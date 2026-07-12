@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: four_check
+      POSTGRES_USER: four_check
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U four_check -d four_check"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: ./server
+    environment:
+      DATABASE_URL: postgres://four_check:${POSTGRES_PASSWORD:-local_dev_password}@postgres:5432/four_check?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-production-1234}
+      COOKIE_SECURE: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "8088:80"
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  postgres_data:

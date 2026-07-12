@@ -1,0 +1,8 @@
+.git
+.DS_Store
+.env
+web/node_modules
+web/dist
+参考文件
+docs
+*.md

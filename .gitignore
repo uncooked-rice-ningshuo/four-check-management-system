@@ -4,3 +4,5 @@ web/node_modules/
 web/dist/
 server/bin/
 coverage/
+
+.pnpm-store/

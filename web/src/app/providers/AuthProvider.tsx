@@ -17,7 +17,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       user,
       loading,
-      signIn: async input => setUser(await loginAccount(input)),
+      signIn: async input => { const signedIn = await loginAccount(input); setUser(signedIn); return signedIn },
       signOut: async () => { await logoutAccount(); setUser(null) },
     }}>
       {children}

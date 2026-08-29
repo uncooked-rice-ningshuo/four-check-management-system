@@ -5,7 +5,7 @@ import type { User } from '../../entities/user/model/user'
 export type AuthState = {
   user: User | null
   loading: boolean
-  signIn: (input: { studentNo: string; password: string }) => Promise<void>
+  signIn: (input: { loginName: string; password: string }) => Promise<User>
   signOut: () => Promise<void>
 }
 

@@ -9,5 +9,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   const location = useLocation()
   if (loading) return <div className="loading"><Spin size="large" /></div>
-  return user ? children : <Navigate to="/login" state={{ from: location.pathname }} replace />
+  if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />
+  if (user.mustChangePassword && location.pathname !== '/change-password') return <Navigate to="/change-password" replace />
+  return children
 }

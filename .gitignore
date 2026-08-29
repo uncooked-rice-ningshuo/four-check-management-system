@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.env.save
 web/node_modules/
 web/dist/
 server/bin/

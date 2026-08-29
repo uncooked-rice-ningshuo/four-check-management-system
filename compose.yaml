@@ -9,21 +9,93 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_dev_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./server/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U four_check -d four_check"]
       interval: 5s
       timeout: 3s
       retries: 20
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: four_check
+      PGUSER: four_check
+      PGPASSWORD: ${POSTGRES_PASSWORD:-local_dev_password}
+    volumes:
+      - ./server/migrations:/migrations:ro
+    command: ["sh", "-c", "for file in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f \"$$file\"; done"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  minio:
+    build:
+      context: .
+      dockerfile: server/minio/Dockerfile
+      args:
+        MINIO_VERSION: RELEASE.2025-10-15T17-29-55Z
+    image: four-check-minio:RELEASE.2025-10-15T17-29-55Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MinIO 根账号}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MinIO 根密码}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$${MINIO_BUCKET}" in ''|*[!a-z0-9.-]*) echo 'invalid MINIO_BUCKET' >&2; exit 1;; esac
+        test "$${MINIO_ACCESS_KEY}" != "$${MINIO_ROOT_USER}"
+        mc alias set bootstrap http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "bootstrap/$${MINIO_BUCKET}"
+        mc version enable "bootstrap/$${MINIO_BUCKET}"
+        mc anonymous set none "bootstrap/$${MINIO_BUCKET}"
+        sed "s/BUCKET_PLACEHOLDER/$${MINIO_BUCKET}/g" /config/app-policy.json > /tmp/app-policy.json
+        mc admin policy create bootstrap four-check-app /tmp/app-policy.json
+        mc admin user add bootstrap "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"
+        mc admin policy attach bootstrap four-check-app --user "$${MINIO_ACCESS_KEY}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MinIO 根账号}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MinIO 根密码}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MinIO 应用账号}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请在 .env 中设置 MinIO 应用密钥}
+      MINIO_BUCKET: ${MINIO_BUCKET:-four-check-files}
+    volumes:
+      - ./server/minio/app-policy.json:/config/app-policy.json:ro
+    depends_on:
+      minio:
+        condition: service_healthy
   api:
     build: ./server
     environment:
       DATABASE_URL: postgres://four_check:${POSTGRES_PASSWORD:-local_dev_password}@postgres:5432/four_check?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-production-1234}
       COOKIE_SECURE: "false"
+      BOOTSTRAP_ADMIN_LOGIN: ${BOOTSTRAP_ADMIN_LOGIN:-admin}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-系统管理员}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?请在 .env 中设置初始管理员密码}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MinIO 应用账号}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请在 .env 中设置 MinIO 应用密钥}
+      MINIO_BUCKET: ${MINIO_BUCKET:-four-check-files}
+      MINIO_USE_TLS: "false"
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_MAX_FILE_SIZE_BYTES: ${MINIO_MAX_FILE_SIZE_BYTES:-52428800}
+      MINIO_CONNECT_TIMEOUT: ${MINIO_CONNECT_TIMEOUT:-5s}
+      MINIO_OPERATION_TIMEOUT: ${MINIO_OPERATION_TIMEOUT:-30s}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health/live"]
       interval: 5s
@@ -40,3 +112,4 @@ services:
         condition: service_healthy
 volumes:
   postgres_data:
+  minio_data:

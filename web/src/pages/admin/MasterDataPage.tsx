@@ -32,9 +32,9 @@ export function MasterDataPage() {
   const records = useQuery({ queryKey: ['master-data', kind, keyword, page], queryFn: () => getMasterData(kind, { keyword, page, pageSize: 20 }) })
   const referenceKinds: MasterDataKind[] = ['faculties', 'majors', 'staff', 'classes', 'dormitories', 'classrooms']
   const references = useQueries({ queries: referenceKinds.map(referenceKind => ({ queryKey: ['master-data-reference', referenceKind], queryFn: () => getMasterData(referenceKind, { pageSize: 100 }) })) })
-  const options = (referenceKind: MasterDataKind) => references[referenceKinds.indexOf(referenceKind)].data?.items.map(item => ({ value: item.id, label: `${item.code} · ${item.name}` })) ?? []
+  const options = (referenceKind: MasterDataKind) => (references[referenceKinds.indexOf(referenceKind)].data?.items ?? []).map(item => ({ value: item.id, label: `${item.code} · ${item.name}` }))
   const dictionaryTypes = useQuery({ queryKey: ['dictionary-types'], queryFn: () => getDictionaries() })
-  const dictionaryTypeIds = dictionaryCodes.map(code => dictionaryTypes.data?.types.find(type => type.code === code && type.enabled)?.id)
+  const dictionaryTypeIds = dictionaryCodes.map(code => (dictionaryTypes.data?.types ?? []).find(type => type.code === code && type.enabled)?.id)
   const dictionaries = useQueries({ queries: dictionaryCodes.map((code, index) => ({
     queryKey: ['dictionary-items', code, dictionaryTypeIds[index]],
     queryFn: () => dictionaryTypeIds[index] ? getDictionaries(dictionaryTypeIds[index]) : Promise.resolve({ types: [], items: [] }),
@@ -42,7 +42,7 @@ export function MasterDataPage() {
   })) })
   const dictionaryOptions = (code: typeof dictionaryCodes[number]) => {
     const result = dictionaries[dictionaryCodes.indexOf(code)]
-    return result.data?.items.filter(item => item.enabled).map(item => ({ value: item.value, label: item.label })) ?? []
+    return (result.data?.items ?? []).filter(item => item.enabled).map(item => ({ value: item.value, label: item.label }))
   }
   const history = useQuery({ queryKey: ['master-data-history', kind, historyRecord?.id], queryFn: () => getMasterDataChanges(kind, historyRecord!.id), enabled: Boolean(historyRecord) })
   const refresh = async () => {
@@ -77,7 +77,7 @@ export function MasterDataPage() {
 	{records.isError && <Alert type="error" showIcon title="基础数据加载失败" description="请检查网络连接后重试。" />}
 	{(dictionaryTypes.isError || dictionaries.some(query => query.isError)) && <Alert type="error" showIcon title="系统字典加载失败" description="性别和学籍状态暂时无法选择，请刷新页面后重试。" />}
     <Tabs activeKey={kind} onChange={value => { setKind(value as MasterDataKind); setPage(1); setKeyword('') }} items={kinds.map(value => ({ key: value, label: kindConfigs[value].label }))} />
-    <ProTable<MasterDataRecord> rowKey="id" loading={records.isLoading} dataSource={records.data?.items} columns={columns} search={false}
+    <ProTable<MasterDataRecord> rowKey="id" loading={records.isLoading} dataSource={records.data?.items ?? []} columns={columns} search={false}
       toolbar={{ search: { placeholder: `搜索${config.codeLabel}或名称…`, onSearch: value => { setKeyword(value); setPage(1) } }, actions: [<Button key="create" type="primary" icon={<PlusOutlined aria-hidden />} onClick={openCreate}>新增{config.singular}</Button>] }}
       options={{ reload: () => void records.refetch(), density: true, setting: true }} pagination={{ current: page, pageSize: 20, total: records.data?.total, onChange: setPage, showSizeChanger: false }} locale={{ emptyText: <Empty description={`暂无${config.label}数据`} /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>

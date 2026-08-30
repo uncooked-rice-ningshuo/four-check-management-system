@@ -66,6 +66,16 @@ func TestCreateTypeNormalizesCode(t *testing.T) {
 	}
 }
 
+func TestListReturnsEmptyCollectionsAsArrays(t *testing.T) {
+	catalog, err := NewService(&memoryRepository{}).List(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.Types == nil || catalog.Items == nil {
+		t.Fatalf("dictionary catalog contains nil collections: %+v", catalog)
+	}
+}
+
 func TestCreateTypeProvidesDictionaryAuditMutation(t *testing.T) {
 	repository := &memoryRepository{}
 	created, err := NewService(repository).CreateType(context.Background(), Type{Code: "CUSTOM", Name: "自定义"}, audit.Metadata{ActorID: "admin-1", RequestID: "dictionary-request"})

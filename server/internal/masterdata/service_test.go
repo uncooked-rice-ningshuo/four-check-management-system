@@ -134,3 +134,13 @@ func TestListNormalizesPagination(t *testing.T) {
 		t.Fatalf("page = %+v", page)
 	}
 }
+
+func TestListReturnsAnEmptyItemsArray(t *testing.T) {
+	page, err := NewService(newMemoryRepository()).List(context.Background(), Query{Kind: KindClass})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items == nil {
+		t.Fatal("empty master-data pages must serialize items as [] instead of null")
+	}
+}

@@ -141,7 +141,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	if err != nil {
 		return EffectiveResult{}, err
 	}
-	result := EffectiveResult{AccountID: profile.AccountID, SystemRole: profile.SystemRole}
+	result := EffectiveResult{AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
 	if profile.SystemRole == SystemRoleSuperAdmin {
 		for _, action := range allActions {
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceSystemRole, Label: "超级管理员"}))
@@ -195,7 +195,14 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 }
 
 func (s *Service) ListRules(ctx context.Context, accountID string) ([]Rule, error) {
-	return s.repository.ListRules(ctx, accountID)
+	rules, err := s.repository.ListRules(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if rules == nil {
+		rules = make([]Rule, 0)
+	}
+	return rules, nil
 }
 
 func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, metadata ...audit.Metadata) (Rule, error) {

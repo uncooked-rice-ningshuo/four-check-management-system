@@ -115,3 +115,21 @@ func TestCreateRuleProvidesPermissionAuditMutation(t *testing.T) {
 		t.Fatalf("mutation = %+v", mutation)
 	}
 }
+
+func TestEmptyPermissionCollectionsAreArrays(t *testing.T) {
+	service := NewService(&memoryRepository{profile: AccessProfile{AccountID: "member", SystemRole: SystemRoleMember}})
+	effective, err := service.Effective(context.Background(), "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Permissions == nil {
+		t.Fatal("empty effective permissions must serialize as [] instead of null")
+	}
+	rules, err := service.ListRules(context.Background(), "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules == nil {
+		t.Fatal("empty permission rules must serialize as [] instead of null")
+	}
+}

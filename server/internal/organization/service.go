@@ -83,13 +83,26 @@ func NewService(repository Repository) *Service { return &Service{repository: re
 
 func (s *Service) ListCatalogs(ctx context.Context, enabledOnly bool) (Catalogs, error) {
 	catalogs, err := s.repository.ListCatalogs(ctx, enabledOnly)
-	if err != nil || !enabledOnly {
+	if err != nil {
 		return catalogs, err
 	}
-	catalogs.Departments = filterDepartments(catalogs.Departments)
-	catalogs.OrganizationRoles = filterRoles(catalogs.OrganizationRoles)
-	catalogs.InspectionTypes = filterInspectionTypes(catalogs.InspectionTypes)
+	if enabledOnly {
+		catalogs.Departments = filterDepartments(catalogs.Departments)
+		catalogs.OrganizationRoles = filterRoles(catalogs.OrganizationRoles)
+		catalogs.InspectionTypes = filterInspectionTypes(catalogs.InspectionTypes)
+	} else {
+		catalogs.Departments = nonNil(catalogs.Departments)
+		catalogs.OrganizationRoles = nonNil(catalogs.OrganizationRoles)
+		catalogs.InspectionTypes = nonNil(catalogs.InspectionTypes)
+	}
 	return catalogs, nil
+}
+
+func nonNil[T any](values []T) []T {
+	if values == nil {
+		return make([]T, 0)
+	}
+	return values
 }
 
 func (s *Service) CreateDepartment(ctx context.Context, department Department, metadata ...audit.Metadata) (Department, error) {

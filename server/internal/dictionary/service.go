@@ -59,9 +59,15 @@ func (s *Service) List(ctx context.Context, typeID string) (Catalog, error) {
 	if err != nil {
 		return Catalog{}, err
 	}
-	var items []Item
+	if types == nil {
+		types = make([]Type, 0)
+	}
+	items := make([]Item, 0)
 	if typeID != "" {
 		items, err = s.repository.ListDictionaryItems(ctx, typeID)
+		if items == nil {
+			items = make([]Item, 0)
+		}
 	}
 	return Catalog{Types: types, Items: items}, err
 }

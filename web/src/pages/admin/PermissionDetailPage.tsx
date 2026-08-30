@@ -31,7 +31,7 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     { title: '权限动作', dataIndex: 'action', renderText: actionName },
     { title: '结果', dataIndex: 'effect', width: 90, render: (_, record) => <Tag color={record.effect === 'DENY' ? 'red' : 'green'}>{record.effect === 'DENY' ? '拒绝' : '允许'}</Tag> },
     { title: '生效范围', dataIndex: 'scope', render: (_, record) => <Typography.Text>{scopeSummary(record.scope)}</Typography.Text> },
-    { title: '权限来源', dataIndex: 'sources', render: (_, record) => <Space wrap>{record.sources.map(source => <Tag key={`${source.type}-${source.label}`} color="blue">{source.label}</Tag>)}</Space> },
+    { title: '权限来源', dataIndex: 'sources', render: (_, record) => <Space wrap>{(record.sources ?? []).map(source => <Tag key={`${source.type}-${source.label}`} color="blue">{source.label}</Tag>)}</Space> },
   ]
   const ruleColumns: ProColumns<PermissionRule>[] = [
     { title: '动作', dataIndex: 'action', renderText: actionName }, { title: '效果', dataIndex: 'effect', render: (_, record) => <Tag color={record.effect === 'DENY' ? 'red' : 'green'}>{record.effect === 'DENY' ? '拒绝' : '允许'}</Tag> },
@@ -40,18 +40,18 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
   ]
   return <Drawer title={`${userName} · 生效权限`} open={Boolean(accountId)} onClose={onClose} size="large" destroyOnHidden>
     <Typography.Paragraph type="secondary">最终权限按系统角色、组织角色、部门业务映射和用户单独授权/限制合并；匹配范围内的拒绝规则优先。</Typography.Paragraph>
-    <ProTable<EffectivePermission> rowKey={(record, index) => `${record.action}-${record.effect}-${index}`} headerTitle="当前生效权限" loading={effective.isLoading} search={false} options={false} pagination={{ pageSize: 8 }} dataSource={effective.data?.permissions} columns={permissionColumns} locale={{ emptyText: <Empty description="当前没有生效权限" /> }} />
-    <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
+    <ProTable<EffectivePermission> rowKey={(record, index) => `${record.action}-${record.effect}-${index}`} headerTitle="当前生效权限" loading={effective.isLoading} search={false} options={false} pagination={{ pageSize: 8 }} dataSource={effective.data?.permissions ?? []} columns={permissionColumns} locale={{ emptyText: <Empty description="当前没有生效权限" /> }} />
+    <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data ?? []} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}权限规则`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} width={720} destroyOnHidden>
       <Form form={form} layout="vertical" onFinish={values => save.mutate(values)} preserve={false}>
         <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions} /></Form.Item>
         <Form.Item name="effect" label="规则效果" rules={[{ required: true }]}><Select options={[{ value: 'ALLOW', label: '允许（补充授权）' }, { value: 'DENY', label: '拒绝（单独限制）' }]} /></Form.Item>
-        <Form.Item name={['scope', 'academicYearId']} label="学年范围"><Select allowClear options={calendar.data?.academicYears.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name={['scope', 'semesterId']} label="学期范围"><Select allowClear options={calendar.data?.semesters.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name={['scope', 'weekId']} label="周次范围"><Select allowClear options={calendar.data?.weeks.map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item>
-        <Form.Item name={['scope', 'inspectionTypeId']} label="检查类型"><Select allowClear options={catalogs.data?.inspectionTypes.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name={['scope', 'departmentId']} label="部门范围"><Select allowClear options={catalogs.data?.departments.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name={['scope', 'classId']} label="班级范围"><Select allowClear showSearch optionFilterProp="label" options={classes.data?.items.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name={['scope', 'academicYearId']} label="学年范围"><Select allowClear options={(calendar.data?.academicYears ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name={['scope', 'semesterId']} label="学期范围"><Select allowClear options={(calendar.data?.semesters ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name={['scope', 'weekId']} label="周次范围"><Select allowClear options={(calendar.data?.weeks ?? []).map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item>
+        <Form.Item name={['scope', 'inspectionTypeId']} label="检查类型"><Select allowClear options={(catalogs.data?.inspectionTypes ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name={['scope', 'departmentId']} label="部门范围"><Select allowClear options={(catalogs.data?.departments ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name={['scope', 'classId']} label="班级范围"><Select allowClear showSearch optionFilterProp="label" options={(classes.data?.items ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
         <Form.Item name={['scope', 'grade']} label="年级范围"><Input autoComplete="off" placeholder="留空表示全部年级…" /></Form.Item>
         <Form.Item name="note" label="授权说明" rules={[{ required: true, message: '请说明设置原因' }]}><Input.TextArea rows={3} maxLength={255} showCount /></Form.Item>
       </Form>

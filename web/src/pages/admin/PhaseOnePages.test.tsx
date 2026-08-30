@@ -10,7 +10,7 @@ import { MasterDataPage } from './MasterDataPage'
 import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
-import { assignUserRole, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getMasterData, getPendingRegistrations, getUsers, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType } from '../../shared/api/adminApi'
+import { assignUserRole, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -129,6 +129,21 @@ describe('阶段一管理页面', () => {
 	expect(await screen.findByText('张三 · 生效权限')).toBeVisible()
   })
 
+  it('权限详情把后端 null 集合按空列表展示而不会白屏', async () => {
+	vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+	vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'user-1', systemRole: 'MEMBER', permissions: null } as never)
+	vi.mocked(getPermissionRules).mockResolvedValue(null as never)
+	vi.mocked(getMasterData).mockResolvedValue({ items: null, total: 0, page: 1, pageSize: 100 } as never)
+	renderPage(<UserManagementPage />)
+
+	fireEvent.click(await screen.findByRole('button', { name: '权限详情' }))
+
+	await waitFor(() => expect(getEffectivePermissions).toHaveBeenCalledWith('user-1'))
+	await waitFor(() => expect(getPermissionRules).toHaveBeenCalledWith('user-1'))
+	expect(await screen.findByText('当前没有生效权限')).toBeVisible()
+	expect(screen.getByText('暂无用户单独规则')).toBeVisible()
+  })
+
   it('归属保存成功后清除草稿并禁用保存按钮', async () => {
     vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'department-1', organizationRoleId: 'role-1' }])
     vi.mocked(getCatalogs).mockResolvedValue({ departments: [{ id: 'department-1', code: 'ONE', name: '部门一', enabled: true }, { id: 'department-2', code: 'TWO', name: '部门二', enabled: true }], organizationRoles: [{ id: 'role-1', code: 'MEMBER', name: '委员', enabled: true, sortOrder: 1 }], inspectionTypes: [] })
@@ -151,6 +166,17 @@ describe('阶段一管理页面', () => {
     expect(await screen.findByRole('tab', { name: '学生' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '班级' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增学生' })).toBeInTheDocument()
+  })
+
+  it('基础数据页面把后端 null 集合按空列表展示而不会白屏', async () => {
+	vi.mocked(getMasterData).mockResolvedValue({ items: null, total: 0, page: 1, pageSize: 20 } as never)
+	vi.mocked(getDictionaries).mockResolvedValue({ types: null, items: null } as never)
+	renderPage(<MasterDataPage />)
+
+	await waitFor(() => expect(getMasterData).toHaveBeenCalledTimes(7))
+	await waitFor(() => expect(getDictionaries).toHaveBeenCalled())
+	expect(await screen.findByText('暂无学生数据')).toBeVisible()
+	expect(screen.getByRole('button', { name: '新增学生' })).toBeVisible()
   })
 
   it('学生基础数据表单使用系统字典选项', async () => {

@@ -53,6 +53,16 @@ func TestPublicCatalogsHideDisabledOptions(t *testing.T) {
 	}
 }
 
+func TestAdminCatalogsReturnEmptyCollectionsAsArrays(t *testing.T) {
+	catalogs, err := NewService(&memoryRepository{}).ListCatalogs(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalogs.Departments == nil || catalogs.OrganizationRoles == nil || catalogs.InspectionTypes == nil {
+		t.Fatalf("organization catalogs contain nil collections: %+v", catalogs)
+	}
+}
+
 func TestScopeRequiresDepartmentAndInspectionType(t *testing.T) {
 	svc := NewService(&memoryRepository{})
 	err := svc.UpsertScope(context.Background(), DepartmentInspectionScope{CanView: true})

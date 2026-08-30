@@ -107,7 +107,14 @@ func (s *Service) List(ctx context.Context, query Query) (Page, error) {
 	if query.PageSize < 1 || query.PageSize > 100 {
 		query.PageSize = 20
 	}
-	return s.repository.ListMasterData(ctx, query)
+	page, err := s.repository.ListMasterData(ctx, query)
+	if err != nil {
+		return Page{}, err
+	}
+	if page.Items == nil {
+		page.Items = make([]Record, 0)
+	}
+	return page, nil
 }
 
 func (s *Service) Create(ctx context.Context, actorID string, record Record, metadata ...audit.Metadata) (Record, error) {

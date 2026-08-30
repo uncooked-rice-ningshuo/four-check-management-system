@@ -90,6 +90,9 @@ func TestScopedAllowAndExplicitDenyPrecedence(t *testing.T) {
 	if result.Allowed(ActionInspectionView, Scope{SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "attendance"}) {
 		t.Fatal("explicit deny must override matching allow")
 	}
+	if result.Allowed(ActionInspectionView, Scope{SemesterID: "semester-1", InspectionTypeID: "attendance"}) {
+		t.Fatal("an unbounded request must not encompass a narrower explicit deny")
+	}
 }
 
 func TestCreateRuleRejectsUnknownAction(t *testing.T) {

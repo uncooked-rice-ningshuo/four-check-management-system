@@ -1,4 +1,6 @@
-# Attendance Import Implementation Plan
+# 阶段 2 工作流 A：通用导入框架 + 到课率第一增量实施计划
+
+> **范围说明：** 本计划是[完整阶段 2 实施主计划](./2026-08-30-phase-two-completion-implementation.md)的工作流 A，只交付通用导入底座与“到课率”第一增量。即使 Task 1–12 全部完成，也只能宣称“工作流 A 完成”，绝不能宣称“阶段 2 完成”。完整阶段 2 还必须通过角色化工作台、普通用户应用外壳、七类检查、其余六类导入、部门工作流、状态看板及跨角色验收门禁。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -6,14 +8,14 @@
 
 **Architecture:** 后端新增 `inspection` 和 `importjob` 模块；解析阶段只持久化批次/行，确认阶段在 PostgreSQL 单事务内写检查记录、扩展表、批次结果和审计。前端在到课率详情页通过 TanStack Query 调用专用 API client，并以 Drawer 完成导入流程，不新增导入一级导航。
 
-**Tech Stack:** Go 1.24、Gin、pgx/PostgreSQL、MinIO、React 19、TypeScript、Ant Design、TanStack Query、Vitest。XLSX 处理库在 Task 3 前需要用户明确批准后才可加入 `server/go.mod`。
+**Tech Stack:** Go 1.25、Gin、pgx/PostgreSQL、MinIO、React 19、TypeScript、Ant Design、TanStack Query、Vitest、`github.com/xuri/excelize/v2@v2.11.0`（用户已批准）。
 
 ---
 
 ## 前置门禁
 
 - 当前工作分支必须是 `feat-0.1-2`，并保留工作区已有文档改动。
-- 在 Task 3 前确认是否允许新增经过锁定版本的 Go XLSX 运行时依赖；未获许可不得修改 `go.mod/go.sum`。
+- Task 3 所需的 Go 1.25 基线和 `github.com/xuri/excelize/v2@v2.11.0` 已获用户明确许可；不得借此引入其他运行时依赖。
 - 各 Task 的 `Commit` 步骤只是建议检查点。根据仓库规则，每次执行 `git add`、`git commit`、推送或创建 PR 前都要再次取得用户许可。
 - 如测试数据库或 MinIO 未配置，先运行纯单元/API 测试；集成测试要准确标记为未运行，不得伪报通过。
 
@@ -455,7 +457,9 @@ git add web/e2e README.md docs/plans/2026-08-30-attendance-import-design.md
 git commit -m "test: verify attendance import workflow"
 ```
 
-## 完成判定
+## 工作流 A 完成判定（不代表阶段 2 完成）
+
+以下条件只判定本计划的 Task 1–12 是否完成。阶段 2 的总完成条件与角色验收矩阵以[完整阶段 2 实施主计划](./2026-08-30-phase-two-completion-implementation.md)为准；不得把本节检查结果外推为完整阶段 2 已完成。
 
 - 到课率标准模板可鉴权下载，合法 `.xlsx` 最多 1000 行可以预览。
 - 文件级和行级错误使用稳定错误码，前端提供明确修复建议。
@@ -464,3 +468,4 @@ git commit -m "test: verify attendance import workflow"
 - 所有按 ID 的批次、行和文件访问均通过后端动作权限与数据范围验证。
 - 原文件、模板版本、SHA-256、批次、导入行、业务记录与审计可相互追溯。
 - 后端 `go vet ./...`、`go test ./...`，前端 `pnpm lint`、`pnpm test`、`pnpm build` 和计划内 Playwright 场景均实际通过；受环境限制的项目明确列出。
+- 尚未交付角色化工作台、普通用户应用外壳、七类检查完整 CRUD、其余六类导入、部门提交/审核/退回/确认和状态看板时，阶段 2 必须保持“未完成”。

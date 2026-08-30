@@ -24,6 +24,7 @@ const (
 	ActionFileUploadFailed        Action = "FILE_UPLOAD_FAILED"
 	ActionFileRead                Action = "FILE_READ"
 	ActionFileIntegrityAnomaly    Action = "FILE_INTEGRITY_ANOMALY"
+	ActionImportBatchConfirmed    Action = "IMPORT_BATCH_CONFIRMED"
 )
 
 var (

@@ -11,6 +11,8 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dictionary"
+	"four-check-management-system/server/internal/importjob"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
@@ -46,6 +48,21 @@ func (p *Postgres) Ready(ctx context.Context) error { return p.Pool.Ping(ctx) }
 // withAudit 在同一 PostgreSQL 事务内执行一次业务变更并追加审计记录。
 // action 和 before/after 值由应用服务决定；持久化层只负责脱敏、原子性与追加写。
 func (p *Postgres) withAudit(ctx context.Context, metadata audit.Metadata, entry audit.Entry, mutation func(pgx.Tx) error) error {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := mutation(tx); err != nil {
+		return err
+	}
+	if err := insertAuditTx(ctx, tx, metadata, entry); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func insertAuditTx(ctx context.Context, tx pgx.Tx, metadata audit.Metadata, entry audit.Entry) error {
 	metadata, entry, err := audit.Sanitize(metadata, entry)
 	if err != nil {
 		return err
@@ -64,24 +81,12 @@ func (p *Postgres) withAudit(ctx context.Context, metadata audit.Metadata, entry
 	if err != nil {
 		return fmt.Errorf("encode audit after value: %w", err)
 	}
-
-	tx, err := p.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err := mutation(tx); err != nil {
-		return err
-	}
 	_, err = tx.Exec(ctx, `INSERT INTO audit_logs(
 		id,actor_id,action,resource_type,resource_id,before_json,after_json,reason,request_id,ip,user_agent,created_at
 	) VALUES($1,NULLIF($2,'')::uuid,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,'')::inet,$11,$12)`,
 		entry.ID, metadata.ActorID, string(entry.Action), entry.ResourceType, entry.ResourceID,
 		beforeJSON, afterJSON, metadata.Reason, metadata.RequestID, metadata.IP, metadata.UserAgent, entry.CreatedAt)
-	if err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return err
 }
 
 func auditJSON(value any) (any, error) {
@@ -1002,4 +1007,481 @@ func (p *Postgres) CurrentWeek(ctx context.Context, date time.Time) (*academic.W
 		return nil, err
 	}
 	return &value, nil
+}
+
+// ListAttendance applies every effective scope dimension in PostgreSQL before returning personal inspection data.
+func (p *Postgres) ListAttendance(ctx context.Context, query inspection.AttendanceListQuery) (inspection.AttendancePage, error) {
+	countSQL, countArgs, listSQL, listArgs, err := buildAttendanceListQueries(query)
+	if err != nil {
+		return inspection.AttendancePage{}, err
+	}
+	page := inspection.AttendancePage{Items: make([]inspection.AttendanceRecord, 0), Page: query.Page, PageSize: query.PageSize}
+	if err := p.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&page.Total); err != nil {
+		return inspection.AttendancePage{}, err
+	}
+	rows, err := p.Pool.Query(ctx, listSQL, listArgs...)
+	if err != nil {
+		return inspection.AttendancePage{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var record inspection.AttendanceRecord
+		if err := rows.Scan(
+			&record.ID, &record.InspectionTypeID, &record.SemesterID, &record.WeekID, &record.DepartmentID,
+			&record.StudentID, &record.StudentNoSnapshot, &record.StudentNameSnapshot, &record.ClassID,
+			&record.ClassNameSnapshot, &record.GradeSnapshot, &record.CourseID, &record.CourseName,
+			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours,
+			&record.PeriodText, &record.Remark, &record.Source, &record.Status, &record.ImportBatchID,
+			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.CreatedAt, &record.UpdatedAt,
+		); err != nil {
+			return inspection.AttendancePage{}, err
+		}
+		page.Items = append(page.Items, record)
+	}
+	return page, rows.Err()
+}
+
+func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, []any, string, []any, error) {
+	orderBy, err := attendanceOrderBy(query.Sort)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+	where := ` FROM inspection_records ir
+		JOIN attendance_details ad ON ad.record_id = ir.id
+		JOIN courses c ON c.id = ad.course_id
+		LEFT JOIN classrooms cr ON cr.id = ad.classroom_id
+		WHERE ir.semester_id = $1::uuid
+		  AND ir.week_id = $2::uuid
+		  AND ir.inspection_type_id = $3::uuid
+		  AND ($4::text = '' OR ir.department_id = $4::uuid)
+		  AND ($5::text = '' OR ir.class_id = $5::uuid)
+		  AND ($6::text = '' OR ir.grade_snapshot = $6)
+		  AND ($7::text = '' OR ir.student_no_snapshot ILIKE '%' || $7 || '%'
+		       OR ir.student_name_snapshot ILIKE '%' || $7 || '%')
+		  AND ir.deleted_at IS NULL`
+	countSQL := `SELECT count(*)` + where
+	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,ir.department_id,
+		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
+		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
+		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(cr.code,''),
+		ir.occurred_at,ad.absence_hours,ad.period_text,ir.remark,ir.source,ir.status,
+		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
+		ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $8 OFFSET $9`
+	countArgs := []any{
+		query.SemesterID, query.WeekID, query.InspectionTypeID, query.DepartmentID,
+		query.ClassID, query.Grade, query.Keyword,
+	}
+	listArgs := append(append([]any{}, countArgs...), query.PageSize, (query.Page-1)*query.PageSize)
+	return countSQL, countArgs, listSQL, listArgs, nil
+}
+
+func attendanceOrderBy(sort string) (string, error) {
+	switch sort {
+	case inspection.SortOccurredAtDescending:
+		return "ir.occurred_at DESC, ir.id DESC", nil
+	case inspection.SortOccurredAtAscending:
+		return "ir.occurred_at ASC, ir.id ASC", nil
+	case inspection.SortStudentNoAscending:
+		return "ir.student_no_snapshot ASC, ir.id ASC", nil
+	case inspection.SortStudentNoDescending:
+		return "ir.student_no_snapshot DESC, ir.id DESC", nil
+	default:
+		return "", inspection.ErrInvalidAttendanceQuery
+	}
+}
+
+// LoadAttendanceReferences bulk-loads only the identifiers present in one authorized import batch.
+func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjob.AttendanceReferenceLookup) (importjob.AttendanceReferences, error) {
+	result := importjob.AttendanceReferences{
+		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference),
+		CoursesByClassAndName: make(map[string]importjob.AttendanceCourseReference), ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
+	}
+	studentRows, err := p.Pool.Query(ctx, `SELECT s.id,s.student_no,s.name,s.class_id,c.name,c.grade
+		FROM students s JOIN classes c ON c.id=s.class_id
+		WHERE s.enabled AND c.enabled AND s.student_no = ANY($1::text[])
+		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR c.grade=$3)`, lookup.StudentNos, lookup.ClassID, lookup.Grade)
+	if err != nil {
+		return result, err
+	}
+	for studentRows.Next() {
+		var value importjob.AttendanceStudentReference
+		if err := studentRows.Scan(&value.ID, &value.StudentNo, &value.Name, &value.ClassID, &value.ClassName, &value.Grade); err != nil {
+			studentRows.Close()
+			return result, err
+		}
+		result.StudentsByNo[value.StudentNo] = value
+	}
+	if err := studentRows.Err(); err != nil {
+		studentRows.Close()
+		return result, err
+	}
+	studentRows.Close()
+
+	classRows, err := p.Pool.Query(ctx, `SELECT id,name,grade FROM classes WHERE enabled AND name = ANY($1::text[])
+		AND ($2='' OR id=NULLIF($2,'')::uuid) AND ($3='' OR grade=$3)`, lookup.ClassNames, lookup.ClassID, lookup.Grade)
+	if err != nil {
+		return result, err
+	}
+	for classRows.Next() {
+		var value importjob.AttendanceClassReference
+		if err := classRows.Scan(&value.ID, &value.Name, &value.Grade); err != nil {
+			classRows.Close()
+			return result, err
+		}
+		result.ClassesByName[value.Name] = value
+	}
+	if err := classRows.Err(); err != nil {
+		classRows.Close()
+		return result, err
+	}
+	classRows.Close()
+
+	courseRows, err := p.Pool.Query(ctx, `SELECT id,name,COALESCE(class_id::text,''),COALESCE(classroom_id::text,'')
+		FROM courses WHERE enabled AND name = ANY($1::text[]) AND ($2='' OR class_id=NULLIF($2,'')::uuid)`, lookup.CourseNames, lookup.ClassID)
+	if err != nil {
+		return result, err
+	}
+	for courseRows.Next() {
+		var value importjob.AttendanceCourseReference
+		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomID); err != nil {
+			courseRows.Close()
+			return result, err
+		}
+		result.CoursesByClassAndName[value.ClassID+"\x1f"+value.Name] = value
+	}
+	if err := courseRows.Err(); err != nil {
+		courseRows.Close()
+		return result, err
+	}
+	courseRows.Close()
+
+	classroomRows, err := p.Pool.Query(ctx, `SELECT id,code FROM classrooms WHERE enabled AND code = ANY($1::text[])`, lookup.ClassroomCodes)
+	if err != nil {
+		return result, err
+	}
+	for classroomRows.Next() {
+		var value importjob.AttendanceClassroomReference
+		if err := classroomRows.Scan(&value.ID, &value.Code); err != nil {
+			classroomRows.Close()
+			return result, err
+		}
+		result.ClassroomsByCode[value.Code] = value
+	}
+	if err := classroomRows.Err(); err != nil {
+		classroomRows.Close()
+		return result, err
+	}
+	classroomRows.Close()
+	return result, nil
+}
+
+// FindExistingAttendanceKeys checks duplicates inside the already-authorized import scope in one query.
+func (p *Postgres) FindExistingAttendanceKeys(ctx context.Context, scope importjob.AttendanceImportScope, keys []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if len(keys) == 0 {
+		return result, nil
+	}
+	rows, err := p.Pool.Query(ctx, `SELECT dedup_key FROM inspection_records
+		WHERE semester_id=$1::uuid AND week_id=$2::uuid AND inspection_type_id=$3::uuid AND department_id=$4::uuid
+		  AND ($5='' OR class_id=NULLIF($5,'')::uuid) AND ($6='' OR grade_snapshot=$6)
+		  AND dedup_key = ANY($7::text[]) AND deleted_at IS NULL`,
+		scope.SemesterID, scope.WeekID, scope.InspectionTypeID, scope.DepartmentID, scope.ClassID, scope.Grade, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		result[key] = struct{}{}
+	}
+	return result, rows.Err()
+}
+
+// FindImportBatch loads the batch together with its authoritative week boundaries.
+func (p *Postgres) FindImportBatch(ctx context.Context, id string) (importjob.Batch, error) {
+	return scanImportBatch(p.Pool.QueryRow(ctx, importBatchSelect+` WHERE b.id=$1`, id))
+}
+
+// CreateImportBatch persists the initial UPLOADED state after private storage has verified the source file.
+func (p *Postgres) CreateImportBatch(ctx context.Context, batch importjob.Batch) error {
+	_, err := p.Pool.Exec(ctx, `INSERT INTO import_batches(
+		id,inspection_type_id,semester_id,week_id,department_id,class_id,grade,original_file_id,template_id,template_version,
+		status,total_rows,valid_rows,invalid_rows,imported_rows,version,created_by,created_at,updated_at
+	) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,$8,$9,$10,$11,0,0,0,0,$12,$13,$14,$15)`,
+		batch.ID, batch.InspectionTypeID, batch.SemesterID, batch.WeekID, batch.DepartmentID, batch.ClassID, batch.Grade, batch.OriginalFileID,
+		batch.TemplateID, batch.TemplateVersion, batch.Status, batch.Version, batch.CreatedBy, batch.CreatedAt, batch.UpdatedAt)
+	return err
+}
+
+func (p *Postgres) FindPublishedImportTemplate(ctx context.Context, inspectionTypeID string) (importjob.Template, error) {
+	var value importjob.Template
+	err := p.Pool.QueryRow(ctx, `SELECT id,code,name,inspection_type_id,version_no,file_id,status FROM import_templates
+		WHERE inspection_type_id=$1::uuid AND status='PUBLISHED'`, inspectionTypeID).Scan(
+		&value.ID, &value.Code, &value.Name, &value.InspectionTypeID, &value.Version, &value.FileID, &value.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return importjob.Template{}, importjob.ErrTemplateNotFound
+	}
+	return value, err
+}
+
+func (p *Postgres) ListImportRows(ctx context.Context, batchID string, page, pageSize int) (importjob.ImportRowPage, error) {
+	result := importjob.ImportRowPage{Items: make([]importjob.ImportRow, 0), Page: page, PageSize: pageSize}
+	if err := p.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE batch_id=$1`, batchID).Scan(&result.Total); err != nil {
+		return importjob.ImportRowPage{}, err
+	}
+	rows, err := p.Pool.Query(ctx, `SELECT id,batch_id,row_no,raw_data_json,normalized_data_json,validation_status,errors_json,COALESCE(record_id::text,'')
+		FROM import_rows WHERE batch_id=$1 ORDER BY row_no LIMIT $2 OFFSET $3`, batchID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return importjob.ImportRowPage{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var value importjob.ImportRow
+		var raw, normalized, validationErrors []byte
+		if err := rows.Scan(&value.ID, &value.BatchID, &value.RowNo, &raw, &normalized, &value.ValidationStatus, &validationErrors, &value.RecordID); err != nil {
+			return importjob.ImportRowPage{}, err
+		}
+		if err := json.Unmarshal(raw, &value.RawData); err != nil {
+			return importjob.ImportRowPage{}, err
+		}
+		if err := json.Unmarshal(normalized, &value.NormalizedRecord); err != nil {
+			return importjob.ImportRowPage{}, err
+		}
+		if err := json.Unmarshal(validationErrors, &value.Errors); err != nil {
+			return importjob.ImportRowPage{}, err
+		}
+		result.Items = append(result.Items, value)
+	}
+	return result, rows.Err()
+}
+
+// UpdateImportBatchState applies an optimistic state transition.
+func (p *Postgres) UpdateImportBatchState(ctx context.Context, id string, expectedVersion int, target string, failure importjob.BatchFailure) (importjob.Batch, error) {
+	tag, err := p.Pool.Exec(ctx, `UPDATE import_batches SET status=$3,failure_code=$4,failure_message=$5,version=version+1,updated_at=now(),
+		cancelled_at=CASE WHEN $3='CANCELLED' THEN now() ELSE cancelled_at END
+		WHERE id=$1 AND version=$2`, id, expectedVersion, target, failure.Code, failure.Message)
+	if err != nil {
+		return importjob.Batch{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return importjob.Batch{}, importjob.ErrBatchVersionConflict
+	}
+	return p.FindImportBatch(ctx, id)
+}
+
+// ReplaceImportPreview atomically replaces parsed rows and publishes their aggregate counts.
+func (p *Postgres) ReplaceImportPreview(ctx context.Context, batch importjob.Batch, rows []importjob.ImportRow) (importjob.Batch, error) {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return importjob.Batch{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM import_rows WHERE batch_id=$1`, batch.ID); err != nil {
+		return importjob.Batch{}, err
+	}
+	validRows, invalidRows := 0, 0
+	for _, row := range rows {
+		rawJSON, err := json.Marshal(row.RawData)
+		if err != nil {
+			return importjob.Batch{}, err
+		}
+		var normalized any = map[string]any{}
+		if row.ValidationStatus == importjob.RowStatusValid {
+			normalized = row.NormalizedRecord
+			validRows++
+		} else {
+			invalidRows++
+		}
+		normalizedJSON, err := json.Marshal(normalized)
+		if err != nil {
+			return importjob.Batch{}, err
+		}
+		errorsJSON, err := json.Marshal(row.Errors)
+		if err != nil {
+			return importjob.Batch{}, err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO import_rows(
+			id,batch_id,row_no,raw_data_json,normalized_data_json,validation_status,errors_json,record_id
+		) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,'')::uuid)`,
+			row.ID, batch.ID, row.RowNo, rawJSON, normalizedJSON, row.ValidationStatus, errorsJSON, row.RecordID); err != nil {
+			return importjob.Batch{}, err
+		}
+	}
+	tag, err := tx.Exec(ctx, `UPDATE import_batches SET status='PREVIEW_READY',total_rows=$3,valid_rows=$4,invalid_rows=$5,
+		failure_code='',failure_message='',version=version+1,updated_at=now()
+		WHERE id=$1 AND version=$2 AND status='PARSING'`, batch.ID, batch.Version, len(rows), validRows, invalidRows)
+	if err != nil {
+		return importjob.Batch{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return importjob.Batch{}, importjob.ErrBatchVersionConflict
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return importjob.Batch{}, err
+	}
+	batch.Status = importjob.BatchStatusPreviewReady
+	batch.TotalRows, batch.ValidRows, batch.InvalidRows = len(rows), validRows, invalidRows
+	batch.Version++
+	batch.FailureCode, batch.FailureMessage = "", ""
+	return batch, nil
+}
+
+const importBatchSelect = `SELECT b.id,b.inspection_type_id,b.semester_id,b.week_id,b.department_id,COALESCE(b.class_id::text,''),b.grade,b.original_file_id,
+	b.template_id,b.template_version,b.status,b.total_rows,b.valid_rows,b.invalid_rows,b.imported_rows,b.version,
+	COALESCE(b.confirm_idempotency_key,''),b.failure_code,b.failure_message,b.created_by,b.created_at,b.updated_at,
+	COALESCE(b.confirmed_at,'epoch'::timestamptz),COALESCE(b.cancelled_at,'epoch'::timestamptz),w.start_date,w.end_date
+	FROM import_batches b JOIN semester_weeks w ON w.id=b.week_id`
+
+type importBatchScanner interface {
+	Scan(...any) error
+}
+
+func scanImportBatch(row importBatchScanner) (importjob.Batch, error) {
+	var batch importjob.Batch
+	err := row.Scan(
+		&batch.ID, &batch.InspectionTypeID, &batch.SemesterID, &batch.WeekID, &batch.DepartmentID, &batch.ClassID, &batch.Grade, &batch.OriginalFileID,
+		&batch.TemplateID, &batch.TemplateVersion, &batch.Status, &batch.TotalRows, &batch.ValidRows, &batch.InvalidRows,
+		&batch.ImportedRows, &batch.Version, &batch.ConfirmIdempotencyKey, &batch.FailureCode, &batch.FailureMessage,
+		&batch.CreatedBy, &batch.CreatedAt, &batch.UpdatedAt, &batch.ConfirmedAt, &batch.CancelledAt, &batch.WeekStart, &batch.WeekEnd,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return importjob.Batch{}, importjob.ErrBatchNotFound
+	}
+	if err != nil {
+		return importjob.Batch{}, err
+	}
+	return batch, nil
+}
+
+// ConfirmAttendanceImport locks, validates and persists one import confirmation and its audit atomically.
+func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.ConfirmBatchInput, mutation audit.Mutation) (importjob.ConfirmResult, error) {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	defer tx.Rollback(ctx)
+	var status, idempotencyKey string
+	var totalRows, validRows, invalidRows, importedRows, version, templateVersion int
+	err = tx.QueryRow(ctx, `SELECT status,total_rows,valid_rows,invalid_rows,imported_rows,version,
+		COALESCE(confirm_idempotency_key,''),template_version
+		FROM import_batches WHERE id=$1 AND semester_id=$2::uuid AND week_id=$3::uuid
+		  AND inspection_type_id=$4::uuid AND department_id=$5::uuid
+		  AND COALESCE(class_id::text,'')=$6 AND grade=$7 AND created_by=$8::uuid FOR UPDATE`,
+		input.BatchID, input.Scope.SemesterID, input.Scope.WeekID, input.Scope.InspectionTypeID, input.Scope.DepartmentID, input.Scope.ClassID, input.Scope.Grade, input.Scope.ActorID,
+	).Scan(&status, &totalRows, &validRows, &invalidRows, &importedRows, &version, &idempotencyKey, &templateVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
+	}
+	if err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	if status == importjob.BatchStatusConfirmed {
+		if idempotencyKey == input.IdempotencyKey {
+			return importjob.ConfirmResult{BatchID: input.BatchID, Status: status, ImportedRows: importedRows, Version: version}, nil
+		}
+		return importjob.ConfirmResult{}, importjob.ErrBatchAlreadyConfirmed
+	}
+	if version != input.ExpectedVersion {
+		return importjob.ConfirmResult{}, importjob.ErrBatchVersionConflict
+	}
+	if status != importjob.BatchStatusPreviewReady {
+		return importjob.ConfirmResult{}, importjob.ErrInvalidBatchTransition
+	}
+	if totalRows <= 0 || invalidRows != 0 || validRows != totalRows {
+		return importjob.ConfirmResult{}, importjob.ErrBatchHasErrors
+	}
+	rows, err := tx.Query(ctx, `SELECT id,normalized_data_json FROM import_rows
+		WHERE batch_id=$1 AND validation_status='VALID' ORDER BY row_no FOR UPDATE`, input.BatchID)
+	if err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	type confirmedRow struct {
+		id     string
+		record inspection.AttendanceRecord
+	}
+	confirmedRows := make([]confirmedRow, 0, validRows)
+	for rows.Next() {
+		var row confirmedRow
+		var normalized []byte
+		if err := rows.Scan(&row.id, &normalized); err != nil {
+			rows.Close()
+			return importjob.ConfirmResult{}, err
+		}
+		if err := json.Unmarshal(normalized, &row.record); err != nil {
+			rows.Close()
+			return importjob.ConfirmResult{}, fmt.Errorf("decode normalized import row: %w", err)
+		}
+		if !confirmationRecordMatches(row.record, input) {
+			rows.Close()
+			return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
+		}
+		confirmedRows = append(confirmedRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return importjob.ConfirmResult{}, err
+	}
+	rows.Close()
+	if len(confirmedRows) != validRows {
+		return importjob.ConfirmResult{}, importjob.ErrBatchHasErrors
+	}
+	if _, err := tx.Exec(ctx, `UPDATE import_batches SET status='CONFIRMING',updated_at=now() WHERE id=$1`, input.BatchID); err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	for _, row := range confirmedRows {
+		record := row.record
+		if _, err := tx.Exec(ctx, `INSERT INTO inspection_records(
+			id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,
+			class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,source,status,import_batch_id,dedup_key,row_version,created_by
+		) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,1,$13,$14,$15,$16,$17,$18,$19)`,
+			record.ID, record.InspectionTypeID, record.SemesterID, record.WeekID, record.DepartmentID, record.StudentID,
+			record.StudentNoSnapshot, record.StudentNameSnapshot, record.ClassID, record.ClassNameSnapshot, record.GradeSnapshot,
+			record.OccurredAt, record.Remark, record.Source, record.Status, input.BatchID, record.DedupKey, record.RowVersion, record.CreatedBy); err != nil {
+			return importjob.ConfirmResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id)
+			VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid)`, record.ID, record.CourseID, record.AbsenceHours, record.PeriodText, record.ClassroomID); err != nil {
+			return importjob.ConfirmResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE import_rows SET record_id=$2 WHERE id=$1 AND batch_id=$3`, row.id, record.ID, input.BatchID); err != nil {
+			return importjob.ConfirmResult{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE import_batches SET status='CONFIRMED',imported_rows=$2,confirm_idempotency_key=$3,
+		version=version+1,confirmed_at=now(),updated_at=now(),failure_code='',failure_message='' WHERE id=$1`,
+		input.BatchID, len(confirmedRows), input.IdempotencyKey); err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	if err := insertAuditTx(ctx, tx, mutation.Metadata, confirmationAuditEntry(input, templateVersion, len(confirmedRows), version)); err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	return importjob.ConfirmResult{BatchID: input.BatchID, Status: importjob.BatchStatusConfirmed, ImportedRows: len(confirmedRows), Version: version + 1}, nil
+}
+
+func confirmationAuditEntry(input importjob.ConfirmBatchInput, templateVersion, importedRows, previousVersion int) audit.Entry {
+	return audit.Entry{
+		Action: audit.ActionImportBatchConfirmed, ResourceType: "import_batch", ResourceID: input.BatchID,
+		Before: map[string]any{"status": importjob.BatchStatusPreviewReady, "version": previousVersion},
+		After: map[string]any{
+			"status": importjob.BatchStatusConfirmed, "importedRows": importedRows, "templateVersion": templateVersion,
+			"semesterId": input.Scope.SemesterID, "weekId": input.Scope.WeekID,
+			"inspectionTypeId": input.Scope.InspectionTypeID, "departmentId": input.Scope.DepartmentID,
+		},
+	}
+}
+
+func confirmationRecordMatches(record inspection.AttendanceRecord, input importjob.ConfirmBatchInput) bool {
+	withinClass := input.Scope.ClassID == "" || record.ClassID == input.Scope.ClassID
+	withinGrade := input.Scope.Grade == "" || record.GradeSnapshot == input.Scope.Grade
+	return withinClass && withinGrade && record.ID != "" && record.InspectionTypeID == input.Scope.InspectionTypeID &&
+		record.SemesterID == input.Scope.SemesterID && record.WeekID == input.Scope.WeekID &&
+		record.DepartmentID == input.Scope.DepartmentID && record.ImportBatchID == input.BatchID &&
+		record.CreatedBy == input.Scope.ActorID && record.Source == inspection.RecordSourceExcel &&
+		record.Status == inspection.RecordStatusDraft && record.DedupKey != "" && record.RowVersion == 1
 }

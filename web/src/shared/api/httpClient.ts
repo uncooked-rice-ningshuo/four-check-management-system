@@ -18,21 +18,32 @@ export function setAccessToken(token: string | null) {
 
 // apiRequest 是前端唯一的 HTTP 传输入口，负责附加内存令牌，
 // 并允许浏览器在认证请求中携带 HttpOnly 刷新 Cookie。
-export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request(path: string, init: RequestInit) {
+	const headers = new Headers(init.headers)
+	if (!(init.body instanceof FormData) && init.body !== undefined && !headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json')
+	}
+	if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   const response = await fetch(`/api/v1${path}`, {
     ...init,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init.headers,
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
+		headers,
   })
 
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new ApiError(response.status, body.code ?? 'REQUEST_FAILED', body.message ?? '请求失败')
   }
+	return response
+}
 
-  return (response.status === 204 ? undefined : response.json()) as Promise<T>
+export async function apiRequest<T>(path: string, init: RequestInit = {}, responseType: 'json' | 'blob' = 'json'): Promise<T> {
+	const response = await request(path, init)
+	if (response.status === 204) return undefined as T
+	return (responseType === 'blob' ? response.blob() : response.json()) as Promise<T>
+}
+
+export async function apiDownload(path: string) {
+	const response = await request(path, {})
+	return { blob: await response.blob(), headers: response.headers }
 }

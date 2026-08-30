@@ -111,18 +111,26 @@ type EffectiveResult struct {
 func (r EffectiveResult) Allowed(action string, requested Scope) bool {
 	allowed := false
 	for _, permission := range r.Permissions {
-		if permission.Action != action || !scopeMatches(permission.Scope, requested) {
+		if permission.Action != action {
 			continue
 		}
-		if permission.Effect == EffectDeny {
+		if permission.Effect == EffectDeny && scopesOverlap(permission.Scope, requested) {
 			return false
 		}
-		if permission.Effect == EffectAllow {
+		if permission.Effect == EffectAllow && scopeMatches(permission.Scope, requested) {
 			allowed = true
 		}
 	}
 	return allowed
 }
+
+func scopesOverlap(left, right Scope) bool {
+	return overlaps(left.AcademicYearID, right.AcademicYearID) && overlaps(left.SemesterID, right.SemesterID) &&
+		overlaps(left.WeekID, right.WeekID) && overlaps(left.InspectionTypeID, right.InspectionTypeID) &&
+		overlaps(left.DepartmentID, right.DepartmentID) && overlaps(left.ClassID, right.ClassID) && overlaps(left.Grade, right.Grade)
+}
+
+func overlaps(left, right string) bool { return left == "" || right == "" || left == right }
 
 type Repository interface {
 	LoadAccessProfile(context.Context, string) (AccessProfile, error)

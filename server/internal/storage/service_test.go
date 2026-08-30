@@ -214,6 +214,19 @@ func TestStoreMarksFailureAndAttemptsCleanup(t *testing.T) {
 	}
 }
 
+func TestDiscardMarksAvailableImportSourceRecoverableBeforeRemoval(t *testing.T) {
+	repository := newMemoryFileRepository()
+	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusAvailable}
+	objects := newMemoryObjectStorage()
+	objects.data["system/file-id"] = []byte("private import")
+	if err := NewService(repository, objects, 1024).Discard(context.Background(), "file-id", audit.Metadata{ActorID: "actor-id"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.failed) != 1 || repository.failed[0].FailureCode != FailureOrphanedImport || len(objects.removed) != 1 {
+		t.Fatalf("failed=%#v removed=%#v", repository.failed, objects.removed)
+	}
+}
+
 func TestOpenRefusesNonAvailableFile(t *testing.T) {
 	repository := newMemoryFileRepository()
 	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusPending}
@@ -242,6 +255,42 @@ func TestOpenMarksAvailableMetadataMissingWhenObjectDisappears(t *testing.T) {
 	}
 	if len(repository.missing) != 1 || repository.missing[0].FailureCode != FailureObjectMissing {
 		t.Fatalf("missing transitions = %#v", repository.missing)
+	}
+}
+
+func TestReadVerifiedReturnsContentOnlyAfterSHAAndSizeMatch(t *testing.T) {
+	repository := newMemoryFileRepository()
+	content := []byte("verified import workbook")
+	wantSHA := fmt.Sprintf("%x", sha256.Sum256(content))
+	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusAvailable, SizeBytes: int64(len(content)), SHA256: wantSHA}
+	objects := newMemoryObjectStorage()
+	objects.data["system/file-id"] = content
+
+	file, got, err := NewService(repository, objects, 1024).ReadVerified(context.Background(), "file-id", audit.Metadata{ActorID: "actor-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.ID != "file-id" || !bytes.Equal(got, content) || len(repository.audits) != 1 || repository.audits[0].Entry.Action != audit.ActionFileRead {
+		t.Fatalf("verified read = %#v, %q, audits %#v", file, got, repository.audits)
+	}
+}
+
+func TestReadVerifiedRejectsUnavailableOrMismatchedContent(t *testing.T) {
+	repository := newMemoryFileRepository()
+	repository.files["pending"] = File{ID: "pending", ObjectKey: "system/pending", Status: StatusPending}
+	repository.files["mismatch"] = File{ID: "mismatch", ObjectKey: "system/mismatch", Status: StatusAvailable, SizeBytes: 3, SHA256: strings.Repeat("0", 64)}
+	objects := newMemoryObjectStorage()
+	objects.data["system/mismatch"] = []byte("abc")
+	service := NewService(repository, objects, 1024)
+
+	if _, _, err := service.ReadVerified(context.Background(), "pending", audit.Metadata{}); !errors.Is(err, ErrFileUnavailable) {
+		t.Fatalf("pending error = %v", err)
+	}
+	if _, _, err := service.ReadVerified(context.Background(), "mismatch", audit.Metadata{}); !errors.Is(err, ErrIntegrityMismatch) {
+		t.Fatalf("mismatch error = %v", err)
+	}
+	if len(repository.missing) != 1 || repository.missing[0].FailureCode != FailureIntegrityMismatch {
+		t.Fatalf("integrity transition = %#v", repository.missing)
 	}
 }
 

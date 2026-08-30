@@ -21,7 +21,7 @@ Compose 从已包含安全修复的 `RELEASE.2025-10-15T17-29-55Z` 源码构建�
 ## 测试
 
 ```bash
-docker run --rm -v "$PWD/server:/app" -w /app golang:1.24-alpine go test ./...
+docker run --rm -v "$PWD/server:/app" -w /app golang:1.25-alpine go test ./...
 cd web && pnpm test && pnpm build
 docker compose config
 ```

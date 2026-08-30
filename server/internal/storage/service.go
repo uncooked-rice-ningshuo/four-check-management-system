@@ -32,6 +32,7 @@ const (
 	FailureStorageUnavailable = "STORAGE_UNAVAILABLE"
 	FailureIntegrityMismatch  = "INTEGRITY_MISMATCH"
 	FailureObjectMissing      = "OBJECT_MISSING"
+	FailureOrphanedImport     = "ORPHANED_IMPORT_SOURCE"
 )
 
 var (
@@ -175,6 +176,66 @@ func (s *Service) Open(ctx context.Context, id string, metadata audit.Metadata) 
 		return file, Object{}, err
 	}
 	return file, object, nil
+}
+
+// ReadVerified returns private object bytes only after status, size and SHA-256 are rechecked.
+func (s *Service) ReadVerified(ctx context.Context, id string, metadata audit.Metadata) (File, []byte, error) {
+	file, err := s.repository.FindFile(ctx, id)
+	if err != nil {
+		return File{}, nil, err
+	}
+	if file.Status != StatusAvailable {
+		return file, nil, ErrFileUnavailable
+	}
+	if file.SizeBytes < 0 || file.SizeBytes > s.maxSize {
+		return file, nil, ErrFileTooLarge
+	}
+	object, err := s.objects.Open(ctx, file.ObjectKey)
+	if errors.Is(err, ErrObjectMissing) {
+		return file, nil, s.markReadAnomaly(ctx, file, FailureObjectMissing, "对象不存在", ErrObjectMissing, metadata)
+	}
+	if err != nil {
+		return file, nil, err
+	}
+	defer object.Body.Close()
+	content, err := io.ReadAll(io.LimitReader(object.Body, file.SizeBytes+1))
+	if err != nil {
+		return file, nil, err
+	}
+	observedSHA := fmt.Sprintf("%x", sha256.Sum256(content))
+	if int64(len(content)) != file.SizeBytes || object.Info.Size != file.SizeBytes || observedSHA != file.SHA256 {
+		return file, nil, s.markReadAnomaly(ctx, file, FailureIntegrityMismatch, "对象完整性校验失败", ErrIntegrityMismatch, metadata)
+	}
+	mutation := fileMutation(metadata, audit.ActionFileRead, file.ID, StatusAvailable, file)
+	if err := s.repository.RecordFileAudit(ctx, mutation); err != nil {
+		return file, nil, err
+	}
+	return file, content, nil
+}
+
+// Discard marks an AVAILABLE object recoverable before attempting best-effort object removal.
+func (s *Service) Discard(ctx context.Context, id string, metadata audit.Metadata) error {
+	file, err := s.repository.FindFile(ctx, id)
+	if err != nil {
+		return err
+	}
+	if file.Status != StatusAvailable {
+		return ErrFileUnavailable
+	}
+	file.Status, file.FailureCode, file.FailureMessage = StatusFailed, FailureOrphanedImport, "导入源文件未关联业务批次"
+	if err := s.repository.MarkFileFailed(ctx, file, fileMutation(metadata, audit.ActionFileUploadFailed, file.ID, StatusAvailable, file)); err != nil {
+		return err
+	}
+	return s.objects.Remove(ctx, file.ObjectKey)
+}
+
+func (s *Service) markReadAnomaly(ctx context.Context, file File, code, message string, cause error, metadata audit.Metadata) error {
+	file.Status, file.FailureCode, file.FailureMessage = StatusMissing, code, message
+	mutation := fileMutation(metadata, audit.ActionFileIntegrityAnomaly, file.ID, StatusAvailable, file)
+	if err := s.repository.MarkFileMissing(ctx, file, mutation); err != nil {
+		return err
+	}
+	return cause
 }
 
 // Reconcile targets only stale rows selected by PostgreSQL; it never enumerates the entire bucket.

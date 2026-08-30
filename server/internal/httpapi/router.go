@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"log"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"four-check-management-system/server/internal/academic"
+	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dictionary"
+	"four-check-management-system/server/internal/importjob"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
@@ -20,14 +24,38 @@ import (
 )
 
 type AdminServices struct {
-	Organization       *organization.Service
-	Academic           *academic.Service
-	Permission         *permission.Service
-	MasterData         *masterdata.Service
-	Dictionary         *dictionary.Service
-	Storage            *storage.Service
-	PostgresReady      readinessChecker
-	ObjectStorageReady readinessChecker
+	Organization         *organization.Service
+	Academic             *academic.Service
+	Permission           *permission.Service
+	MasterData           *masterdata.Service
+	Dictionary           *dictionary.Service
+	Storage              *storage.Service
+	PostgresReady        readinessChecker
+	ObjectStorageReady   readinessChecker
+	ImportJobs           importJobHTTPService
+	Attendance           attendanceHTTPService
+	ImportFiles          importFileHTTPService
+	ImportMaxUploadBytes int64
+}
+
+type importJobHTTPService interface {
+	CreateBatch(context.Context, importjob.CreateBatchInput) (importjob.Batch, error)
+	ParseBatch(context.Context, importjob.ParseBatchInput) (importjob.Batch, error)
+	GetBatch(context.Context, string) (importjob.Batch, error)
+	ListRows(context.Context, string, int, int) (importjob.ImportRowPage, error)
+	PublishedTemplate(context.Context, string) (importjob.Template, error)
+	ConfirmBatch(context.Context, importjob.ConfirmBatchInput) (importjob.ConfirmResult, error)
+	CancelBatch(context.Context, string, int) (importjob.Batch, error)
+}
+
+type attendanceHTTPService interface {
+	ListAttendance(context.Context, inspection.AttendanceListFilter, inspection.AttendanceScope) (inspection.AttendancePage, error)
+}
+
+type importFileHTTPService interface {
+	Store(context.Context, storage.StoreInput, audit.Metadata) (storage.File, error)
+	ReadVerified(context.Context, string, audit.Metadata) (storage.File, []byte, error)
+	Discard(context.Context, string, audit.Metadata) error
 }
 
 type readinessChecker interface {
@@ -35,16 +63,20 @@ type readinessChecker interface {
 }
 
 type handler struct {
-	auth               *auth.Service
-	organization       *organization.Service
-	academic           *academic.Service
-	permission         *permission.Service
-	masterData         *masterdata.Service
-	dictionary         *dictionary.Service
-	storage            *storage.Service
-	postgresReady      readinessChecker
-	objectStorageReady readinessChecker
-	secureCookie       bool
+	auth                 *auth.Service
+	organization         *organization.Service
+	academic             *academic.Service
+	permission           *permission.Service
+	masterData           *masterdata.Service
+	dictionary           *dictionary.Service
+	storage              *storage.Service
+	postgresReady        readinessChecker
+	objectStorageReady   readinessChecker
+	importJobs           importJobHTTPService
+	attendance           attendanceHTTPService
+	importFiles          importFileHTTPService
+	importMaxUploadBytes int64
+	secureCookie         bool
 }
 
 func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...AdminServices) *gin.Engine {
@@ -58,6 +90,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.masterData, h.dictionary = dependencies[0].MasterData, dependencies[0].Dictionary
 		h.storage = dependencies[0].Storage
 		h.postgresReady, h.objectStorageReady = dependencies[0].PostgresReady, dependencies[0].ObjectStorageReady
+		h.importJobs, h.attendance, h.importFiles = dependencies[0].ImportJobs, dependencies[0].Attendance, dependencies[0].ImportFiles
+		h.importMaxUploadBytes = dependencies[0].ImportMaxUploadBytes
 	}
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/health/ready", h.readiness)
@@ -111,7 +145,32 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	dictionaryAdmin.POST("/dictionaries/types/:typeId/items", h.createDictionaryItem)
 	dictionaryAdmin.PUT("/dictionaries/types/:typeId/items/:id", h.updateDictionaryItem)
 	v1.GET("/academic/current-week", h.currentWeek)
+	v1.GET("/inspections/attendance", h.listAttendance)
+	v1.GET("/permissions/effective", h.currentEffectivePermissions)
+	v1.GET("/imports/attendance/template", h.downloadAttendanceTemplate)
+	v1.POST("/imports/attendance", h.uploadAttendanceImport)
+	v1.GET("/imports/:id", h.getImportBatch)
+	v1.GET("/imports/:id/rows", h.listImportRows)
+	v1.POST("/imports/:id/confirm", h.confirmImportBatch)
+	v1.POST("/imports/:id/cancel", h.cancelImportBatch)
 	return r
+}
+
+func (h *handler) currentEffectivePermissions(c *gin.Context) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return
+	}
+	if h.permission == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "权限服务尚未就绪")
+		return
+	}
+	result, err := h.permission.Effective(c, account.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "PERMISSION_LOOKUP_FAILED", "无法读取当前权限")
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *handler) readiness(c *gin.Context) {
@@ -513,6 +572,320 @@ func (h *handler) currentWeek(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"week": result})
 }
 
+func (h *handler) listAttendance(c *gin.Context) {
+	account, scope, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionView)
+	if !ok {
+		return
+	}
+	_ = account
+	page, pageSize, ok := pagination(c)
+	if !ok {
+		return
+	}
+	filter := inspection.AttendanceListFilter{
+		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
+		DepartmentID: scope.DepartmentID, ClassID: scope.ClassID, Grade: scope.Grade,
+		Keyword: c.Query("keyword"), Sort: c.DefaultQuery("sort", inspection.SortOccurredAtDescending), Page: page, PageSize: pageSize,
+	}
+	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{
+		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
+		DepartmentID: scope.DepartmentID, ClassID: scope.ClassID, Grade: scope.Grade,
+	})
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) downloadAttendanceTemplate(c *gin.Context) {
+	account, scope, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionView)
+	if !ok {
+		return
+	}
+	template, err := h.importJobs.PublishedTemplate(c, scope.InspectionTypeID)
+	if err != nil || template.InspectionTypeID != scope.InspectionTypeID {
+		writeImportError(c, err)
+		return
+	}
+	file, content, err := h.importFiles.ReadVerified(c, template.FileID, requestMetadata(c, ""))
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	_ = account
+	name := strings.TrimSpace(file.OriginalName)
+	if name == "" {
+		name = "attendance-template.xlsx"
+	}
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	c.Header("X-Import-Template-ID", template.ID)
+	c.Header("X-Import-Template-Version", strconv.Itoa(template.Version))
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content)
+}
+
+func (h *handler) uploadAttendanceImport(c *gin.Context) {
+	if _, ok := h.currentAccount(c); !ok {
+		return
+	}
+	if h.importMaxUploadBytes <= 0 {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "导入服务尚未就绪")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, multipartRequestLimit(h.importMaxUploadBytes))
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+		} else {
+			writeError(c, http.StatusBadRequest, "INVALID_FILE", "请选择有效的 XLSX 文件")
+		}
+		return
+	}
+	scope := inspectionScopeFromForm(c)
+	account, ok := h.authorizeInspectionScope(c, permission.ActionInspectionEnter, scope, false)
+	if !ok {
+		return
+	}
+	templateVersion, err := strconv.Atoi(c.PostForm("templateVersion"))
+	if err != nil || templateVersion < 1 || strings.TrimSpace(c.PostForm("templateId")) == "" {
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "模板信息无效")
+		return
+	}
+	published, err := h.importJobs.PublishedTemplate(c, scope.InspectionTypeID)
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	if published.ID != c.PostForm("templateId") || published.Version != templateVersion || published.InspectionTypeID != scope.InspectionTypeID {
+		writeError(c, http.StatusUnprocessableEntity, string(importjob.ErrorTemplateVersionMismatch), "模板版本与当前发布版本不一致")
+		return
+	}
+	opened, err := fileHeader.Open()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_FILE", "无法读取上传文件")
+		return
+	}
+	defer opened.Close()
+	stored, err := h.importFiles.Store(c, storage.StoreInput{
+		OriginalName: fileHeader.Filename, DeclaredContentType: fileHeader.Header.Get("Content-Type"), Size: fileHeader.Size,
+		RetentionType: storage.RetentionImportSource, CreatedBy: account.ID, Body: opened,
+	}, requestMetadata(c, ""))
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	batch, err := h.importJobs.CreateBatch(c, importjob.CreateBatchInput{
+		InspectionTypeID: scope.InspectionTypeID, SemesterID: scope.SemesterID, WeekID: scope.WeekID, DepartmentID: scope.DepartmentID,
+		ClassID: scope.ClassID, Grade: scope.Grade,
+		SourceFile: stored, TemplateID: c.PostForm("templateId"), TemplateVersion: templateVersion, CreatedBy: account.ID,
+	})
+	if err != nil {
+		_ = h.importFiles.Discard(c, stored.ID, requestMetadata(c, "导入批次创建失败，回收未关联源文件"))
+		writeImportError(c, err)
+		return
+	}
+	batch, err = h.importJobs.ParseBatch(c, importjob.ParseBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, AuditMetadata: requestMetadata(c, "")})
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, batch)
+}
+
+func (h *handler) getImportBatch(c *gin.Context) {
+	_, batch, ok := h.authorizedBatch(c, permission.ActionInspectionView)
+	if ok {
+		c.JSON(http.StatusOK, batch)
+	}
+}
+
+func (h *handler) listImportRows(c *gin.Context) {
+	_, batch, ok := h.authorizedBatch(c, permission.ActionInspectionView)
+	if !ok {
+		return
+	}
+	page, pageSize, ok := pagination(c)
+	if !ok {
+		return
+	}
+	result, err := h.importJobs.ListRows(c, batch.ID, page, pageSize)
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) confirmImportBatch(c *gin.Context) {
+	account, batch, ok := h.authorizedBatch(c, permission.ActionInspectionEnter)
+	if !ok {
+		return
+	}
+	var input struct {
+		Version int `json:"version"`
+	}
+	if !bind(c, &input) {
+		return
+	}
+	result, err := h.importJobs.ConfirmBatch(c, importjob.ConfirmBatchInput{
+		BatchID: batch.ID, ExpectedVersion: input.Version, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		Scope: importjob.ConfirmScope{SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID,
+			DepartmentID: batch.DepartmentID, ClassID: batch.ClassID, Grade: batch.Grade, ActorID: account.ID},
+		AuditMetadata: requestMetadata(c, ""),
+	})
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) cancelImportBatch(c *gin.Context) {
+	_, batch, ok := h.authorizedBatch(c, permission.ActionInspectionEnter)
+	if !ok {
+		return
+	}
+	var input struct {
+		Version int `json:"version"`
+	}
+	if !bind(c, &input) {
+		return
+	}
+	result, err := h.importJobs.CancelBatch(c, batch.ID, input.Version)
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) authorizeInspectionRequest(c *gin.Context, action string) (auth.Account, permission.Scope, bool) {
+	scope := permission.Scope{
+		SemesterID: c.Query("semesterId"), WeekID: c.Query("weekId"), InspectionTypeID: c.Query("inspectionTypeId"),
+		DepartmentID: c.Query("departmentId"), ClassID: c.Query("classId"), Grade: c.Query("grade"),
+	}
+	account, ok := h.authorizeInspectionScope(c, action, scope, false)
+	return account, scope, ok
+}
+
+func inspectionScopeFromForm(c *gin.Context) permission.Scope {
+	return permission.Scope{SemesterID: c.PostForm("semesterId"), WeekID: c.PostForm("weekId"), InspectionTypeID: c.PostForm("inspectionTypeId"), DepartmentID: c.PostForm("departmentId"), ClassID: c.PostForm("classId"), Grade: c.PostForm("grade")}
+}
+
+func (h *handler) authorizeInspectionScope(c *gin.Context, action string, scope permission.Scope, hideExistence bool) (auth.Account, bool) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return auth.Account{}, false
+	}
+	if account.MustChangePassword || strings.TrimSpace(scope.SemesterID) == "" || strings.TrimSpace(scope.WeekID) == "" || strings.TrimSpace(scope.InspectionTypeID) == "" || strings.TrimSpace(scope.DepartmentID) == "" {
+		writeInspectionForbidden(c, hideExistence)
+		return auth.Account{}, false
+	}
+	if account.IsSuperAdmin {
+		return account, true
+	}
+	if h.permission == nil {
+		writeInspectionForbidden(c, hideExistence)
+		return auth.Account{}, false
+	}
+	effective, err := h.permission.Effective(c, account.ID)
+	if err != nil || !effective.Allowed(action, scope) {
+		writeInspectionForbidden(c, hideExistence)
+		return auth.Account{}, false
+	}
+	return account, true
+}
+
+func (h *handler) authorizedBatch(c *gin.Context, action string) (auth.Account, importjob.Batch, bool) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return auth.Account{}, importjob.Batch{}, false
+	}
+	batch, err := h.importJobs.GetBatch(c, c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusNotFound, "IMPORT_BATCH_NOT_FOUND", "导入批次不存在或无权访问")
+		return auth.Account{}, importjob.Batch{}, false
+	}
+	scope := permission.Scope{SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID, DepartmentID: batch.DepartmentID, ClassID: batch.ClassID, Grade: batch.Grade}
+	if account.IsSuperAdmin {
+		return account, batch, true
+	}
+	if account.MustChangePassword || h.permission == nil {
+		writeInspectionForbidden(c, true)
+		return auth.Account{}, importjob.Batch{}, false
+	}
+	effective, err := h.permission.Effective(c, account.ID)
+	if err != nil || !effective.Allowed(action, scope) {
+		writeInspectionForbidden(c, true)
+		return auth.Account{}, importjob.Batch{}, false
+	}
+	return account, batch, true
+}
+
+func writeInspectionForbidden(c *gin.Context, hideExistence bool) {
+	if hideExistence {
+		writeError(c, http.StatusNotFound, "IMPORT_BATCH_NOT_FOUND", "导入批次不存在或无权访问")
+		return
+	}
+	writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权访问当前检查范围")
+}
+
+func pagination(c *gin.Context) (int, int, bool) {
+	page, errPage := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, errPageSize := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if errPage != nil || errPageSize != nil || page < 1 || pageSize < 1 || pageSize > 100 {
+		writeError(c, http.StatusBadRequest, "INVALID_PAGINATION", "分页参数无效")
+		return 0, 0, false
+	}
+	return page, pageSize, true
+}
+
+func multipartRequestLimit(fileLimit int64) int64 {
+	const envelopeAllowance = int64(1 << 20)
+	if fileLimit > (1<<63-1)-envelopeAllowance {
+		return 1<<63 - 1
+	}
+	return fileLimit + envelopeAllowance
+}
+
+func writeImportError(c *gin.Context, err error) {
+	switch {
+	case err == nil:
+		writeError(c, http.StatusNotFound, "IMPORT_TEMPLATE_NOT_FOUND", "导入模板不存在")
+	case errors.Is(err, importjob.ErrBatchNotFound):
+		writeError(c, http.StatusNotFound, "IMPORT_BATCH_NOT_FOUND", "导入批次不存在或无权访问")
+	case errors.Is(err, importjob.ErrTemplateNotFound):
+		writeError(c, http.StatusNotFound, "IMPORT_TEMPLATE_NOT_FOUND", "当前检查类型尚未发布导入模板")
+	case errors.Is(err, importjob.ErrBatchScopeMismatch):
+		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权访问当前检查范围")
+	case errors.Is(err, importjob.ErrBatchVersionConflict):
+		writeError(c, http.StatusConflict, "VERSION_CONFLICT", "数据已更新，请刷新后重试")
+	case errors.Is(err, importjob.ErrBatchHasErrors):
+		writeError(c, http.StatusConflict, "BATCH_HAS_ERRORS", "批次仍有错误，不能确认")
+	case errors.Is(err, importjob.ErrBatchAlreadyConfirmed):
+		writeError(c, http.StatusConflict, "BATCH_ALREADY_CONFIRMED", "批次已使用其他请求确认")
+	case errors.Is(err, importjob.ErrInvalidBatchTransition):
+		writeError(c, http.StatusConflict, "INVALID_BATCH_STATE", "当前批次状态不允许该操作")
+	case errors.Is(err, importjob.ErrInvalidIdempotencyKey):
+		writeError(c, http.StatusBadRequest, "INVALID_IDEMPOTENCY_KEY", "确认请求缺少有效幂等键")
+	case errors.Is(err, importjob.ErrInvalidBatch), errors.Is(err, importjob.ErrSourceFileNotReady), errors.Is(err, inspection.ErrInvalidAttendanceQuery):
+		writeError(c, http.StatusBadRequest, "INVALID_IMPORT_REQUEST", "导入请求不符合要求")
+	case errors.Is(err, storage.ErrFileTooLarge):
+		writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+	case errors.Is(err, storage.ErrFileUnavailable), errors.Is(err, storage.ErrIntegrityMismatch), errors.Is(err, storage.ErrObjectMissing):
+		writeError(c, http.StatusConflict, "SOURCE_FILE_UNAVAILABLE", "文件不可用或完整性校验失败")
+	default:
+		var parsed *importjob.ParseError
+		if errors.As(err, &parsed) {
+			writeError(c, http.StatusUnprocessableEntity, string(parsed.Code), parsed.Message)
+			return
+		}
+		writeError(c, http.StatusInternalServerError, "IMPORT_SERVICE_UNAVAILABLE", "导入服务暂时不可用，请稍后重试")
+	}
+}
+
 func (h *handler) requireSuperAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		a, ok := h.currentAccount(c)
@@ -574,6 +947,7 @@ func (h *handler) currentAccount(c *gin.Context) (auth.Account, bool) {
 		writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "登录状态已失效")
 		return auth.Account{}, false
 	}
+	c.Set("account", a)
 	return a, true
 }
 

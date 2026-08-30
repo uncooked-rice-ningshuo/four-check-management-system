@@ -13,6 +13,8 @@ import (
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dictionary"
 	"four-check-management-system/server/internal/httpapi"
+	"four-check-management-system/server/internal/importjob"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
@@ -46,16 +48,10 @@ func main() {
 	if _, err := svc.BootstrapAdmin(ctx, envOr("BOOTSTRAP_ADMIN_LOGIN", "admin"), envOr("BOOTSTRAP_ADMIN_NAME", "系统管理员"), mustEnv("BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
 		log.Fatal(err)
 	}
-	r := httpapi.NewRouter(svc, os.Getenv("COOKIE_SECURE") == "true", httpapi.AdminServices{
-		Organization:       organization.NewService(db),
-		Academic:           academic.NewService(db),
-		Permission:         permission.NewService(db),
-		MasterData:         masterdata.NewService(db),
-		Dictionary:         dictionary.NewService(db),
-		Storage:            storageService,
-		PostgresReady:      db,
-		ObjectStorageReady: objectStorage,
-	})
+	services := newApplicationServices(db, storageService, storageConfig.MaxFileSize)
+	services.PostgresReady = db
+	services.ObjectStorageReady = objectStorage
+	r := httpapi.NewRouter(svc, os.Getenv("COOKIE_SECURE") == "true", services)
 	if err := httpapi.ConfigureTrustedProxies(r, os.Getenv("TRUSTED_PROXY_CIDRS")); err != nil {
 		log.Fatal(err)
 	}
@@ -65,6 +61,15 @@ func main() {
 	}
 	log.Printf("api listening on %s", addr)
 	log.Fatal(r.Run(addr))
+}
+
+func newApplicationServices(db *store.Postgres, storageService *storage.Service, maxUploadBytes int64) httpapi.AdminServices {
+	return httpapi.AdminServices{
+		Organization: organization.NewService(db), Academic: academic.NewService(db), Permission: permission.NewService(db),
+		MasterData: masterdata.NewService(db), Dictionary: dictionary.NewService(db), Storage: storageService,
+		ImportJobs: importjob.NewService(db, storageService, importjob.NewAttendanceXLSXParser(maxUploadBytes), importjob.NewAttendanceAdapter(db)),
+		Attendance: inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,
+	}
 }
 
 func loadStorageConfig(getenv func(string) string) (storageRuntimeConfig, error) {

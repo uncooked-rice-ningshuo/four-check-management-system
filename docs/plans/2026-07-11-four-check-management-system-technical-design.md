@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Web 前端 | React 19、TypeScript、Vite、Ant Design 5 | 管理后台生态成熟，适合复杂表格、表单和权限页面 |
 | 前端状态 | TanStack Query、Zustand、React Router | 服务端状态、少量全局状态和路由职责分离 |
-| 后端 | Go 1.24+、Gin、GORM 或 sqlc | 推荐 Gin + GORM 快速交付；复杂统计 SQL 可直接编写 |
+| 后端 | Go 1.25+、Gin、GORM 或 sqlc | 推荐 Gin + GORM 快速交付；复杂统计 SQL 可直接编写 |
 | API | RESTful API、OpenAPI 3.1 | 易开发、易联调、便于生成 TS 类型和接口文档 |
 | 数据库 | PostgreSQL 16+ | 事务、约束、JSONB、窗口函数和复杂统计能力较强 |
 | 缓存/任务 | MVP 可不部署 Redis；异步任务先用数据库任务表 | 降低运维复杂度；任务量增加后再引入 Redis/Asynq |
@@ -657,6 +657,9 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 - 统一检查主表、七类扩展表、手工录入。
 - Excel 模板、校验预览、确认导入、回滚。
 - 部门提交、审核、退回和状态看板。
+- 交付独立于 `/admin` 的普通用户应用外壳和角色化工作台，按有效 RBAC + ABAC 权限展示当前学年/学期/周次、临时周覆盖、我的待办、本部门业务状态和检查快捷入口。
+- 阶段 2 工作台只展示检查与部门工作流信息；待生成通报、待通报审核、待定稿和完整全院通报进度属于阶段 3，不得提前伪实现。
+- 阶段 2 完成必须通过[完整阶段 2 实施主计划与总体验收矩阵](./2026-08-30-phase-two-completion-implementation.md)；仅完成[工作流 A：通用导入框架 + 到课率第一增量](./2026-08-30-attendance-import-implementation.md)不代表阶段 2 完成。
 
 ### 阶段 3：统计与通报（3—4 周）
 

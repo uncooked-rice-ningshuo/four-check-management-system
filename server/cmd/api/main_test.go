@@ -46,3 +46,13 @@ func TestLoadStorageConfigRejectsMissingCredentialsWithoutEchoingValues(t *testi
 		t.Fatalf("configuration error leaked a value: %v", err)
 	}
 }
+
+func TestNewApplicationServicesWiresAttendanceImportRuntime(t *testing.T) {
+	services := newApplicationServices(nil, nil, 8<<20)
+	if services.ImportJobs == nil || services.Attendance == nil || services.ImportFiles == nil {
+		t.Fatalf("attendance import runtime is incomplete: %#v", services)
+	}
+	if services.ImportMaxUploadBytes != 8<<20 {
+		t.Fatalf("upload limit = %d", services.ImportMaxUploadBytes)
+	}
+}

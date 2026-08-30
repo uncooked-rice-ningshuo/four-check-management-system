@@ -153,6 +153,14 @@ body {
   min-height: 100vh;
   background: #eef3f8;
 }
+.attendance-page { display: grid; gap: 20px; }
+.attendance-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.attendance-page-heading h2.ant-typography { margin: 0 0 4px; }
+.attendance-context-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 16px; }
+.attendance-context-grid label { display: grid; gap: 6px; color: #344054; font-weight: 600; }
+.attendance-state { min-height: 160px; display: grid; place-items: center; color: #475467; }
+@media (max-width: 900px) { .attendance-context-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .attendance-page-heading { align-items: flex-start; flex-direction: column; } .attendance-context-grid { grid-template-columns: 1fr; } }
 .admin-sider {
   position: sticky !important;
   inset-block-start: 0;

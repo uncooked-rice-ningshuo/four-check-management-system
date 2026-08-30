@@ -88,7 +88,7 @@ docs/plans/                  技术方案与实施计划
 ## 4. 技术与架构约束
 
 - 前端：React 19、TypeScript、Vite、Ant Design、React Router、TanStack Query；使用仓库指定的 `pnpm`。
-- 后端：Go 1.24+、Gin、PostgreSQL；保持模块化单体，MVP 不自行拆微服务或引入 Redis。
+- 后端：Go 1.25+、Gin、PostgreSQL；保持模块化单体，MVP 不自行拆微服务或引入 Redis。
 - API：RESTful，前缀 `/api/v1`；JSON 用 `camelCase`，数据库用 `snake_case`。
 - 后端调用方向：`Handler → Application Service → Domain/Repository → Infrastructure`。
 - Handler 只转换 HTTP 输入输出；事务和用例编排放在 Application Service；状态机与业务不变量放在 Domain；数据范围过滤下推 Repository。

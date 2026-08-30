@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dictionary"
+	"four-check-management-system/server/internal/importjob"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
@@ -67,6 +71,273 @@ func TestStorageAuditMigrationDefinesRequiredSchema(t *testing.T) {
 			t.Errorf("storage/audit migration does not define %s", fragment)
 		}
 	}
+}
+
+func TestPhaseTwoAttendanceImportMigrationDefinesRequiredSchema(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "005_phase_two_attendance_import.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS import_templates",
+		"CREATE TABLE IF NOT EXISTS import_batches",
+		"CREATE TABLE IF NOT EXISTS import_rows",
+		"CREATE TABLE IF NOT EXISTS inspection_records",
+		"CREATE TABLE IF NOT EXISTS attendance_details",
+		"import_templates_status_check",
+		"import_batches_status_check",
+		"import_rows_validation_status_check",
+		"inspection_records_source_check",
+		"inspection_records_status_check",
+		"REFERENCES files(id)",
+		"REFERENCES inspection_types(id)",
+		"REFERENCES semesters(id)",
+		"REFERENCES semester_weeks(id)",
+		"REFERENCES departments(id)",
+		"REFERENCES students(id)",
+		"REFERENCES classes(id)",
+		"REFERENCES courses(id)",
+		"UNIQUE(batch_id, row_no)",
+		"uq_import_templates_published",
+		"WHERE status = 'PUBLISHED'",
+		"uq_inspection_records_active_dedup",
+		"WHERE deleted_at IS NULL",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("phase two migration does not define %s", fragment)
+		}
+	}
+}
+
+func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T) {
+	countSQL, countArgs, listSQL, listArgs, err := buildAttendanceListQueries(inspection.AttendanceListQuery{
+		SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "attendance",
+		DepartmentID: "department-study", ClassID: "class-1", Grade: "2023", Keyword: "张晨",
+		Sort: inspection.SortStudentNoAscending, Page: 2, PageSize: 25,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"ir.semester_id = $1::uuid",
+		"ir.week_id = $2::uuid",
+		"ir.inspection_type_id = $3::uuid",
+		"($4::text = '' OR ir.department_id = $4::uuid)",
+		"($5::text = '' OR ir.class_id = $5::uuid)",
+		"($6::text = '' OR ir.grade_snapshot = $6)",
+		"ir.deleted_at IS NULL",
+	} {
+		if !strings.Contains(countSQL, fragment) || !strings.Contains(listSQL, fragment) {
+			t.Errorf("attendance queries do not contain %q\ncount: %s\nlist: %s", fragment, countSQL, listSQL)
+		}
+	}
+	if !strings.Contains(listSQL, "ORDER BY ir.student_no_snapshot ASC, ir.id ASC") {
+		t.Fatalf("list query does not use whitelisted sort: %s", listSQL)
+	}
+	if strings.Contains(listSQL, "semester-1") || strings.Contains(listSQL, "张晨") {
+		t.Fatalf("list query interpolates user input: %s", listSQL)
+	}
+	if len(countArgs) != 7 || len(listArgs) != 9 || listArgs[7] != 25 || listArgs[8] != 25 {
+		t.Fatalf("count/list args = %#v / %#v", countArgs, listArgs)
+	}
+}
+
+func TestBuildAttendanceListQueriesRejectsUnknownSort(t *testing.T) {
+	_, _, _, _, err := buildAttendanceListQueries(inspection.AttendanceListQuery{
+		SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "attendance",
+		Sort: "occurred_at DESC; DROP TABLE students", Page: 1, PageSize: 20,
+	})
+	if !errors.Is(err, inspection.ErrInvalidAttendanceQuery) {
+		t.Fatalf("error = %v, want ErrInvalidAttendanceQuery", err)
+	}
+}
+
+func TestConfirmAttendanceImportCommitsIdempotentlyAgainstPostgres(t *testing.T) {
+	database := openTestPostgres(t)
+	fixture := seedAttendanceConfirmation(t, database, false)
+	mutation := confirmationMutation(fixture.input)
+
+	result, err := database.ConfirmAttendanceImport(context.Background(), fixture.input, mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != importjob.BatchStatusConfirmed || result.ImportedRows != 1 || result.Version != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	retry, err := database.ConfirmAttendanceImport(context.Background(), fixture.input, mutation)
+	if err != nil || retry != result {
+		t.Fatalf("idempotent retry = %#v, %v", retry, err)
+	}
+	different := fixture.input
+	different.ExpectedVersion = result.Version
+	different.IdempotencyKey = "different-" + uuid.NewString()
+	if _, err := database.ConfirmAttendanceImport(context.Background(), different, mutation); !errors.Is(err, importjob.ErrBatchAlreadyConfirmed) {
+		t.Fatalf("different-key error = %v", err)
+	}
+	var records, details, linkedRows, audits int
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM inspection_records WHERE import_batch_id=$1`, fixture.input.BatchID).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM attendance_details ad JOIN inspection_records ir ON ir.id=ad.record_id WHERE ir.import_batch_id=$1`, fixture.input.BatchID).Scan(&details); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM import_rows WHERE batch_id=$1 AND record_id IS NOT NULL`, fixture.input.BatchID).Scan(&linkedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_logs WHERE resource_type='import_batch' AND resource_id=$1 AND action=$2`, fixture.input.BatchID, audit.ActionImportBatchConfirmed).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if records != 1 || details != 1 || linkedRows != 1 || audits != 1 {
+		t.Fatalf("committed counts records=%d details=%d linked=%d audits=%d", records, details, linkedRows, audits)
+	}
+}
+
+func TestConfirmAttendanceImportRollsBackAllWritesWhenDetailInsertFails(t *testing.T) {
+	database := openTestPostgres(t)
+	fixture := seedAttendanceConfirmation(t, database, true)
+	if _, err := database.ConfirmAttendanceImport(context.Background(), fixture.input, confirmationMutation(fixture.input)); err == nil {
+		t.Fatal("confirmation unexpectedly succeeded with missing classroom")
+	}
+	var records, linkedRows, audits int
+	var status string
+	var version, importedRows int
+	if err := database.Pool.QueryRow(context.Background(), `SELECT status,version,imported_rows FROM import_batches WHERE id=$1`, fixture.input.BatchID).Scan(&status, &version, &importedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM inspection_records WHERE import_batch_id=$1`, fixture.input.BatchID).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM import_rows WHERE batch_id=$1 AND record_id IS NOT NULL`, fixture.input.BatchID).Scan(&linkedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_logs WHERE resource_type='import_batch' AND resource_id=$1`, fixture.input.BatchID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if status != importjob.BatchStatusPreviewReady || version != 1 || importedRows != 0 || records != 0 || linkedRows != 0 || audits != 0 {
+		t.Fatalf("rollback state status=%s version=%d imported=%d records=%d linked=%d audits=%d", status, version, importedRows, records, linkedRows, audits)
+	}
+}
+
+func TestConfirmationAuditEntryContainsOnlySafeBatchSummary(t *testing.T) {
+	input := importjob.ConfirmBatchInput{
+		BatchID: "batch-1",
+		Scope:   importjob.ConfirmScope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ActorID: "actor-1"},
+	}
+	entry := confirmationAuditEntry(input, 3, 12, 7)
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, required := range []string{"batch-1", "semester-1", "week-1", "type-1", "department-1", "templateVersion", "importedRows"} {
+		if !strings.Contains(text, required) {
+			t.Errorf("audit entry misses %q: %s", required, text)
+		}
+	}
+	for _, forbidden := range []string{"raw_data_json", "normalized_data_json", "studentNo", "studentName", "actor-1"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("audit entry leaks %q: %s", forbidden, text)
+		}
+	}
+}
+
+func TestConfirmationRecordMustRemainInsideClassAndGradeScope(t *testing.T) {
+	input := importjob.ConfirmBatchInput{BatchID: "batch-1", Scope: importjob.ConfirmScope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ClassID: "class-1", Grade: "2026", ActorID: "actor-1"}}
+	record := inspection.AttendanceRecord{ID: "record-1", SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ClassID: "class-2", GradeSnapshot: "2026", ImportBatchID: "batch-1", CreatedBy: "actor-1", Source: inspection.RecordSourceExcel, Status: inspection.RecordStatusDraft, DedupKey: "dedup", RowVersion: 1}
+	if confirmationRecordMatches(record, input) {
+		t.Fatal("record from another class matched narrowed confirmation scope")
+	}
+	record.ClassID, record.GradeSnapshot = "class-1", "2025"
+	if confirmationRecordMatches(record, input) {
+		t.Fatal("record from another grade matched narrowed confirmation scope")
+	}
+}
+
+type attendanceConfirmationFixture struct {
+	input importjob.ConfirmBatchInput
+}
+
+func openTestPostgres(t *testing.T) *Postgres {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not configured")
+	}
+	database, err := Open(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	return database
+}
+
+func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassroom bool) attendanceConfirmationFixture {
+	t.Helper()
+	ctx := context.Background()
+	accountID, yearID, semesterID, weekID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	facultyID, classID, studentID, courseID, classroomID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	originalFileID, templateFileID, templateID, batchID, rowID, recordID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	departmentID := "10000000-0000-0000-0000-000000000002"
+	inspectionTypeID := "30000000-0000-0000-0000-000000000001"
+	unique := uuid.NewString()
+	templateVersion := int(time.Now().UnixNano()%1_000_000_000) + 1
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password) VALUES($1,$2,'导入确认测试','unused','ACTIVE','SYSTEM','SUPER_ADMIN',true,false)`, []any{accountID, "confirm-" + unique}},
+		{`INSERT INTO academic_years(id,name,start_date,end_date) VALUES($1,$2,'2026-01-01','2026-12-31')`, []any{yearID, "year-" + unique}},
+		{`INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES($1,$2,$3,'测试学期','2026-01-01','2026-12-31')`, []any{semesterID, yearID, "semester-" + unique}},
+		{`INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date) VALUES($1,$2,1,'2026-06-15','2026-06-21')`, []any{weekID, semesterID}},
+		{`INSERT INTO faculties(id,code,name) VALUES($1,$2,$3)`, []any{facultyID, "faculty-" + unique, "学院-" + unique}},
+		{`INSERT INTO classes(id,code,name,grade,faculty_id) VALUES($1,$2,$3,'2026',$4)`, []any{classID, "class-" + unique, "班级-" + unique, facultyID}},
+		{`INSERT INTO classrooms(id,code,building,room_no,floor) VALUES($1,$2,'测试楼','101',1)`, []any{classroomID, "room-" + unique}},
+		{`INSERT INTO courses(id,code,name,class_id,classroom_id) VALUES($1,$2,'数据结构',$3,$4)`, []any{courseID, "course-" + unique, classID, classroomID}},
+		{`INSERT INTO students(id,student_no,name,grade,faculty_id,class_id) VALUES($1,$2,'虚构学生','2026',$3,$4)`, []any{studentID, "student-" + unique, facultyID, classID}},
+		{`INSERT INTO files(id,bucket,object_key,original_name,size_bytes,sha256,status,retention_type,created_by) VALUES($1,'test',$2,'source.xlsx',1,$3,'AVAILABLE','IMPORT_SOURCE',$4)`, []any{originalFileID, "source/" + unique, strings.Repeat("a", 64), accountID}},
+		{`INSERT INTO files(id,bucket,object_key,original_name,size_bytes,sha256,status,retention_type,created_by) VALUES($1,'test',$2,'template.xlsx',1,$3,'AVAILABLE','TEMPLATE',$4)`, []any{templateFileID, "template/" + unique, strings.Repeat("b", 64), accountID}},
+		{`INSERT INTO import_templates(id,code,name,inspection_type_id,version_no,file_id,status,created_by) VALUES($1,$2,'到课率模板',$3,$4,$5,'DRAFT',$6)`, []any{templateID, "template-" + unique, inspectionTypeID, templateVersion, templateFileID, accountID}},
+		{`INSERT INTO import_batches(id,inspection_type_id,semester_id,week_id,department_id,original_file_id,template_id,template_version,status,total_rows,valid_rows,invalid_rows,version,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PREVIEW_READY',1,1,0,1,$9)`, []any{batchID, inspectionTypeID, semesterID, weekID, departmentID, originalFileID, templateID, templateVersion, accountID}},
+	}
+	for _, statement := range statements {
+		if _, err := database.Pool.Exec(ctx, statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordClassroomID := classroomID
+	if invalidClassroom {
+		recordClassroomID = uuid.NewString()
+	}
+	record := inspection.AttendanceRecord{
+		ID: recordID, InspectionTypeID: inspectionTypeID, SemesterID: semesterID, WeekID: weekID, DepartmentID: departmentID,
+		StudentID: studentID, StudentNoSnapshot: "student-" + unique, StudentNameSnapshot: "虚构学生", ClassID: classID,
+		ClassNameSnapshot: "班级-" + unique, GradeSnapshot: "2026", CourseID: courseID, ClassroomID: recordClassroomID,
+		OccurredAt: time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC), AbsenceHours: 2, PeriodText: "第1-2节", Remark: "测试数据",
+		Source: inspection.RecordSourceExcel, Status: inspection.RecordStatusDraft, ImportBatchID: batchID,
+		DedupKey: strings.Repeat("c", 64), RowVersion: 1, CreatedBy: accountID,
+	}
+	normalized, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO import_rows(id,batch_id,row_no,raw_data_json,normalized_data_json,validation_status,errors_json) VALUES($1,$2,5,'{}',$3,'VALID','[]')`, rowID, batchID, normalized); err != nil {
+		t.Fatal(err)
+	}
+	return attendanceConfirmationFixture{input: importjob.ConfirmBatchInput{
+		BatchID: batchID, ExpectedVersion: 1, IdempotencyKey: "confirm-" + unique,
+		Scope:         importjob.ConfirmScope{SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID, DepartmentID: departmentID, ActorID: accountID},
+		AuditMetadata: audit.Metadata{ActorID: accountID, RequestID: "request-" + unique},
+	}}
+}
+
+func confirmationMutation(input importjob.ConfirmBatchInput) audit.Mutation {
+	return audit.Mutation{Metadata: input.AuditMetadata, Entry: audit.Entry{
+		Action: audit.ActionImportBatchConfirmed, ResourceType: "import_batch", ResourceID: input.BatchID,
+		Before: map[string]any{"status": importjob.BatchStatusPreviewReady},
+		After:  map[string]any{"status": importjob.BatchStatusConfirmed, "importedRows": 1, "templateVersion": 1, "semesterId": input.Scope.SemesterID, "weekId": input.Scope.WeekID, "departmentId": input.Scope.DepartmentID, "inspectionTypeId": input.Scope.InspectionTypeID},
+	}}
 }
 
 func TestBusinessMutationAndAuditCommitOrRollbackTogether(t *testing.T) {

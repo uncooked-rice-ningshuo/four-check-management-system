@@ -129,6 +129,17 @@ describe('阶段一管理页面', () => {
 	expect(await screen.findByText('张三 · 生效权限')).toBeVisible()
   })
 
+  it('权限详情使用中文展示系统配置查看权限', async () => {
+	vi.mocked(getUsers).mockResolvedValue([{ accountId: 'admin-1', loginName: 'admin', studentNo: '', name: '超级管理员', status: 'ACTIVE', systemRole: 'SUPER_ADMIN', isSuperAdmin: true, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+	vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'admin-1', systemRole: 'SUPER_ADMIN', permissions: [{ action: 'CONFIGURATION_VIEW', effect: 'ALLOW', scope: {}, sources: [{ type: 'SYSTEM_ROLE', label: '超级管理员' }] }] })
+	renderPage(<UserManagementPage />)
+
+	fireEvent.click(await screen.findByRole('button', { name: '权限详情' }))
+
+	expect(await screen.findByText('系统配置查看')).toBeVisible()
+	expect(screen.queryByText('CONFIGURATION_VIEW')).not.toBeInTheDocument()
+  })
+
   it('权限详情把后端 null 集合按空列表展示而不会白屏', async () => {
 	vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
 	vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'user-1', systemRole: 'MEMBER', permissions: null } as never)

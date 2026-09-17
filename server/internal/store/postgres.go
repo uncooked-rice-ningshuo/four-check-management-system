@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"four-check-management-system/server/internal/academic"
@@ -42,8 +43,26 @@ func Open(ctx context.Context, url string) (*Postgres, error) {
 // Close 释放连接池中的全部 PostgreSQL 连接。
 func (p *Postgres) Close() { p.Pool.Close() }
 
-// Ready verifies that PostgreSQL can serve a new request.
-func (p *Postgres) Ready(ctx context.Context) error { return p.Pool.Ping(ctx) }
+// Ready checks the schema used by the running application as well as connectivity.
+// A reachable database with pending migrations must not be advertised as ready.
+func (p *Postgres) Ready(ctx context.Context) error {
+	var ready bool
+	err := p.Pool.QueryRow(ctx, `SELECT
+		to_regclass('public.teaching_buildings') IS NOT NULL
+		AND to_regclass('public.morning_exercise_details') IS NOT NULL
+		AND to_regclass('public.late_return_details') IS NOT NULL
+		AND to_regclass('public.dorm_hygiene_details') IS NOT NULL
+		AND to_regclass('public.classroom_hygiene_details') IS NOT NULL
+		AND to_regclass('public.public_dormitory_hygiene_details') IS NOT NULL
+		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')`).Scan(&ready)
+	if err != nil {
+		return fmt.Errorf("database schema readiness: %w", err)
+	}
+	if !ready {
+		return errors.New("database schema incomplete: apply pending migrations")
+	}
+	return nil
+}
 
 // withAudit 在同一 PostgreSQL 事务内执行一次业务变更并追加审计记录。
 // action 和 before/after 值由应用服务决定；持久化层只负责脱敏、原子性与追加写。
@@ -631,20 +650,18 @@ func invalidatePermissionSessions(ctx context.Context, tx pgx.Tx, accountID stri
 }
 
 func (p *Postgres) ListMasterData(ctx context.Context, query masterdata.Query) (masterdata.Page, error) {
-	selectSQL, table, codeColumn, nameColumn, ok := masterRecordSelect(query.Kind)
+	selectSQL, table, codeColumn, nameColumn, ok := serverManagedMasterRecordSelect(query.Kind)
 	if !ok {
 		return masterdata.Page{}, masterdata.ErrInvalidKind
 	}
-	var enabled any
-	if query.Enabled != nil {
-		enabled = *query.Enabled
-	}
-	filter := fmt.Sprintf(` WHERE ($1='' OR %s ILIKE '%%'||$1||'%%' OR %s ILIKE '%%'||$1||'%%') AND ($2::boolean IS NULL OR enabled=$2)`, codeColumn, nameColumn)
+	filter, args := masterDataFilter(query, codeColumn, nameColumn)
 	var total int
-	if err := p.Pool.QueryRow(ctx, `SELECT count(*) FROM `+table+filter, query.Keyword, enabled).Scan(&total); err != nil {
+	if err := p.Pool.QueryRow(ctx, `SELECT count(*) FROM `+table+filter, args...).Scan(&total); err != nil {
 		return masterdata.Page{}, err
 	}
-	rows, err := p.Pool.Query(ctx, selectSQL+filter+` ORDER BY `+codeColumn+` LIMIT $3 OFFSET $4`, query.Keyword, enabled, query.PageSize, (query.Page-1)*query.PageSize)
+	limitPosition := len(args) + 1
+	listArgs := append(append([]any{}, args...), query.PageSize, (query.Page-1)*query.PageSize)
+	rows, err := p.Pool.Query(ctx, selectSQL+filter+` ORDER BY `+codeColumn+fmt.Sprintf(` LIMIT $%d OFFSET $%d`, limitPosition, limitPosition+1), listArgs...)
 	if err != nil {
 		return masterdata.Page{}, err
 	}
@@ -660,8 +677,74 @@ func (p *Postgres) ListMasterData(ctx context.Context, query masterdata.Query) (
 	return result, rows.Err()
 }
 
+func masterDataFilter(query masterdata.Query, codeColumn, nameColumn string) (string, []any) {
+	var enabled any
+	if query.Enabled != nil {
+		enabled = *query.Enabled
+	}
+	clauses := []string{
+		fmt.Sprintf(`($1='' OR %s ILIKE '%%'||$1||'%%' OR %s ILIKE '%%'||$1||'%%')`, codeColumn, nameColumn),
+		fmt.Sprintf(`($2='' OR %s ILIKE '%%'||$2||'%%')`, codeColumn),
+		fmt.Sprintf(`($3='' OR %s ILIKE '%%'||$3||'%%')`, nameColumn),
+		`($4::boolean IS NULL OR enabled=$4)`,
+	}
+	args := []any{query.Keyword, query.Code, query.Name, enabled}
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf(`%s=$%d`, column, len(args)))
+	}
+	switch query.Kind {
+	case masterdata.KindClassroom:
+		add("teaching_building_id", query.TeachingBuildingID)
+	case masterdata.KindDormitoryBuilding:
+		add("dormitory_area_id", query.DormitoryAreaID)
+	case masterdata.KindMajor:
+		add("faculty_id", query.FacultyID)
+	case masterdata.KindStaff:
+		add("faculty_id", query.FacultyID)
+		add("gender", query.Gender)
+	case masterdata.KindClass:
+		add("faculty_id", query.FacultyID)
+		add("major_id", query.MajorID)
+		add("head_teacher_id", query.HeadTeacherID)
+		add("grade_id", query.GradeID)
+	case masterdata.KindStudent:
+		add("faculty_id", query.FacultyID)
+		add("major_id", query.MajorID)
+		add("class_id", query.ClassID)
+		add("dormitory_id", query.DormitoryID)
+		add("grade_id", query.GradeID)
+		add("gender", query.Gender)
+		add("enrollment_status", query.EnrollmentStatus)
+	case masterdata.KindCourse:
+		add("teacher_id", query.TeacherID)
+		if query.ClassID != "" {
+			args = append(args, query.ClassID)
+			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_classes cc WHERE cc.course_id=courses.id AND cc.class_id=$%d)`, len(args)))
+		}
+		if query.ClassroomID != "" {
+			args = append(args, query.ClassroomID)
+			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=courses.id AND cs.classroom_id=$%d)`, len(args)))
+		}
+		if query.SemesterID != "" {
+			args = append(args, query.SemesterID)
+			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=courses.id AND cs.semester_id=$%d)`, len(args)))
+		}
+	case masterdata.KindDormitory:
+		add("dormitory_building_id", query.DormitoryBuildingID)
+		if query.DormitoryAreaID != "" {
+			args = append(args, query.DormitoryAreaID)
+			clauses = append(clauses, fmt.Sprintf(`dormitory_building_id IN (SELECT id FROM dormitory_buildings WHERE dormitory_area_id=$%d)`, len(args)))
+		}
+	}
+	return ` WHERE ` + strings.Join(clauses, ` AND `), args
+}
+
 func (p *Postgres) FindMasterData(ctx context.Context, kind, id string) (masterdata.Record, error) {
-	selectSQL, _, _, _, ok := masterRecordSelect(kind)
+	selectSQL, _, _, _, ok := serverManagedMasterRecordSelect(kind)
 	if !ok {
 		return masterdata.Record{}, masterdata.ErrInvalidKind
 	}
@@ -673,12 +756,18 @@ func (p *Postgres) FindMasterData(ctx context.Context, kind, id string) (masterd
 }
 
 func (p *Postgres) MasterDataExists(ctx context.Context, kind, id string) (bool, error) {
-	_, table, _, _, ok := masterRecordSelect(kind)
+	_, table, _, _, ok := serverManagedMasterRecordSelect(kind)
 	if !ok {
 		return false, masterdata.ErrInvalidKind
 	}
 	var exists bool
 	err := p.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id=$1 AND enabled)`, id).Scan(&exists)
+	return exists, err
+}
+
+func (p *Postgres) AcademicSemesterExists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := p.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM semesters WHERE id=$1 AND enabled)`, id).Scan(&exists)
 	return exists, err
 }
 
@@ -691,7 +780,7 @@ func (p *Postgres) CreateMasterData(ctx context.Context, actorID string, value m
 		return insertMasterChange(ctx, tx, actorID, value.Kind, value.ID, "CREATE", nil, after)
 	})
 	if err != nil {
-		return masterdata.Record{}, err
+		return masterdata.Record{}, masterDataError(err)
 	}
 	return p.FindMasterData(ctx, value.Kind, value.ID)
 }
@@ -710,9 +799,33 @@ func (p *Postgres) UpdateMasterData(ctx context.Context, actorID string, value m
 		return insertMasterChange(ctx, tx, actorID, value.Kind, value.ID, "UPDATE", beforeJSON, afterJSON)
 	})
 	if err != nil {
-		return masterdata.Record{}, err
+		return masterdata.Record{}, masterDataError(err)
 	}
 	return p.FindMasterData(ctx, value.Kind, value.ID)
+}
+
+func masterDataError(err error) error {
+	var databaseError *pgconn.PgError
+	if !errors.As(err, &databaseError) {
+		return err
+	}
+	if databaseError.Code == "23P01" && databaseError.ConstraintName == "course_schedules_no_overlap" {
+		return masterdata.ErrInvalidSchedule
+	}
+	if databaseError.Code != "23505" {
+		return err
+	}
+	switch databaseError.ConstraintName {
+	case "staff_employee_no_key", "students_student_no_key":
+		return masterdata.ErrDuplicateCode
+	case "faculties_name_key", "grades_name_key", "classes_name_key":
+		return masterdata.ErrDuplicateName
+	default:
+		if strings.Contains(databaseError.ConstraintName, "name") {
+			return masterdata.ErrDuplicateName
+		}
+		return err
+	}
 }
 
 func (p *Postgres) ListMasterDataChanges(ctx context.Context, kind, id string) ([]masterdata.Change, error) {
@@ -733,36 +846,65 @@ func (p *Postgres) ListMasterDataChanges(ctx context.Context, kind, id string) (
 	return result, rows.Err()
 }
 
-func masterRecordSelect(kind string) (string, string, string, string, bool) {
+func serverManagedMasterRecordSelect(kind string) (string, string, string, string, bool) {
 	const empty = `''::text`
+	columns := []string{
+		"id", empty, "name", "enabled", empty, empty, empty, empty, empty, empty, empty, empty, empty,
+		empty, "0", empty, empty, empty, empty, "0", empty, empty, empty, empty, "created_at", "updated_at",
+		empty, "ARRAY[]::text[]", "'[]'::jsonb",
+	}
+	table, identifierColumn, nameColumn := "", "name", "name"
 	switch kind {
 	case masterdata.KindFaculty:
-		return `SELECT id,code,name,enabled,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,created_at,updated_at FROM faculties`, "faculties", "code", "name", true
+		table = "faculties"
+	case masterdata.KindGrade:
+		table = "grades"
+	case masterdata.KindDormitoryArea:
+		table = "dormitory_areas"
+	case masterdata.KindDormitoryBuilding:
+		table, columns[22] = "dormitory_buildings", "dormitory_area_id::text"
+	case masterdata.KindTeachingBuilding:
+		table = "teaching_buildings"
 	case masterdata.KindMajor:
-		return `SELECT id,code,name,enabled,faculty_id::text,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,created_at,updated_at FROM majors`, "majors", "code", "name", true
+		table, columns[4] = "majors", "faculty_id::text"
 	case masterdata.KindStaff:
-		return `SELECT id,employee_no,name,enabled,COALESCE(faculty_id::text,''),` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,gender,phone,` + empty + `,0,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,created_at,updated_at FROM staff`, "staff", "employee_no", "name", true
+		table, identifierColumn, columns[1], columns[4], columns[11], columns[12] = "staff", "employee_no", "employee_no", "COALESCE(faculty_id::text,'')", "gender", "phone"
 	case masterdata.KindClass:
-		return `SELECT id,code,name,enabled,COALESCE(faculty_id::text,''),COALESCE(major_id::text,''),COALESCE(head_teacher_id::text,''),` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,grade,enrolled_size,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,created_at,updated_at FROM classes`, "classes", "code", "name", true
+		table, columns[4], columns[5], columns[6] = "classes", "COALESCE(faculty_id::text,'')", "COALESCE(major_id::text,'')", "COALESCE(head_teacher_id::text,'')"
+		columns[13], columns[14], columns[26] = "COALESCE((SELECT name FROM grades WHERE id=classes.grade_id),'')", "enrolled_size", "grade_id::text"
 	case masterdata.KindDormitory:
-		return `SELECT id,code,code,enabled,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,campus_area,` + empty + `,building_no,room_no,0,` + empty + `,` + empty + `,created_at,updated_at FROM dormitories`, "dormitories", "code", "code", true
+		table, identifierColumn, nameColumn = "dormitories", "room_no", "room_no"
+		columns[2], columns[18], columns[22], columns[23] = "room_no", "room_no", "(SELECT dormitory_area_id::text FROM dormitory_buildings WHERE id=dormitories.dormitory_building_id)", "dormitory_building_id::text"
 	case masterdata.KindClassroom:
-		return `SELECT id,code,code,enabled,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,building,` + empty + `,room_no,floor,` + empty + `,` + empty + `,created_at,updated_at FROM classrooms`, "classrooms", "code", "code", true
+		table, identifierColumn = "classrooms", "room_no"
+		nameColumn = "(SELECT name FROM teaching_buildings WHERE id=classrooms.teaching_building_id) || ' ' || room_no"
+		columns[2], columns[16], columns[18] = nameColumn, "teaching_building_id::text", "room_no"
 	case masterdata.KindCourse:
-		return `SELECT id,code,name,enabled,` + empty + `,` + empty + `,` + empty + `,COALESCE(teacher_id::text,''),COALESCE(class_id::text,''),` + empty + `,COALESCE(classroom_id::text,''),` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,schedule_text,` + empty + `,created_at,updated_at FROM courses`, "courses", "code", "name", true
+		table, columns[7] = "courses", "COALESCE(teacher_id::text,'')"
+		columns[27] = "ARRAY(SELECT class_id::text FROM course_classes WHERE course_id=courses.id ORDER BY class_id)"
+		columns[28] = `COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'semesterId',semester_id::text,'classroomId',classroom_id::text,'weekday',weekday,'startSection',start_section,'endSection',end_section) ORDER BY weekday,start_section) FROM course_schedules WHERE course_id=courses.id),'[]'::jsonb)`
 	case masterdata.KindStudent:
-		return `SELECT id,student_no,name,enabled,COALESCE(faculty_id::text,''),COALESCE(major_id::text,''),` + empty + `,` + empty + `,COALESCE(class_id::text,''),COALESCE(dormitory_id::text,''),` + empty + `,gender,` + empty + `,grade,0,` + empty + `,` + empty + `,` + empty + `,` + empty + `,0,` + empty + `,enrollment_status,created_at,updated_at FROM students`, "students", "student_no", "name", true
+		table, identifierColumn, columns[1] = "students", "student_no", "student_no"
+		columns[4], columns[5], columns[8], columns[9], columns[11] = "COALESCE(faculty_id::text,'')", "COALESCE(major_id::text,'')", "COALESCE(class_id::text,'')", "COALESCE(dormitory_id::text,'')", "gender"
+		columns[13], columns[21], columns[26] = "COALESCE((SELECT name FROM grades WHERE id=students.grade_id),'')", "enrollment_status", "grade_id::text"
 	default:
 		return "", "", "", "", false
 	}
+	return "SELECT " + strings.Join(columns, ",") + " FROM " + table, table, identifierColumn, nameColumn, true
 }
 
 func scanMasterRecord(r row, kind string) (masterdata.Record, error) {
 	value := masterdata.Record{Kind: kind}
+	var schedulesJSON []byte
+	var ignoredFloor int
 	err := r.Scan(&value.ID, &value.Code, &value.Name, &value.Enabled, &value.FacultyID, &value.MajorID,
 		&value.HeadTeacherID, &value.TeacherID, &value.ClassID, &value.DormitoryID, &value.ClassroomID, &value.Gender,
-		&value.Phone, &value.Grade, &value.EnrolledSize, &value.CampusArea, &value.Building, &value.BuildingNo,
-		&value.RoomNo, &value.Floor, &value.ScheduleText, &value.EnrollmentStatus, &value.CreatedAt, &value.UpdatedAt)
+		&value.Phone, &value.Grade, &value.EnrolledSize, &value.CampusArea, &value.TeachingBuildingID, &value.BuildingNo,
+		&value.RoomNo, &ignoredFloor, &value.ScheduleText, &value.EnrollmentStatus, &value.DormitoryAreaID,
+		&value.DormitoryBuildingID, &value.CreatedAt, &value.UpdatedAt, &value.GradeID, &value.ClassIDs, &schedulesJSON)
+	if err == nil && len(schedulesJSON) > 0 {
+		err = json.Unmarshal(schedulesJSON, &value.Schedules)
+	}
 	return value, err
 }
 
@@ -770,21 +912,32 @@ func insertMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 	var err error
 	switch value.Kind {
 	case masterdata.KindFaculty:
-		_, err = tx.Exec(ctx, `INSERT INTO faculties(id,code,name,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.Code, value.Name, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO faculties(id,name,enabled) VALUES($1,$2,$3)`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindGrade:
+		_, err = tx.Exec(ctx, `INSERT INTO grades(id,name,enabled) VALUES($1,$2,$3)`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindDormitoryArea:
+		_, err = tx.Exec(ctx, `INSERT INTO dormitory_areas(id,name,enabled) VALUES($1,$2,$3)`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindDormitoryBuilding:
+		_, err = tx.Exec(ctx, `INSERT INTO dormitory_buildings(id,dormitory_area_id,name,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.DormitoryAreaID, value.Name, value.Enabled)
+	case masterdata.KindTeachingBuilding:
+		_, err = tx.Exec(ctx, `INSERT INTO teaching_buildings(id,name,enabled) VALUES($1,$2,$3)`, value.ID, value.Name, value.Enabled)
 	case masterdata.KindMajor:
-		_, err = tx.Exec(ctx, `INSERT INTO majors(id,faculty_id,code,name,enabled) VALUES($1,$2,$3,$4,$5)`, value.ID, value.FacultyID, value.Code, value.Name, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO majors(id,faculty_id,name,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.FacultyID, value.Name, value.Enabled)
 	case masterdata.KindStaff:
 		_, err = tx.Exec(ctx, `INSERT INTO staff(id,employee_no,name,gender,phone,faculty_id,enabled) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7)`, value.ID, value.Code, value.Name, value.Gender, value.Phone, value.FacultyID, value.Enabled)
 	case masterdata.KindClass:
-		_, err = tx.Exec(ctx, `INSERT INTO classes(id,code,name,grade,faculty_id,major_id,head_teacher_id,enrolled_size,enabled) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid,$8,$9)`, value.ID, value.Code, value.Name, value.Grade, value.FacultyID, value.MajorID, value.HeadTeacherID, value.EnrolledSize, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO classes(id,name,grade_id,faculty_id,major_id,head_teacher_id,enrolled_size,enabled) VALUES($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8)`, value.ID, value.Name, value.GradeID, value.FacultyID, value.MajorID, value.HeadTeacherID, value.EnrolledSize, value.Enabled)
 	case masterdata.KindDormitory:
-		_, err = tx.Exec(ctx, `INSERT INTO dormitories(id,code,campus_area,building_no,room_no,enabled) VALUES($1,$2,$3,$4,$5,$6)`, value.ID, value.Code, value.CampusArea, value.BuildingNo, value.RoomNo, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO dormitories(id,room_no,dormitory_building_id,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.RoomNo, value.DormitoryBuildingID, value.Enabled)
 	case masterdata.KindClassroom:
-		_, err = tx.Exec(ctx, `INSERT INTO classrooms(id,code,building,room_no,floor,enabled) VALUES($1,$2,$3,$4,$5,$6)`, value.ID, value.Code, value.Building, value.RoomNo, value.Floor, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO classrooms(id,teaching_building_id,room_no,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.TeachingBuildingID, value.RoomNo, value.Enabled)
 	case masterdata.KindCourse:
-		_, err = tx.Exec(ctx, `INSERT INTO courses(id,code,name,teacher_id,class_id,classroom_id,schedule_text,enabled) VALUES($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8)`, value.ID, value.Code, value.Name, value.TeacherID, value.ClassID, value.ClassroomID, value.ScheduleText, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO courses(id,name,teacher_id,enabled) VALUES($1,$2,NULLIF($3,'')::uuid,$4)`, value.ID, value.Name, value.TeacherID, value.Enabled)
+		if err == nil {
+			err = replaceCourseRelations(ctx, tx, value)
+		}
 	case masterdata.KindStudent:
-		_, err = tx.Exec(ctx, `INSERT INTO students(id,student_no,name,gender,grade,faculty_id,major_id,class_id,dormitory_id,enrollment_status,enabled) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,$10,$11)`, value.ID, value.Code, value.Name, value.Gender, value.Grade, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
+		_, err = tx.Exec(ctx, `INSERT INTO students(id,student_no,name,gender,grade_id,faculty_id,major_id,class_id,dormitory_id,enrollment_status,enabled) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,$10,$11)`, value.ID, value.Code, value.Name, value.Gender, value.GradeID, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
 	default:
 		return masterdata.ErrInvalidKind
 	}
@@ -796,24 +949,56 @@ func updateMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 	switch value.Kind {
 	case masterdata.KindFaculty:
 		_, err = tx.Exec(ctx, `UPDATE faculties SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindGrade:
+		_, err = tx.Exec(ctx, `UPDATE grades SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindDormitoryArea:
+		_, err = tx.Exec(ctx, `UPDATE dormitory_areas SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Enabled)
+	case masterdata.KindDormitoryBuilding:
+		_, err = tx.Exec(ctx, `UPDATE dormitory_buildings SET name=$2,dormitory_area_id=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.DormitoryAreaID, value.Enabled)
+	case masterdata.KindTeachingBuilding:
+		_, err = tx.Exec(ctx, `UPDATE teaching_buildings SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Enabled)
 	case masterdata.KindMajor:
 		_, err = tx.Exec(ctx, `UPDATE majors SET name=$2,faculty_id=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.FacultyID, value.Enabled)
 	case masterdata.KindStaff:
 		_, err = tx.Exec(ctx, `UPDATE staff SET name=$2,gender=$3,phone=$4,faculty_id=NULLIF($5,'')::uuid,enabled=$6,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Gender, value.Phone, value.FacultyID, value.Enabled)
 	case masterdata.KindClass:
-		_, err = tx.Exec(ctx, `UPDATE classes SET name=$2,grade=$3,faculty_id=NULLIF($4,'')::uuid,major_id=NULLIF($5,'')::uuid,head_teacher_id=NULLIF($6,'')::uuid,enrolled_size=$7,enabled=$8,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Grade, value.FacultyID, value.MajorID, value.HeadTeacherID, value.EnrolledSize, value.Enabled)
+		_, err = tx.Exec(ctx, `UPDATE classes SET name=$2,grade_id=$3,faculty_id=NULLIF($4,'')::uuid,major_id=NULLIF($5,'')::uuid,head_teacher_id=NULLIF($6,'')::uuid,enrolled_size=$7,enabled=$8,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.GradeID, value.FacultyID, value.MajorID, value.HeadTeacherID, value.EnrolledSize, value.Enabled)
 	case masterdata.KindDormitory:
-		_, err = tx.Exec(ctx, `UPDATE dormitories SET campus_area=$2,building_no=$3,room_no=$4,enabled=$5,updated_at=now() WHERE id=$1`, value.ID, value.CampusArea, value.BuildingNo, value.RoomNo, value.Enabled)
+		_, err = tx.Exec(ctx, `UPDATE dormitories SET room_no=$2,dormitory_building_id=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.RoomNo, value.DormitoryBuildingID, value.Enabled)
 	case masterdata.KindClassroom:
-		_, err = tx.Exec(ctx, `UPDATE classrooms SET building=$2,room_no=$3,floor=$4,enabled=$5,updated_at=now() WHERE id=$1`, value.ID, value.Building, value.RoomNo, value.Floor, value.Enabled)
+		_, err = tx.Exec(ctx, `UPDATE classrooms SET teaching_building_id=$2,room_no=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.TeachingBuildingID, value.RoomNo, value.Enabled)
 	case masterdata.KindCourse:
-		_, err = tx.Exec(ctx, `UPDATE courses SET name=$2,teacher_id=NULLIF($3,'')::uuid,class_id=NULLIF($4,'')::uuid,classroom_id=NULLIF($5,'')::uuid,schedule_text=$6,enabled=$7,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.TeacherID, value.ClassID, value.ClassroomID, value.ScheduleText, value.Enabled)
+		_, err = tx.Exec(ctx, `UPDATE courses SET name=$2,teacher_id=NULLIF($3,'')::uuid,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.TeacherID, value.Enabled)
+		if err == nil {
+			err = replaceCourseRelations(ctx, tx, value)
+		}
 	case masterdata.KindStudent:
-		_, err = tx.Exec(ctx, `UPDATE students SET name=$2,gender=$3,grade=$4,faculty_id=NULLIF($5,'')::uuid,major_id=NULLIF($6,'')::uuid,class_id=NULLIF($7,'')::uuid,dormitory_id=NULLIF($8,'')::uuid,enrollment_status=$9,enabled=$10,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Gender, value.Grade, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
+		_, err = tx.Exec(ctx, `UPDATE students SET name=$2,gender=$3,grade_id=$4,faculty_id=NULLIF($5,'')::uuid,major_id=NULLIF($6,'')::uuid,class_id=NULLIF($7,'')::uuid,dormitory_id=NULLIF($8,'')::uuid,enrollment_status=$9,enabled=$10,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Gender, value.GradeID, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
 	default:
 		return masterdata.ErrInvalidKind
 	}
 	return err
+}
+
+func replaceCourseRelations(ctx context.Context, tx pgx.Tx, value masterdata.Record) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM course_classes WHERE course_id=$1`, value.ID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM course_schedules WHERE course_id=$1`, value.ID); err != nil {
+		return err
+	}
+	for _, classID := range value.ClassIDs {
+		if _, err := tx.Exec(ctx, `INSERT INTO course_classes(course_id,class_id) VALUES($1,$2)`, value.ID, classID); err != nil {
+			return err
+		}
+	}
+	for _, schedule := range value.Schedules {
+		if _, err := tx.Exec(ctx, `INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section)
+			VALUES($1,$2,$3,$4,$5,$6,$7)`, schedule.ID, value.ID, schedule.SemesterID, schedule.ClassroomID, schedule.Weekday, schedule.StartSection, schedule.EndSection); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func insertMasterChange(ctx context.Context, tx pgx.Tx, actorID, kind, id, action string, before, after []byte) error {
@@ -998,15 +1183,11 @@ func (p *Postgres) UpdateWeek(ctx context.Context, value academic.Week, mutation
 }
 
 func (p *Postgres) CurrentWeek(ctx context.Context, date time.Time) (*academic.Week, error) {
-	var value academic.Week
-	err := p.Pool.QueryRow(ctx, `SELECT id,semester_id,week_no,start_date,end_date,enabled,note FROM semester_weeks WHERE enabled AND $1::date BETWEEN start_date AND end_date ORDER BY start_date LIMIT 1`, date).Scan(&value.ID, &value.SemesterID, &value.WeekNo, &value.StartDate, &value.EndDate, &value.Enabled, &value.Note)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+	snapshot, err := p.ReadWorkContext(ctx, date)
 	if err != nil {
 		return nil, err
 	}
-	return &value, nil
+	return academic.ResolveWorkContext(snapshot, date).Week, nil
 }
 
 // ListAttendance applies every effective scope dimension in PostgreSQL before returning personal inspection data.
@@ -1050,26 +1231,34 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		JOIN attendance_details ad ON ad.record_id = ir.id
 		JOIN courses c ON c.id = ad.course_id
 		LEFT JOIN classrooms cr ON cr.id = ad.classroom_id
+		LEFT JOIN teaching_buildings tb ON tb.id = cr.teaching_building_id
 		WHERE ir.semester_id = $1::uuid
 		  AND ir.week_id = $2::uuid
 		  AND ir.inspection_type_id = $3::uuid
-		  AND ($4::text = '' OR ir.department_id = $4::uuid)
+		  AND (($4::text <> '' AND ir.department_id = $4::uuid)
+		       OR ($4::text = '' AND (cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[]))))
 		  AND ($5::text = '' OR ir.class_id = $5::uuid)
 		  AND ($6::text = '' OR ir.grade_snapshot = $6)
 		  AND ($7::text = '' OR ir.student_no_snapshot ILIKE '%' || $7 || '%'
 		       OR ir.student_name_snapshot ILIKE '%' || $7 || '%')
+		  AND ($8::text = '' OR ir.status = $8)
+		  AND ($9::text = '' OR ir.source = $9)
 		  AND ir.deleted_at IS NULL`
 	countSQL := `SELECT count(*)` + where
 	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,ir.department_id,
 		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
 		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
-		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(cr.code,''),
+		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
 		ir.occurred_at,ad.absence_hours,ad.period_text,ir.remark,ir.source,ir.status,
 		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
-		ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $8 OFFSET $9`
+		ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
+	departmentIDs := query.DepartmentIDs
+	if departmentIDs == nil {
+		departmentIDs = make([]string, 0)
+	}
 	countArgs := []any{
 		query.SemesterID, query.WeekID, query.InspectionTypeID, query.DepartmentID,
-		query.ClassID, query.Grade, query.Keyword,
+		query.ClassID, query.Grade, query.Keyword, query.Status, query.Source, departmentIDs,
 	}
 	listArgs := append(append([]any{}, countArgs...), query.PageSize, (query.Page-1)*query.PageSize)
 	return countSQL, countArgs, listSQL, listArgs, nil
@@ -1096,10 +1285,10 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference),
 		CoursesByClassAndName: make(map[string]importjob.AttendanceCourseReference), ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
 	}
-	studentRows, err := p.Pool.Query(ctx, `SELECT s.id,s.student_no,s.name,s.class_id,c.name,c.grade
-		FROM students s JOIN classes c ON c.id=s.class_id
+	studentRows, err := p.Pool.Query(ctx, `SELECT s.id,s.student_no,s.name,s.class_id,c.name,g.name
+		FROM students s JOIN classes c ON c.id=s.class_id JOIN grades g ON g.id=c.grade_id
 		WHERE s.enabled AND c.enabled AND s.student_no = ANY($1::text[])
-		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR c.grade=$3)`, lookup.StudentNos, lookup.ClassID, lookup.Grade)
+		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.StudentNos, lookup.ClassID, lookup.Grade)
 	if err != nil {
 		return result, err
 	}
@@ -1117,8 +1306,9 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	}
 	studentRows.Close()
 
-	classRows, err := p.Pool.Query(ctx, `SELECT id,name,grade FROM classes WHERE enabled AND name = ANY($1::text[])
-		AND ($2='' OR id=NULLIF($2,'')::uuid) AND ($3='' OR grade=$3)`, lookup.ClassNames, lookup.ClassID, lookup.Grade)
+	classRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,g.name FROM classes c JOIN grades g ON g.id=c.grade_id
+		WHERE c.enabled AND c.name = ANY($1::text[])
+		AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.ClassNames, lookup.ClassID, lookup.Grade)
 	if err != nil {
 		return result, err
 	}
@@ -1136,14 +1326,17 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	}
 	classRows.Close()
 
-	courseRows, err := p.Pool.Query(ctx, `SELECT id,name,COALESCE(class_id::text,''),COALESCE(classroom_id::text,'')
-		FROM courses WHERE enabled AND name = ANY($1::text[]) AND ($2='' OR class_id=NULLIF($2,'')::uuid)`, lookup.CourseNames, lookup.ClassID)
+	courseRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,cc.class_id::text,
+		ARRAY(SELECT DISTINCT cs.classroom_id::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text)
+		FROM courses c JOIN course_classes cc ON cc.course_id=c.id
+		WHERE c.enabled AND c.name = ANY($1::text[]) AND ($2='' OR cc.class_id=NULLIF($2,'')::uuid)
+		  AND EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid)`, lookup.CourseNames, lookup.ClassID, lookup.SemesterID)
 	if err != nil {
 		return result, err
 	}
 	for courseRows.Next() {
 		var value importjob.AttendanceCourseReference
-		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomID); err != nil {
+		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomIDs); err != nil {
 			courseRows.Close()
 			return result, err
 		}
@@ -1155,7 +1348,9 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	}
 	courseRows.Close()
 
-	classroomRows, err := p.Pool.Query(ctx, `SELECT id,code FROM classrooms WHERE enabled AND code = ANY($1::text[])`, lookup.ClassroomCodes)
+	classroomRows, err := p.Pool.Query(ctx, `SELECT classroom.id,building.name || ' ' || classroom.room_no
+		FROM classrooms classroom JOIN teaching_buildings building ON building.id=classroom.teaching_building_id
+		WHERE classroom.enabled AND building.enabled AND building.name || ' ' || classroom.room_no = ANY($1::text[])`, lookup.ClassroomCodes)
 	if err != nil {
 		return result, err
 	}
@@ -1184,8 +1379,8 @@ func (p *Postgres) FindExistingAttendanceKeys(ctx context.Context, scope importj
 	rows, err := p.Pool.Query(ctx, `SELECT dedup_key FROM inspection_records
 		WHERE semester_id=$1::uuid AND week_id=$2::uuid AND inspection_type_id=$3::uuid AND department_id=$4::uuid
 		  AND ($5='' OR class_id=NULLIF($5,'')::uuid) AND ($6='' OR grade_snapshot=$6)
-		  AND dedup_key = ANY($7::text[]) AND deleted_at IS NULL`,
-		scope.SemesterID, scope.WeekID, scope.InspectionTypeID, scope.DepartmentID, scope.ClassID, scope.Grade, keys)
+		  AND dedup_key = ANY($7::text[]) AND deleted_at IS NULL AND ($8='' OR id<>NULLIF($8,'')::uuid)`,
+		scope.SemesterID, scope.WeekID, scope.InspectionTypeID, scope.DepartmentID, scope.ClassID, scope.Grade, keys, scope.ExcludeRecordID)
 	if err != nil {
 		return nil, err
 	}
@@ -1227,13 +1422,13 @@ func (p *Postgres) FindPublishedImportTemplate(ctx context.Context, inspectionTy
 	return value, err
 }
 
-func (p *Postgres) ListImportRows(ctx context.Context, batchID string, page, pageSize int) (importjob.ImportRowPage, error) {
+func (p *Postgres) ListImportRows(ctx context.Context, batchID string, page, pageSize int, validationStatus string) (importjob.ImportRowPage, error) {
 	result := importjob.ImportRowPage{Items: make([]importjob.ImportRow, 0), Page: page, PageSize: pageSize}
-	if err := p.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE batch_id=$1`, batchID).Scan(&result.Total); err != nil {
+	if err := p.Pool.QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE batch_id=$1 AND ($2='' OR validation_status=$2)`, batchID, validationStatus).Scan(&result.Total); err != nil {
 		return importjob.ImportRowPage{}, err
 	}
 	rows, err := p.Pool.Query(ctx, `SELECT id,batch_id,row_no,raw_data_json,normalized_data_json,validation_status,errors_json,COALESCE(record_id::text,'')
-		FROM import_rows WHERE batch_id=$1 ORDER BY row_no LIMIT $2 OFFSET $3`, batchID, pageSize, (page-1)*pageSize)
+		FROM import_rows WHERE batch_id=$1 AND ($2='' OR validation_status=$2) ORDER BY row_no LIMIT $3 OFFSET $4`, batchID, validationStatus, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return importjob.ImportRowPage{}, err
 	}
@@ -1260,8 +1455,8 @@ func (p *Postgres) ListImportRows(ctx context.Context, batchID string, page, pag
 
 // UpdateImportBatchState applies an optimistic state transition.
 func (p *Postgres) UpdateImportBatchState(ctx context.Context, id string, expectedVersion int, target string, failure importjob.BatchFailure) (importjob.Batch, error) {
-	tag, err := p.Pool.Exec(ctx, `UPDATE import_batches SET status=$3,failure_code=$4,failure_message=$5,version=version+1,updated_at=now(),
-		cancelled_at=CASE WHEN $3='CANCELLED' THEN now() ELSE cancelled_at END
+	tag, err := p.Pool.Exec(ctx, `UPDATE import_batches SET status=$3::varchar,failure_code=$4,failure_message=$5,version=version+1,updated_at=now(),
+		cancelled_at=CASE WHEN $3::varchar='CANCELLED' THEN now() ELSE cancelled_at END
 		WHERE id=$1 AND version=$2`, id, expectedVersion, target, failure.Code, failure.Message)
 	if err != nil {
 		return importjob.Batch{}, err
@@ -1414,6 +1609,7 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 			rows.Close()
 			return importjob.ConfirmResult{}, fmt.Errorf("decode normalized import row: %w", err)
 		}
+		row.record.DedupKey = inspection.AttendanceDedupKey(row.record)
 		if !confirmationRecordMatches(row.record, input) {
 			rows.Close()
 			return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch

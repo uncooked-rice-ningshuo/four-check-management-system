@@ -24,6 +24,9 @@ const (
 	ActionFileUploadFailed        Action = "FILE_UPLOAD_FAILED"
 	ActionFileRead                Action = "FILE_READ"
 	ActionFileIntegrityAnomaly    Action = "FILE_INTEGRITY_ANOMALY"
+	ActionInspectionRecordUpdated Action = "INSPECTION_RECORD_UPDATED"
+	ActionInspectionRecordDeleted Action = "INSPECTION_RECORD_DELETED"
+	ActionInspectionRecordCreated Action = "INSPECTION_RECORD_CREATED"
 	ActionImportBatchConfirmed    Action = "IMPORT_BATCH_CONFIRMED"
 )
 

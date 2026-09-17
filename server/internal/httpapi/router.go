@@ -13,6 +13,7 @@ import (
 	"four-check-management-system/server/internal/academic"
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
+	"four-check-management-system/server/internal/dashboard"
 	"four-check-management-system/server/internal/dictionary"
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
@@ -26,6 +27,7 @@ import (
 type AdminServices struct {
 	Organization         *organization.Service
 	Academic             *academic.Service
+	WorkContext          *academic.WorkContextService
 	Permission           *permission.Service
 	MasterData           *masterdata.Service
 	Dictionary           *dictionary.Service
@@ -34,6 +36,10 @@ type AdminServices struct {
 	ObjectStorageReady   readinessChecker
 	ImportJobs           importJobHTTPService
 	Attendance           attendanceHTTPService
+	ManualAttendance     manualAttendanceHTTPService
+	Inspections          inspectionHTTPService
+	AttendanceMutations  attendanceMutationHTTPService
+	Dashboard            dashboardHTTPService
 	ImportFiles          importFileHTTPService
 	ImportMaxUploadBytes int64
 }
@@ -42,7 +48,7 @@ type importJobHTTPService interface {
 	CreateBatch(context.Context, importjob.CreateBatchInput) (importjob.Batch, error)
 	ParseBatch(context.Context, importjob.ParseBatchInput) (importjob.Batch, error)
 	GetBatch(context.Context, string) (importjob.Batch, error)
-	ListRows(context.Context, string, int, int) (importjob.ImportRowPage, error)
+	ListRows(context.Context, string, int, int, string) (importjob.ImportRowPage, error)
 	PublishedTemplate(context.Context, string) (importjob.Template, error)
 	ConfirmBatch(context.Context, importjob.ConfirmBatchInput) (importjob.ConfirmResult, error)
 	CancelBatch(context.Context, string, int) (importjob.Batch, error)
@@ -50,6 +56,10 @@ type importJobHTTPService interface {
 
 type attendanceHTTPService interface {
 	ListAttendance(context.Context, inspection.AttendanceListFilter, inspection.AttendanceScope) (inspection.AttendancePage, error)
+}
+
+type dashboardHTTPService interface {
+	Workbench(context.Context, dashboard.Actor, time.Time) (dashboard.Workbench, error)
 }
 
 type importFileHTTPService interface {
@@ -74,6 +84,11 @@ type handler struct {
 	objectStorageReady   readinessChecker
 	importJobs           importJobHTTPService
 	attendance           attendanceHTTPService
+	manualAttendance     manualAttendanceHTTPService
+	inspections          inspectionHTTPService
+	workContext          *academic.WorkContextService
+	attendanceMutations  attendanceMutationHTTPService
+	dashboard            dashboardHTTPService
 	importFiles          importFileHTTPService
 	importMaxUploadBytes int64
 	secureCookie         bool
@@ -91,6 +106,11 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.storage = dependencies[0].Storage
 		h.postgresReady, h.objectStorageReady = dependencies[0].PostgresReady, dependencies[0].ObjectStorageReady
 		h.importJobs, h.attendance, h.importFiles = dependencies[0].ImportJobs, dependencies[0].Attendance, dependencies[0].ImportFiles
+		h.dashboard = dependencies[0].Dashboard
+		h.manualAttendance = dependencies[0].ManualAttendance
+		h.inspections = dependencies[0].Inspections
+		h.workContext = dependencies[0].WorkContext
+		h.attendanceMutations = dependencies[0].AttendanceMutations
 		h.importMaxUploadBytes = dependencies[0].ImportMaxUploadBytes
 	}
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -145,8 +165,23 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	dictionaryAdmin.POST("/dictionaries/types/:typeId/items", h.createDictionaryItem)
 	dictionaryAdmin.PUT("/dictionaries/types/:typeId/items/:id", h.updateDictionaryItem)
 	v1.GET("/academic/current-week", h.currentWeek)
+	v1.GET("/work-context", h.getWorkContext)
+	v1.PUT("/work-context", h.setWorkContext)
+	v1.GET("/inspections/attendance/filter-options", h.attendanceFilterOptions)
 	v1.GET("/inspections/attendance", h.listAttendance)
+	v1.POST("/inspections/attendance", h.createManualAttendance)
+	v1.POST("/inspections", h.createInspection)
+	v1.GET("/inspections", h.listInspections)
+	v1.GET("/inspections/:id", h.getInspection)
+	v1.PATCH("/inspections/:id", h.updateInspection)
+	v1.DELETE("/inspections/:id", h.deleteInspection)
+	v1.POST("/inspections/batch", h.batchInspections)
+	v1.GET("/inspections/attendance/:id", h.attendanceDetail)
+	v1.PATCH("/inspections/attendance/:id", h.updateAttendance)
+	v1.DELETE("/inspections/attendance/:id", h.deleteAttendance)
+	v1.POST("/inspections/attendance/batch", h.batchAttendance)
 	v1.GET("/permissions/effective", h.currentEffectivePermissions)
+	v1.GET("/dashboard/workbench", h.workbench)
 	v1.GET("/imports/attendance/template", h.downloadAttendanceTemplate)
 	v1.POST("/imports/attendance", h.uploadAttendanceImport)
 	v1.GET("/imports/:id", h.getImportBatch)
@@ -448,7 +483,15 @@ func (h *handler) listMasterData(c *gin.Context) {
 		}
 		enabled = &value
 	}
-	result, err := h.masterData.List(c, masterdata.Query{Kind: c.Param("kind"), Keyword: c.Query("keyword"), Enabled: enabled, Page: page, PageSize: pageSize})
+	result, err := h.masterData.List(c, masterdata.Query{
+		Kind: c.Param("kind"), Keyword: c.Query("keyword"), Code: c.Query("code"), Name: c.Query("name"), Enabled: enabled,
+		FacultyID: c.Query("facultyId"), MajorID: c.Query("majorId"), HeadTeacherID: c.Query("headTeacherId"),
+		TeacherID: c.Query("teacherId"), ClassID: c.Query("classId"), DormitoryID: c.Query("dormitoryId"),
+		ClassroomID: c.Query("classroomId"), GradeID: c.Query("gradeId"), Gender: c.Query("gender"),
+		EnrollmentStatus: c.Query("enrollmentStatus"), CampusArea: c.Query("campusArea"),
+		BuildingNo: c.Query("buildingNo"), TeachingBuildingID: c.Query("teachingBuildingId"), Page: page, PageSize: pageSize,
+		DormitoryAreaID: c.Query("dormitoryAreaId"), DormitoryBuildingID: c.Query("dormitoryBuildingId"), SemesterID: c.Query("semesterId"),
+	})
 	writeResult(c, result, err)
 }
 func (h *handler) createMasterData(c *gin.Context) {
@@ -572,8 +615,188 @@ func (h *handler) currentWeek(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"week": result})
 }
 
+type attendanceClassOption struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Grade string `json:"grade"`
+}
+
+type attendanceFilterOptionsResponse struct {
+	InspectionType         organization.InspectionType `json:"inspectionType"`
+	ResponsibleDepartments []organization.Department   `json:"responsibleDepartments"`
+	Departments            []organization.Department   `json:"departments"`
+	Semesters              []academic.Semester         `json:"semesters"`
+	Weeks                  []academic.Week             `json:"weeks"`
+	Classes                []attendanceClassOption     `json:"classes"`
+	Grades                 []string                    `json:"grades"`
+}
+
+func (h *handler) attendanceFilterOptions(c *gin.Context) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return
+	}
+	if account.MustChangePassword {
+		writeError(c, http.StatusForbidden, "FORBIDDEN", "修改初始密码后才能访问检查业务")
+		return
+	}
+	if h.organization == nil || h.academic == nil || h.masterData == nil || (!account.IsSuperAdmin && h.permission == nil) {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "筛选选项服务尚未就绪")
+		return
+	}
+
+	catalogs, err := h.organization.ListCatalogs(c, true)
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+	calendar, err := h.academic.List(c)
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+	classes, err := h.listEnabledAttendanceClasses(c)
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+	inspectionType, found := attendanceInspectionType(catalogs.InspectionTypes)
+	if !found {
+		writeError(c, http.StatusServiceUnavailable, "ATTENDANCE_TYPE_UNAVAILABLE", "到课率检查类型尚未启用")
+		return
+	}
+	scopes, err := h.organization.ListScopes(c)
+	if err != nil {
+		writeDomainError(c, err)
+		return
+	}
+
+	permissions := permission.EffectiveResult{}
+	if !account.IsSuperAdmin {
+		permissions, err = h.permission.Effective(c, account.ID)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "PERMISSION_LOOKUP_FAILED", "无法读取当前权限")
+			return
+		}
+	}
+	result, allowed := buildAttendanceFilterOptions(account.IsSuperAdmin, permissions, inspectionType, catalogs.Departments, calendar, classes)
+	if !allowed {
+		writeInspectionForbidden(c, false)
+		return
+	}
+	result.ResponsibleDepartments = attendanceResponsibleDepartments(catalogs.Departments, scopes, inspectionType.ID)
+	c.JSON(http.StatusOK, result)
+}
+
+func attendanceResponsibleDepartments(departments []organization.Department, scopes []organization.DepartmentInspectionScope, inspectionTypeID string) []organization.Department {
+	responsibleIDs := make(map[string]struct{})
+	for _, scope := range scopes {
+		if scope.Enabled && scope.CanEnter && scope.InspectionTypeID == inspectionTypeID {
+			responsibleIDs[scope.DepartmentID] = struct{}{}
+		}
+	}
+	result := make([]organization.Department, 0)
+	for _, department := range departments {
+		if _, responsible := responsibleIDs[department.ID]; department.Enabled && responsible {
+			result = append(result, department)
+		}
+	}
+	return result
+}
+
+func (h *handler) listEnabledAttendanceClasses(ctx context.Context) ([]masterdata.Record, error) {
+	enabled := true
+	result := make([]masterdata.Record, 0)
+	for page := 1; ; page++ {
+		values, err := h.masterData.List(ctx, masterdata.Query{Kind: masterdata.KindClass, Enabled: &enabled, Page: page, PageSize: 100})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, values.Items...)
+		if len(result) >= values.Total || len(values.Items) == 0 {
+			return result, nil
+		}
+	}
+}
+
+func attendanceInspectionType(values []organization.InspectionType) (organization.InspectionType, bool) {
+	for _, value := range values {
+		if value.Code == inspection.InspectionTypeAttendance && value.Enabled {
+			return value, true
+		}
+	}
+	return organization.InspectionType{}, false
+}
+
+func buildAttendanceFilterOptions(superAdmin bool, effective permission.EffectiveResult, inspectionType organization.InspectionType, departments []organization.Department, calendar academic.Calendar, classes []masterdata.Record) (attendanceFilterOptionsResponse, bool) {
+	grants := make([]permission.Scope, 0)
+	if !superAdmin {
+		for _, value := range effective.Permissions {
+			if value.Action == permission.ActionInspectionView && value.Effect == permission.EffectAllow && scopeOptionMatches(value.Scope.InspectionTypeID, inspectionType.ID) {
+				grants = append(grants, value.Scope)
+			}
+		}
+		if len(grants) == 0 {
+			return attendanceFilterOptionsResponse{}, false
+		}
+	}
+	allowed := func(matches func(permission.Scope) bool) bool {
+		if superAdmin {
+			return true
+		}
+		for _, grant := range grants {
+			if matches(grant) {
+				return true
+			}
+		}
+		return false
+	}
+
+	result := attendanceFilterOptionsResponse{
+		InspectionType:         inspectionType,
+		ResponsibleDepartments: make([]organization.Department, 0),
+		Departments:            make([]organization.Department, 0),
+		Semesters:              make([]academic.Semester, 0),
+		Weeks:                  make([]academic.Week, 0),
+		Classes:                make([]attendanceClassOption, 0),
+		Grades:                 make([]string, 0),
+	}
+	for _, value := range departments {
+		if value.Enabled && allowed(func(scope permission.Scope) bool { return scopeOptionMatches(scope.DepartmentID, value.ID) }) {
+			result.Departments = append(result.Departments, value)
+		}
+	}
+	for _, value := range calendar.Semesters {
+		if value.Enabled && allowed(func(scope permission.Scope) bool { return scopeOptionMatches(scope.SemesterID, value.ID) }) {
+			result.Semesters = append(result.Semesters, value)
+		}
+	}
+	for _, value := range calendar.Weeks {
+		if value.Enabled && allowed(func(scope permission.Scope) bool {
+			return scopeOptionMatches(scope.SemesterID, value.SemesterID) && scopeOptionMatches(scope.WeekID, value.ID)
+		}) {
+			result.Weeks = append(result.Weeks, value)
+		}
+	}
+	gradeSet := make(map[string]struct{})
+	for _, value := range classes {
+		if value.Enabled && allowed(func(scope permission.Scope) bool {
+			return scopeOptionMatches(scope.ClassID, value.ID) && scopeOptionMatches(scope.Grade, value.Grade)
+		}) {
+			result.Classes = append(result.Classes, attendanceClassOption{ID: value.ID, Name: value.Name, Grade: value.Grade})
+			if _, exists := gradeSet[value.Grade]; !exists {
+				gradeSet[value.Grade] = struct{}{}
+				result.Grades = append(result.Grades, value.Grade)
+			}
+		}
+	}
+	return result, true
+}
+
+func scopeOptionMatches(granted, candidate string) bool { return granted == "" || granted == candidate }
+
 func (h *handler) listAttendance(c *gin.Context) {
-	account, scope, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionView)
+	account, scope, allowedDepartments, ok := h.authorizeAttendanceList(c)
 	if !ok {
 		return
 	}
@@ -585,17 +808,70 @@ func (h *handler) listAttendance(c *gin.Context) {
 	filter := inspection.AttendanceListFilter{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
 		DepartmentID: scope.DepartmentID, ClassID: scope.ClassID, Grade: scope.Grade,
-		Keyword: c.Query("keyword"), Sort: c.DefaultQuery("sort", inspection.SortOccurredAtDescending), Page: page, PageSize: pageSize,
+		Keyword: c.Query("keyword"), Status: c.Query("status"), Source: c.Query("source"),
+		Sort: c.DefaultQuery("sort", inspection.SortOccurredAtDescending), Page: page, PageSize: pageSize,
 	}
 	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
-		DepartmentID: scope.DepartmentID, ClassID: scope.ClassID, Grade: scope.Grade,
+		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments, ClassID: scope.ClassID, Grade: scope.Grade,
 	})
 	if err != nil {
 		writeImportError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *handler) authorizeAttendanceList(c *gin.Context) (auth.Account, permission.Scope, []string, bool) {
+	scope := permission.Scope{
+		SemesterID: c.Query("semesterId"), WeekID: c.Query("weekId"), InspectionTypeID: c.Query("inspectionTypeId"),
+		DepartmentID: c.Query("departmentId"), ClassID: c.Query("classId"), Grade: c.Query("grade"),
+	}
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	if account.MustChangePassword || strings.TrimSpace(scope.SemesterID) == "" || strings.TrimSpace(scope.WeekID) == "" || strings.TrimSpace(scope.InspectionTypeID) == "" {
+		writeInspectionForbidden(c, false)
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	if account.IsSuperAdmin {
+		return account, scope, nil, true
+	}
+	if h.permission == nil || h.organization == nil {
+		writeInspectionForbidden(c, false)
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	effective, err := h.permission.Effective(c, account.ID)
+	if err != nil {
+		writeInspectionForbidden(c, false)
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	if scope.DepartmentID != "" {
+		if !effective.Allowed(permission.ActionInspectionView, scope) {
+			writeInspectionForbidden(c, false)
+			return auth.Account{}, permission.Scope{}, nil, false
+		}
+		return account, scope, nil, true
+	}
+	catalogs, err := h.organization.ListCatalogs(c, true)
+	if err != nil {
+		writeDomainError(c, err)
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	departments := make([]string, 0)
+	for _, department := range catalogs.Departments {
+		candidate := scope
+		candidate.DepartmentID = department.ID
+		if effective.Allowed(permission.ActionInspectionView, candidate) {
+			departments = append(departments, department.ID)
+		}
+	}
+	if len(departments) == 0 {
+		writeInspectionForbidden(c, false)
+		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	return account, scope, departments, true
 }
 
 func (h *handler) downloadAttendanceTemplate(c *gin.Context) {
@@ -710,7 +986,8 @@ func (h *handler) listImportRows(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.importJobs.ListRows(c, batch.ID, page, pageSize)
+	validationStatus := strings.ToUpper(strings.TrimSpace(c.Query("validationStatus")))
+	result, err := h.importJobs.ListRows(c, batch.ID, page, pageSize, validationStatus)
 	if err != nil {
 		writeImportError(c, err)
 		return
@@ -987,6 +1264,18 @@ func writeResultStatus(c *gin.Context, status int, result any, err error) {
 	c.JSON(status, result)
 }
 func writeDomainError(c *gin.Context, err error) {
+	if errors.Is(err, masterdata.ErrInvalidSchedule) {
+		writeError(c, http.StatusBadRequest, "INVALID_COURSE_SCHEDULE", "请检查学期、星期和节次，排课时间不能重叠")
+		return
+	}
+	if errors.Is(err, masterdata.ErrDuplicateCode) {
+		writeError(c, http.StatusConflict, "MASTER_DATA_IDENTIFIER_EXISTS", "该学号或工号已存在")
+		return
+	}
+	if errors.Is(err, masterdata.ErrDuplicateName) {
+		writeError(c, http.StatusConflict, "MASTER_DATA_NAME_EXISTS", "该名称已存在")
+		return
+	}
 	if errors.Is(err, auth.ErrForbidden) {
 		writeError(c, http.StatusForbidden, "FORBIDDEN", "无权执行该操作")
 		return

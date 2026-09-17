@@ -37,6 +37,9 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 	if !validAttendanceSort(filter.Sort) {
 		return AttendancePage{}, ErrInvalidAttendanceQuery
 	}
+	if !validAttendanceStatus(filter.Status) || !validAttendanceSource(filter.Source) {
+		return AttendancePage{}, ErrInvalidAttendanceQuery
+	}
 
 	semesterID, ok := intersectScopeValue(filter.SemesterID, scope.SemesterID)
 	if !ok {
@@ -54,6 +57,9 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 	if !ok {
 		return AttendancePage{}, ErrScopeMismatch
 	}
+	if departmentID != "" && len(scope.DepartmentIDs) > 0 && !containsScopeValue(scope.DepartmentIDs, departmentID) {
+		return AttendancePage{}, ErrScopeMismatch
+	}
 	classID, ok := intersectScopeValue(filter.ClassID, scope.ClassID)
 	if !ok {
 		return AttendancePage{}, ErrScopeMismatch
@@ -65,8 +71,9 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 
 	page, err := s.repository.ListAttendance(ctx, AttendanceListQuery{
 		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
-		DepartmentID: departmentID, ClassID: classID, Grade: grade,
-		Keyword: strings.TrimSpace(filter.Keyword), Sort: filter.Sort, Page: filter.Page, PageSize: filter.PageSize,
+		DepartmentID: departmentID, DepartmentIDs: append([]string(nil), scope.DepartmentIDs...), ClassID: classID, Grade: grade,
+		Keyword: strings.TrimSpace(filter.Keyword), Status: filter.Status, Source: filter.Source,
+		Sort: filter.Sort, Page: filter.Page, PageSize: filter.PageSize,
 	})
 	if err != nil {
 		return AttendancePage{}, err
@@ -75,6 +82,33 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 		page.Items = make([]AttendanceRecord, 0)
 	}
 	return page, nil
+}
+
+func containsScopeValue(values []string, candidate string) bool {
+	for _, value := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func validAttendanceStatus(status string) bool {
+	switch status {
+	case "", RecordStatusDraft, RecordStatusPendingReview, RecordStatusReturned, RecordStatusConfirmed, RecordStatusLocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAttendanceSource(source string) bool {
+	switch source {
+	case "", RecordSourceManual, RecordSourceExcel, RecordSourceReportCorrection, RecordSourceMigration:
+		return true
+	default:
+		return false
+	}
 }
 
 func intersectScopeValue(requested, allowed string) (string, bool) {

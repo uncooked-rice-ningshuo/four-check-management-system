@@ -136,3 +136,16 @@ func TestEmptyPermissionCollectionsAreArrays(t *testing.T) {
 		t.Fatal("empty permission rules must serialize as [] instead of null")
 	}
 }
+
+func TestInspectionManageIsSeparateFromEntry(t *testing.T) {
+	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER"} {
+		profile := AccessProfile{AccountID: "user", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: role, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, Enabled: true}}}
+		result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "user")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Allowed("INSPECTION_MANAGE", Scope{DepartmentID: "study", InspectionTypeID: "attendance"}) != (role != "MEMBER") {
+			t.Fatalf("management permission for %s", role)
+		}
+	}
+}

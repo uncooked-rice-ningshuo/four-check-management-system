@@ -119,6 +119,9 @@ func TestNewAttendanceRecordUsesExcelDraftDefaultsAndStableDedupKey(t *testing.T
 	if again.DedupKey != record.DedupKey {
 		t.Fatalf("dedup keys differ: %q != %q", again.DedupKey, record.DedupKey)
 	}
+	if restored := AttendanceDedupKey(record); restored != record.DedupKey {
+		t.Fatalf("restored dedup key = %q, want %q", restored, record.DedupKey)
+	}
 }
 
 func TestListAttendanceCompilesScopeIntoRepositoryQuery(t *testing.T) {
@@ -126,7 +129,7 @@ func TestListAttendanceCompilesScopeIntoRepositoryQuery(t *testing.T) {
 	service := NewService(repository)
 	page, err := service.ListAttendance(context.Background(), AttendanceListFilter{
 		SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "inspection-attendance",
-		Keyword: "张晨", Sort: SortStudentNoAscending, Page: 2, PageSize: 25,
+		Keyword: "张晨", Status: RecordStatusDraft, Source: RecordSourceExcel, Sort: SortStudentNoAscending, Page: 2, PageSize: 25,
 	}, AttendanceScope{DepartmentID: "department-study", ClassID: "class-1", Grade: "2023"})
 	if err != nil {
 		t.Fatal(err)
@@ -140,8 +143,23 @@ func TestListAttendanceCompilesScopeIntoRepositoryQuery(t *testing.T) {
 	if repository.query.Sort != SortStudentNoAscending || repository.query.Page != 2 || repository.query.PageSize != 25 {
 		t.Fatalf("paging query = %+v", repository.query)
 	}
+	if repository.query.Status != RecordStatusDraft || repository.query.Source != RecordSourceExcel {
+		t.Fatalf("business filters = %+v", repository.query)
+	}
 	if page.Items == nil {
 		t.Fatal("empty attendance items must serialize as [] instead of null")
+	}
+}
+
+func TestListAttendanceRejectsUnknownStatusOrSource(t *testing.T) {
+	tests := []AttendanceListFilter{
+		{SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "inspection-attendance", Status: "DELETED", Page: 1, PageSize: 20},
+		{SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "inspection-attendance", Source: "UNKNOWN", Page: 1, PageSize: 20},
+	}
+	for _, filter := range tests {
+		if _, err := NewService(&recordingRepository{}).ListAttendance(context.Background(), filter, AttendanceScope{}); !errors.Is(err, ErrInvalidAttendanceQuery) {
+			t.Fatalf("filter=%+v error=%v, want ErrInvalidAttendanceQuery", filter, err)
+		}
 	}
 }
 

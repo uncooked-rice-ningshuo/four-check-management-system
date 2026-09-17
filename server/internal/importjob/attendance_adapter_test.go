@@ -35,7 +35,7 @@ func validAttendanceReferences() AttendanceReferences {
 			"S20260002": {ID: "student-2", StudentNo: "S20260002", Name: "测试学生乙", ClassID: "class-1", ClassName: "示例班级A", Grade: "2026"},
 		},
 		ClassesByName:         map[string]AttendanceClassReference{"示例班级A": {ID: "class-1", Name: "示例班级A", Grade: "2026"}},
-		CoursesByClassAndName: map[string]AttendanceCourseReference{attendanceCourseKey("class-1", "数据结构"): {ID: "course-1", Name: "数据结构", ClassID: "class-1", ClassroomID: "room-1"}},
+		CoursesByClassAndName: map[string]AttendanceCourseReference{attendanceCourseKey("class-1", "数据结构"): {ID: "course-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}}},
 		ClassroomsByCode:      map[string]AttendanceClassroomReference{"A101": {ID: "room-1", Code: "A101"}},
 	}
 }
@@ -78,7 +78,7 @@ func TestAttendanceAdapterNormalizesValidRowsWithOneBulkPrefetch(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	record := result.Rows[0].Record
-	if record.StudentID != "student-1" || record.CourseID != "course-1" || record.ClassroomID != "room-1" || record.AbsenceHours != 2 {
+	if record.StudentID != "student-1" || record.CourseID != "course-1" || record.CourseName != "数据结构" || record.ClassroomID != "room-1" || record.ClassroomCode != "A101" || record.AbsenceHours != 2 {
 		t.Fatalf("record = %#v", record)
 	}
 	if record.OccurredAt.Format(time.RFC3339) != "2026-06-17T08:00:00+08:00" || record.DedupKey == "" {
@@ -143,6 +143,9 @@ func TestAttendanceAdapterDetectsBatchAndExistingDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.Rows[0].Errors[0].Message != "第 5 行与系统中已有到课率记录重复" {
+		t.Fatalf("existing row feedback=%s", result.Rows[0].Errors[0].Message)
+	}
 	if !hasValidationCode(result.Rows[0].Errors, ErrorRecordAlreadyExists) {
 		t.Fatalf("existing duplicate errors = %#v", result.Rows[0].Errors)
 	}
@@ -154,8 +157,8 @@ func TestAttendanceAdapterDetectsBatchAndExistingDuplicates(t *testing.T) {
 func TestAttendanceAdapterDisambiguatesSameCourseNameByClass(t *testing.T) {
 	references := validAttendanceReferences()
 	references.CoursesByClassAndName = map[string]AttendanceCourseReference{
-		attendanceCourseKey("class-1", "数据结构"): {ID: "course-class-1", Name: "数据结构", ClassID: "class-1", ClassroomID: "room-1"},
-		attendanceCourseKey("class-2", "数据结构"): {ID: "course-class-2", Name: "数据结构", ClassID: "class-2", ClassroomID: "room-2"},
+		attendanceCourseKey("class-1", "数据结构"): {ID: "course-class-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}},
+		attendanceCourseKey("class-2", "数据结构"): {ID: "course-class-2", Name: "数据结构", ClassID: "class-2", ClassroomIDs: []string{"room-2"}},
 	}
 	repository := &fakeAttendanceReferenceRepository{references: references, existing: map[string]struct{}{}}
 	result, err := NewAttendanceAdapter(repository).Validate(context.Background(), attendanceImportScope(), []ParsedRow{attendanceParsedRow(5, "S20260001")})
@@ -212,4 +215,15 @@ func hasValidationCode(errors []ValidationError, code ErrorCode) bool {
 		}
 	}
 	return false
+}
+
+func TestAttendanceDuplicateFeedbackIdentifiesBothSourceRows(t *testing.T) {
+	repository := &fakeAttendanceReferenceRepository{references: validAttendanceReferences(), existing: map[string]struct{}{}}
+	result, err := NewAttendanceAdapter(repository).Validate(context.Background(), attendanceImportScope(), []ParsedRow{attendanceParsedRow(5, "S20260001"), attendanceParsedRow(12, "S20260001")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Rows[1].Errors[0].Message != "第 12 行与本文件第 5 行重复" {
+		t.Fatalf("feedback=%s", result.Rows[1].Errors[0].Message)
+	}
 }

@@ -12,10 +12,18 @@ import (
 )
 
 const (
-	InspectionTypeAttendance = "ATTENDANCE"
+	InspectionTypeAttendance = "ATTENDANCE_RATE"
 
-	RecordStatusDraft = "DRAFT"
-	RecordSourceExcel = "EXCEL"
+	RecordStatusDraft         = "DRAFT"
+	RecordStatusPendingReview = "PENDING_REVIEW"
+	RecordStatusReturned      = "RETURNED"
+	RecordStatusConfirmed     = "CONFIRMED"
+	RecordStatusLocked        = "LOCKED"
+
+	RecordSourceManual           = "MANUAL"
+	RecordSourceExcel            = "EXCEL"
+	RecordSourceReportCorrection = "REPORT_CORRECTION"
+	RecordSourceMigration        = "MIGRATION"
 
 	SortOccurredAtDescending = "occurredAtDesc"
 	SortOccurredAtAscending  = "occurredAtAsc"
@@ -58,6 +66,8 @@ type AttendanceInput struct {
 
 // AttendanceRecord combines the common inspection record with attendance-specific fields.
 type AttendanceRecord struct {
+	HasSubmission       bool      `json:"-"`
+	HasReportLock       bool      `json:"-"`
 	ID                  string    `json:"id"`
 	InspectionTypeID    string    `json:"inspectionTypeId"`
 	SemesterID          string    `json:"semesterId"`
@@ -154,6 +164,15 @@ func attendanceDedupKey(input AttendanceInput) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// AttendanceDedupKey restores the internal idempotency key after a normalized
+// import row is decoded. The key intentionally remains absent from API JSON.
+func AttendanceDedupKey(record AttendanceRecord) string {
+	return attendanceDedupKey(AttendanceInput{
+		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
+		StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
+	})
+}
+
 type AttendanceListFilter struct {
 	SemesterID       string
 	WeekID           string
@@ -162,6 +181,8 @@ type AttendanceListFilter struct {
 	ClassID          string
 	Grade            string
 	Keyword          string
+	Status           string
+	Source           string
 	Sort             string
 	Page             int
 	PageSize         int
@@ -174,6 +195,7 @@ type AttendanceScope struct {
 	WeekID           string
 	InspectionTypeID string
 	DepartmentID     string
+	DepartmentIDs    []string
 	ClassID          string
 	Grade            string
 }
@@ -183,9 +205,12 @@ type AttendanceListQuery struct {
 	WeekID           string
 	InspectionTypeID string
 	DepartmentID     string
+	DepartmentIDs    []string
 	ClassID          string
 	Grade            string
 	Keyword          string
+	Status           string
+	Source           string
 	Sort             string
 	Page             int
 	PageSize         int

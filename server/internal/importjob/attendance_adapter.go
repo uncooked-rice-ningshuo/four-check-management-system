@@ -33,6 +33,7 @@ type ValidationError struct {
 }
 
 type AttendanceImportScope struct {
+	ExcludeRecordID  string
 	InspectionTypeID string
 	SemesterID       string
 	WeekID           string
@@ -68,7 +69,8 @@ type AttendanceClassReference struct {
 }
 
 type AttendanceCourseReference struct {
-	ID, Name, ClassID, ClassroomID string
+	ID, Name, ClassID string
+	ClassroomIDs      []string
 }
 
 type AttendanceClassroomReference struct {
@@ -118,14 +120,14 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 	}
 	result := AttendanceValidationResult{Rows: make([]AttendanceValidationRow, 0, len(rows))}
 	keys := make([]string, 0, len(rows))
-	seen := make(map[string]struct{}, len(rows))
+	seen := make(map[string]int, len(rows))
 	for _, row := range rows {
 		validated := a.validateRow(scope, references, row)
 		if len(validated.Errors) == 0 {
-			if _, exists := seen[validated.Record.DedupKey]; exists {
-				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", "本批次存在重复到课率记录", "删除重复行或修正日期、课程和节次"))
+			if firstRow, exists := seen[validated.Record.DedupKey]; exists {
+				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与本文件第 %d 行重复", row.RowNo, firstRow), "核对两行的学生、课程、检查日期时间和节次，保留正确的一行"))
 			} else {
-				seen[validated.Record.DedupKey] = struct{}{}
+				seen[validated.Record.DedupKey] = row.RowNo
 				keys = append(keys, validated.Record.DedupKey)
 			}
 		}
@@ -139,7 +141,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 		row := &result.Rows[index]
 		if row.Record.DedupKey != "" {
 			if _, exists := existing[row.Record.DedupKey]; exists {
-				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", "系统中已存在相同到课率记录", "核对已录入数据，不要重复导入"))
+				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有到课率记录重复", row.RowNo), "按本行学生、课程、检查日期时间和节次核对有权查看的记录；需修正时使用编辑，不要重复导入"))
 			}
 		}
 		if len(row.Errors) == 0 {
@@ -184,7 +186,7 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "course_name", "课程不存在或不在当前数据范围", "使用系统中的有效课程名称"))
 	}
 	if classroomCode != "" && !classroomOK {
-		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "classroom_code", "教室不存在或不在当前数据范围", "使用系统中的有效教室编码"))
+		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "classroom_code", "教室不存在或不在当前数据范围", "使用系统中的完整教室位置"))
 	}
 	if studentOK && studentName != student.Name {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "student_name", "姓名与学号不一致", "使用学号对应的姓名"))
@@ -201,7 +203,7 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	if courseOK && classOK && course.ClassID != "" && course.ClassID != class.ID {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "course_name", "课程与班级不一致", "使用该班级当前课程"))
 	}
-	if courseOK && classroomOK && course.ClassroomID != "" && course.ClassroomID != classroom.ID {
+	if courseOK && classroomOK && len(course.ClassroomIDs) > 0 && !contains(course.ClassroomIDs, classroom.ID) {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "classroom_code", "教室与课程安排不一致", "使用课程安排中的教室"))
 	}
 
@@ -249,8 +251,19 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", "到课率记录不符合当前周次规则", "核对日期、时间和业务上下文"))
 		return result
 	}
+	record.CourseName = course.Name
+	record.ClassroomCode = classroom.Code
 	result.Record = record
 	return result
+}
+
+func contains(values []string, candidate string) bool {
+	for _, value := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func attendanceLookup(scope AttendanceImportScope, rows []ParsedRow) AttendanceReferenceLookup {

@@ -10,13 +10,76 @@ import (
 	"testing"
 	"time"
 
+	"four-check-management-system/server/internal/academic"
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
+	"four-check-management-system/server/internal/masterdata"
+	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
 )
+
+type attendanceOrganizationRepository struct {
+	catalogs organization.Catalogs
+	scopes   []organization.DepartmentInspectionScope
+}
+
+func (r *attendanceOrganizationRepository) ListCatalogs(context.Context, bool) (organization.Catalogs, error) {
+	return r.catalogs, nil
+}
+func (r *attendanceOrganizationRepository) ListScopes(context.Context) ([]organization.DepartmentInspectionScope, error) {
+	return r.scopes, nil
+}
+func (r *attendanceOrganizationRepository) UpsertScope(context.Context, organization.DepartmentInspectionScope, audit.Mutation) error {
+	return nil
+}
+func (r *attendanceOrganizationRepository) CreateDepartment(_ context.Context, value organization.Department, _ audit.Mutation) (organization.Department, error) {
+	return value, nil
+}
+func (r *attendanceOrganizationRepository) UpdateDepartment(_ context.Context, value organization.Department, _ audit.Mutation) (organization.Department, error) {
+	return value, nil
+}
+func (r *attendanceOrganizationRepository) UpdateInspectionType(_ context.Context, value organization.InspectionType, _ audit.Mutation) (organization.InspectionType, error) {
+	return value, nil
+}
+func (r *attendanceOrganizationRepository) ListUsers(context.Context) ([]organization.UserAssignment, error) {
+	return nil, nil
+}
+func (r *attendanceOrganizationRepository) AssignUserRole(context.Context, organization.UserAssignment, audit.Mutation) error {
+	return nil
+}
+
+type attendanceAcademicRepository struct{ calendar academic.Calendar }
+
+func (r *attendanceAcademicRepository) List(context.Context) (academic.Calendar, error) {
+	return r.calendar, nil
+}
+func (r *attendanceAcademicRepository) CreateYear(_ context.Context, value academic.AcademicYear, _ audit.Mutation) (academic.AcademicYear, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) UpdateYear(_ context.Context, value academic.AcademicYear, _ audit.Mutation) (academic.AcademicYear, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) CreateSemester(_ context.Context, value academic.Semester, _ audit.Mutation) (academic.Semester, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) UpdateSemester(_ context.Context, value academic.Semester, _ audit.Mutation) (academic.Semester, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) CreateWeek(_ context.Context, value academic.Week, _ audit.Mutation) (academic.Week, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) UpdateWeek(_ context.Context, value academic.Week, _ audit.Mutation) (academic.Week, error) {
+	return value, nil
+}
+func (r *attendanceAcademicRepository) CurrentWeek(context.Context, time.Time) (*academic.Week, error) {
+	if len(r.calendar.Weeks) == 0 {
+		return nil, nil
+	}
+	return &r.calendar.Weeks[0], nil
+}
 
 type importHTTPStub struct {
 	batch        importjob.Batch
@@ -28,6 +91,7 @@ type importHTTPStub struct {
 	confirmInput importjob.ConfirmBatchInput
 	createErr    error
 	discarded    bool
+	rowStatus    string
 }
 
 func (s *importHTTPStub) CreateBatch(_ context.Context, input importjob.CreateBatchInput) (importjob.Batch, error) {
@@ -50,8 +114,9 @@ func (s *importHTTPStub) GetBatch(_ context.Context, id string) (importjob.Batch
 	}
 	return s.batch, nil
 }
-func (s *importHTTPStub) ListRows(_ context.Context, _ string, page, pageSize int) (importjob.ImportRowPage, error) {
+func (s *importHTTPStub) ListRows(_ context.Context, _ string, page, pageSize int, validationStatus string) (importjob.ImportRowPage, error) {
 	s.rows.Page, s.rows.PageSize = page, pageSize
+	s.rowStatus = validationStatus
 	return s.rows, nil
 }
 func (s *importHTTPStub) PublishedTemplate(context.Context, string) (importjob.Template, error) {
@@ -111,6 +176,10 @@ func (s *attendanceHTTPStub) ListAttendance(_ context.Context, filter inspection
 }
 
 func attendanceRouter(t *testing.T, allowed bool) (http.Handler, string, *importHTTPStub, *attendanceHTTPStub) {
+	return attendanceRouterWithRole(t, allowed, false)
+}
+
+func attendanceRouterWithRole(t *testing.T, allowed, superAdmin bool) (http.Handler, string, *importHTTPStub, *attendanceHTTPStub) {
 	t.Helper()
 	accountsRepository := &accounts{values: map[string]auth.Account{}}
 	authService := auth.NewService(accountsRepository, &sessions{values: map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
@@ -118,6 +187,10 @@ func attendanceRouter(t *testing.T, allowed bool) (http.Handler, string, *import
 	account := accountsRepository.values["24010088"]
 	account.Status = auth.StatusActive
 	account.PrimaryDepartmentID = "department-study"
+	account.IsSuperAdmin = superAdmin
+	if superAdmin {
+		account.SystemRole = permission.SystemRoleSuperAdmin
+	}
 	accountsRepository.values[account.LoginName] = account
 	tokens, _ := authService.Login(context.Background(), account.LoginName, "Password123")
 	effect := permission.EffectDeny
@@ -137,8 +210,54 @@ func attendanceRouter(t *testing.T, allowed bool) (http.Handler, string, *import
 	}
 	attendance := &attendanceHTTPStub{page: inspection.AttendancePage{Items: []inspection.AttendanceRecord{}, Page: 1, PageSize: 20}}
 	files := &fileHTTPStub{content: []byte("xlsx-template"), onDiscard: func() { imports.discarded = true }}
-	router := NewRouter(authService, false, AdminServices{Permission: permission.NewService(permissionRepository), ImportJobs: imports, Attendance: attendance, ImportFiles: files, ImportMaxUploadBytes: 4096})
+	organizationService := organization.NewService(&attendanceOrganizationRepository{catalogs: organization.Catalogs{
+		Departments: []organization.Department{
+			{ID: "department-study", Code: "STUDY", Name: "学习部", Enabled: true},
+			{ID: "department-office", Code: "OFFICE", Name: "办公室", Enabled: true},
+			{ID: "other-department", Code: "OTHER", Name: "其他部门", Enabled: true},
+		},
+		InspectionTypes: []organization.InspectionType{
+			{ID: "type-attendance", Code: "ATTENDANCE_RATE", Name: "到课率", Enabled: true},
+			{ID: "type-other", Code: "OTHER", Name: "其他检查", Enabled: true},
+		},
+	}, scopes: []organization.DepartmentInspectionScope{
+		{DepartmentID: "department-study", InspectionTypeID: "type-attendance", CanEnter: true, CanView: true, Enabled: true},
+		{DepartmentID: "department-office", InspectionTypeID: "type-attendance", CanView: true, Enabled: true},
+	}})
+	academicService := academic.NewService(&attendanceAcademicRepository{calendar: academic.Calendar{
+		Semesters: []academic.Semester{{ID: "semester-1", AcademicYearID: "year-1", Code: "FIRST", Name: "2026-2027 学年上学期", Enabled: true}},
+		Weeks:     []academic.Week{{ID: "week-1", SemesterID: "semester-1", WeekNo: 1, Enabled: true}},
+	}})
+	masterDataService := masterdata.NewService(&masterRepository{records: map[string]masterdata.Record{
+		masterdata.KindClass + ":allowed-class": {ID: "allowed-class", Kind: masterdata.KindClass, Code: "CS2401", Name: "计科 2401", Grade: "2024", Enabled: true},
+	}})
+	router := NewRouter(authService, false, AdminServices{
+		Organization: organizationService, Academic: academicService, Permission: permission.NewService(permissionRepository), MasterData: masterDataService,
+		ImportJobs: imports, Attendance: attendance, ImportFiles: files, ImportMaxUploadBytes: 4096,
+	})
 	return router, tokens.AccessToken, imports, attendance
+}
+
+func TestSuperAdminAttendanceListAllowsEmptyDepartmentFilter(t *testing.T) {
+	router, token, _, attendance := attendanceRouterWithRole(t, true, true)
+	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&page=1&pageSize=20"
+
+	response := performJSON(router, http.MethodGet, path, nil, token)
+
+	if response.Code != http.StatusOK || attendance.filter.DepartmentID != "" || attendance.scope.DepartmentID != "" {
+		t.Fatalf("response=%d %s filter=%#v scope=%#v", response.Code, response.Body.String(), attendance.filter, attendance.scope)
+	}
+}
+
+func TestAttendanceListCompilesAuthorizedDepartmentsWhenFilterIsEmpty(t *testing.T) {
+	router, token, _, attendance := attendanceRouter(t, true)
+	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&classId=allowed-class&page=1&pageSize=20"
+
+	response := performJSON(router, http.MethodGet, path, nil, token)
+
+	if response.Code != http.StatusOK || len(attendance.scope.DepartmentIDs) != 1 || attendance.scope.DepartmentIDs[0] != "department-study" {
+		t.Fatalf("response=%d %s scope=%#v", response.Code, response.Body.String(), attendance.scope)
+	}
 }
 
 func TestAttendanceImportRoutesRequireAuthenticationAndEffectiveScope(t *testing.T) {
@@ -165,9 +284,9 @@ func TestAttendanceImportRoutesRequireAuthenticationAndEffectiveScope(t *testing
 
 func TestAttendanceListReturnsStablePagination(t *testing.T) {
 	router, token, _, attendance := attendanceRouter(t, true)
-	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=department-study&classId=allowed-class&page=2&pageSize=25&sort=studentNoAsc"
+	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=department-study&classId=allowed-class&status=DRAFT&source=EXCEL&page=2&pageSize=25&sort=studentNoAsc"
 	response := performJSON(router, http.MethodGet, path, nil, token)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items":[]`) || attendance.filter.Page != 2 || attendance.filter.PageSize != 25 || attendance.scope.DepartmentID != "department-study" {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items":[]`) || attendance.filter.Page != 2 || attendance.filter.PageSize != 25 || attendance.filter.Status != inspection.RecordStatusDraft || attendance.filter.Source != inspection.RecordSourceExcel || attendance.scope.DepartmentID != "department-study" {
 		t.Fatalf("response=%d %s filter=%#v scope=%#v", response.Code, response.Body.String(), attendance.filter, attendance.scope)
 	}
 }
@@ -177,6 +296,22 @@ func TestEffectivePermissionsReturnsOnlyCurrentAccountProjection(t *testing.T) {
 	response := performJSON(router, http.MethodGet, "/api/v1/permissions/effective", nil, token)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), permission.ActionInspectionView) || strings.Contains(response.Body.String(), "Password123") {
 		t.Fatalf("permissions=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAttendanceFilterOptionsAreAuthenticatedAndBusinessScoped(t *testing.T) {
+	router, token, _, _ := attendanceRouter(t, true)
+	path := "/api/v1/inspections/attendance/filter-options"
+	if response := performJSON(router, http.MethodGet, path, nil, ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated options = %d %s", response.Code, response.Body.String())
+	}
+	response := performJSON(router, http.MethodGet, path, nil, token)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"code":"ATTENDANCE_RATE"`) || !strings.Contains(body, `"responsibleDepartments":[{"id":"department-study"`) || !strings.Contains(body, `"name":"计科 2401"`) || !strings.Contains(body, `"weekNo":1`) {
+		t.Fatalf("options=%d %s", response.Code, body)
+	}
+	if strings.Contains(body, "other-department") || strings.Contains(body, "department-office") || strings.Contains(body, "type-other") {
+		t.Fatalf("options leaked another business scope: %s", body)
 	}
 }
 
@@ -259,8 +394,8 @@ func TestImportBatchByIDReauthorizesAndMapsVersionIdempotencyErrors(t *testing.T
 		t.Fatalf("class idor=%d %s", response.Code, response.Body.String())
 	}
 	imports.batch.ClassID = "allowed-class"
-	preview := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1/rows?page=2&pageSize=10", nil, token)
-	if preview.Code != http.StatusOK || imports.rows.Page != 2 || imports.rows.PageSize != 10 {
+	preview := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1/rows?page=2&pageSize=10&validationStatus=invalid", nil, token)
+	if preview.Code != http.StatusOK || imports.rows.Page != 2 || imports.rows.PageSize != 10 || imports.rowStatus != importjob.RowStatusInvalid {
 		t.Fatalf("preview=%d %s page=%#v", preview.Code, preview.Body.String(), imports.rows)
 	}
 

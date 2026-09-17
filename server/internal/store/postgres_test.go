@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"four-check-management-system/server/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestPhaseOneMigrationDefinesRequiredTables(t *testing.T) {
@@ -33,6 +35,161 @@ func TestPhaseOneMigrationDefinesRequiredTables(t *testing.T) {
 		if !strings.Contains(text, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Errorf("migration does not define %s", table)
 		}
+	}
+}
+
+func TestFacultyCodeExpansionMigrationSupportsLongBusinessCodes(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "006_expand_faculty_code.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	if !strings.Contains(text, "ALTER COLUMN code TYPE varchar(64)") {
+		t.Fatalf("faculty code migration does not expand code to varchar(64): %s", text)
+	}
+}
+
+func TestGradesMigrationDefinesMasterDataAndExistingGradeConstraints(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "007_add_grades_master_data.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{"CREATE TABLE IF NOT EXISTS grades", "SELECT grade FROM classes", "SELECT grade FROM students", "classes_grade_fkey", "students_grade_fkey"} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("grades migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestDormitoryHierarchyMigrationBackfillsExistingRooms(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "008_add_dormitory_hierarchy.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{"CREATE TABLE IF NOT EXISTS dormitory_areas", "CREATE TABLE IF NOT EXISTS dormitory_buildings", "SELECT DISTINCT campus_area", "SELECT DISTINCT campus_area, building_no", "dormitory_building_id"} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("dormitory hierarchy migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestServerManagedMasterDataMigrationRemovesArtificialCodesAndStructuresCourses(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "009_server_managed_master_data.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	if strings.Contains(strings.ToUpper(text), "TRUNCATE TABLE") {
+		t.Fatal("server-managed master-data migration must preserve existing business and change-history rows")
+	}
+	for _, fragment := range []string{
+		"DROP COLUMN code", "grade_id uuid", "CREATE TABLE course_classes", "CREATE TABLE course_schedules",
+		"weekday BETWEEN 1 AND 7", "start_section BETWEEN 1 AND 10", "end_section BETWEEN start_section AND 10",
+		"UPDATE classes", "UPDATE students", "INSERT INTO course_classes", "CREATE TABLE course_schedule_migration_backlog",
+		"INSERT INTO course_schedule_migration_backlog", "DROP COLUMN schedule_text", "DROP COLUMN class_id", "DROP COLUMN classroom_id",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("server-managed master-data migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestMasterDataIntegrityMigrationProtectsCourseIdentityAndSchedules(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "010_master_data_integrity.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{"courses_name_key UNIQUE(name)", "CREATE EXTENSION IF NOT EXISTS btree_gist", "course_schedules_no_overlap", "int4range(start_section, end_section, '[]') WITH &&"} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("master-data integrity migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestTeachingBuildingMigrationNormalizesClassroomHierarchy(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "011_add_teaching_buildings.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{
+		"CREATE TABLE teaching_buildings", "SELECT DISTINCT", "teaching_building_id",
+		"DROP COLUMN building", "DROP COLUMN floor", "classrooms_building_room_key",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("teaching-building migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestComposeMigrationRunnerRecordsAndSkipsAppliedFiles(t *testing.T) {
+	scriptPath := filepath.Join("..", "..", "scripts", "migrate.sh")
+	contents, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	for _, fragment := range []string{"schema_migrations", "existing_schema", "001_init.sql", "002_admin_foundation.sql", "009_server_managed_master_data.sql", "already applied", "BEGIN;", "COMMIT;"} {
+		if !strings.Contains(text, fragment) {
+			t.Errorf("migration runner does not contain %q", fragment)
+		}
+	}
+	composePath := filepath.Join("..", "..", "..", "compose.yaml")
+	compose, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), `["sh", "/migrate.sh"]`) {
+		t.Error("compose does not use the versioned migration runner")
+	}
+}
+
+func TestMasterDataFilterUsesKindSpecificConstraints(t *testing.T) {
+	filter, args := masterDataFilter(masterdata.Query{
+		Kind: masterdata.KindStudent, Code: "S01", Name: "张", FacultyID: "faculty-1", MajorID: "major-1", GradeID: "grade-1", EnrollmentStatus: "ENROLLED",
+	}, "student_no", "name")
+	for _, fragment := range []string{"student_no ILIKE '%'||$2||'%'", "name ILIKE '%'||$3||'%'", "faculty_id=$5", "major_id=$6", "grade_id=$7", "enrollment_status=$8"} {
+		if !strings.Contains(filter, fragment) {
+			t.Fatalf("filter %q does not contain %q; args=%v", filter, fragment, args)
+		}
+	}
+	filter, args = masterDataFilter(masterdata.Query{Kind: masterdata.KindClassroom, TeachingBuildingID: "building-1"}, "room_no", "room_no")
+	if !strings.Contains(filter, "teaching_building_id=$5") || len(args) != 5 {
+		t.Fatalf("classroom filter=%q args=%v", filter, args)
+	}
+}
+
+func TestMasterDataErrorMapsFacultyUniqueConstraints(t *testing.T) {
+	tests := []struct {
+		constraint string
+		want       error
+	}{
+		{constraint: "students_student_no_key", want: masterdata.ErrDuplicateCode},
+		{constraint: "faculties_name_key", want: masterdata.ErrDuplicateName},
+	}
+	for _, test := range tests {
+		t.Run(test.constraint, func(t *testing.T) {
+			err := masterDataError(&pgconn.PgError{Code: "23505", ConstraintName: test.constraint})
+			if !errors.Is(err, test.want) {
+				t.Fatalf("masterDataError() = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestMasterDataErrorMapsScheduleExclusionConstraint(t *testing.T) {
+	err := masterDataError(&pgconn.PgError{Code: "23P01", ConstraintName: "course_schedules_no_overlap"})
+	if !errors.Is(err, masterdata.ErrInvalidSchedule) {
+		t.Fatalf("masterDataError() = %v, want %v", err, masterdata.ErrInvalidSchedule)
 	}
 }
 
@@ -114,7 +271,7 @@ func TestPhaseTwoAttendanceImportMigrationDefinesRequiredSchema(t *testing.T) {
 func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T) {
 	countSQL, countArgs, listSQL, listArgs, err := buildAttendanceListQueries(inspection.AttendanceListQuery{
 		SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "attendance",
-		DepartmentID: "department-study", ClassID: "class-1", Grade: "2023", Keyword: "张晨",
+		DepartmentID: "department-study", DepartmentIDs: []string{"department-study", "department-office"}, ClassID: "class-1", Grade: "2023", Keyword: "张晨", Status: inspection.RecordStatusDraft, Source: inspection.RecordSourceExcel,
 		Sort: inspection.SortStudentNoAscending, Page: 2, PageSize: 25,
 	})
 	if err != nil {
@@ -124,9 +281,11 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 		"ir.semester_id = $1::uuid",
 		"ir.week_id = $2::uuid",
 		"ir.inspection_type_id = $3::uuid",
-		"($4::text = '' OR ir.department_id = $4::uuid)",
+		"cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[])",
 		"($5::text = '' OR ir.class_id = $5::uuid)",
 		"($6::text = '' OR ir.grade_snapshot = $6)",
+		"($8::text = '' OR ir.status = $8)",
+		"($9::text = '' OR ir.source = $9)",
 		"ir.deleted_at IS NULL",
 	} {
 		if !strings.Contains(countSQL, fragment) || !strings.Contains(listSQL, fragment) {
@@ -139,7 +298,7 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 	if strings.Contains(listSQL, "semester-1") || strings.Contains(listSQL, "张晨") {
 		t.Fatalf("list query interpolates user input: %s", listSQL)
 	}
-	if len(countArgs) != 7 || len(listArgs) != 9 || listArgs[7] != 25 || listArgs[8] != 25 {
+	if len(countArgs) != 10 || len(listArgs) != 12 || listArgs[10] != 25 || listArgs[11] != 25 {
 		t.Fatalf("count/list args = %#v / %#v", countArgs, listArgs)
 	}
 }
@@ -151,6 +310,20 @@ func TestBuildAttendanceListQueriesRejectsUnknownSort(t *testing.T) {
 	})
 	if !errors.Is(err, inspection.ErrInvalidAttendanceQuery) {
 		t.Fatalf("error = %v, want ErrInvalidAttendanceQuery", err)
+	}
+}
+
+func TestBuildAttendanceListQueriesUsesEmptyArrayForUnrestrictedDepartments(t *testing.T) {
+	_, countArgs, _, _, err := buildAttendanceListQueries(inspection.AttendanceListQuery{
+		SemesterID: "semester-1", WeekID: "week-3", InspectionTypeID: "attendance",
+		Sort: inspection.SortOccurredAtDescending, Page: 1, PageSize: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	departments, ok := countArgs[9].([]string)
+	if !ok || departments == nil || len(departments) != 0 {
+		t.Fatalf("department scope argument = %#v, want a non-nil empty array", countArgs[9])
 	}
 }
 
@@ -277,11 +450,12 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 	t.Helper()
 	ctx := context.Background()
 	accountID, yearID, semesterID, weekID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	facultyID, classID, studentID, courseID, classroomID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	facultyID, gradeID, classID, studentID, courseID, teachingBuildingID, classroomID, scheduleID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	originalFileID, templateFileID, templateID, batchID, rowID, recordID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	departmentID := "10000000-0000-0000-0000-000000000002"
 	inspectionTypeID := "30000000-0000-0000-0000-000000000001"
-	unique := uuid.NewString()
+	unique := uuid.NewString()[:8]
+	gradeName := fmt.Sprintf("%04d级", 1000+time.Now().UnixNano()%9000)
 	templateVersion := int(time.Now().UnixNano()%1_000_000_000) + 1
 	statements := []struct {
 		sql  string
@@ -291,11 +465,15 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 		{`INSERT INTO academic_years(id,name,start_date,end_date) VALUES($1,$2,'2026-01-01','2026-12-31')`, []any{yearID, "year-" + unique}},
 		{`INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES($1,$2,$3,'测试学期','2026-01-01','2026-12-31')`, []any{semesterID, yearID, "semester-" + unique}},
 		{`INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date) VALUES($1,$2,1,'2026-06-15','2026-06-21')`, []any{weekID, semesterID}},
-		{`INSERT INTO faculties(id,code,name) VALUES($1,$2,$3)`, []any{facultyID, "faculty-" + unique, "学院-" + unique}},
-		{`INSERT INTO classes(id,code,name,grade,faculty_id) VALUES($1,$2,$3,'2026',$4)`, []any{classID, "class-" + unique, "班级-" + unique, facultyID}},
-		{`INSERT INTO classrooms(id,code,building,room_no,floor) VALUES($1,$2,'测试楼','101',1)`, []any{classroomID, "room-" + unique}},
-		{`INSERT INTO courses(id,code,name,class_id,classroom_id) VALUES($1,$2,'数据结构',$3,$4)`, []any{courseID, "course-" + unique, classID, classroomID}},
-		{`INSERT INTO students(id,student_no,name,grade,faculty_id,class_id) VALUES($1,$2,'虚构学生','2026',$3,$4)`, []any{studentID, "student-" + unique, facultyID, classID}},
+		{`INSERT INTO faculties(id,name) VALUES($1,$2)`, []any{facultyID, "学院-" + unique}},
+		{`INSERT INTO grades(id,name) VALUES($1,$2)`, []any{gradeID, gradeName}},
+		{`INSERT INTO classes(id,name,grade_id,faculty_id) VALUES($1,$2,$3,$4)`, []any{classID, "班级-" + unique, gradeID, facultyID}},
+		{`INSERT INTO teaching_buildings(id,name) VALUES($1,$2)`, []any{teachingBuildingID, "测试楼-" + unique}},
+		{`INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES($1,$2,$3)`, []any{classroomID, teachingBuildingID, unique}},
+		{`INSERT INTO courses(id,name) VALUES($1,'数据结构')`, []any{courseID}},
+		{`INSERT INTO course_classes(course_id,class_id) VALUES($1,$2)`, []any{courseID, classID}},
+		{`INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section) VALUES($1,$2,$3,$4,3,1,2)`, []any{scheduleID, courseID, semesterID, classroomID}},
+		{`INSERT INTO students(id,student_no,name,grade_id,faculty_id,class_id) VALUES($1,$2,'虚构学生',$3,$4,$5)`, []any{studentID, "student-" + unique, gradeID, facultyID, classID}},
 		{`INSERT INTO files(id,bucket,object_key,original_name,size_bytes,sha256,status,retention_type,created_by) VALUES($1,'test',$2,'source.xlsx',1,$3,'AVAILABLE','IMPORT_SOURCE',$4)`, []any{originalFileID, "source/" + unique, strings.Repeat("a", 64), accountID}},
 		{`INSERT INTO files(id,bucket,object_key,original_name,size_bytes,sha256,status,retention_type,created_by) VALUES($1,'test',$2,'template.xlsx',1,$3,'AVAILABLE','TEMPLATE',$4)`, []any{templateFileID, "template/" + unique, strings.Repeat("b", 64), accountID}},
 		{`INSERT INTO import_templates(id,code,name,inspection_type_id,version_no,file_id,status,created_by) VALUES($1,$2,'到课率模板',$3,$4,$5,'DRAFT',$6)`, []any{templateID, "template-" + unique, inspectionTypeID, templateVersion, templateFileID, accountID}},
@@ -313,7 +491,7 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 	record := inspection.AttendanceRecord{
 		ID: recordID, InspectionTypeID: inspectionTypeID, SemesterID: semesterID, WeekID: weekID, DepartmentID: departmentID,
 		StudentID: studentID, StudentNoSnapshot: "student-" + unique, StudentNameSnapshot: "虚构学生", ClassID: classID,
-		ClassNameSnapshot: "班级-" + unique, GradeSnapshot: "2026", CourseID: courseID, ClassroomID: recordClassroomID,
+		ClassNameSnapshot: "班级-" + unique, GradeSnapshot: gradeName, CourseID: courseID, ClassroomID: recordClassroomID,
 		OccurredAt: time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC), AbsenceHours: 2, PeriodText: "第1-2节", Remark: "测试数据",
 		Source: inspection.RecordSourceExcel, Status: inspection.RecordStatusDraft, ImportBatchID: batchID,
 		DedupKey: strings.Repeat("c", 64), RowVersion: 1, CreatedBy: accountID,
@@ -325,6 +503,24 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 	if _, err := database.Pool.Exec(ctx, `INSERT INTO import_rows(id,batch_id,row_no,raw_data_json,normalized_data_json,validation_status,errors_json) VALUES($1,$2,5,'{}',$3,'VALID','[]')`, rowID, batchID, normalized); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM inspection_records WHERE import_batch_id=$1`, batchID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM import_rows WHERE batch_id=$1`, batchID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM import_batches WHERE id=$1`, batchID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM import_templates WHERE id=$1`, templateID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM files WHERE id IN ($1,$2)`, originalFileID, templateFileID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM courses WHERE id=$1`, courseID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM students WHERE id=$1`, studentID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM classes WHERE id=$1`, classID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM classrooms WHERE id=$1`, classroomID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM teaching_buildings WHERE id=$1`, teachingBuildingID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM grades WHERE id=$1`, gradeID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM faculties WHERE id=$1`, facultyID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM semester_weeks WHERE id=$1`, weekID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM semesters WHERE id=$1`, semesterID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM academic_years WHERE id=$1`, yearID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM accounts WHERE id=$1`, accountID)
+	})
 	return attendanceConfirmationFixture{input: importjob.ConfirmBatchInput{
 		BatchID: batchID, ExpectedVersion: 1, IdempotencyKey: "confirm-" + unique,
 		Scope:         importjob.ConfirmScope{SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID, DepartmentID: departmentID, ActorID: accountID},
@@ -605,17 +801,17 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 	defer database.Close()
 
 	masterService := masterdata.NewService(database)
-	faculty, err := masterService.Create(ctx, "", masterdata.Record{Kind: masterdata.KindFaculty, Code: "T" + uuid.NewString()[:8], Name: "测试院系" + uuid.NewString()[:8]})
+	faculty, err := masterService.Create(ctx, "", masterdata.Record{Kind: masterdata.KindFaculty, Name: "测试院系" + uuid.NewString()[:8]})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Pool.Exec(ctx, `DELETE FROM master_data_changes WHERE entity_id=$1`, faculty.ID)
 	defer database.Pool.Exec(ctx, `DELETE FROM faculties WHERE id=$1`, faculty.ID)
-	page, err := masterService.List(ctx, masterdata.Query{Kind: masterdata.KindFaculty, Keyword: faculty.Code, Page: 1, PageSize: 20})
+	page, err := masterService.List(ctx, masterdata.Query{Kind: masterdata.KindFaculty, Name: faculty.Name, Page: 1, PageSize: 20})
 	if err != nil || page.Total != 1 || len(page.Items) != 1 {
 		t.Fatalf("master data page=%+v err=%v", page, err)
 	}
-	faculty.Name = "测试院系（已修改）"
+	faculty.Name += "（已修改）"
 	if _, err := masterService.Update(ctx, "", faculty); err != nil {
 		t.Fatal(err)
 	}
@@ -625,6 +821,14 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 	}
 	unique := uuid.NewString()[:8]
 	createdRecords := []masterdata.Record{}
+	defer func() {
+		tables := map[string]string{masterdata.KindFaculty: "faculties", masterdata.KindGrade: "grades", masterdata.KindMajor: "majors", masterdata.KindStaff: "staff", masterdata.KindClass: "classes", masterdata.KindDormitoryArea: "dormitory_areas", masterdata.KindDormitoryBuilding: "dormitory_buildings", masterdata.KindDormitory: "dormitories", masterdata.KindTeachingBuilding: "teaching_buildings", masterdata.KindClassroom: "classrooms", masterdata.KindCourse: "courses", masterdata.KindStudent: "students"}
+		for index := len(createdRecords) - 1; index >= 0; index-- {
+			record := createdRecords[index]
+			_, _ = database.Pool.Exec(ctx, `DELETE FROM `+tables[record.Kind]+` WHERE id=$1`, record.ID)
+			_, _ = database.Pool.Exec(ctx, `DELETE FROM master_data_changes WHERE entity_id=$1`, record.ID)
+		}
+	}()
 	createRecord := func(record masterdata.Record) masterdata.Record {
 		t.Helper()
 		created, createErr := masterService.Create(ctx, "", record)
@@ -634,22 +838,32 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 		createdRecords = append(createdRecords, created)
 		return created
 	}
-	major := createRecord(masterdata.Record{Kind: masterdata.KindMajor, Code: "M" + unique, Name: "测试专业" + unique, FacultyID: faculty.ID})
-	staff := createRecord(masterdata.Record{Kind: masterdata.KindStaff, Code: "E" + unique, Name: "测试教师", FacultyID: faculty.ID})
-	class := createRecord(masterdata.Record{Kind: masterdata.KindClass, Code: "C" + unique, Name: "测试班级" + unique, Grade: "2026", FacultyID: faculty.ID, MajorID: major.ID, HeadTeacherID: staff.ID, EnrolledSize: 30})
-	dormitory := createRecord(masterdata.Record{Kind: masterdata.KindDormitory, Code: "D" + unique, Name: "D" + unique, CampusArea: "东区", BuildingNo: "1", RoomNo: unique})
-	classroom := createRecord(masterdata.Record{Kind: masterdata.KindClassroom, Code: "R" + unique, Name: "R" + unique, Building: "教学楼", RoomNo: unique, Floor: 2})
-	createRecord(masterdata.Record{Kind: masterdata.KindCourse, Code: "K" + unique, Name: "测试课程", TeacherID: staff.ID, ClassID: class.ID, ClassroomID: classroom.ID, ScheduleText: "周一 1-2 节"})
-	createRecord(masterdata.Record{Kind: masterdata.KindStudent, Code: "S" + unique, Name: "测试学生", Gender: "MALE", Grade: "2026", FacultyID: faculty.ID, MajorID: major.ID, ClassID: class.ID, DormitoryID: dormitory.ID})
-	defer func() {
-		for index := len(createdRecords) - 1; index >= 0; index-- {
-			record := createdRecords[index]
-			_, _ = database.Pool.Exec(ctx, `DELETE FROM `+record.Kind+` WHERE id=$1`, record.ID)
-			_, _ = database.Pool.Exec(ctx, `DELETE FROM master_data_changes WHERE entity_id=$1`, record.ID)
-		}
-	}()
+	grade := createRecord(masterdata.Record{Kind: masterdata.KindGrade, Name: fmt.Sprintf("%04d级", 1000+time.Now().UnixNano()%9000)})
+	major := createRecord(masterdata.Record{Kind: masterdata.KindMajor, Name: "测试专业" + unique, FacultyID: faculty.ID})
+	staff := createRecord(masterdata.Record{Kind: masterdata.KindStaff, Code: "E" + unique, Name: "测试教师" + unique, FacultyID: faculty.ID})
+	class := createRecord(masterdata.Record{Kind: masterdata.KindClass, Name: "测试班级" + unique, GradeID: grade.ID, FacultyID: faculty.ID, MajorID: major.ID, HeadTeacherID: staff.ID, EnrolledSize: 30})
+	dormitoryArea := createRecord(masterdata.Record{Kind: masterdata.KindDormitoryArea, Name: "测试宿舍区" + unique})
+	dormitoryBuilding := createRecord(masterdata.Record{Kind: masterdata.KindDormitoryBuilding, Name: "测试宿舍楼" + unique, DormitoryAreaID: dormitoryArea.ID})
+	dormitory := createRecord(masterdata.Record{Kind: masterdata.KindDormitory, DormitoryBuildingID: dormitoryBuilding.ID, RoomNo: unique})
+	teachingBuilding := createRecord(masterdata.Record{Kind: masterdata.KindTeachingBuilding, Name: "测试教学楼" + unique})
+	classroom := createRecord(masterdata.Record{Kind: masterdata.KindClassroom, TeachingBuildingID: teachingBuilding.ID, RoomNo: unique})
+	var semesterID string
+	if err := database.Pool.QueryRow(ctx, `SELECT id::text FROM semesters WHERE enabled ORDER BY start_date DESC LIMIT 1`).Scan(&semesterID); err != nil {
+		t.Fatal(err)
+	}
+	course := createRecord(masterdata.Record{Kind: masterdata.KindCourse, Name: "测试课程" + unique, TeacherID: staff.ID, ClassIDs: []string{class.ID}, Schedules: []masterdata.CourseSchedule{{SemesterID: semesterID, ClassroomID: classroom.ID, Weekday: 1, StartSection: 1, EndSection: 2}}})
+	if len(course.ClassIDs) != 1 || course.ClassIDs[0] != class.ID || len(course.Schedules) != 1 || course.Schedules[0].EndSection != 2 {
+		t.Fatalf("persisted structured course=%+v", course)
+	}
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO courses(id,name) VALUES($1,$2)`, uuid.NewString(), course.Name); err == nil {
+		t.Fatal("database accepted a duplicate canonical course name")
+	}
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section) VALUES($1,$2,$3,$4,1,2,3)`, uuid.NewString(), course.ID, semesterID, classroom.ID); err == nil {
+		t.Fatal("database accepted an overlapping course schedule")
+	}
+	createRecord(masterdata.Record{Kind: masterdata.KindStudent, Code: "S" + unique, Name: "测试学生" + unique, Gender: "MALE", GradeID: grade.ID, FacultyID: faculty.ID, MajorID: major.ID, ClassID: class.ID, DormitoryID: dormitory.ID})
 	for _, record := range createdRecords {
-		listed, listErr := masterService.List(ctx, masterdata.Query{Kind: record.Kind, Keyword: record.Code, Page: 1, PageSize: 20})
+		listed, listErr := masterService.List(ctx, masterdata.Query{Kind: record.Kind, Name: record.Name, Page: 1, PageSize: 20})
 		if listErr != nil || listed.Total != 1 || len(listed.Items) != 1 {
 			t.Fatalf("kind=%s page=%+v err=%v", record.Kind, listed, listErr)
 		}

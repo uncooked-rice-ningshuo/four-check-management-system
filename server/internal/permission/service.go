@@ -27,6 +27,7 @@ const (
 	ActionMasterDataManage  = "MASTER_DATA_MANAGE"
 	ActionDictionaryManage  = "DICTIONARY_MANAGE"
 	ActionConfigurationView = "CONFIGURATION_VIEW"
+	ActionInspectionManage  = "INSPECTION_MANAGE"
 	ActionInspectionEnter   = "INSPECTION_ENTER"
 	ActionInspectionView    = "INSPECTION_VIEW"
 	ActionInspectionReview  = "INSPECTION_REVIEW"
@@ -43,7 +44,7 @@ var ErrInvalidRule = errors.New("invalid permission rule")
 
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
-	ActionInspectionEnter, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary,
+	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary,
 	ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
@@ -168,6 +169,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 		scope := Scope{DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
 		source := Source{Type: SourceDepartmentMap, Label: "部门与检查类型映射"}
+		if leadership && mapping.CanEnter {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionManage, scope, Source{Type: SourceOrganizationRole, Label: "部门负责人记录管理"}))
+		}
 		if mapping.CanEnter {
 			result.Permissions = append(result.Permissions, allow(ActionInspectionEnter, scope, source))
 		}

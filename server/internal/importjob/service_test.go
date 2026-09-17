@@ -22,6 +22,8 @@ type memoryImportRepository struct {
 	confirmMutation audit.Mutation
 	createCalls     int
 	createErr       error
+	listCalls       int
+	listStatus      string
 }
 
 func (r *memoryImportRepository) CreateImportBatch(_ context.Context, batch Batch) error {
@@ -37,7 +39,9 @@ func (r *memoryImportRepository) FindPublishedImportTemplate(context.Context, st
 	return Template{}, ErrBatchNotFound
 }
 
-func (r *memoryImportRepository) ListImportRows(context.Context, string, int, int) (ImportRowPage, error) {
+func (r *memoryImportRepository) ListImportRows(_ context.Context, _ string, _, _ int, validationStatus string) (ImportRowPage, error) {
+	r.listCalls++
+	r.listStatus = validationStatus
 	return ImportRowPage{Items: []ImportRow{}}, nil
 }
 
@@ -145,6 +149,25 @@ func previewBatch(status string) Batch {
 		DepartmentID: "department-study", OriginalFileID: "file-1", TemplateID: "template-1", TemplateVersion: 1,
 		Status: status, Version: 1, CreatedBy: "account-1",
 		WeekStart: time.Date(2026, 6, 15, 0, 0, 0, 0, location), WeekEnd: time.Date(2026, 6, 21, 0, 0, 0, 0, location), Location: location,
+	}
+}
+
+func TestListRowsValidatesAndForwardsValidationStatus(t *testing.T) {
+	repository := &memoryImportRepository{}
+	service := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{})
+
+	if _, err := service.ListRows(context.Background(), "batch-1", 1, 20, RowStatusInvalid); err != nil {
+		t.Fatalf("list invalid rows: %v", err)
+	}
+	if repository.listCalls != 1 || repository.listStatus != RowStatusInvalid {
+		t.Fatalf("repository filter calls=%d status=%q", repository.listCalls, repository.listStatus)
+	}
+
+	if _, err := service.ListRows(context.Background(), "batch-1", 1, 20, "BROKEN"); !errors.Is(err, ErrInvalidBatch) {
+		t.Fatalf("invalid validation status error=%v", err)
+	}
+	if repository.listCalls != 1 {
+		t.Fatalf("invalid filter reached repository: calls=%d", repository.listCalls)
 	}
 }
 

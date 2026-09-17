@@ -19,7 +19,7 @@ type Repository interface {
 	ReplaceImportPreview(context.Context, Batch, []ImportRow) (Batch, error)
 	ConfirmAttendanceImport(context.Context, ConfirmBatchInput, audit.Mutation) (ConfirmResult, error)
 	FindPublishedImportTemplate(context.Context, string) (Template, error)
-	ListImportRows(context.Context, string, int, int) (ImportRowPage, error)
+	ListImportRows(context.Context, string, int, int, string) (ImportRowPage, error)
 }
 
 type VerifiedFileReader interface {
@@ -94,11 +94,15 @@ func (s *Service) GetBatch(ctx context.Context, id string) (Batch, error) {
 	return s.repository.FindImportBatch(ctx, id)
 }
 
-func (s *Service) ListRows(ctx context.Context, batchID string, page, pageSize int) (ImportRowPage, error) {
+func (s *Service) ListRows(ctx context.Context, batchID string, page, pageSize int, validationStatus string) (ImportRowPage, error) {
+	validationStatus = strings.ToUpper(strings.TrimSpace(validationStatus))
 	if strings.TrimSpace(batchID) == "" || page < 1 || pageSize < 1 || pageSize > 100 {
 		return ImportRowPage{}, ErrInvalidBatch
 	}
-	return s.repository.ListImportRows(ctx, batchID, page, pageSize)
+	if validationStatus != "" && validationStatus != RowStatusValid && validationStatus != RowStatusInvalid {
+		return ImportRowPage{}, ErrInvalidBatch
+	}
+	return s.repository.ListImportRows(ctx, batchID, page, pageSize, validationStatus)
 }
 
 func (s *Service) PublishedTemplate(ctx context.Context, inspectionTypeID string) (Template, error) {

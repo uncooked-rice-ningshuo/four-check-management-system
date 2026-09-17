@@ -136,9 +136,14 @@ func (r *permissionRepository) DeleteRule(context.Context, string, string, audit
 	return nil
 }
 
-type masterRepository struct{ records map[string]masterdata.Record }
+type masterRepository struct {
+	records   map[string]masterdata.Record
+	createErr error
+	lastQuery masterdata.Query
+}
 
 func (r *masterRepository) ListMasterData(_ context.Context, query masterdata.Query) (masterdata.Page, error) {
+	r.lastQuery = query
 	var items []masterdata.Record
 	for _, record := range r.records {
 		if record.Kind == query.Kind {
@@ -158,7 +163,13 @@ func (r *masterRepository) MasterDataExists(_ context.Context, kind, id string) 
 	_, ok := r.records[kind+":"+id]
 	return ok, nil
 }
+func (r *masterRepository) AcademicSemesterExists(_ context.Context, id string) (bool, error) {
+	return id == "semester-1", nil
+}
 func (r *masterRepository) CreateMasterData(_ context.Context, _ string, record masterdata.Record, _ audit.Mutation) (masterdata.Record, error) {
+	if r.createErr != nil {
+		return masterdata.Record{}, r.createErr
+	}
 	r.records[record.Kind+":"+record.ID] = record
 	return record, nil
 }
@@ -359,6 +370,70 @@ func TestSuperAdminCanCreateAndListMasterData(t *testing.T) {
 	listed := performJSON(router, http.MethodGet, "/api/v1/admin/master-data/faculties?page=1&pageSize=20", nil, tokens.AccessToken)
 	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte("计算机学院")) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+}
+
+func TestSuperAdminCanCreateGradeWithoutCode(t *testing.T) {
+	repository := &accounts{values: map[string]auth.Account{}}
+	svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
+	admin, _ := svc.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
+	admin.MustChangePassword = false
+	repository.values[admin.LoginName] = admin
+	tokens, _ := svc.Login(context.Background(), "admin", "InitialPassword123")
+	router := NewRouter(svc, false, AdminServices{MasterData: masterdata.NewService(&masterRepository{records: map[string]masterdata.Record{}})})
+
+	created := performJSON(router, http.MethodPost, "/api/v1/admin/master-data/grades", map[string]any{"name": "2027"}, tokens.AccessToken)
+	if created.Code != http.StatusCreated || bytes.Contains(created.Body.Bytes(), []byte(`"code"`)) || !bytes.Contains(created.Body.Bytes(), []byte(`"name":"2027级"`)) {
+		t.Fatalf("create grade status=%d body=%s", created.Code, created.Body.String())
+	}
+}
+
+func TestListMasterDataForwardsKindSpecificFilters(t *testing.T) {
+	accountsRepository := &accounts{values: map[string]auth.Account{}}
+	authService := auth.NewService(accountsRepository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
+	admin, _ := authService.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
+	admin.MustChangePassword = false
+	accountsRepository.values[admin.LoginName] = admin
+	tokens, _ := authService.Login(context.Background(), "admin", "InitialPassword123")
+	repository := &masterRepository{records: map[string]masterdata.Record{}}
+	router := NewRouter(authService, false, AdminServices{MasterData: masterdata.NewService(repository)})
+
+	response := performJSON(router, http.MethodGet, "/api/v1/admin/master-data/students?code=S01&name=%E5%BC%A0&enabled=true&facultyId=faculty-1&majorId=major-1&gradeId=grade-1&enrollmentStatus=ENROLLED", nil, tokens.AccessToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	query := repository.lastQuery
+	if query.Code != "S01" || query.Name != "张" || query.Enabled == nil || !*query.Enabled || query.FacultyID != "faculty-1" || query.MajorID != "major-1" || query.GradeID != "grade-1" || query.EnrollmentStatus != "ENROLLED" {
+		t.Fatalf("query = %+v", query)
+	}
+}
+
+func TestCreateMasterDataReportsDuplicateFacultyName(t *testing.T) {
+	tests := []struct {
+		name          string
+		repositoryErr error
+		code          string
+		message       string
+	}{
+		{name: "name", repositoryErr: masterdata.ErrDuplicateName, code: "MASTER_DATA_NAME_EXISTS", message: "该名称已存在"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &accounts{values: map[string]auth.Account{}}
+			svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
+			admin, _ := svc.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
+			admin.MustChangePassword = false
+			repository.values[admin.LoginName] = admin
+			tokens, _ := svc.Login(context.Background(), "admin", "InitialPassword123")
+			router := NewRouter(svc, false, AdminServices{MasterData: masterdata.NewService(&masterRepository{
+				records: map[string]masterdata.Record{}, createErr: test.repositoryErr,
+			})})
+
+			response := performJSON(router, http.MethodPost, "/api/v1/admin/master-data/faculties", map[string]any{"name": "计算机科学与工程学院"}, tokens.AccessToken)
+			if response.Code != http.StatusConflict || !bytes.Contains(response.Body.Bytes(), []byte(test.code)) || !bytes.Contains(response.Body.Bytes(), []byte(test.message)) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

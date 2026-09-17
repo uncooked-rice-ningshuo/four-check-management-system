@@ -11,6 +11,7 @@ import (
 
 	"four-check-management-system/server/internal/academic"
 	"four-check-management-system/server/internal/auth"
+	"four-check-management-system/server/internal/dashboard"
 	"four-check-management-system/server/internal/dictionary"
 	"four-check-management-system/server/internal/httpapi"
 	"four-check-management-system/server/internal/importjob"
@@ -64,11 +65,20 @@ func main() {
 }
 
 func newApplicationServices(db *store.Postgres, storageService *storage.Service, maxUploadBytes int64) httpapi.AdminServices {
+	organizationService := organization.NewService(db)
+	academicService := academic.NewService(db)
+	permissionService := permission.NewService(db)
+	manualAttendance := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academicService, organizationService, permissionService)
 	return httpapi.AdminServices{
-		Organization: organization.NewService(db), Academic: academic.NewService(db), Permission: permission.NewService(db),
+		Organization: organizationService, Academic: academicService, Permission: permissionService,
 		MasterData: masterdata.NewService(db), Dictionary: dictionary.NewService(db), Storage: storageService,
 		ImportJobs: importjob.NewService(db, storageService, importjob.NewAttendanceXLSXParser(maxUploadBytes), importjob.NewAttendanceAdapter(db)),
 		Attendance: inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,
+		ManualAttendance:    manualAttendance,
+		Inspections:         inspection.NewRecordService(db, permissionService),
+		WorkContext:         academic.NewWorkContextService(db),
+		AttendanceMutations: inspection.NewMutationService(db, manualAttendance, permissionService),
+		Dashboard:           dashboard.NewService(db, academicService, organizationService, permissionService),
 	}
 }
 

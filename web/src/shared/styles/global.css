@@ -153,14 +153,59 @@ body {
   min-height: 100vh;
   background: #eef3f8;
 }
-.attendance-page { display: grid; gap: 20px; }
+.admin-shell > .ant-layout {
+  min-width: 0;
+}
+.attendance-page {
+  display: grid;
+  width: min(1480px, 100%);
+  min-width: 0;
+  margin-inline: auto;
+  gap: 20px;
+}
 .attendance-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .attendance-page-heading h2.ant-typography { margin: 0 0 4px; }
+.attendance-records-table,
+.attendance-records-table .ant-pro-card,
+.attendance-records-table .ant-pro-card-body,
+.attendance-records-table .ant-table-wrapper,
+.attendance-records-table .ant-spin-container {
+  max-width: 100%;
+  min-width: 0;
+}
+.attendance-records-table .ant-pro-card-body {
+  overflow: hidden;
+}
+.attendance-records-table .ant-table-content {
+  overflow-x: auto !important;
+  overscroll-behavior-inline: contain;
+}
+.attendance-records-table .ant-pro-table-list-toolbar-container,
+.attendance-records-table .ant-pro-table-list-toolbar-right {
+  flex-wrap: wrap;
+}
 .attendance-context-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 16px; }
 .attendance-context-grid label { display: grid; gap: 6px; color: #344054; font-weight: 600; }
-.attendance-state { min-height: 160px; display: grid; place-items: center; color: #475467; }
+.import-template-action, .import-preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.import-template-action h5.ant-typography { margin: 0 0 4px; }
+.import-scope-summary {
+  overflow: hidden;
+  border: 1px solid #dce6ef;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.import-scope-heading { padding: 18px 20px 14px; border-bottom: 1px solid #e4ebf1; }
+.import-scope-heading h5.ant-typography { margin: 0 0 4px; }
+.import-scope-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.import-scope-item { min-width: 0; padding: 15px 20px; display: grid; gap: 6px; border-bottom: 1px solid #e4ebf1; }
+.import-scope-item:nth-child(odd) { border-right: 1px solid #e4ebf1; }
+.import-scope-item:nth-last-child(-n + 2) { border-bottom: 0; }
+.import-scope-item > span { color: #667085; font-size: 12px; line-height: 1.5; }
+.import-scope-item > strong { color: #182230; font-size: 14px; line-height: 32px; }
+.import-scope-department .ant-select { width: 100%; }
+.import-preview-row-invalid > td { background: #fff7f6 !important; }
 @media (max-width: 900px) { .attendance-context-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .attendance-page-heading { align-items: flex-start; flex-direction: column; } .attendance-context-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .attendance-page-heading, .import-template-action, .import-preview-toolbar { align-items: flex-start; flex-direction: column; } .attendance-context-grid, .import-scope-grid { grid-template-columns: 1fr; } .import-scope-item, .import-scope-item:nth-child(odd), .import-scope-item:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid #e4ebf1; } .import-scope-item:last-child { border-bottom: 0; } }
 .admin-sider {
   position: sticky !important;
   inset-block-start: 0;
@@ -290,7 +335,9 @@ body {
   font-size: 11px;
 }
 .admin-content {
+  min-width: 0;
   padding: 30px;
+  overflow-x: hidden;
 }
 .admin-page {
   width: min(1380px, 100%);
@@ -416,6 +463,29 @@ body {
 .dashboard-lower {
   margin-top: 18px;
 }
+.workbench-page,
+.embedded-admin-dashboard {
+	width: min(1480px, 100%);
+	margin-inline: auto;
+}
+.workbench-hero { margin-bottom: 18px; }
+.workbench-stats .ant-card { min-height: 154px; }
+.workbench-stats .ant-typography { display: block; margin-top: 12px; font-size: 13px; }
+.workbench-section-heading {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 16px;
+	margin: 28px 0 14px;
+}
+.workbench-section-heading h3.ant-typography { margin: 0 0 3px; color: #173b5f; }
+.department-progress-card { height: 100%; border: 1px solid #dfe7ef; box-shadow: 0 10px 26px rgba(42, 70, 98, .05); }
+.department-progress-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.department-progress-heading h4.ant-typography { margin: 8px 0 14px; color: #173b5f; }
+.department-progress-counts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; color: #71869a; font-size: 13px; }
+.department-progress-counts strong { color: #183651; font-size: 16px; }
+.department-progress-action { margin: 12px 0 -8px -15px; }
+.embedded-admin-dashboard { margin-top: 34px; padding-top: 4px; border-top: 1px solid #dce5ed; }
 .setup-list > div {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
@@ -486,9 +556,59 @@ body {
 .skip-link:focus-visible { transform: translateY(0); }
 .dictionary-grid {
   display: grid;
-  grid-template-columns: minmax(360px, .9fr) minmax(520px, 1.4fr);
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr);
   gap: 18px;
   align-items: start;
+}
+.dictionary-grid > .ant-card,
+.dictionary-grid .ant-card-body,
+.dictionary-grid .ant-pro-card,
+.dictionary-grid .ant-pro-card-body,
+.dictionary-grid .ant-table-wrapper {
+  min-width: 0;
+  max-width: 100%;
+}
+.dictionary-grid .ant-table-content {
+  overflow-x: auto !important;
+  overscroll-behavior-inline: contain;
+}
+.master-data-workspace > .ant-card-body {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  min-height: 620px;
+}
+.master-data-navigation {
+  padding: 14px 10px;
+  border-inline-end: 1px solid #e7edf2;
+  background: #f8fafc;
+}
+.master-data-navigation .ant-menu {
+  border-inline-end: 0 !important;
+  background: transparent;
+}
+.master-data-navigation .ant-menu-item-group-title {
+  padding-block: 14px 6px;
+  color: #718397;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .08em;
+}
+.master-data-table-panel {
+  min-width: 0;
+  padding: 6px 18px 18px;
+}
+.course-schedule-list {
+  display: grid;
+  gap: 12px;
+}
+.course-schedule-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.course-schedule-list .ant-card-body {
+  padding-block-end: 4px;
 }
 .selected-table-row > td { background: #eaf4ff !important; }
 .history-entry + .history-entry { margin-block-start: 16px; }
@@ -512,6 +632,32 @@ body {
   .setup-list > div > .ant-btn { grid-column: 2; justify-self: start; }
   .profile-summary { grid-template-columns: auto 1fr; }
   .profile-summary > .ant-btn { grid-column: 1 / -1; }
+  .attendance-records-table .ant-pro-table-list-toolbar-container {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .attendance-records-table .ant-pro-table-list-toolbar-left,
+  .attendance-records-table .ant-pro-table-list-toolbar-right {
+    width: 100%;
+    min-width: 0;
+  }
+  .attendance-records-table .ant-pro-table-list-toolbar-right {
+    justify-content: space-between;
+  }
+  .attendance-records-table .ant-pagination {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .master-data-workspace > .ant-card-body { grid-template-columns: 1fr; }
+  .master-data-navigation {
+    overflow-x: auto;
+    border-inline-end: 0;
+    border-block-end: 1px solid #e7edf2;
+  }
+  .master-data-navigation .ant-menu { min-width: 680px; }
+  .master-data-table-panel { padding-inline: 10px; }
+  .course-schedule-heading { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 900px) {
   .auth-page {

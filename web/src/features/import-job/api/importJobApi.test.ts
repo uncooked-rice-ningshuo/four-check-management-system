@@ -20,9 +20,9 @@ describe('importJobApi', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [], total: 0, page: 3, pageSize: 10 }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ batchId: 'batch-1', status: 'CONFIRMED', importedRows: 2, version: 4 }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
-    await importJobApi.rows('batch-1', 3, 10)
+    await importJobApi.rows('batch-1', 3, 10, 'INVALID')
     await importJobApi.confirm('batch-1', 3, 'confirm-key')
-    expect(fetchMock.mock.calls[0][0]).toContain('/imports/batch-1/rows?page=3&pageSize=10')
+    expect(fetchMock.mock.calls[0][0]).toContain('/imports/batch-1/rows?page=3&pageSize=10&validationStatus=INVALID')
     const confirmInit = fetchMock.mock.calls[1][1] as RequestInit
     expect(new Headers(confirmInit.headers).get('Idempotency-Key')).toBe('confirm-key')
     expect(JSON.parse(confirmInit.body as string)).toEqual({ version: 3 })

@@ -26,10 +26,23 @@ export const getPermissionRules = (accountId: string) => apiRequest<PermissionRu
 export const createPermissionRule = (accountId: string, input: Omit<PermissionRule, 'id' | 'accountId' | 'sourceType' | 'enabled'>) => apiRequest<PermissionRule>(`/admin/users/${accountId}/permission-rules`, { method: 'POST', body: JSON.stringify(input) })
 export const updatePermissionRule = (input: PermissionRule) => apiRequest<PermissionRule>(`/admin/users/${input.accountId}/permission-rules/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const deletePermissionRule = (accountId: string, ruleId: string) => apiRequest<void>(`/admin/users/${accountId}/permission-rules/${ruleId}`, { method: 'DELETE' })
-export const getMasterData = (kind: MasterDataKind, params: { keyword?: string; enabled?: boolean; page?: number; pageSize?: number } = {}) => {
+export type MasterDataListParams = Partial<Pick<MasterDataRecord,
+  'facultyId' | 'majorId' | 'headTeacherId' | 'teacherId' | 'classId' | 'dormitoryId' | 'classroomId' |
+  'gradeId' | 'gender' | 'enrollmentStatus' | 'campusArea' | 'buildingNo' | 'dormitoryAreaId' | 'dormitoryBuildingId' | 'teachingBuildingId'>> & {
+  keyword?: string
+  code?: string
+  name?: string
+  enabled?: boolean
+  semesterId?: string
+  page?: number
+  pageSize?: number
+}
+
+export const getMasterData = (kind: MasterDataKind, params: MasterDataListParams = {}) => {
   const query = new URLSearchParams()
-  if (params.keyword) query.set('keyword', params.keyword)
-  if (params.enabled !== undefined) query.set('enabled', String(params.enabled))
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, String(value))
+  })
   query.set('page', String(params.page ?? 1))
   query.set('pageSize', String(params.pageSize ?? 20))
   return apiRequest<MasterDataPage>(`/admin/master-data/${kind}?${query}`)

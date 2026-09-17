@@ -160,16 +160,20 @@ stateDiagram-v2
 - `semesters(id, academic_year_id, code, name, start_date, end_date, status)`
 - `semester_weeks(id, semester_id, week_no, start_date, end_date, enabled)`；唯一键 `(semester_id, week_no)`，日期范围不得交叉。
 - `system_settings(key, value_json, updated_by)`；临时工作周次覆盖存配置并记录审计。
-- `faculties(id, code, name)`、`majors(id, faculty_id, code, name)`
+- `faculties(id, name)`、`grades(id, name)`、`majors(id, faculty_id, name)`
 - `staff(id, employee_no, name, gender, phone_ciphertext, faculty_id, enabled)`
-- `classes(id, code, name, grade, faculty_id, major_id, head_teacher_id, expected_size, enabled)`
-- `dormitories(id, campus_area, building_no, room_no, enabled)`；唯一键 `(campus_area, building_no, room_no)`
-- `students(id, student_no, name, id_card_ciphertext, id_card_hash, gender, phone_ciphertext, grade, faculty_id, major_id, class_id, dormitory_id, status)`
+- `classes(id, name, grade_id, faculty_id, major_id, head_teacher_id, expected_size, enabled)`
+- `dormitory_areas(id, name)`、`dormitory_buildings(id, dormitory_area_id, name)`、`dormitories(id, dormitory_building_id, room_no, enabled)`；宿舍唯一键为 `(dormitory_building_id, room_no)`
+- `students(id, student_no, name, id_card_ciphertext, id_card_hash, gender, phone_ciphertext, grade_id, faculty_id, major_id, class_id, dormitory_id, status)`
 - `class_enrollments(id, student_id, class_id, start_date, end_date)`，保留转班历史。
-- `courses(id, code, name, teacher_id, enabled)`
-- `course_schedules(id, course_id, semester_id, class_id, classroom_id, weekday, start_section, end_section, valid_from, valid_to)`
-- `classrooms(id, building, room_no, floor, enabled)`
+- `courses(id, name, teacher_id, enabled)`、`course_classes(course_id, class_id)`；课程名称全局唯一，一门课程可关联多个共同授课班级。
+- `course_schedules(id, course_id, semester_id, classroom_id, weekday, start_section, end_section)`；星期取 1–7，节次取 1–10，结束节次不得早于开始节次，同一课程的排课时段由应用校验与 PostgreSQL 排斥约束共同保证不重叠，每节课按 45 分钟展示。
+- `teaching_buildings(id, name, enabled)`、`classrooms(id, teaching_building_id, room_no, enabled)`；教室唯一键为 `(teaching_building_id, room_no)`，不维护楼层字段。
 - `dictionary_types`、`dictionary_items` 只承载可配置展示项；部门、角色、检查类型等有业务关系的数据不得仅作为字典项。
+
+以上基础数据的 `id` 均由后端生成并持久化，前端不得要求管理员填写技术标识或院系/专业/班级/课程等人工编码。`student_no`、`employee_no`、`room_no` 和教室的楼宇/房间信息是现实业务标识，不属于技术主键。下拉选择统一提交 UUID、展示完整名称；检查记录继续保存名称和年级快照，避免基础数据变化影响历史结果。
+
+基础数据列表应解析并展示必要的业务关系名称，而非只显示本表名称或关联 ID。专业展示院系，班级展示年级/院系/专业/班主任，学生展示年级/院系/专业/班级/宿舍，课程展示教师/班级/排课。宿舍层级的展示名称在查询结果关联层完成拼接：宿舍楼为“宿舍区 + 宿舍楼”，宿舍为“宿舍区 + 宿舍楼 + 宿舍号”；教学楼独立维护，教室展示为“教学楼名称 + 教室号”。持久化分别保存外键与房间号，不冗余保存拼接文本。
 
 ### 4.4 检查业务表
 
@@ -370,7 +374,7 @@ web/src/
 │   └── router/                  # 路由表、ProtectedRoute、权限路由守卫
 ├── pages/                       # 路由级页面，只负责页面编排
 │   ├── auth/                    # 登录、注册、注册结果
-│   └── home/                    # 工作台/当前阶段占位页
+│   └── home/                    # 统一工作台页面编排
 ├── features/                    # 可独立复用的业务用例和业务规则
 │   └── auth/model/              # 登录注册校验等认证规则，不放页面和 HTTP 基础设施
 ├── entities/                    # 领域 UI 模型及实体级展示能力
@@ -575,7 +579,7 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 4. 滚动或短暂停机部署 API/Worker/Web。
 5. 执行 `/health/live`、`/health/ready` 和核心冒烟测试。
 
-数据库迁移使用 golang-migrate/Goose，每次迁移有明确回滚策略。结构性破坏变更使用“扩展—迁移数据—切换—清理”方式，避免新旧版本不兼容。
+生产数据库迁移应使用 golang-migrate/Goose，每次迁移有明确回滚策略。当前本地 Compose 引导脚本通过 `schema_migrations` 对 SQL 文件逐个记账并在单事务中执行，避免容器重启时重复重放。结构性破坏变更使用“扩展—迁移数据—切换—清理”方式；迁移 `009` 原位回填年级 UUID 和课程班级关系，并把无法可靠自动转换的旧排课文本保存到迁移待办表，禁止通过清空业务数据或变更历史绕过数据转换。
 
 ## 12. 测试方案
 
@@ -657,7 +661,7 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 - 统一检查主表、七类扩展表、手工录入。
 - Excel 模板、校验预览、确认导入、回滚。
 - 部门提交、审核、退回和状态看板。
-- 交付独立于 `/admin` 的普通用户应用外壳和角色化工作台，按有效 RBAC + ABAC 权限展示当前学年/学期/周次、临时周覆盖、我的待办、本部门业务状态和检查快捷入口。
+- 交付普通用户与管理员共用的应用外壳、单一权限侧边栏和统一工作台，按有效 RBAC + ABAC 权限展示当前学年/学期/周次、临时周覆盖、我的待办、本部门业务状态和检查快捷入口。
 - 阶段 2 工作台只展示检查与部门工作流信息；待生成通报、待通报审核、待定稿和完整全院通报进度属于阶段 3，不得提前伪实现。
 - 阶段 2 完成必须通过[完整阶段 2 实施主计划与总体验收矩阵](./2026-08-30-phase-two-completion-implementation.md)；仅完成[工作流 A：通用导入框架 + 到课率第一增量](./2026-08-30-attendance-import-implementation.md)不代表阶段 2 完成。
 
@@ -701,3 +705,50 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 - 文件下载不可通过猜测 ID 越权访问。
 - 1 万条以内常规列表查询在目标服务器上 2 秒内返回。
 - PostgreSQL 与文件存储可以从备份联合恢复，并能打开抽检的定稿文件。
+
+## 2026-09-06 已确认实现同步
+
+统一首页为 `/`，名称为“工作台”；`/admin` 经管理守卫后重定向到首页，具体管理路由继续独立鉴权。复用 `HomePage`、`AdminDashboardPage` 与 `PhaseTwoDashboard`，不另建第二操作空间。
+
+当前受保护接口为 `GET /api/v1/dashboard/workbench`，返回 `context`、`myTodos`、`departmentStatuses`。个人待办以创建人和有效查看范围过滤，仅计 DRAFT、RETURNED；部门整体仅向拥有该部门/检查类型完整查看范围的账号展示，局部授权或局部拒绝不能以部分计数冒充整体。聚合范围下推 SQL。当前聚合来自检查记录，部门提交状态机尚未实现，后续需补联动验收。
+
+列表部门筛选为空表示全部有效权限范围；超级管理员无需部门身份绑定。导入批次仍归属一个部门，在抽屉内选择目标部门，由后端重新鉴权。外层展示筛选不得成为新增或导入授权门禁。详见[交接记录](./2026-09-06-project-handover.md)。
+
+### 到课率手工创建增量
+
+新增受保护的 `POST /api/v1/inspections/attendance`，由 `inspection.ManualService` 编排有效权限、学期周次、部门类型配置、复用的到课率字段校验及审计。现有 `AttendanceAdapter` 通过手工输入适配方法复用 XLSX 校验，不创建文件或导入批次。PostgreSQL 在同一事务中锁定并复核相关基础数据/排课、写入 MANUAL/DRAFT 主记录、扩展明细与 INSPECTION_RECORD_CREATED 审计，沿用有效记录唯一索引阻止重复。前端新增表单位于 `features/attendance/ui`，经 mutation hook 与统一 HTTP Client 提交；成功后刷新检查列表与工作台。
+
+
+## 2026-09-06 到课率记录管理增量
+
+用户已确认独立 `INSPECTION_MANAGE`。本人草稿由录入权或管理权授权，他人草稿由管理权授权；每项动作的 ALLOW/DENY 与七维范围独立计算。部门部长/副部长从允许录入的部门类型映射取得默认管理权，普通成员不默认取得。管理权不替代创建动作的录入权。
+
+`MutationService` 复用手工录入字段校验，分别检查原范围和目标范围；PostgreSQL 按范围读取、锁定记录，复核 DRAFT、无提交/通报关联及版本，原子更新或软删除。编辑排除自身重复键并保留来源、创建人及导入关联；批量稳定排序加锁、全部校验后执行，审计失败回滚。接口、请求及稳定错误码见 README；本次不新增迁移，仅覆盖到课率未提交草稿。
+
+
+## 2026-09-06 七类字段核对状态
+
+[字段核对稿](./2026-09-06-seven-inspection-field-review.md)已补参考模板表头和公共区 Word 证据。用户已确认到课率/无机课堂共用扩展表、早锻炼与早签不分类型、卫生对象级记录与责任关联、重复报错和复查时间/轮次。本文既有扩展表示意未包含公共宿舍卫生，不应视为完整可执行迁移清单；实施计划已统一为新增五张业务扩展表，七类共用六张业务扩展表。现阶段不创建新迁移，不改变现有到课率行为。
+
+
+七类目录已落于 `server/internal/inspection/catalog.json`（Go 嵌入读取）与 `web/src/entities/inspection/model/types.ts`（测试保证一致）。字段元数据与实际校验器分离，模板版本 1 对六类新业务仅为 PLANNED；只有到课率声明当前可用动作。卫生时间/轮次、区域和责任关联的数据库结构在下一增量追加，当前目录不改变权限或 SQL 读写行为。
+
+## 2026-09-06 物理结构增量：012
+
+已追加五张业务扩展表，与 attendance_details 合计六张；新增两张卫生区域表及责任班级/学生/寝室关联表。主表 occurrence_kind 为 TIME、DATE 或 ROUND：分别存 occurred_at、inspection_date、inspection_date + inspection_round，三种形态互斥。旧记录保持 TIME；早锻炼 DATE，课程与晚归 TIME，卫生 TIME/ROUND。卫生使用独立多责任关系，主表 student_id/class_id 为空；责任范围后续必须编译进查询 SQL。
+
+卫生结果互斥，不合格原因必填；violation_count 为不合格 1、优秀/合格 0，提交事务时验证结果/计数及至少一个责任班级。学生责任引用本记录责任班级，快照不随转班改变。新关联限制物理删除，软删除保留历史。既有有效 dedup_key 唯一索引继续有效；自然键构造、当前归属、周日期和完整聚合校验由后续应用服务负责。具体迁移与验证见交接记录，新增六类 API 尚未开放。
+
+### Task 3 校验边界（2026-09-06）
+
+新增 inspection.ValidateDetails 与七类明确模型，目录描述字段通用约束，领域校验负责形态、跨字段不变量、周日期及自然键。原始 JSON 仅在领域输入边界使用 RawMessage，拒绝重复成员和未知字段，后续 Repository 消费具体结构。DetailContext 是服务端已解析的周/类型上下文，不是授权凭证。所有数据库引用/字典启用与关系校验、责任范围 SQL、乐观锁、审计及聚合事务仍由 Application Service 与 Repository 落实。领域错误只输出安全路径/代码，不回显输入；新类型 API 暂未开放。
+
+### Task 4/5 服务落地（2026-09-06）
+
+七类统一 CRUD 现由 RecordService 编排 InspectionTransaction，Postgres 实现配置/引用锁定、完整聚合持久化、范围 SQL、版本及审计。详情与列表使用一致快照；卫生 SQL 对所有责任班级逐项判权，不暴露部分授权聚合。未提交草稿允许本人 ENTER / 他人 MANAGE，编辑验证原与目标范围，批删按固定顺序锁定并全部校验；各动作 DENY 独立。审计失败导致全部回滚。
+
+详见 [API 契约](./2026-09-06-inspection-api-contract.md)，包括到课率专用路径兼容、原因字典命名、区域依赖及字段/权限边界。其余类型 API 已接通，页面/Excel/部门流程未随此增量开放。历史“新增六类 API 尚未开放”描述由本条更新。
+
+### Task 6/7 落地（2026-09-07）
+
+统一外壳、工作台根路由及既有页面归属保留，导航/路由扣除完全覆盖动作授权的 DENY。临时工作周已通过 013 的 system_settings 实现；沿用现有校历管理权限，全局生效，明确 expiresAt、乐观版本及审计事务。到期或目标/父级停用时回退，当前无教学周返回空值。默认周次与工作台共用服务器解析；前端周期刷新仅使相应缓存失效，不覆盖已打开表单。[完整契约](./2026-09-07-navigation-work-context.md)。

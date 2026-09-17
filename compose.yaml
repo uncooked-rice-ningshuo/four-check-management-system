@@ -23,7 +23,8 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:-local_dev_password}
     volumes:
       - ./server/migrations:/migrations:ro
-    command: ["sh", "-c", "for file in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f \"$$file\"; done"]
+      - ./server/scripts/migrate.sh:/migrate.sh:ro
+    command: ["sh", "/migrate.sh"]
     depends_on:
       postgres:
         condition: service_healthy

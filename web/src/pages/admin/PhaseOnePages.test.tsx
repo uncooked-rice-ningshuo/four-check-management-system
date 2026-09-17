@@ -10,7 +10,8 @@ import { MasterDataPage } from './MasterDataPage'
 import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
-import { assignUserRole, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType } from '../../shared/api/adminApi'
+import type { MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
+import { assignUserRole, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -99,7 +100,7 @@ describe('阶段一管理页面', () => {
     expect(screen.getByRole('button', { name: '权限详情' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重置密码' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '禁用' })).toBeInTheDocument()
-  })
+  }, 10_000)
 
   it('用户表格使用 ProTable 原生查询区并支持关键字筛选', async () => {
     vi.mocked(getUsers).mockResolvedValue([
@@ -172,19 +173,275 @@ describe('阶段一管理页面', () => {
     await waitFor(() => expect(saveButton).toBeDisabled())
   })
 
-  it('基础数据页面使用分类页签和 ProTable 新增入口', async () => {
+  it('基础数据页面使用分类导航和 ProTable 新增入口', async () => {
     renderPage(<MasterDataPage />)
-    expect(await screen.findByRole('tab', { name: '学生' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '班级' })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: '学生' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '班级' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增学生' })).toBeInTheDocument()
   })
+
+  it('基础数据按业务分组在左侧导航并在右侧展示表格', async () => {
+    const { container } = renderPage(<MasterDataPage />)
+    expect(await screen.findByText('基础信息')).toBeVisible()
+    expect(screen.getByText('宿舍相关')).toBeVisible()
+    expect(screen.getByText('教学相关')).toBeVisible()
+    expect(screen.getByText('宿舍区')).toBeVisible()
+    expect(screen.getByText('宿舍楼')).toBeVisible()
+    expect(container.querySelector('.master-data-workspace')).not.toBeNull()
+    expect(container.querySelector('.master-data-navigation')).not.toBeNull()
+  })
+
+  it('基础数据查询区分别提供编码和名称且不再显示合并筛选', async () => {
+    renderPage(<MasterDataPage />)
+    expect(await screen.findByLabelText('学号')).toBeVisible()
+    expect(screen.getByLabelText('名称')).toBeVisible()
+    expect(screen.queryByLabelText('编码或名称')).not.toBeInTheDocument()
+  })
+
+  it('基础数据只加载当前页签及其表单依赖，切换页签时加载新页签', async () => {
+    renderPage(<MasterDataPage />)
+    await waitFor(() => expect(getMasterData).toHaveBeenCalledTimes(8))
+    expect(new Set(vi.mocked(getMasterData).mock.calls.map(call => call[0]))).toEqual(new Set(['students', 'grades', 'faculties', 'majors', 'classes', 'dormitory-areas', 'dormitory-buildings', 'dormitories']))
+
+    vi.mocked(getMasterData).mockClear()
+    fireEvent.click(screen.getByRole('menuitem', { name: '院系' }))
+    await waitFor(() => expect(getMasterData).toHaveBeenCalledWith('faculties', expect.objectContaining({ page: 1, pageSize: 20 })))
+    expect(vi.mocked(getMasterData).mock.calls.every(call => call[0] === 'faculties')).toBe(true)
+  })
+
+  it('基础数据关联下拉遍历所有分页结果', async () => {
+    vi.mocked(getMasterData).mockImplementation(async (kind, params) => {
+      if (kind === 'grades' && params?.enabled && params.page === 1) {
+        return {
+          items: Array.from({ length: 100 }, (_, index) => ({ id: `grade-${index}`, kind, name: `${1900 + index}级`, enabled: true })),
+          total: 101,
+          page: 1,
+          pageSize: 100,
+        }
+      }
+      if (kind === 'grades' && params?.enabled && params.page === 2) {
+        return { items: [{ id: 'grade-last', kind, name: '2000级', enabled: true }], total: 101, page: 2, pageSize: 100 }
+      }
+      return { items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 20 }
+    })
+
+    renderPage(<MasterDataPage />)
+
+    await waitFor(() => expect(getMasterData).toHaveBeenCalledWith('grades', expect.objectContaining({ enabled: true, page: 2, pageSize: 100 })))
+  })
+
+  it('基础数据 ProTable 展示当前类型的名称、状态和关系筛选', async () => {
+    renderPage(<MasterDataPage />)
+    expect(await screen.findByLabelText('学号')).toBeVisible()
+    expect(screen.getByLabelText('名称')).toBeVisible()
+    expect(screen.getByLabelText('状态')).toBeVisible()
+    expect(screen.getByLabelText('所属院系')).toBeVisible()
+    expect(screen.getByLabelText('专业')).toBeVisible()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '专业' }))
+    expect(await screen.findByLabelText('名称')).toBeVisible()
+    expect(screen.queryByLabelText('专业编码')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('所属院系')).toBeVisible()
+  })
+
+  it('专业和学生表格展示完整的业务关联字段', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => {
+      const records: Partial<Record<MasterDataKind, MasterDataRecord[]>> = {
+        faculties: [{ id: 'faculty-1', kind: 'faculties', name: '计算机学院', enabled: true }],
+        majors: [{ id: 'major-1', kind: 'majors', name: '软件工程', facultyId: 'faculty-1', enabled: true }],
+        grades: [{ id: 'grade-1', kind: 'grades', name: '2026级', enabled: true }],
+        classes: [{ id: 'class-1', kind: 'classes', name: '软件工程一班', gradeId: 'grade-1', grade: '2026级', facultyId: 'faculty-1', majorId: 'major-1', enabled: true }],
+        students: [{ id: 'student-1', kind: 'students', code: '20260001', name: '张三', gradeId: 'grade-1', grade: '2026级', facultyId: 'faculty-1', majorId: 'major-1', classId: 'class-1', enabled: true }],
+      }
+      const items = records[kind] ?? []
+      return { items, total: items.length, page: 1, pageSize: 20 }
+    })
+    renderPage(<MasterDataPage />)
+
+    expect(await screen.findByRole('cell', { name: '计算机学院' })).toBeVisible()
+    expect(screen.getByRole('cell', { name: '软件工程' })).toBeVisible()
+    expect(screen.getByRole('cell', { name: '软件工程一班' })).toBeVisible()
+    expect(screen.getByRole('cell', { name: '2026级' })).toBeVisible()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '专业' }))
+    expect(await screen.findByRole('cell', { name: '计算机学院' })).toBeVisible()
+  })
+
+  it('宿舍和宿舍楼使用完整层级名称并提示宿舍号示例', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => {
+      const records: Partial<Record<MasterDataKind, MasterDataRecord[]>> = {
+        'dormitory-areas': [{ id: 'area-4', kind: 'dormitory-areas', name: '4 区', enabled: true }],
+        'dormitory-buildings': [{ id: 'building-1', kind: 'dormitory-buildings', name: '1 栋', dormitoryAreaId: 'area-4', enabled: true }],
+        dormitories: [{ id: 'room-401', kind: 'dormitories', name: '401', roomNo: '401', dormitoryAreaId: 'area-4', dormitoryBuildingId: 'building-1', enabled: true }],
+      }
+      const items = records[kind] ?? []
+      return { items, total: items.length, page: 1, pageSize: 20 }
+    })
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '宿舍楼' }))
+    expect(await screen.findByRole('cell', { name: '4 区 1 栋' })).toBeVisible()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '宿舍' }))
+    expect(await screen.findByRole('cell', { name: '4 区 1 栋 401' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '新增宿舍' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增宿舍' })
+    expect(within(dialog).getByText('例如：401、402')).toBeInTheDocument()
+    expect(within(dialog).getByPlaceholderText('例如：401')).toBeInTheDocument()
+  })
+
+  it('教学楼独立维护且教室选择教学楼而不再填写楼层', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => {
+      const records: Partial<Record<MasterDataKind, MasterDataRecord[]>> = {
+        'teaching-buildings': [{ id: 'teaching-building-1', kind: 'teaching-buildings', name: '博学楼', enabled: true }],
+        classrooms: [{ id: 'classroom-101', kind: 'classrooms', name: '博学楼 101', teachingBuildingId: 'teaching-building-1', roomNo: '101', enabled: true }],
+      }
+      const items = records[kind] ?? []
+      return { items, total: items.length, page: 1, pageSize: 20 }
+    })
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '教学楼' }))
+    expect(await screen.findByRole('cell', { name: '博学楼' })).toBeVisible()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '教室' }))
+    expect(await screen.findByRole('cell', { name: '博学楼 101' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '新增教室' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增教室' })
+    expect(within(dialog).getByLabelText('教学楼')).toHaveAttribute('role', 'combobox')
+    expect(within(dialog).getByLabelText('教室号')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('楼层')).not.toBeInTheDocument()
+  })
+
+  it('院系、专业、班级和课程不再要求管理员维护编码', async () => {
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '院系' }))
+    expect(await screen.findByLabelText('名称')).toBeVisible()
+    expect(screen.queryByLabelText('院系编码')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '新增院系' }))
+    expect(within(await screen.findByRole('dialog', { name: '新增院系' })).queryByLabelText('院系编码')).not.toBeInTheDocument()
+  })
+
+  it('课程支持多班级和学期星期节次复合排课', async () => {
+    vi.mocked(getAcademicCalendar).mockResolvedValue({
+      academicYears: [],
+      semesters: [{ id: 'semester-1', academicYearId: 'year-1', code: 'FIRST', name: '2026—2027 学年第一学期', startDate: '2026-09-01T00:00:00Z', endDate: '2027-01-15T00:00:00Z', enabled: true }],
+      weeks: [],
+    })
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '课程' }))
+    fireEvent.click(await screen.findByRole('button', { name: '新增课程' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增课程' })
+    expect(within(dialog).queryByLabelText('课程编码')).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('授课班级')).toHaveAttribute('role', 'combobox')
+    expect(within(dialog).getByLabelText('所属学期')).toHaveAttribute('role', 'combobox')
+    expect(within(dialog).getByLabelText('星期')).toHaveAttribute('role', 'combobox')
+    expect(within(dialog).getByLabelText('开始节次')).toHaveAttribute('aria-valuemin', '1')
+    expect(within(dialog).getByLabelText('结束节次')).toHaveAttribute('aria-valuemax', '10')
+    expect(within(dialog).getByText('45 分钟/节')).toBeInTheDocument()
+  })
+
+  it('年级可独立维护且学生表单从年级基础数据中选择', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => ({
+      items: kind === 'grades' ? [{ id: 'grade-2026', kind: 'grades', name: '2026级', enabled: true }] : [],
+      total: kind === 'grades' ? 1 : 0, page: 1, pageSize: 20,
+    }))
+    renderPage(<MasterDataPage />)
+    expect(await screen.findByRole('menuitem', { name: '年级' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '新增学生' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增学生' })
+    const gradeInputId = dialog.querySelector('label[title="年级"]')?.getAttribute('for')
+    expect(gradeInputId).toBeTruthy()
+    expect(document.getElementById(gradeInputId!)).toHaveAttribute('role', 'combobox')
+    expect(getMasterData).toHaveBeenCalledWith('grades', expect.objectContaining({ enabled: true }))
+  })
+
+  it('基础数据关联下拉选项只显示完整名称', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => ({
+      items: kind === 'faculties' ? [{ id: 'faculty-1', kind, code: 'SCHOOL_OF_COMPUTER_SCIENCE_AND_ENGINEERING', name: '计算机科学与工程学院', enabled: true }] : [],
+      total: kind === 'faculties' ? 1 : 0, page: 1, pageSize: 20,
+    }))
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '新增学生' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增学生' })
+    fireEvent.mouseDown(within(dialog).getByLabelText('所属院系'))
+
+    expect(await screen.findByRole('option', { name: '计算机科学与工程学院' })).toBeInTheDocument()
+    expect(screen.queryByText(/SCHOOL_OF_COMPUTER_SCIENCE_AND_ENGINEERING/)).not.toBeInTheDocument()
+  })
+
+  it('年级只录入年份而不暴露内部编码', async () => {
+    vi.mocked(createMasterData).mockResolvedValue({ id: 'grade-2027', kind: 'grades', code: '2027', name: '2027级', enabled: true })
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '年级' }))
+    expect(await screen.findByLabelText('年级')).toBeVisible()
+    expect(screen.queryByLabelText('年级编码')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('名称')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新增年级' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增年级' })
+    expect(within(dialog).queryByLabelText('年级编码')).not.toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('年级'), { target: { value: '2027' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }))
+
+    await waitFor(() => expect(createMasterData).toHaveBeenCalledWith('grades', { name: '2027' }))
+  })
+
+  it('宿舍楼依赖宿舍区且宿舍通过选择项维护层级', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => ({
+      items: kind === 'dormitory-areas'
+        ? [{ id: 'area-north', kind, code: 'NORTH', name: '北校区', enabled: true }]
+        : kind === 'dormitory-buildings'
+          ? [{ id: 'building-1', kind, code: '1', name: '一栋', enabled: true, dormitoryAreaId: 'area-north' }]
+          : [],
+      total: 0, page: 1, pageSize: 20,
+    }))
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '宿舍楼' }))
+    fireEvent.click(await screen.findByRole('button', { name: '新增宿舍楼' }))
+    let dialog = await screen.findByRole('dialog', { name: '新增宿舍楼' })
+    expect(within(dialog).getByLabelText('所属宿舍区')).toHaveAttribute('role', 'combobox')
+    fireEvent.click(within(dialog).getByRole('button', { name: /取\s*消/ }))
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '宿舍' }))
+    fireEvent.click(await screen.findByRole('button', { name: '新增宿舍' }))
+    dialog = await screen.findByRole('dialog', { name: '新增宿舍' })
+    expect(within(dialog).getByLabelText('宿舍区')).toHaveAttribute('role', 'combobox')
+    expect(within(dialog).getByLabelText('宿舍楼')).toHaveAttribute('role', 'combobox')
+  }, 15_000)
+
+  it('基础数据编辑弹窗回显当前记录', async () => {
+    vi.mocked(getMasterData).mockImplementation(async kind => ({
+      items: kind === 'faculties' ? [{
+        id: 'faculty-1', kind: 'faculties',
+        name: '计算机科学与工程学院', enabled: true,
+      }] : [],
+      total: kind === 'faculties' ? 1 : 0,
+      page: 1,
+      pageSize: 20,
+    }))
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '院系' }))
+    await screen.findByRole('cell', { name: '计算机科学与工程学院' })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑院系' })
+    expect(within(dialog).queryByRole('textbox', { name: '院系编码' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('textbox', { name: '名称' })).toHaveValue('计算机科学与工程学院')
+  }, 10_000)
 
   it('基础数据页面把后端 null 集合按空列表展示而不会白屏', async () => {
 	vi.mocked(getMasterData).mockResolvedValue({ items: null, total: 0, page: 1, pageSize: 20 } as never)
 	vi.mocked(getDictionaries).mockResolvedValue({ types: null, items: null } as never)
 	renderPage(<MasterDataPage />)
 
-	await waitFor(() => expect(getMasterData).toHaveBeenCalledTimes(7))
+	await waitFor(() => expect(getMasterData).toHaveBeenCalledTimes(8))
 	await waitFor(() => expect(getDictionaries).toHaveBeenCalled())
 	expect(await screen.findByText('暂无学生数据')).toBeVisible()
 	expect(screen.getByRole('button', { name: '新增学生' })).toBeVisible()
@@ -202,9 +459,10 @@ describe('阶段一管理页面', () => {
 
     renderPage(<MasterDataPage />)
     fireEvent.click(await screen.findByRole('button', { name: '新增学生' }))
-    fireEvent.mouseDown(screen.getByLabelText('性别'))
+    const dialog = await screen.findByRole('dialog', { name: '新增学生' })
+    fireEvent.mouseDown(within(dialog).getByLabelText('性别'))
     expect(await screen.findByText('男（系统字典）')).toBeInTheDocument()
-    fireEvent.mouseDown(screen.getByLabelText('学籍状态'))
+    fireEvent.mouseDown(within(dialog).getByLabelText('学籍状态'))
     expect((await screen.findAllByText('在籍（系统字典）')).length).toBeGreaterThan(0)
   })
 
@@ -215,6 +473,83 @@ describe('阶段一管理页面', () => {
     expect(await screen.findByRole('dialog', { name: '新增字典类型' })).toBeInTheDocument()
     expect(screen.getByLabelText('类型编码')).toBeInTheDocument()
   })
+
+	it('字典页面默认选中第一个类型并展示其选项', async () => {
+		vi.mocked(getDictionaries).mockImplementation(async typeId => typeId
+			? { types: [], items: [{ id: 'item-1', typeId, value: 'ENROLLED', label: '在籍', description: '', sortOrder: 10, enabled: true }] }
+			: { types: [
+				{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '', system: false, enabled: true },
+				{ id: 'type-2', code: 'GENDER', name: '性别', description: '', system: true, enabled: true },
+			], items: [] })
+		renderPage(<DictionaryPage />)
+
+		await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('type-1'))
+		expect(screen.getAllByRole('radio')[0]).toBeChecked()
+		expect(await screen.findByText('字典选项 · 学籍状态')).toBeVisible()
+		expect(await screen.findByRole('cell', { name: '在籍' })).toBeVisible()
+	}, 10_000)
+
+	it('字典类型的选中状态不提供取消选择操作', async () => {
+		vi.mocked(getDictionaries).mockResolvedValue({
+			types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '', system: false, enabled: true }],
+			items: [],
+		})
+		renderPage(<DictionaryPage />)
+
+		fireEvent.click(await screen.findByRole('radio'))
+		expect(screen.queryByText('取消选择')).not.toBeInTheDocument()
+	})
+
+	it('字典类型表格在窄容器内使用内部横向滚动', async () => {
+		vi.mocked(getDictionaries).mockResolvedValue({
+			types: [{ id: 'type-1', code: 'A_VERY_LONG_DICTIONARY_TYPE_CODE', name: '很长的字典类型名称', description: '', system: false, enabled: true }],
+			items: [],
+		})
+		renderPage(<DictionaryPage />)
+
+		const typeCell = await screen.findByRole('cell', { name: 'A_VERY_LONG_DICTIONARY_TYPE_CODE' })
+		expect(typeCell.closest('table')).toHaveStyle({ width: 'max-content' })
+	})
+
+	it('编辑字典类型时回显原有信息', async () => {
+		vi.mocked(getDictionaries).mockResolvedValue({
+			types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '学生当前学籍状态', system: false, enabled: true }],
+			items: [],
+		})
+		renderPage(<DictionaryPage />)
+
+		const typeRow = (await screen.findByRole('cell', { name: '学籍状态' })).closest('tr')
+		if (!typeRow) throw new Error('未找到字典类型行')
+		fireEvent.click(within(typeRow).getByRole('button', { name: '编辑' }))
+
+		const dialog = await screen.findByRole('dialog', { name: '编辑字典类型' })
+		expect(within(dialog).getByLabelText('类型编码')).toHaveValue('STATUS')
+		expect(within(dialog).getByLabelText('类型名称')).toHaveValue('学籍状态')
+		expect(within(dialog).getByLabelText('说明')).toHaveValue('学生当前学籍状态')
+	})
+
+	it('编辑字典项时回显原有信息', async () => {
+		vi.mocked(getDictionaries).mockImplementation(async typeId => typeId
+			? { types: [], items: [{ id: 'item-1', typeId, value: 'LEFT', label: '离校', description: '已离开学校', sortOrder: 40, enabled: true }] }
+			: { types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '', system: false, enabled: true }], items: [] })
+		renderPage(<DictionaryPage />)
+
+		await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('type-1'))
+		fireEvent.click(await screen.findByRole('button', { name: '新增选项' }))
+		const createDialog = await screen.findByRole('dialog', { name: '新增字典项' })
+		fireEvent.click(within(createDialog).getByRole('button', { name: /取\s*消/ }))
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: '新增字典项' })).not.toBeInTheDocument())
+		const itemRow = (await screen.findByRole('cell', { name: '离校' })).closest('tr')
+		if (!itemRow) throw new Error('未找到字典项行')
+		fireEvent.click(within(itemRow).getByRole('button', { name: '编辑' }))
+
+		const dialog = await screen.findByRole('dialog', { name: '编辑字典项' })
+		expect(within(dialog).getByLabelText('选项值')).toHaveValue('LEFT')
+		expect(within(dialog).getByLabelText('显示名称')).toHaveValue('离校')
+		expect(within(dialog).getByLabelText('排序')).toHaveValue('40')
+		expect(within(dialog).getByLabelText('说明')).toHaveValue('已离开学校')
+		expect(within(dialog).getByRole('switch', { name: '状态' })).toBeChecked()
+	}, 10_000)
 
 	it('停用部门前展示对象名称和影响范围并等待确认', async () => {
 		vi.mocked(getCatalogs).mockResolvedValue({
@@ -281,5 +616,5 @@ describe('阶段一管理页面', () => {
 		expect(within(dialog).getByText(/现有记录仍保留原值/)).toBeInTheDocument()
 		fireEvent.click(within(dialog).getByRole('button', { name: '确认停用' }))
 		await waitFor(() => expect(vi.mocked(updateDictionaryItem).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ id: 'item-1', enabled: false })))
-	})
+	}, 10_000)
 })

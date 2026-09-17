@@ -2,13 +2,15 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 在工作流 A 的通用导入底座与到课率第一增量之上，完整交付阶段 2 的普通用户应用外壳、角色化工作台、七类检查、手工与 Excel 录入、部门提交审核状态机、状态看板及跨角色验收闭环。
+**Goal:** 在工作流 A 的通用导入底座与到课率第一增量之上，完整交付阶段 2 的统一应用外壳、角色化工作台、七类检查、手工与 Excel 录入、部门提交审核状态机、状态看板及跨角色验收闭环。
 
-**Architecture:** 保持模块化单体与 `Handler → Application Service → Domain/Repository → PostgreSQL/MinIO` 调用方向。统一检查主表承载公共状态、版本、数据范围和软删除信息，七张扩展表承载类型字段；所有列表、聚合和按 ID 访问把有效 RBAC + ABAC 范围编译进数据库查询。前端新增独立于 `/admin` 的普通用户应用外壳，通过 `UI → TanStack Query hook → API client → /api/v1` 获取服务端权威结果；工作台只编排阶段 2 检查与部门工作流，不伪实现阶段 3 通报能力。
+**Architecture:** 保持模块化单体与 `Handler → Application Service → Domain/Repository → PostgreSQL/MinIO` 调用方向。统一检查主表承载公共状态、版本、数据范围和软删除信息，六张业务扩展表承载七类字段（到课率/无机课堂共用）；所有列表、聚合和按 ID 访问把有效 RBAC + ABAC 范围编译进数据库查询。前端使用统一应用外壳和单一侧边栏，按当前用户的有效权限组合工作台、日常检查和管理配置入口，各路由继续由独立守卫拦截；通过 `UI → TanStack Query hook → API client → /api/v1` 获取服务端权威结果。工作台只编排阶段 2 检查与部门工作流，不伪实现阶段 3 通报能力。
 
 **Tech Stack:** Go 1.25、Gin、pgx/PostgreSQL、MinIO、React 19、TypeScript、Vite、Ant Design、React Router、TanStack Query、Vitest、Playwright、`github.com/xuri/excelize/v2@v2.11.0`。
 
 ---
+
+> **2026-09-06 执行状态：** Task 6 已实现统一外壳；Task 11–12 已提前实现当前周记录聚合及统一工作台第一增量，未完成部门流程联动和全角色验收。Task 7 仍需补临时工作周覆盖；Task 1–5、8–10、13–19 不得标记整体完成。最新交接见[交接记录](./2026-09-06-project-handover.md)。下文 RED/Verify 是执行要求，并非已运行证据。
 
 ## 1. 计划地位、范围与执行规则
 
@@ -16,7 +18,7 @@
 
 阶段 2 包含：
 
-- 独立普通用户应用外壳、有效权限导航和角色化工作台。
+- 统一应用外壳、有效权限导航和角色化工作台。
 - 当前学年、学期、周次、临时周覆盖、我的待办、本部门业务状态和有效权限快捷入口。
 - 统一检查主表和到课率、无机课堂、教室卫生、早操早签、寝室卫生、晚归、公共寝室卫生七张扩展表。
 - 七类检查的手工录入、查询、编辑、软删除、批量操作、乐观锁、审计和权限范围。
@@ -118,6 +120,8 @@ Task 0 工作流 A 总门禁
 
 ### Task 1: 固化七类字段字典、重复键与状态契约
 
+> 2026-09-06：材料核对完成，见[七类字段核对稿](./2026-09-06-seven-inspection-field-review.md)。D1–D4 已获确认（早锻炼/早签不分类型），七类字段目录与镜像测试已实现。目录不启用未实现的六类能力；新扩展表为五张，加既有共享 attendance_details 共六张。责任关联和日期/轮次仍需下一迁移落实。
+
 **Depends on:** Task 0。
 
 **Files:**
@@ -139,28 +143,30 @@ Task 0 工作流 A 总门禁
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: define phase two inspection catalog`。
 
-### Task 2: 追加其余六类扩展表迁移
+### Task 2: 为其余六类追加五张业务扩展表迁移
 
 **Depends on:** Task 1。
 
 **Files:**
-- Create: `server/migrations/006_phase_two_inspection_extensions.sql`
+- Create: `server/migrations/012_phase_two_inspection_extensions.sql`
 - Modify: `server/internal/store/postgres_test.go`
 - Create: `server/internal/store/testdata/phase_two_extension_constraints.sql`
 
-**RED:** 迁移契约测试断言六张扩展表、到 `inspection_records(id)` 的级联受限外键、字段 CHECK、有效记录 partial unique index、查询索引及无个人信息注释；临时 PostgreSQL 测试断言重复有效记录失败、软删除后可重建、孤儿扩展失败。
+**RED:** 迁移契约测试断言五张新增业务扩展表、到 `inspection_records(id)` 的级联受限外键、字段 CHECK、有效记录 partial unique index、查询索引及无个人信息注释；临时 PostgreSQL 测试断言重复有效记录失败、软删除后可重建、孤儿扩展失败。
 
 **Run:** `cd server && go test ./internal/store -run 'TestPhaseTwoExtensionMigration|TestPhaseTwoExtensionConstraints'`。
 
-**Expected RED:** FAIL，提示 `006` 不存在或缺少表/约束。
+**Expected RED:** FAIL，提示 新增扩展迁移不存在或缺少表/约束。
 
-**GREEN:** 新增 `006`，不修改 `005`。公共学期、周次、类型、部门、班级、来源、状态、版本、创建人和软删除继续只存主表；扩展表只存类型字段。
+**GREEN:** 暂排新增 `012`（执行时核对最新序号），不改写已有 `001`—`011`。公共学期、周次、类型、部门、班级、来源、状态、版本、创建人和软删除继续只存主表；扩展表只存类型字段。
 
-**Verify:** 聚焦测试 PASS；在空临时库顺序执行 `001`—`006` PASS；向下不提供破坏性回滚脚本。
+**Verify:** 聚焦测试 PASS；在空临时库顺序执行 `001` 至新增扩展迁移 PASS；向下不提供破坏性回滚脚本。
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: add remaining inspection extension schema`。
 
 ### Task 3: 实现七类领域模型与校验适配器
+
+**当前状态（2026-09-06）：领域层已完成。** `details.go` 定义七类明确模型，`validation.go` 按目录校验并生成兼容重复键；数据库引用、权限与事务接入在 Task 4 实施，不代表新增 API 已开放。
 
 **Depends on:** Task 2。
 
@@ -183,6 +189,10 @@ Task 0 工作流 A 总门禁
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: validate seven inspection detail models`。
 
 ### Task 4: 实现手工录入、列表和详情 API
+
+**2026-09-06 更新：已完成七类统一创建、列表与详情 API。** 真实数据库验证范围谓词、关联有效性和审计事务，详情/列表使用 INSPECTION_VIEW。后续历史说明中的“其余六类仍未完成”由本条更新；页面与 Excel 适配器仍待后续任务。见 [API 契约](./2026-09-06-inspection-api-contract.md)。
+
+> 2026-09-06 增量：到课率手工新增 `POST /api/v1/inspections/attendance` 与页面内新增抽屉已实现，复用导入基础数据和去重校验，MANUAL 草稿与审计同事务持久化。到课率编辑详情、草稿编辑/软删除已由下一增量补齐；其余六类仍未完成，不关闭 Task 4 总门禁。
 
 **Depends on:** Task 3。
 
@@ -209,6 +219,10 @@ Task 0 工作流 A 总门禁
 
 ### Task 5: 实现编辑、软删除和批量操作
 
+**2026-09-06 更新：** 七类未提交草稿编辑、软删除、批量删除已通过统一 API 交付，Task 4 的七类创建/列表/详情同时完成。适用范围与原有到课率决策一致；RETURNED 修正继续等待部门流程，不关闭其门禁。详见 [API 契约与验证边界](./2026-09-06-inspection-api-contract.md)。
+
+> 2026-09-06 到课率增量已实现：独立 `INSPECTION_MANAGE`（用户已确认），录入权处理本人草稿、管理权处理范围内他人草稿；仅限未提交且无锁定关联的 DRAFT。编辑校验原/目标范围，版本冲突拒绝；软删除及最多 100 条批量删除与审计同事务。RETURNED 修正依赖部门流程，其余六类仍未交付，不关闭 Task 5 总门禁。详见[实施决策](./2026-09-06-attendance-mutations-design.md)。
+
 **Depends on:** Task 4。
 
 **Files:**
@@ -231,30 +245,34 @@ Task 0 工作流 A 总门禁
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: protect inspection mutations with versions`。
 
-### Task 6: 建立普通用户应用外壳和有效权限导航
+### Task 6: 建立统一应用外壳和有效权限导航
+
+**2026-09-07：已复核现有统一外壳，并补齐导航/路由对完全覆盖 ALLOW 的 DENY 处理。** 保留已确认的 `/` 工作台；尚无页面的检查类型不提前开放。
 
 **Depends on:** Task 4。
 
 **Files:**
-- Create: `web/src/shared/layouts/AppLayout.tsx`
-- Create: `web/src/shared/layouts/AppLayout.test.tsx`
+- Modify: `web/src/app/layouts/AppLayout.tsx`
+- Create: `web/src/app/layouts/AppLayout.test.tsx`
 - Create: `web/src/app/router/EffectivePermissionRoute.tsx`
 - Create: `web/src/app/router/EffectivePermissionRoute.test.tsx`
 - Modify: `web/src/app/App.tsx`
 
 **RED:** 路由测试断言普通成员能进入 `/workbench` 和授权的 `/inspections/:typeCode`，不能进入受管理员守卫的 `/admin`；菜单按有效动作与范围显示，单独 `DENY` 隐藏入口；直接 URL 越权显示 403，不重定向成空白页。断言无“导入”“审核”“统计”一级导航。
 
-**Run:** `cd web && pnpm test -- src/shared/layouts/AppLayout.test.tsx src/app/router/EffectivePermissionRoute.test.tsx`。
+**Run:** `cd web && pnpm test -- src/app/layouts/AppLayout.test.tsx src/app/router/EffectivePermissionRoute.test.tsx`。
 
-**Expected RED:** FAIL，普通用户外壳/路由不存在。
+**Expected RED:** FAIL，统一权限菜单或有效权限路由守卫尚未完成。
 
-**GREEN:** 保留 `/admin` 管理外壳；新增普通应用外壳，一级导航仅按原型包含工作台和日常检查等已交付范围。导入和审核是检查详情内动作。
+**GREEN:** 工作台、日常检查和管理配置复用同一应用外壳与侧边栏，菜单项按当前用户有效权限组合展示；`/admin` 与 `/inspections` 仍分别执行对应路由守卫。一级导航仅按原型包含已交付范围，导入和审核是检查详情内动作。
 
 **Verify:** 聚焦测试 PASS；`rg "path:.*(import|review|statistics)" web/src/app web/src/shared/layouts` 不产生一级导航命中；`pnpm lint && pnpm test && pnpm build` PASS。
 
-**Checkpoint:** 提交前请求用户许可；建议消息 `feat: add permission-aware member application shell`。
+**Checkpoint:** 提交前请求用户许可；建议消息 `feat: add permission-aware unified application shell`。
 
 ### Task 7: 实现学期周次工作上下文与临时覆盖
+
+**2026-09-07：已实现。** 全局覆盖沿用校历管理权限、显式到期时间、版本与审计，默认周次和工作台共用解析结果；详见 [实现与验证边界](./2026-09-07-navigation-work-context.md)。
 
 **Depends on:** Task 6。
 
@@ -285,7 +303,7 @@ Task 0 工作流 A 总门禁
 **Depends on:** Task 5。
 
 **Files:**
-- Create: `server/migrations/007_phase_two_department_workflow.sql`
+- Create: `server/migrations/014_phase_two_department_workflow.sql`
 - Create: `server/internal/workflow/model.go`
 - Create: `server/internal/workflow/state_machine.go`
 - Create: `server/internal/workflow/state_machine_test.go`
@@ -297,9 +315,9 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** FAIL，迁移/状态机不存在。
 
-**GREEN:** `007` 只追加；提交聚合唯一范围为学年、学期、周次、部门、检查类型和活动修订号。状态机是唯一转换入口，Repository 不接受任意状态字符串。
+**GREEN:** 暂排 `014` 只追加（013 已用于工作上下文配置）（执行时核对最新序号）；提交聚合唯一范围为学年、学期、周次、部门、检查类型和活动修订号。状态机是唯一转换入口，Repository 不接受任意状态字符串。
 
-**Verify:** 聚焦测试 PASS；空临时库执行 `001`—`007` PASS。
+**Verify:** 聚焦测试 PASS；空临时库执行 `001` 至新增部门工作流迁移 PASS。
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: add department submission state machine`。
 
@@ -371,7 +389,7 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** FAIL，聚合服务或端点不存在。
 
-**GREEN:** 提供 `GET /api/v1/dashboard/department-statuses`，基于记录与提交真实状态实时聚合，不持久化易漂移的假计数；必要缓存只能在权限和工作上下文键下短时使用并正确失效。
+**GREEN:** 提供 `GET /api/v1/dashboard/workbench` 的 `departmentStatuses` 字段，基于记录与提交真实状态实时聚合，不持久化易漂移的假计数；必要缓存只能在权限和工作上下文键下短时使用并正确失效。
 
 **Verify:** 聚焦测试 PASS；查询计划使用范围/状态索引；`go vet ./... && go test ./...` PASS。
 
@@ -382,13 +400,14 @@ Task 0 工作流 A 总门禁
 **Depends on:** Task 7、Task 10、Task 11。
 
 **Files:**
-- Create: `server/internal/dashboard/workbench.go`
+- Modify: `server/internal/dashboard/service.go`（已实现工作台首个增量）
 - Modify: `server/internal/dashboard/service_test.go`
 - Create: `web/src/features/phase-two-dashboard/api/dashboardClient.ts`
 - Create: `web/src/features/phase-two-dashboard/model/usePhaseTwoDashboard.ts`
 - Create: `web/src/features/phase-two-dashboard/ui/PhaseTwoDashboard.tsx`
 - Create: `web/src/features/phase-two-dashboard/ui/PhaseTwoDashboard.test.tsx`
-- Create: `web/src/pages/workbench/WorkbenchPage.tsx`
+- Modify: `web/src/pages/home/HomePage.tsx`
+- Modify: `web/src/pages/admin/AdminDashboardPage.tsx`
 - Modify: `web/src/app/App.tsx`
 
 **RED:** 后端按五类角色矩阵返回当前上下文、我的待办、本部门/授权范围状态和有效快捷入口；前端逐角色覆盖加载、空、失败、403、过期授权和无快捷入口。负向断言页面没有待生成通报、待通报审核、待定稿、全院通报进度及其 API 请求。
@@ -397,7 +416,7 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** FAIL，工作台聚合/UI 不存在。
 
-**GREEN:** 快捷入口由服务端有效动作与范围生成，前端只做显示和路由验证；“我的待办”仅来自检查补录、退回和授权审核任务。办公室/指定管理员没有检查授权时不自动得到敏感卡片。
+**GREEN:** 快捷入口由服务端有效动作与范围生成，前端只做显示和路由验证；“我的待办”只统计本人创建且在有效查看范围内的 DRAFT、RETURNED 记录；部门审核数量放在部门状态中，不混入个人待办。办公室/指定管理员没有检查授权时不自动得到敏感卡片。
 
 **Verify:** 两端聚焦和完整检查 PASS；`rg "待生成通报|待通报审核|待定稿|全院通报进度" web/src server/internal/dashboard` 只允许出现在负向测试。
 
@@ -587,7 +606,7 @@ git diff --check
 阶段 2 只有同时满足以下条件才能完成：
 
 - 工作流 A Task 1–12 与本计划 Task 0–19 均按 TDD 实际执行，RED/GREEN 证据可追溯。
-- 普通用户使用独立应用外壳；`/admin` 仍是管理后台，不承担成员工作台。
+- 所有角色复用统一应用外壳和单一权限侧边栏；`/admin` 仍由管理路由守卫保护，不向无权用户开放。
 - 七类主/扩展模型、手工录入、导入、编辑、软删除、批量、版本、审计和范围控制全部可用。
 - 已审核或锁定数据不能直接回滚；确认/锁定数据不能被普通编辑、删除或批量覆盖。
 - 部门状态机、事务、版本冲突、退回原因和实时五状态看板通过成功与失败路径验证。
@@ -603,6 +622,12 @@ git diff --check
 1. 七类检查各自的最终字段、必填规则、单位、合法区间、Excel 列顺序和“有效记录重复键”，尤其是无机课堂、早操早签、晚归与公共寝室卫生的历史口径。
 2. 部门提交修订语义：退回后是在同一提交上递增版本再次提交，还是生成新修订；确认后如发现错误，阶段 2 是否只允许走后续更正流程而不重开原提交。
 3. 导入回滚产品粒度：本计划采用更安全的“整批、全记录仍为未提交 DRAFT 才允许”基线；若需要选行回滚或提交后撤销，必须另行设计权限、审计与补偿流程。
-4. 系统管理员与超级管理员的检查数据默认范围：本计划遵循最小权限，系统管理员不因配置权限自动获得敏感检查明细；超级管理员是否默认拥有全院阶段 2 数据范围需与既有权限基线最终核对。
+4. 系统管理员与超级管理员的检查数据默认范围：本计划遵循最小权限，系统管理员不因配置权限自动获得敏感检查明细；超级管理员按已确认的超级权限访问全院范围，无需绑定部门；此默认范围问题已确认，不再作为待确认项。
 5. 若仓库没有 Playwright 依赖，是否批准新增锁定版本的开发依赖与配置；未批准时可用既有 Playwright skill 验收，但不能把仓库内 E2E 装配写成已完成。
 6. 扩展表物理拆分：现有技术方案允许到课率与无机课堂共用 `attendance_details`，本计划为满足“七类扩展模型/迁移”采用七个显式模型和七张扩展表。Task 2 执行前需确认是保留该显式拆分，还是采用“七个领域模型、六张物理表”的既有方案；不得静默偏离技术方案。
+
+## 2026-09-06 Task 2 执行更新（覆盖上文历史待定项）
+
+Task 2 已完成：012 迁移、phase_two_extensions_test.go 及 testdata 下两份 SQL 验证文件已落地，真实临时库迁移与现有到课率录入回归通过。下一步执行 Task 3。
+
+第 7 节第 6 项已获确认：七类领域模型、六张业务扩展表，无机课堂共用 attendance_details；不再等待物理拆分确认。卫生班级责任使用独立关联表与快照，上文“班级只存主表”仅适用于个人检查。具体结构、验证及边界见 2026-09-06-project-handover.md 的“012 检查扩展迁移”记录。

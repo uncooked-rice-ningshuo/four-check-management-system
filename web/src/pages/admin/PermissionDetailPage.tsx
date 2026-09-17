@@ -9,7 +9,7 @@ import { createPermissionRule, deletePermissionRule, getAcademicCalendar, getCat
 const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
   ['CONFIGURATION_VIEW', '系统配置查看'],
-  ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
+  ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
   ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '历史归档查看'],
 ].map(([value, label]) => ({ value, label }))
 const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value

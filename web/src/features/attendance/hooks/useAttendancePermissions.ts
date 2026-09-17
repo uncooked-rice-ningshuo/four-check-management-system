@@ -11,6 +11,10 @@ export function useCurrentAcademicWeek() {
   return useQuery({ queryKey: ['academic', 'current-week'], queryFn: attendanceApi.currentWeek })
 }
 
+export function useAttendanceFilterOptions() {
+	return useQuery({ queryKey: ['attendance', 'filter-options'], queryFn: attendanceApi.filterOptions })
+}
+
 function scopeMatches(granted: PermissionScope, requested: PermissionScope) {
   return (Object.keys(granted) as (keyof PermissionScope)[]).every(key => !granted[key] || granted[key] === requested[key])
 }

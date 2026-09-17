@@ -20,7 +20,10 @@ export const importJobApi = {
     return apiRequest<ImportBatch>('/imports/attendance', { method: 'POST', body })
   },
   batch(id: string) { return apiRequest<ImportBatch>(`/imports/${encodeURIComponent(id)}`) },
-  rows(id: string, page: number, pageSize: number) { return apiRequest<ImportRowPage>(`/imports/${encodeURIComponent(id)}/rows?page=${page}&pageSize=${pageSize}`) },
+  rows(id: string, page: number, pageSize: number, validationStatus?: 'VALID' | 'INVALID') {
+    const filterQuery = validationStatus ? `&validationStatus=${validationStatus}` : ''
+    return apiRequest<ImportRowPage>(`/imports/${encodeURIComponent(id)}/rows?page=${page}&pageSize=${pageSize}${filterQuery}`)
+  },
   confirm(id: string, version: number, idempotencyKey: string) {
     return apiRequest<ConfirmImportResult>(`/imports/${encodeURIComponent(id)}/confirm`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ version }) })
   },

@@ -43,6 +43,7 @@ var (
 	ErrInvalidInput        = errors.New("invalid input")
 	ErrForbidden           = errors.New("forbidden")
 	ErrInvalidTransition   = errors.New("invalid account status transition")
+	ErrVersionConflict     = errors.New("account version conflict")
 )
 
 // Account 是认证与管理端使用的安全账号领域模型。PasswordHash 只能在服务端参与校验。
@@ -75,21 +76,28 @@ type accessClaims struct {
 	jwt.RegisteredClaims
 }
 
-// AccountRepository 把账号状态迁移和审核事务交给持久化层原子执行。
+// AccountRepository atomically persists each account mutation and its audit.
+// Password, status and account updates must also revoke every refresh session
+// in that same transaction; callers must never perform a second revocation step.
 type AccountRepository interface {
 	Create(context.Context, Account, audit.Mutation) error
 	FindByLoginName(context.Context, string) (Account, error)
 	FindByID(context.Context, string) (Account, error)
-	UpdatePassword(context.Context, string, string, bool, audit.Mutation) error
+	UpdatePassword(context.Context, string, string, bool, int, audit.Mutation) error
 	ListPending(context.Context) ([]Account, error)
 	ReviewRegistration(context.Context, string, string, string, string, time.Time, audit.Mutation) (Account, error)
 	UpdateAccount(context.Context, Account, audit.Mutation) (Account, error)
-	SetStatus(context.Context, string, string, audit.Mutation) (Account, error)
+	SetStatus(context.Context, string, string, int, audit.Mutation) (Account, error)
 }
 
 type SessionRepository interface {
-	Save(context.Context, RefreshSession) error
-	Consume(context.Context, string, time.Time) (RefreshSession, error)
+	// Save rechecks the account status/version under a lock before persisting a
+	// login session, so an earlier password check cannot outlive account changes.
+	Save(context.Context, RefreshSession, int) error
+	FindRefreshSession(context.Context, string, time.Time) (RefreshSession, error)
+	// Rotate atomically consumes the old session and saves its replacement after
+	// rechecking the account's active status and expected session version.
+	Rotate(context.Context, string, time.Time, RefreshSession, int) error
 	Revoke(context.Context, string, time.Time) error
 	RevokeAll(context.Context, string, time.Time) error
 }
@@ -105,6 +113,15 @@ type AdminCreateUserInput struct {
 
 type AdminUpdateUserInput struct {
 	StudentNo, Name, SystemRole string
+}
+
+// NewTemporaryPassword creates a unique credential for a single account operation.
+func NewTemporaryPassword() (string, error) {
+	secret := make([]byte, 18)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(secret), nil
 }
 
 type Tokens struct {
@@ -225,9 +242,6 @@ func (s *Service) AdminUpdateUser(ctx context.Context, actor Account, accountID 
 	if err != nil {
 		return Account{}, err
 	}
-	if err := s.sessions.RevokeAll(ctx, accountID, s.now().UTC()); err != nil {
-		return Account{}, err
-	}
 	return updated, nil
 }
 
@@ -244,11 +258,8 @@ func (s *Service) AdminSetUserStatus(ctx context.Context, actor Account, account
 	}
 	mutation := accountMutation(metadata, actor.ID, audit.ActionAccountStatusChanged, target.ID,
 		map[string]any{"status": target.Status}, map[string]any{"status": status}, "")
-	updated, err := s.accounts.SetStatus(ctx, accountID, status, mutation)
+	updated, err := s.accounts.SetStatus(ctx, accountID, status, target.SessionVersion, mutation)
 	if err != nil {
-		return Account{}, err
-	}
-	if err := s.sessions.RevokeAll(ctx, accountID, s.now().UTC()); err != nil {
 		return Account{}, err
 	}
 	return updated, nil
@@ -271,10 +282,10 @@ func (s *Service) AdminResetPassword(ctx context.Context, actor Account, account
 	}
 	mutation := accountMutation(metadata, actor.ID, audit.ActionAccountPasswordReset, target.ID,
 		map[string]any{"mustChangePassword": target.MustChangePassword}, map[string]any{"mustChangePassword": true}, "")
-	if err := s.accounts.UpdatePassword(ctx, accountID, hash, true, mutation); err != nil {
+	if err := s.accounts.UpdatePassword(ctx, accountID, hash, true, target.SessionVersion, mutation); err != nil {
 		return err
 	}
-	return s.sessions.RevokeAll(ctx, accountID, s.now().UTC())
+	return nil
 }
 
 func validManagedSystemRole(role string) bool {
@@ -283,7 +294,13 @@ func validManagedSystemRole(role string) bool {
 
 func (s *Service) Login(ctx context.Context, loginName, password string) (Tokens, error) {
 	a, err := s.accounts.FindByLoginName(ctx, strings.TrimSpace(loginName))
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte(password)) != nil || a.Status != StatusActive {
+	if errors.Is(err, ErrAccountNotFound) {
+		return Tokens{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return Tokens{}, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte(password)) != nil || a.Status != StatusActive {
 		return Tokens{}, ErrInvalidCredentials
 	}
 	return s.issueTokens(ctx, a)
@@ -295,7 +312,18 @@ func (s *Service) ChangePassword(ctx context.Context, actor Account, currentPass
 		return ErrInvalidInput
 	}
 	current, err := s.accounts.FindByID(ctx, actor.ID)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(current.PasswordHash), []byte(currentPassword)) != nil {
+	if errors.Is(err, ErrAccountNotFound) {
+		return ErrInvalidCredentials
+	}
+	if err != nil {
+		return err
+	}
+	// Authentication can finish before a concurrent invalidation commits.
+	// Do not adopt the newer account version as authority for the old actor.
+	if current.Status != StatusActive || current.SessionVersion != actor.SessionVersion {
+		return ErrInvalidAccessToken
+	}
+	if bcrypt.CompareHashAndPassword([]byte(current.PasswordHash), []byte(currentPassword)) != nil {
 		return ErrInvalidCredentials
 	}
 	hash, err := hashPassword(newPassword)
@@ -304,10 +332,10 @@ func (s *Service) ChangePassword(ctx context.Context, actor Account, currentPass
 	}
 	mutation := accountMutation(metadata, actor.ID, audit.ActionAccountPasswordReset, current.ID,
 		map[string]any{"mustChangePassword": current.MustChangePassword}, map[string]any{"mustChangePassword": false}, "")
-	if err := s.accounts.UpdatePassword(ctx, current.ID, hash, false, mutation); err != nil {
+	if err := s.accounts.UpdatePassword(ctx, current.ID, hash, false, current.SessionVersion, mutation); err != nil {
 		return err
 	}
-	return s.sessions.RevokeAll(ctx, current.ID, s.now().UTC())
+	return nil
 }
 
 func (s *Service) ListPendingRegistrations(ctx context.Context, actor Account) ([]Account, error) {
@@ -363,15 +391,25 @@ func accountAuditState(account Account) map[string]any {
 
 func (s *Service) Refresh(ctx context.Context, token string) (Tokens, error) {
 	now := s.now().UTC()
-	session, err := s.sessions.Consume(ctx, tokenHash(token), now)
+	session, err := s.sessions.FindRefreshSession(ctx, tokenHash(token), now)
 	if err != nil {
-		return Tokens{}, ErrInvalidRefreshToken
+		return Tokens{}, err
 	}
 	a, err := s.accounts.FindByID(ctx, session.AccountID)
-	if err != nil || a.Status != StatusActive {
+	if errors.Is(err, ErrAccountNotFound) || (err == nil && a.Status != StatusActive) {
 		return Tokens{}, ErrInvalidRefreshToken
 	}
-	return s.issueTokens(ctx, a)
+	if err != nil {
+		return Tokens{}, err
+	}
+	tokens, replacement, err := s.prepareTokens(a, now)
+	if err != nil {
+		return Tokens{}, err
+	}
+	if err = s.sessions.Rotate(ctx, tokenHash(token), now, replacement, a.SessionVersion); err != nil {
+		return Tokens{}, err
+	}
+	return tokens, nil
 }
 
 func (s *Service) Logout(ctx context.Context, token string) error {
@@ -397,14 +435,32 @@ func (s *Service) AuthenticateAccessToken(ctx context.Context, raw string) (Acco
 		return Account{}, ErrInvalidAccessToken
 	}
 	a, err := s.accounts.FindByID(ctx, sub)
-	if err != nil || a.Status != StatusActive || claims.SessionVersion != a.SessionVersion {
+	if errors.Is(err, ErrAccountNotFound) {
+		return Account{}, ErrInvalidAccessToken
+	}
+	if err != nil {
+		return Account{}, err
+	}
+	if a.Status != StatusActive || claims.SessionVersion != a.SessionVersion {
 		return Account{}, ErrInvalidAccessToken
 	}
 	return a, nil
 }
 
 func (s *Service) issueTokens(ctx context.Context, a Account) (Tokens, error) {
-	now := s.now().UTC()
+	tokens, session, err := s.prepareTokens(a, s.now().UTC())
+	if err != nil {
+		return Tokens{}, err
+	}
+	if err = s.sessions.Save(ctx, session, a.SessionVersion); err != nil {
+		return Tokens{}, err
+	}
+	return tokens, nil
+}
+
+// prepareTokens has no persistence side effects, so rotation can commit both
+// session changes together only after all credential generation succeeds.
+func (s *Service) prepareTokens(a Account, now time.Time) (Tokens, RefreshSession, error) {
 	accessExp, refreshExp := now.Add(s.accessTTL), now.Add(s.refreshTTL)
 	claims := accessClaims{
 		SessionVersion: a.SessionVersion,
@@ -414,17 +470,14 @@ func (s *Service) issueTokens(ctx context.Context, a Account) (Tokens, error) {
 	}
 	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.secret)
 	if err != nil {
-		return Tokens{}, err
+		return Tokens{}, RefreshSession{}, err
 	}
 	refreshBytes := make([]byte, 32)
 	if _, err := rand.Read(refreshBytes); err != nil {
-		return Tokens{}, err
+		return Tokens{}, RefreshSession{}, err
 	}
 	refresh := base64.RawURLEncoding.EncodeToString(refreshBytes)
-	if err := s.sessions.Save(ctx, RefreshSession{ID: uuid.NewString(), AccountID: a.ID, TokenHash: tokenHash(refresh), ExpiresAt: refreshExp}); err != nil {
-		return Tokens{}, err
-	}
-	return Tokens{AccessToken: access, RefreshToken: refresh, AccessExpiresAt: accessExp, RefreshExpiresAt: refreshExp}, nil
+	return Tokens{AccessToken: access, RefreshToken: refresh, AccessExpiresAt: accessExp, RefreshExpiresAt: refreshExp}, RefreshSession{ID: uuid.NewString(), AccountID: a.ID, TokenHash: tokenHash(refresh), ExpiresAt: refreshExp}, nil
 }
 
 func hashPassword(password string) (string, error) {

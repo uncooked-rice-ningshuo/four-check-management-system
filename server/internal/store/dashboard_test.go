@@ -12,7 +12,7 @@ import (
 func TestDashboardAggregateSQLConstrainsScopeAndPersonalTodos(t *testing.T) {
 	for _, fragment := range []string{
 		"unnest($3::text[], $4::text[])",
-		"ir.department_id::text = a.department_id",
+		"COALESCE(ir.department_id::text,'') = a.department_id",
 		"ir.inspection_type_id::text = a.inspection_type_id",
 		"ir.semester_id = $1::uuid",
 		"ir.week_id = $2::uuid",

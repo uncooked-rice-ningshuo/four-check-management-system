@@ -11,6 +11,8 @@ import (
 
 var ErrInvalidInput = errors.New("invalid organization input")
 
+var ErrUserNotFound = errors.New("organization assignment account not found")
+
 type Department struct {
 	ID      string `json:"id"`
 	Code    string `json:"code"`
@@ -48,6 +50,8 @@ type DepartmentInspectionScope struct {
 }
 
 type UserAssignment struct {
+	// SessionVersion is loaded internally for atomic assignment writes, never accepted from JSON.
+	SessionVersion     int    `json:"-"`
 	AccountID          string `json:"accountId"`
 	LoginName          string `json:"loginName"`
 	StudentNo          string `json:"studentNo"`
@@ -178,7 +182,11 @@ func (s *Service) UpsertScope(ctx context.Context, scope DepartmentInspectionSco
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]UserAssignment, error) {
-	return s.repository.ListUsers(ctx)
+	users, err := s.repository.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return nonNil(users), nil
 }
 
 func (s *Service) AssignUserRole(ctx context.Context, assignment UserAssignment, metadata ...audit.Metadata) error {
@@ -189,14 +197,21 @@ func (s *Service) AssignUserRole(ctx context.Context, assignment UserAssignment,
 	if err != nil {
 		return err
 	}
-	var before any
+	var before *UserAssignment
 	for _, existing := range users {
 		if existing.AccountID == assignment.AccountID {
-			before = existing
+			before = &existing
 			break
 		}
 	}
-	return s.repository.AssignUserRole(ctx, assignment, organizationMutation(metadata, "userAssignment", assignment.AccountID, before, assignment))
+	if before == nil {
+		return ErrUserNotFound
+	}
+	// Only department and organization role are writable here; audit account fields
+	// must describe the stored account rather than untrusted client display values.
+	after := *before
+	after.DepartmentID, after.OrganizationRoleID = assignment.DepartmentID, assignment.OrganizationRoleID
+	return s.repository.AssignUserRole(ctx, after, organizationMutation(metadata, "userAssignment", after.AccountID, *before, after))
 }
 
 func organizationMutation(metadata []audit.Metadata, resourceType, resourceID string, before, after any) audit.Mutation {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"four-check-management-system/server/internal/academic"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 )
@@ -59,6 +60,10 @@ type ScopeCounts struct {
 	Returned         int
 	Confirmed        int
 	Locked           int
+	BatchTotal       int
+	BatchPending     int
+	BatchReturned    int
+	BatchConfirmed   int
 }
 
 type AcademicContext struct {
@@ -91,6 +96,10 @@ type DepartmentStatus struct {
 	Returned           int    `json:"returned"`
 	Confirmed          int    `json:"confirmed"`
 	Locked             int    `json:"locked"`
+	BatchTotal         int    `json:"batchTotal"`
+	BatchPending       int    `json:"batchPending"`
+	BatchReturned      int    `json:"batchReturned"`
+	BatchConfirmed     int    `json:"batchConfirmed"`
 	CanEnter           bool   `json:"canEnter"`
 	CanReview          bool   `json:"canReview"`
 }
@@ -179,7 +188,7 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 		if !mapping.Enabled || !mapping.CanView || !departmentExists || !typeExists {
 			continue
 		}
-		requested := permission.Scope{SemesterID: week.SemesterID, WeekID: week.ID, DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
+		requested := permission.Scope{AcademicYearID: result.Context.AcademicYearID, SemesterID: week.SemesterID, WeekID: week.ID, DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
 		if !actor.IsSuperAdmin && !effective.Allowed(permission.ActionInspectionView, requested) {
 			continue
 		}
@@ -191,6 +200,23 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 			CanEnter:  actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionEnter, requested),
 			CanReview: actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionReview, requested),
 		}
+	}
+	// College records and batches are a separate scope, visible only under an
+	// explicit type-level grant that is not constrained to a department.
+	for _, inspectionType := range catalogs.InspectionTypes {
+		if !inspectionType.Enabled || !collegeWorkbenchType(inspectionType.Code) {
+			continue
+		}
+		requested := permission.Scope{AcademicYearID: result.Context.AcademicYearID, SemesterID: week.SemesterID, WeekID: week.ID, InspectionTypeID: inspectionType.ID}
+		if !actor.IsSuperAdmin && !effective.Allowed(permission.ActionInspectionView, requested) {
+			continue
+		}
+		scope := Scope{InspectionTypeID: inspectionType.ID}
+		authorized = append(authorized, scope)
+		capabilities[scope] = DepartmentStatus{DepartmentName: "校级", InspectionTypeID: inspectionType.ID,
+			InspectionTypeCode: inspectionType.Code, InspectionTypeName: inspectionType.Name,
+			CanEnter:  actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionEnter, requested),
+			CanReview: actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionReview, requested)}
 	}
 
 	counts, err := s.repository.Aggregate(ctx, AggregateQuery{AccountID: actor.ID, SemesterID: week.SemesterID, WeekID: week.ID, Scopes: authorized})
@@ -207,9 +233,21 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 		value.Status = deriveStatus(count)
 		value.Total, value.Draft, value.PendingReview = count.Total, count.Draft, count.PendingReview
 		value.Returned, value.Confirmed, value.Locked = count.Returned, count.Confirmed, count.Locked
+		value.BatchTotal, value.BatchPending = count.BatchTotal, count.BatchPending
+		value.BatchReturned, value.BatchConfirmed = count.BatchReturned, count.BatchConfirmed
 		result.DepartmentStatuses = append(result.DepartmentStatuses, value)
 	}
 	return result, nil
+}
+
+func collegeWorkbenchType(code string) bool {
+	switch code {
+	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended,
+		inspection.InspectionTypeMorning, inspection.InspectionTypeDormitoryHygiene, inspection.InspectionTypeLateReturn:
+		return true
+	default:
+		return false
+	}
 }
 
 func personalTodoQuery(actor Actor, effective permission.EffectiveResult, current AcademicContext) PersonalTodoQuery {

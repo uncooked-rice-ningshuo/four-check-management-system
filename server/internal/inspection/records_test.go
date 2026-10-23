@@ -9,6 +9,29 @@ import (
 	"testing"
 )
 
+func TestReturnedInspectionCanBeCorrectedButNotDeleted(t *testing.T) {
+	returned := InspectionRecord{Status: RecordStatusReturned, HasSubmission: true, RowVersion: 3}
+	if err := validateInspectionUpdate(returned, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateInspectionUpdate(returned, 2); !errors.Is(err, ErrRecordVersionConflict) {
+		t.Fatalf("stale returned record: %v", err)
+	}
+	if err := validateInspectionMutation(returned, 3); !errors.Is(err, ErrRecordNotEditable) {
+		t.Fatalf("returned record deletion accepted: %v", err)
+	}
+	for _, record := range []InspectionRecord{
+		{Status: RecordStatusPendingReview, HasSubmission: true, RowVersion: 3},
+		{Status: RecordStatusConfirmed, HasSubmission: true, RowVersion: 3},
+		{Status: RecordStatusReturned, HasSubmission: false, RowVersion: 3},
+		{Status: RecordStatusReturned, HasSubmission: true, HasReportLock: true, RowVersion: 3},
+	} {
+		if err := validateInspectionUpdate(record, 3); !errors.Is(err, ErrRecordNotEditable) {
+			t.Fatalf("unsafe correction accepted: %+v %v", record, err)
+		}
+	}
+}
+
 func TestInspectionInvalidMutationsStopBeforeRepository(t *testing.T) {
 	s := NewRecordService(nil, nil)
 	ctx := context.Background()

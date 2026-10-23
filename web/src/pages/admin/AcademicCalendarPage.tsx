@@ -10,7 +10,7 @@ type WeekFilters = { academicYearId?: string; semesterId?: string; dateRange?: [
 
 type ModalKind = 'year' | 'semester' | 'week' | null
 const toISO = (value: string) => `${value}T00:00:00Z`
-type CalendarFormValues = { startYear?: number; academicYearId?: string; semesterCode?: SemesterCode; semesterId?: string; weekNo?: number; note?: string; dateRange: [string, string] }
+type CalendarFormValues = { startYear?: number; academicYearId?: string; semesterCode?: SemesterCode; semesterId?: string; weekNo?: number; note?: string; attendancePenaltyMultiplier?: 1 | 2; dateRange: [string, string] }
 
 const calendarFormDates = (dates: { startDate: string; endDate: string }) => ({ ...dates, dateRange: [dates.startDate.slice(0, 10), dates.endDate.slice(0, 10)] })
 const displayDate = (value: string) => value.slice(0, 10)
@@ -26,8 +26,14 @@ export function AcademicCalendarPage() {
   const save = useMutation({ mutationFn: async (values: CalendarFormValues) => {
     if (modal === 'year') { const defaults = buildAcademicYearDefaults(Number(values.startYear)); const input = { name: defaults.name, startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]) }; return editing ? updateAcademicYear({ ...input, id: editing.id, enabled: editing.enabled }) : createAcademicYear(input) }
     if (modal === 'semester') { const year = data.academicYears.find(item => item.id === values.academicYearId); const defaults = buildSemesterDefaults(Number(displayDate(year?.startDate ?? '').slice(0, 4)), String(values.semesterCode) as SemesterCode); const input = { academicYearId: String(values.academicYearId), code: defaults.code, name: defaults.name, startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]) }; return editing ? updateSemester({ ...input, id: editing.id, enabled: editing.enabled }) : createSemester(input) }
-    const input = { semesterId: String(values.semesterId), weekNo: Number(values.weekNo), startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]), note: String(values.note ?? '') }; return editing ? updateWeek({ ...input, id: editing.id, enabled: editing.enabled }) : createWeek(input)
-  }, onSuccess: async () => { await client.invalidateQueries({ queryKey: ['academic-calendar'] }); setModal(null); setEditing(null); form.resetFields(); message.success('配置已保存') } })
+    const input = { semesterId: String(values.semesterId), weekNo: Number(values.weekNo), startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]), note: String(values.note ?? ''), attendancePenaltyMultiplier: values.attendancePenaltyMultiplier ?? 1 }; return editing ? updateWeek({ ...input, id: editing.id, enabled: editing.enabled }) : createWeek(input)
+  }, onSuccess: async () => {
+    await Promise.all([
+      ['academic-calendar'], ['work-context'], ['academic', 'current-week'], ['course-inspections','context'],
+      ['academic', 'calendar', 'override'], ['dashboard', 'workbench'], ['attendance', 'filter-options'],
+    ].map(queryKey => client.invalidateQueries({ queryKey })))
+    setModal(null); setEditing(null); form.resetFields(); message.success('配置已保存')
+  }, onError: error => { void message.error(error.message) } })
   const data = calendar.data ?? { academicYears: [], semesters: [], weeks: [] }
   const weekRows = data.weeks.filter(week => {
     const semester = data.semesters.find(item => item.id === week.semesterId)
@@ -48,6 +54,7 @@ export function AcademicCalendarPage() {
     setModal(kind)
   }
   const initializeCreateForm = (kind: Exclude<ModalKind, null>) => {
+    if (kind === 'week') form.setFieldValue('attendancePenaltyMultiplier', 1)
     if (kind === 'year') {
       const startYear = currentAcademicYearStart()
       form.setFieldsValue({ startYear, ...calendarFormDates(buildAcademicYearDefaults(startYear)) })
@@ -90,7 +97,7 @@ export function AcademicCalendarPage() {
       { key: 'weeks', label: '周次', children: <ProTable<SemesterWeek, WeekFilters> rowKey="id" search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false }} onSubmit={values => { setWeekFilters(values); setWeekPage(1) }} onReset={() => { setWeekFilters({}); setWeekPage(1) }} options={{ density: true, setting: true }} pagination={{ pageSize: 20, current: weekPage, onChange: setWeekPage }} dataSource={weekRows} columns={[
         { title: '学年', dataIndex: 'academicYearId', valueType: 'select', fieldProps: { options: data.academicYears.map(year => ({ value: year.id, label: year.name })), allowClear: true }, render: (_, week) => data.academicYears.find(year => year.id === data.semesters.find(semester => semester.id === week.semesterId)?.academicYearId)?.name ?? '—' },
         { title: '学期', dataIndex: 'semesterId', valueType: 'select', fieldProps: { options: data.semesters.map(semester => ({ value: semester.id, label: semester.name })), allowClear: true }, render: (_, week) => data.semesters.find(semester => semester.id === week.semesterId)?.name ?? '—' },
-        { title: '时间范围', dataIndex: 'dateRange', valueType: 'dateRange', fieldProps: { placeholder: ['开始日期', '结束日期'] }, hideInTable: true, tooltip: '显示与所选时间范围有交集的周次' },{ title: '周次', dataIndex: 'weekNo', search: false, renderText: value => `第 ${value} 周` }, { title: '开始日期', dataIndex: 'startDate', search: false, renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', search: false, renderText: displayDate }, { title: '备注', dataIndex: 'note', search: false }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('week', record)}>编辑</Button> }]} /> },
+        { title: '时间范围', dataIndex: 'dateRange', valueType: 'dateRange', fieldProps: { placeholder: ['开始日期', '结束日期'] }, hideInTable: true, tooltip: '显示与所选时间范围有交集的周次' },{ title: '周次', dataIndex: 'weekNo', search: false, renderText: value => `第 ${value} 周` }, { title: '开始日期', dataIndex: 'startDate', search: false, renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', search: false, renderText: displayDate }, { title: '到课率违纪计入', dataIndex: 'attendancePenaltyMultiplier', search: false, render: (_, week) => <Tag color={week.attendancePenaltyMultiplier === 2 ? 'orange' : 'blue'}>{week.attendancePenaltyMultiplier === 2 ? 2 : 1} 倍</Tag> }, { title: '备注', dataIndex: 'note', search: false }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('week', record)}>编辑</Button> }]} /> },
     ]} /></Card>}
     <Modal title={`${editing ? '编辑' : '新增'}${modal === 'year' ? '学年' : modal === 'semester' ? '学期' : '周次'}`} open={modal !== null} afterOpenChange={open => { if (open && modal) { if (editing) initializeEditForm(modal, editing); else initializeCreateForm(modal) } }} onCancel={() => { setModal(null); setEditing(null) }} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden>
       <Form form={form} layout="vertical" onFinish={values => save.mutate(values)} onValuesChange={onFormValuesChange} preserve={false}>
@@ -99,6 +106,7 @@ export function AcademicCalendarPage() {
         {modal === 'semester' && <Form.Item noStyle shouldUpdate={(previous, current) => previous.academicYearId !== current.academicYearId}>{({ getFieldValue }) => <Form.Item name="semesterCode" label="学期" rules={[{ required: true, message: '请选择上学期或下学期' }]}><Select disabled={Boolean(editing)} options={semesterTypeOptions.map(option => ({ ...option, disabled: !editing && data.semesters.some(item => item.academicYearId === getFieldValue('academicYearId') && item.code === option.value) }))} /></Form.Item>}</Form.Item>}
         {modal === 'week' && <Form.Item name="semesterId" label="所属学期" rules={[{ required: true }]}><Select options={data.semesters.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>}
         {modal === 'week' && <Form.Item name="weekNo" label="周次" rules={[{ required: true }]}><InputNumber min={1} max={60} style={{ width: '100%' }} /></Form.Item>}
+        {modal === 'week' && <Form.Item name="attendancePenaltyMultiplier" label="到课率违纪计入倍数" extra="未标记时默认普通周 1 倍；只有明确选择教学礼拜周才按 2 倍计入。"><Select options={[{value:1,label:'普通教学周（1 倍）'},{value:2,label:'教学礼拜周（2 倍）'}]} /></Form.Item>}
         {(modal === 'year' || modal === 'semester') && <Form.Item noStyle shouldUpdate>{({ getFieldValue }) => {
           const label = modal === 'year' ? buildAcademicYearDefaults(Number(getFieldValue('startYear') || currentAcademicYearStart())).name : (() => { const year = data.academicYears.find(item => item.id === getFieldValue('academicYearId')); const code = getFieldValue('semesterCode') as SemesterCode | undefined; return year && code ? buildSemesterDefaults(Number(displayDate(year.startDate).slice(0, 4)), code).name : '请选择学年和学期' })()
           return <div className="academic-rule-preview"><span>系统名称</span><strong>{label}</strong><small>日期已按默认校历生成，可根据学校实际安排微调。</small></div>

@@ -10,3 +10,18 @@ it('removes fully denied grants but retains partially available scopes', () => {
   expect(hasNavigableInspectionAction([{ ...allow, scope: { classId: 'one' } }, { ...deny, scope: { classId: 'one' } }], allow.action)).toBe(false)
   expect(hasNavigableInspectionAction([deny], allow.action)).toBe(false)
 })
+
+it('intersects navigation grants and denies with the requested inspection type', () => {
+ const allow: EffectivePermission={action:'INSPECTION_VIEW',effect:'ALLOW',scope:{inspectionTypeId:'attendance'},sources:[]}
+ expect(hasNavigableInspectionAction([allow],allow.action,'unattended')).toBe(false)
+ expect(hasNavigableInspectionAction([{...allow,scope:{}},{...allow,effect:'DENY',scope:{inspectionTypeId:'unattended'}}],allow.action,'unattended')).toBe(false)
+ expect(hasNavigableInspectionAction([{...allow,scope:{}},{...allow,effect:'DENY'}],allow.action,'unattended')).toBe(true)
+})
+
+it('intersects member entry grants with the primary department before showing actions', () => {
+ const allow:EffectivePermission={action:'INSPECTION_ENTER',effect:'ALLOW',scope:{},sources:[]}
+ const deny:EffectivePermission={...allow,effect:'DENY',scope:{inspectionTypeId:'attendance',departmentId:'study'}}
+ expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance','study')).toBe(false)
+ expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance','sports')).toBe(true)
+ expect(hasNavigableInspectionAction([{...allow,scope:{departmentId:'sports'}}],allow.action,'attendance','study')).toBe(false)
+})

@@ -212,60 +212,147 @@ body {
   align-self: flex-start;
   height: 100vh;
   height: 100dvh;
-  background: #0b2748 !important;
-  box-shadow: 8px 0 30px rgba(6, 31, 58, 0.1);
+  background: #10253e !important;
+  border-right: 1px solid #1d3b59;
+  box-shadow: 5px 0 24px rgba(11, 35, 62, 0.08);
 }
 .admin-sider .ant-layout-sider-children {
   display: flex;
   flex-direction: column;
+  background: radial-gradient(circle at 8% 0%, rgba(39, 102, 157, 0.21), transparent 38%);
 }
 .admin-brand {
-  min-height: 104px;
+  min-height: 94px;
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 24px 22px;
+  gap: 12px;
+  padding: 21px 19px;
   color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(197, 220, 240, 0.1);
 }
 .admin-brand-mark {
   flex: 0 0 auto;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 10px;
+  border: 1px solid rgba(140, 202, 255, 0.45);
+  border-radius: 12px;
   font-family: STKaiti, KaiTi, serif;
-  font-size: 23px;
-  background: #0b5cad;
+  font-size: 25px;
+  background: #1768a9;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.22), 0 5px 14px rgba(2, 17, 34, 0.24);
 }
 .admin-brand strong,
 .admin-brand small {
   display: block;
 }
+.admin-brand strong {
+  margin-top: 3px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
 .admin-brand small {
-  margin-top: 5px;
-  color: #9eb8d4;
-  font-size: 12px;
+  color: #a9c5df;
+  font-size: 11px;
+  letter-spacing: 0.13em;
 }
 .admin-sider.ant-layout-sider-collapsed .admin-brand {
   justify-content: center;
-  padding-inline: 19px;
+  padding-inline: 18px;
 }
-.admin-sider.ant-layout-sider-collapsed .admin-brand-copy {
+.admin-sider.ant-layout-sider-collapsed .admin-brand-copy,
+.admin-sider.ant-layout-sider-collapsed .admin-sider-role {
   display: none;
 }
-.admin-sider .ant-menu {
+.admin-sider .ant-menu-root {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding-top: 14px;
-  background: transparent;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 0 0 14px;
+  background: transparent !important;
 }
-.admin-sider .ant-menu-item {
-  width: auto;
-  margin: 0 8px;
-  padding-inline: calc(50% - 16px);
+.admin-sider .ant-menu-root::-webkit-scrollbar {
+  display: none;
+}
+.admin-sider .ant-menu-item,
+.admin-sider .ant-menu-submenu-title {
+  width: auto !important;
+  height: 42px;
+  line-height: 42px;
+  margin: 3px 11px;
+  border-radius: 9px;
+  color: #b5cbe0;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.admin-sider:not(.ant-layout-sider-collapsed) .ant-menu-item,
+.admin-sider:not(.ant-layout-sider-collapsed) .ant-menu-submenu-title {
+  padding-inline-end: 18px !important;
+}
+.admin-sider:not(.ant-layout-sider-collapsed) .ant-menu-item a {
+  white-space: nowrap;
+}
+.admin-sider .ant-menu-submenu-title {
+  font-weight: 600;
+}
+.admin-sider .ant-menu-sub {
+  margin: 2px 12px 8px 27px;
+  padding: 2px 0 2px 7px;
+  border-left: 1px solid rgba(134, 173, 207, 0.22);
+  background: transparent !important;
+}
+.admin-sider .ant-menu-sub .ant-menu-item {
+  margin-inline: 0 2px;
+  font-size: 13px;
+}
+.admin-sider .ant-menu-item:hover,
+.admin-sider .ant-menu-submenu-title:hover {
+  color: #fff !important;
+  background: rgba(115, 169, 217, 0.13) !important;
+}
+.admin-sider .ant-menu-item-selected {
+  color: #fff !important;
+  background: #1b598c !important;
+  box-shadow: inset 3px 0 #7ec9ff;
+}
+.admin-sider .ant-menu-item-selected a,
+.admin-sider .ant-menu-item-selected .anticon {
+  color: #fff !important;
+}
+.admin-sider .ant-menu-submenu-open > .ant-menu-submenu-title {
+  color: #f0f7ff;
+}
+.admin-sider .ant-menu-item:focus-visible,
+.admin-sider .ant-menu-submenu-title:focus-visible,
+.admin-sider .sider-toggle:focus-visible {
+  outline: 2px solid #94d4ff;
+  outline-offset: -2px;
+}
+.admin-sider.ant-layout-sider-collapsed .ant-menu-root > .ant-menu-item,
+.admin-sider.ant-layout-sider-collapsed .ant-menu-root > .ant-menu-submenu > .ant-menu-submenu-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0 !important;
+}
+.admin-sider.ant-layout-sider-collapsed .ant-menu-root > .ant-menu-item .ant-menu-item-icon,
+.admin-sider.ant-layout-sider-collapsed .ant-menu-root > .ant-menu-submenu > .ant-menu-submenu-title .ant-menu-item-icon {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-inline: 0 !important;
+  line-height: 1;
+  transform: translate(-50%, -50%);
 }
 .admin-header {
   height: 64px;
@@ -285,11 +372,20 @@ body {
 .admin-sider-footer {
   flex: 0 0 auto;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
   padding: 12px 16px;
+  border-top: 1px solid rgba(197, 220, 240, 0.1);
+}
+.admin-sider-role {
+  align-self: stretch;
+  color: #89a7c3;
+  font-size: 11px;
+  letter-spacing: 0.03em;
 }
 .admin-sider.ant-layout-sider-collapsed .admin-sider-footer {
-  justify-content: center;
+  align-items: center;
   padding-inline: 0;
 }
 .sider-toggle {
@@ -384,6 +480,30 @@ body {
 .user-management-table .password-state {
   font-size: 12px;
   white-space: nowrap;
+}
+.user-management-table .user-assignment-tag {
+  display: inline-block;
+  max-width: 140px;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.issued-password-details {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #dfe7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.issued-password-details .ant-typography {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .dashboard-hero {
   position: relative;

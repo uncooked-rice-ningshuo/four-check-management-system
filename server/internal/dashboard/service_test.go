@@ -59,6 +59,7 @@ func TestWorkbenchCountsPersonalTodosButShowsDepartmentOverall(t *testing.T) {
 	repository := &repositoryStub{personal: MyTodos{Total: 2, Draft: 1, Returned: 1}, counts: []ScopeCounts{{
 		DepartmentID: "study", InspectionTypeID: "attendance", Total: 9, Draft: 2,
 		PendingReview: 3, Returned: 1, Confirmed: 3,
+		BatchTotal: 3, BatchPending: 1, BatchReturned: 1, BatchConfirmed: 1,
 	}}}
 	service := NewService(repository, academicStub{
 		week: &academic.Week{ID: "week-1", SemesterID: "semester-1", WeekNo: 2},
@@ -84,7 +85,8 @@ func TestWorkbenchCountsPersonalTodosButShowsDepartmentOverall(t *testing.T) {
 	if result.MyTodos.Total != 2 || result.MyTodos.Draft != 1 || result.MyTodos.Returned != 1 {
 		t.Fatalf("personal todos = %#v", result.MyTodos)
 	}
-	if len(result.DepartmentStatuses) != 1 || result.DepartmentStatuses[0].Total != 9 || result.DepartmentStatuses[0].Status != StatusReturned {
+	if len(result.DepartmentStatuses) != 1 || result.DepartmentStatuses[0].Total != 9 || result.DepartmentStatuses[0].Status != StatusReturned ||
+		result.DepartmentStatuses[0].BatchTotal != 3 || result.DepartmentStatuses[0].BatchReturned != 1 {
 		t.Fatalf("department statuses = %#v", result.DepartmentStatuses)
 	}
 	if repository.query.AccountID != "member-1" || len(repository.query.Scopes) != 1 {

@@ -1,3 +1,4 @@
+import { ProFormDatePicker, ProFormTimePicker } from '@ant-design/pro-components'
 import { Alert, Button, Col, Drawer, Form, Input, InputNumber, Row, Select, Space } from 'antd'
 import { useRef, useState } from 'react'
 import type { AttendanceFilterOptions, AttendanceRecord, ManualAttendanceInput } from '../../../entities/inspection/model/inspection'
@@ -55,8 +56,8 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
         <Col xs={24} sm={12}><Form.Item name="studentName" label="姓名" rules={[...required, { whitespace: true, message: '姓名不能为空' }]}><Input maxLength={100} autoComplete="off" /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="courseName" label="课程名称" rules={required}><Input maxLength={200} placeholder="填写该班级在所选学期的课程名称" /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="classroom" label="上课教室" rules={required}><Input maxLength={200} placeholder="例如：博学楼 101" /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="date" label="检查日期" rules={required}><Input type="date" /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="time" label="检查时间" rules={required}><Input type="time" /></Form.Item></Col>
+        <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
+        <Col xs={24} sm={12}><ProFormTimePicker name="time" label="检查时间" rules={required} getValueFromEvent={(_time: unknown, timeString: string) => timeString || undefined} fieldProps={{ format: 'HH:mm', style: { width: '100%' } }} /></Col>
         <Col xs={24} sm={12}><Form.Item name="period" label="节次" rules={required}><Input maxLength={64} placeholder="例如：1-2" /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="absenceHours" label="旷课学时" rules={[...required, { type: 'number', min: 0.01, max: 24, message: '请输入大于 0 且不超过 24 的学时' }]}><InputNumber min={0.01} max={24} style={{ width: '100%' }} /></Form.Item></Col>
       </Row>

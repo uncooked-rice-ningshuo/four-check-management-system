@@ -35,9 +35,12 @@ func (m *memoryAccounts) FindByLoginName(_ context.Context, loginName string) (A
 	return a, nil
 }
 
-func (m *memoryAccounts) UpdatePassword(_ context.Context, id, hash string, mustChange bool, mutation audit.Mutation) error {
+func (m *memoryAccounts) UpdatePassword(_ context.Context, id, hash string, mustChange bool, version int, mutation audit.Mutation) error {
 	for key, a := range m.byStudentNo {
 		if a.ID == id {
+			if a.SessionVersion != version {
+				return ErrVersionConflict
+			}
 			a.PasswordHash = hash
 			a.MustChangePassword = mustChange
 			a.SessionVersion++
@@ -92,6 +95,9 @@ func (m *memoryAccounts) FindByID(_ context.Context, id string) (Account, error)
 func (m *memoryAccounts) UpdateAccount(_ context.Context, account Account, mutation audit.Mutation) (Account, error) {
 	for key, value := range m.byStudentNo {
 		if value.ID == account.ID {
+			if value.SessionVersion != account.SessionVersion {
+				return Account{}, ErrVersionConflict
+			}
 			delete(m.byStudentNo, key)
 			account.PasswordHash = value.PasswordHash
 			account.SessionVersion = value.SessionVersion + 1
@@ -103,9 +109,12 @@ func (m *memoryAccounts) UpdateAccount(_ context.Context, account Account, mutat
 	return Account{}, ErrAccountNotFound
 }
 
-func (m *memoryAccounts) SetStatus(_ context.Context, accountID, status string, mutation audit.Mutation) (Account, error) {
+func (m *memoryAccounts) SetStatus(_ context.Context, accountID, status string, expectedVersion int, mutation audit.Mutation) (Account, error) {
 	for key, value := range m.byStudentNo {
 		if value.ID == accountID {
+			if value.SessionVersion != expectedVersion {
+				return Account{}, ErrVersionConflict
+			}
 			value.Status = status
 			value.SessionVersion++
 			m.byStudentNo[key] = value
@@ -119,19 +128,29 @@ func (m *memoryAccounts) SetStatus(_ context.Context, accountID, status string, 
 type memorySessions struct{ values map[string]RefreshSession }
 
 func newMemorySessions() *memorySessions { return &memorySessions{values: map[string]RefreshSession{}} }
-func (m *memorySessions) Save(_ context.Context, s RefreshSession) error {
+func (m *memorySessions) Save(_ context.Context, s RefreshSession, _ int) error {
 	m.values[s.TokenHash] = s
 	return nil
 }
-func (m *memorySessions) Consume(_ context.Context, hash string, now time.Time) (RefreshSession, error) {
+func (m *memorySessions) FindRefreshSession(_ context.Context, hash string, now time.Time) (RefreshSession, error) {
 	s, ok := m.values[hash]
 	if !ok || s.RevokedAt != nil || !s.ExpiresAt.After(now) {
 		return RefreshSession{}, ErrInvalidRefreshToken
 	}
-	t := now
-	s.RevokedAt = &t
-	m.values[hash] = s
 	return s, nil
+}
+func (m *memorySessions) Rotate(ctx context.Context, hash string, now time.Time, next RefreshSession, _ int) error {
+	s, err := m.FindRefreshSession(ctx, hash, now)
+	if err != nil {
+		return err
+	}
+	if s.AccountID != next.AccountID {
+		return ErrInvalidRefreshToken
+	}
+	s.RevokedAt = &now
+	m.values[hash] = s
+	m.values[next.TokenHash] = next
+	return nil
 }
 func (m *memorySessions) Revoke(_ context.Context, hash string, now time.Time) error {
 	s, ok := m.values[hash]
@@ -353,6 +372,46 @@ func TestRefreshRotatesTokenAndLogoutRevokesIt(t *testing.T) {
 	}
 	if _, err := s.Refresh(context.Background(), second.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("logged-out token error = %v", err)
+	}
+}
+
+type failingRefreshSessions struct {
+	*memorySessions
+	fail bool
+}
+
+func (m *failingRefreshSessions) Save(ctx context.Context, session RefreshSession, version int) error {
+	if m.fail {
+		return errors.New("injected session persistence failure")
+	}
+	return m.memorySessions.Save(ctx, session, version)
+}
+func (m *failingRefreshSessions) Rotate(ctx context.Context, hash string, now time.Time, next RefreshSession, version int) error {
+	if m.fail {
+		return errors.New("injected session persistence failure")
+	}
+	return m.memorySessions.Rotate(ctx, hash, now, next, version)
+}
+
+func TestRefreshPersistenceFailureLeavesOldSessionRetryable(t *testing.T) {
+	s := testService()
+	repository := &failingRefreshSessions{memorySessions: newMemorySessions()}
+	s.sessions = repository
+	ctx := context.Background()
+	if _, err := s.BootstrapAdmin(ctx, "rotation-admin", "Rotation fixture", "InitialPassword123"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Login(ctx, "rotation-admin", "InitialPassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.fail = true
+	if _, err = s.Refresh(ctx, first.RefreshToken); err == nil || errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatal("persistence failure must remain an infrastructure error")
+	}
+	repository.fail = false
+	if _, err = s.Refresh(ctx, first.RefreshToken); err != nil {
+		t.Fatalf("old session cannot retry after rolled-back refresh: %v", err)
 	}
 }
 

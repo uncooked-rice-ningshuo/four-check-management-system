@@ -49,6 +49,9 @@ func TestManualAttendancePostgresIntegration(t *testing.T) {
 	if created.Source != "MANUAL" || created.Status != "DRAFT" || created.ImportBatchID != "" || created.CreatedAt.IsZero() {
 		t.Fatalf("wrong draft metadata: %+v", created)
 	}
+	if created.PenaltyMultiplier == nil || *created.PenaltyMultiplier != 1 || created.PenaltyHours == nil || *created.PenaltyHours != 2 {
+		t.Fatalf("manual penalty snapshot: %+v", created)
+	}
 	if _, err = service.Create(ctx, actor, input, audit.Metadata{}); !errors.Is(err, inspection.ErrAttendanceDuplicate) {
 		t.Fatalf("duplicate=%v", err)
 	}
@@ -97,7 +100,7 @@ func TestManualAttendancePostgresIntegration(t *testing.T) {
 	// Audit failure must roll back both inserted record and attendance detail.
 	rollback := created
 	rollback.ID = uuid.NewString()
-	rollback.PeriodText = "9-10"
+	rollback.PeriodText = "第1节"
 	rollback.DedupKey = inspection.AttendanceDedupKey(rollback)
 	if _, err = db.SaveManualAttendance(ctx, rollback, audit.Mutation{}); err == nil {
 		t.Fatal("expected audit validation failure")

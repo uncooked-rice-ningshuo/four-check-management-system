@@ -15,13 +15,15 @@ import (
 )
 
 type memoryFileRepository struct {
-	files      map[string]File
-	created    []File
-	available  []File
-	failed     []File
-	missing    []File
-	candidates []File
-	audits     []audit.Mutation
+	files        map[string]File
+	created      []File
+	available    []File
+	failed       []File
+	missing      []File
+	candidates   []File
+	audits       []audit.Mutation
+	availableErr error
+	failedErr    error
 }
 
 func newMemoryFileRepository() *memoryFileRepository {
@@ -43,6 +45,9 @@ func (r *memoryFileRepository) FindFile(_ context.Context, id string) (File, err
 }
 
 func (r *memoryFileRepository) MarkFileAvailable(_ context.Context, file File, _ audit.Mutation) error {
+	if r.availableErr != nil {
+		return r.availableErr
+	}
 	file.Status = StatusAvailable
 	r.files[file.ID] = file
 	r.available = append(r.available, file)
@@ -50,9 +55,36 @@ func (r *memoryFileRepository) MarkFileAvailable(_ context.Context, file File, _
 }
 
 func (r *memoryFileRepository) MarkFileFailed(_ context.Context, file File, _ audit.Mutation) error {
+	if r.failedErr != nil {
+		return r.failedErr
+	}
 	file.Status = StatusFailed
 	r.files[file.ID] = file
 	r.failed = append(r.failed, file)
+	return nil
+}
+
+func (r *memoryFileRepository) MarkImportSourceDiscarded(ctx context.Context, file File, mutation audit.Mutation) error {
+	current := r.files[file.ID]
+	if current.Status != StatusAvailable || current.RetentionType != RetentionImportSource || mutation.Metadata.ActorID == "" || current.CreatedBy != mutation.Metadata.ActorID {
+		return ErrFileUnavailable
+	}
+	return r.MarkFileFailed(ctx, file, mutation)
+}
+
+func (r *memoryFileRepository) RecordFileCleanup(_ context.Context, id string, _ bool, mutation audit.Mutation) error {
+	if r.files[id].Status != StatusFailed {
+		return ErrFileUnavailable
+	}
+	r.audits = append(r.audits, mutation)
+	return nil
+}
+
+func (r *memoryFileRepository) RecordFileRecoveryDeferred(_ context.Context, id string, mutation audit.Mutation) error {
+	if r.files[id].Status != StatusPending {
+		return ErrFileUnavailable
+	}
+	r.audits = append(r.audits, mutation)
 	return nil
 }
 
@@ -63,7 +95,7 @@ func (r *memoryFileRepository) MarkFileMissing(_ context.Context, file File, _ a
 	return nil
 }
 
-func (r *memoryFileRepository) ListFileReconciliationCandidates(_ context.Context, _ time.Time, _ int) ([]File, error) {
+func (r *memoryFileRepository) ListFileReconciliationCandidates(_ context.Context, _ string, _ time.Time, _ int) ([]File, error) {
 	return r.candidates, nil
 }
 
@@ -216,7 +248,7 @@ func TestStoreMarksFailureAndAttemptsCleanup(t *testing.T) {
 
 func TestDiscardMarksAvailableImportSourceRecoverableBeforeRemoval(t *testing.T) {
 	repository := newMemoryFileRepository()
-	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusAvailable}
+	repository.files["file-id"] = File{ID: "file-id", Bucket: "private-files", ObjectKey: "system/file-id", Status: StatusAvailable, RetentionType: RetentionImportSource, CreatedBy: "actor-id"}
 	objects := newMemoryObjectStorage()
 	objects.data["system/file-id"] = []byte("private import")
 	if err := NewService(repository, objects, 1024).Discard(context.Background(), "file-id", audit.Metadata{ActorID: "actor-id"}); err != nil {
@@ -229,7 +261,7 @@ func TestDiscardMarksAvailableImportSourceRecoverableBeforeRemoval(t *testing.T)
 
 func TestOpenRefusesNonAvailableFile(t *testing.T) {
 	repository := newMemoryFileRepository()
-	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusPending}
+	repository.files["file-id"] = File{ID: "file-id", Bucket: "private-files", ObjectKey: "system/file-id", Status: StatusPending}
 	objects := newMemoryObjectStorage()
 	service := NewService(repository, objects, 1024)
 
@@ -244,7 +276,7 @@ func TestOpenRefusesNonAvailableFile(t *testing.T) {
 
 func TestOpenMarksAvailableMetadataMissingWhenObjectDisappears(t *testing.T) {
 	repository := newMemoryFileRepository()
-	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusAvailable}
+	repository.files["file-id"] = File{ID: "file-id", Bucket: "private-files", ObjectKey: "system/file-id", Status: StatusAvailable}
 	objects := newMemoryObjectStorage()
 	objects.openErr = ErrObjectMissing
 	service := NewService(repository, objects, 1024)
@@ -262,7 +294,7 @@ func TestReadVerifiedReturnsContentOnlyAfterSHAAndSizeMatch(t *testing.T) {
 	repository := newMemoryFileRepository()
 	content := []byte("verified import workbook")
 	wantSHA := fmt.Sprintf("%x", sha256.Sum256(content))
-	repository.files["file-id"] = File{ID: "file-id", ObjectKey: "system/file-id", Status: StatusAvailable, SizeBytes: int64(len(content)), SHA256: wantSHA}
+	repository.files["file-id"] = File{ID: "file-id", Bucket: "private-files", ObjectKey: "system/file-id", Status: StatusAvailable, SizeBytes: int64(len(content)), SHA256: wantSHA}
 	objects := newMemoryObjectStorage()
 	objects.data["system/file-id"] = content
 
@@ -277,8 +309,8 @@ func TestReadVerifiedReturnsContentOnlyAfterSHAAndSizeMatch(t *testing.T) {
 
 func TestReadVerifiedRejectsUnavailableOrMismatchedContent(t *testing.T) {
 	repository := newMemoryFileRepository()
-	repository.files["pending"] = File{ID: "pending", ObjectKey: "system/pending", Status: StatusPending}
-	repository.files["mismatch"] = File{ID: "mismatch", ObjectKey: "system/mismatch", Status: StatusAvailable, SizeBytes: 3, SHA256: strings.Repeat("0", 64)}
+	repository.files["pending"] = File{ID: "pending", Bucket: "private-files", ObjectKey: "system/pending", Status: StatusPending}
+	repository.files["mismatch"] = File{ID: "mismatch", Bucket: "private-files", ObjectKey: "system/mismatch", Status: StatusAvailable, SizeBytes: 3, SHA256: strings.Repeat("0", 64)}
 	objects := newMemoryObjectStorage()
 	objects.data["system/mismatch"] = []byte("abc")
 	service := NewService(repository, objects, 1024)
@@ -314,5 +346,141 @@ func TestReconcileRepairsStalePendingAndCleansFailedObject(t *testing.T) {
 	}
 	if len(objects.removed) != 1 || objects.removed[0] != failed.ObjectKey {
 		t.Fatalf("cleanup keys = %#v", objects.removed)
+	}
+}
+
+func TestStorageRejectsDifferentMetadataBucketBeforeObjectAccess(t *testing.T) {
+	for _, operation := range []string{"open", "verified", "discard", "reconcile-failed", "reconcile-pending"} {
+		t.Run(operation, func(t *testing.T) {
+			repository := newMemoryFileRepository()
+			file := File{ID: "isolated", Bucket: "another-private-bucket", ObjectKey: "same/key", Status: StatusAvailable, RetentionType: RetentionImportSource, CreatedBy: "actor", SizeBytes: 3, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("abc")))}
+			if operation == "reconcile-failed" {
+				file.Status = StatusFailed
+			}
+			if operation == "reconcile-pending" {
+				file.Status = StatusPending
+			}
+			repository.files[file.ID] = file
+			repository.candidates = []File{file}
+			objects := newMemoryObjectStorage()
+			objects.data[file.ObjectKey] = []byte("abc")
+			service := NewService(repository, objects, 1024)
+			metadata := audit.Metadata{ActorID: "actor"}
+			switch operation {
+			case "open":
+				_, object, err := service.Open(context.Background(), file.ID, metadata)
+				if object.Body != nil {
+					object.Body.Close()
+				}
+				if !errors.Is(err, ErrFileUnavailable) {
+					t.Fatalf("wrong-bucket read accepted: %v", err)
+				}
+			case "verified":
+				if _, _, err := service.ReadVerified(context.Background(), file.ID, metadata); !errors.Is(err, ErrFileUnavailable) {
+					t.Fatalf("wrong-bucket verified read accepted: %v", err)
+				}
+			case "discard":
+				if err := service.Discard(context.Background(), file.ID, metadata); !errors.Is(err, ErrFileUnavailable) {
+					t.Fatalf("wrong-bucket discard accepted: %v", err)
+				}
+			default:
+				result, err := service.Reconcile(context.Background(), time.Now(), 1, metadata)
+				if err != nil || result.Failed != 1 || result.Cleaned != 0 || result.Recovered != 0 {
+					t.Fatalf("wrong-bucket reconciliation accepted: %+v %v", result, err)
+				}
+			}
+			if objects.openCalls != 0 || len(objects.removed) != 0 || repository.files[file.ID].Status != file.Status || len(repository.audits) != 0 {
+				t.Fatal("wrong bucket touched objects or metadata")
+			}
+		})
+	}
+}
+
+func TestStorePreservesObjectWhenStatePersistenceFails(t *testing.T) {
+	for _, failure := range []string{"available", "failed"} {
+		t.Run(failure, func(t *testing.T) {
+			repository := newMemoryFileRepository()
+			objects := newMemoryObjectStorage()
+			if failure == "available" {
+				repository.availableErr = ErrFileUnavailable
+			} else {
+				repository.failedErr = ErrFileUnavailable
+				objects.statErr = ErrUnavailable
+			}
+			file, err := NewService(repository, objects, 1024).Store(context.Background(), StoreInput{OriginalName: "synthetic.txt", Size: 3, RetentionType: RetentionTemporary, Body: strings.NewReader("abc")}, audit.Metadata{})
+			if !errors.Is(err, ErrFileUnavailable) || len(objects.removed) != 0 || string(objects.data[file.ObjectKey]) != "abc" {
+				t.Fatalf("state failure removed recoverable object: %v", err)
+			}
+		})
+	}
+}
+
+// An adversarial stream reports a small size but delivers more bytes.
+type countingBody struct {
+	bytesRead int
+	remaining int
+}
+
+func (r *countingBody) Read(p []byte) (int, error) {
+	if r.remaining == 0 {
+		return 0, io.EOF
+	}
+	n := min(len(p), r.remaining)
+	for i := 0; i < n; i++ {
+		p[i] = 'a'
+	}
+	r.remaining -= n
+	r.bytesRead += n
+	return n, nil
+}
+func (r *countingBody) Close() error { return nil }
+
+type oversizedStreamStorage struct {
+	*memoryObjectStorage
+	body *countingBody
+}
+
+func (s oversizedStreamStorage) Open(context.Context, string) (Object, error) {
+	return Object{Body: s.body, Info: ObjectInfo{Size: 3}}, nil
+}
+func TestPendingRecoveryBoundsStreamAndRejectsOversizedMetadata(t *testing.T) {
+	for _, size := range []int64{3, 2048} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			repository := newMemoryFileRepository()
+			file := File{ID: "pending", Bucket: "private-files", ObjectKey: "pending/key", Status: StatusPending, SizeBytes: size}
+			repository.files[file.ID] = file
+			repository.candidates = []File{file}
+			body := &countingBody{remaining: 1 << 20}
+			objects := oversizedStreamStorage{newMemoryObjectStorage(), body}
+			result, err := NewService(repository, objects, 1024).Reconcile(context.Background(), time.Now(), 1, audit.Metadata{})
+			if err != nil || result.Failed != 1 || result.Recovered != 0 {
+				t.Fatal(result, err)
+			}
+			if size == 3 && body.bytesRead > 4 {
+				t.Fatalf("read beyond declared size: %d", body.bytesRead)
+			}
+			if size > 1024 && body.bytesRead != 0 {
+				t.Fatalf("read oversized metadata object: %d", body.bytesRead)
+			}
+		})
+	}
+}
+
+func TestPendingRecoveryDefersTransientReadFailure(t *testing.T) {
+	repository := newMemoryFileRepository()
+	file := File{ID: "pending", Bucket: "private-files", ObjectKey: "pending/key", Status: StatusPending, SizeBytes: 3}
+	repository.files[file.ID] = file
+	repository.candidates = []File{file}
+	objects := newMemoryObjectStorage()
+	objects.data[file.ObjectKey] = []byte("abc")
+	objects.openErr = ErrUnavailable
+	result, err := NewService(repository, objects, 1024).Reconcile(context.Background(), time.Now(), 1, audit.Metadata{})
+	if err != nil || result.Failed != 1 || repository.files[file.ID].Status != StatusPending || len(objects.removed) != 0 {
+		t.Fatalf("temporary read error destroyed recoverable upload: %+v %v", result, err)
+	}
+	objects.openErr = nil
+	result, err = NewService(repository, objects, 1024).Reconcile(context.Background(), time.Now(), 1, audit.Metadata{})
+	if err != nil || result.Recovered != 1 {
+		t.Fatal("transient read retry did not recover", result, err)
 	}
 }

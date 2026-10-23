@@ -13,6 +13,7 @@ export type AttendanceRecord = {
   inspectionTypeId?: string
   departmentId?: string
   createdBy?: string
+  importBatchId?: string
   id: string
   studentNo: string
   studentName: string
@@ -24,6 +25,8 @@ export type AttendanceRecord = {
   classroomCode?: string
   occurredAt: string
   absenceHours: number
+  penaltyMultiplier?: 1 | 2 | null
+  penaltyHours?: number | null
   period: string
   remark: string
   source: 'EXCEL' | 'MANUAL'

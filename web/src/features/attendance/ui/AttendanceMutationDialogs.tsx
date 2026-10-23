@@ -1,13 +1,12 @@
-import { Alert, Drawer, Form, Input, Modal, Skeleton } from 'antd'
+import { Alert, Form, Input, Modal } from 'antd'
 import { useRef, useState } from 'react'
-import type { AttendanceFilterOptions, AttendanceRecord } from '../../../entities/inspection/model/inspection'
-import { useAttendanceDetail, useDeleteAttendance } from '../hooks/useAttendanceMutations'
-import { ManualAttendanceDrawer } from './ManualAttendanceDrawer'
+import type { AttendanceRecord } from '../../../entities/inspection/model/inspection'
+import { useDeleteAttendance } from '../hooks/useAttendanceMutations'
+import { CourseRecordPanel } from '../../course-inspection/ui/CourseRecordPanels'
 import { ApiError } from '../../../shared/api/httpClient'
 
-type Props = { options?: AttendanceFilterOptions; editId?: string; deleting: AttendanceRecord[]; onClose: () => void }
-export function AttendanceMutationDialogs({ options, editId, deleting, onClose }: Props) {
-  const detail = useAttendanceDetail(editId)
+type Props = { editId?: string; deleting: AttendanceRecord[]; memberDepartmentId?: string; onClose: () => void }
+export function AttendanceMutationDialogs({ editId, deleting, memberDepartmentId, onClose }: Props) {
   const remove = useDeleteAttendance()
   const [form] = Form.useForm<{ reason: string }>()
   const [error, setError] = useState('')
@@ -26,7 +25,7 @@ export function AttendanceMutationDialogs({ options, editId, deleting, onClose }
     } finally { busy.current = false }
   }
   return <>
-    {editId && (detail.data && options ? <ManualAttendanceDrawer editing={detail.data} options={options} onClose={onClose} /> : <Drawer open title="编辑到课率记录" onClose={onClose}>{detail.isError ? <Alert type="error" showIcon title="记录不存在或无权操作，请刷新列表" /> : <Skeleton active />}</Drawer>)}
+    {editId && <CourseRecordPanel id={editId} mode="edit" typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={memberDepartmentId} onClose={onClose} />}
     {deleting.length > 0 && <Modal open title={`确认删除 ${deleting.length} 条到课率草稿？`} okText="确认删除" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={remove.isPending} closable={!remove.isPending} maskClosable={!remove.isPending} cancelButtonProps={{ disabled: remove.isPending }} onCancel={() => { if (!busy.current) onClose() }} onOk={() => void confirm()}>
       <p>将软删除所选草稿并保留审计记录。任一记录已提交、锁定、越权或版本变化时，整批不会删除。</p>
       {error && <Alert type="error" showIcon title={error} />}

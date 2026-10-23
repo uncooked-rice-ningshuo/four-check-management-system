@@ -87,13 +87,23 @@ func (s *MutationService) Update(ctx context.Context, actor ManualActor, id stri
 	if err != nil {
 		return AttendanceRecord{}, err
 	}
-	if err = validateMutationRecord(original, input.Version); err != nil {
+	if err = validateAttendanceEditRecord(original, input.Version); err != nil {
 		return AttendanceRecord{}, err
+	}
+	if actor.IsMember {
+		departmentID, e := ResolveEntryDepartment(actor, input.Record.DepartmentID)
+		if e != nil || departmentID != original.DepartmentID {
+			return AttendanceRecord{}, ErrScopeMismatch
+		}
+		input.Record.DepartmentID = departmentID
 	}
 	input.Record.ExcludeRecordID = original.ID
 	updated, err := s.manual.prepare(ctx, actor, input.Record, original.CreatedBy)
 	if err != nil {
 		return AttendanceRecord{}, err
+	}
+	if original.Status == RecordStatusReturned && (updated.SemesterID != original.SemesterID || updated.WeekID != original.WeekID || updated.DepartmentID != original.DepartmentID || updated.InspectionTypeID != original.InspectionTypeID) {
+		return AttendanceRecord{}, ErrRecordNotEditable
 	}
 	updated.ID, updated.CreatedBy, updated.Source, updated.ImportBatchID = original.ID, original.CreatedBy, original.Source, original.ImportBatchID
 	updated.Status, updated.RowVersion, updated.CreatedAt = original.Status, original.RowVersion+1, original.CreatedAt
@@ -130,6 +140,21 @@ func validateMutationRecord(r AttendanceRecord, version int) error {
 		return ErrRecordVersionConflict
 	}
 	return nil
+}
+
+func validateAttendanceEditRecord(r AttendanceRecord, version int) error {
+	if r.HasReportLock || !((r.Status == RecordStatusDraft && !r.HasSubmission) || (r.Status == RecordStatusReturned && r.HasSubmission)) {
+		return ErrRecordNotEditable
+	}
+	if r.RowVersion != version {
+		return ErrRecordVersionConflict
+	}
+	return nil
+}
+
+// ValidateAttendanceEditRecord permits corrections to an attached returned batch.
+func ValidateAttendanceEditRecord(r AttendanceRecord, version int) error {
+	return validateAttendanceEditRecord(r, version)
 }
 
 // ValidateMutationRecord repeats the state/version invariant under row locks.

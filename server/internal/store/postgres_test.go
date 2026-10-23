@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,13 +167,14 @@ func TestMasterDataFilterUsesKindSpecificConstraints(t *testing.T) {
 	}
 }
 
-func TestMasterDataErrorMapsFacultyUniqueConstraints(t *testing.T) {
+func TestMasterDataErrorMapsKnownUniqueConstraints(t *testing.T) {
 	tests := []struct {
 		constraint string
 		want       error
 	}{
 		{constraint: "students_student_no_key", want: masterdata.ErrDuplicateCode},
 		{constraint: "faculties_name_key", want: masterdata.ErrDuplicateName},
+		{constraint: "public_dormitory_hygiene_area_dormitory_building_id_floor_u_key", want: masterdata.ErrDuplicateName},
 	}
 	for _, test := range tests {
 		t.Run(test.constraint, func(t *testing.T) {
@@ -446,6 +446,16 @@ func openTestPostgres(t *testing.T) *Postgres {
 	return database
 }
 
+// 测试共用一次性数据库，不能用时钟取模分配有限的年级名称。
+func unusedTestGradeName(t *testing.T, database *Postgres) string {
+	t.Helper()
+	var name string
+	if err := database.Pool.QueryRow(context.Background(), `SELECT year::text || '级' FROM generate_series(1000,9999) AS year WHERE NOT EXISTS (SELECT 1 FROM grades WHERE name=year::text || '级') ORDER BY year LIMIT 1`).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
 func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassroom bool) attendanceConfirmationFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -455,7 +465,7 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 	departmentID := "10000000-0000-0000-0000-000000000002"
 	inspectionTypeID := "30000000-0000-0000-0000-000000000001"
 	unique := uuid.NewString()[:8]
-	gradeName := fmt.Sprintf("%04d级", 1000+time.Now().UnixNano()%9000)
+	gradeName := unusedTestGradeName(t, database)
 	templateVersion := int(time.Now().UnixNano()%1_000_000_000) + 1
 	statements := []struct {
 		sql  string
@@ -470,7 +480,7 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 		{`INSERT INTO classes(id,name,grade_id,faculty_id) VALUES($1,$2,$3,$4)`, []any{classID, "班级-" + unique, gradeID, facultyID}},
 		{`INSERT INTO teaching_buildings(id,name) VALUES($1,$2)`, []any{teachingBuildingID, "测试楼-" + unique}},
 		{`INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES($1,$2,$3)`, []any{classroomID, teachingBuildingID, unique}},
-		{`INSERT INTO courses(id,name) VALUES($1,'数据结构')`, []any{courseID}},
+		{`INSERT INTO courses(id,name) VALUES($1,$2)`, []any{courseID, "数据结构-" + unique}},
 		{`INSERT INTO course_classes(course_id,class_id) VALUES($1,$2)`, []any{courseID, classID}},
 		{`INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section) VALUES($1,$2,$3,$4,3,1,2)`, []any{scheduleID, courseID, semesterID, classroomID}},
 		{`INSERT INTO students(id,student_no,name,grade_id,faculty_id,class_id) VALUES($1,$2,'虚构学生',$3,$4,$5)`, []any{studentID, "student-" + unique, gradeID, facultyID, classID}},
@@ -509,6 +519,8 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM import_batches WHERE id=$1`, batchID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM import_templates WHERE id=$1`, templateID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM files WHERE id IN ($1,$2)`, originalFileID, templateFileID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM course_schedules WHERE course_id=$1`, courseID)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM course_classes WHERE course_id=$1`, courseID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM courses WHERE id=$1`, courseID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM students WHERE id=$1`, studentID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM classes WHERE id=$1`, classID)
@@ -682,7 +694,7 @@ func TestFileMetadataTransitionsAndReconciliationAgainstPostgres(t *testing.T) {
 	if _, err := database.Pool.Exec(ctx, `UPDATE files SET status=$2,updated_at=$3 WHERE id=$1`, file.ID, storage.StatusFailed, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	candidates, err := database.ListFileReconciliationCandidates(ctx, now.Add(-30*time.Minute), 10)
+	candidates, err := database.ListFileReconciliationCandidates(ctx, file.Bucket, now.Add(-30*time.Minute), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -838,7 +850,7 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 		createdRecords = append(createdRecords, created)
 		return created
 	}
-	grade := createRecord(masterdata.Record{Kind: masterdata.KindGrade, Name: fmt.Sprintf("%04d级", 1000+time.Now().UnixNano()%9000)})
+	grade := createRecord(masterdata.Record{Kind: masterdata.KindGrade, Name: unusedTestGradeName(t, database)})
 	major := createRecord(masterdata.Record{Kind: masterdata.KindMajor, Name: "测试专业" + unique, FacultyID: faculty.ID})
 	staff := createRecord(masterdata.Record{Kind: masterdata.KindStaff, Code: "E" + unique, Name: "测试教师" + unique, FacultyID: faculty.ID})
 	class := createRecord(masterdata.Record{Kind: masterdata.KindClass, Name: "测试班级" + unique, GradeID: grade.ID, FacultyID: faculty.ID, MajorID: major.ID, HeadTeacherID: staff.ID, EnrolledSize: 30})

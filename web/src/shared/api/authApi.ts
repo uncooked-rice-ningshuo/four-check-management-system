@@ -1,5 +1,5 @@
 import type { User } from '../../entities/user/model/user'
-import { apiRequest, setAccessToken } from './httpClient'
+import { apiRequest, refreshAccessToken, setAccessToken } from './httpClient'
 
 let sessionRefreshInFlight: Promise<User> | null = null
 
@@ -27,8 +27,7 @@ export function refreshSession() {
   if (sessionRefreshInFlight) return sessionRefreshInFlight
 
   sessionRefreshInFlight = (async () => {
-    const data = await apiRequest<{ accessToken: string }>('/auth/refresh', { method: 'POST' })
-    setAccessToken(data.accessToken)
+    await refreshAccessToken()
     return getCurrentUser()
   })().finally(() => {
     sessionRefreshInFlight = null

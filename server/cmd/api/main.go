@@ -21,6 +21,7 @@ import (
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/store"
+	"four-check-management-system/server/internal/workflow"
 )
 
 type storageRuntimeConfig struct {
@@ -72,13 +73,17 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 	return httpapi.AdminServices{
 		Organization: organizationService, Academic: academicService, Permission: permissionService,
 		MasterData: masterdata.NewService(db), Dictionary: dictionary.NewService(db), Storage: storageService,
-		ImportJobs: importjob.NewService(db, storageService, importjob.NewAttendanceXLSXParser(maxUploadBytes), importjob.NewAttendanceAdapter(db)),
-		Attendance: inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,
-		ManualAttendance:    manualAttendance,
-		Inspections:         inspection.NewRecordService(db, permissionService),
-		WorkContext:         academic.NewWorkContextService(db),
-		AttendanceMutations: inspection.NewMutationService(db, manualAttendance, permissionService),
-		Dashboard:           dashboard.NewService(db, academicService, organizationService, permissionService),
+		ImportRollback: importjob.NewRollbackService(db, permissionService),
+		ImportJobs:     importjob.NewInspectionImportService(db, storageService, importjob.NewAttendanceAdapter(db), importjob.NewMorningAdapter(db), importjob.NewLateReturnAdapter(db), importjob.NewDormitoryHygieneAdapter(db), importjob.NewClassroomHygieneAdapter(db), maxUploadBytes),
+		Attendance:     inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,
+		ManualAttendance:         manualAttendance,
+		Inspections:              inspection.NewRecordService(db, permissionService),
+		InspectionOptions:        inspection.NewEntryOptionService(db, permissionService),
+		InspectionContextOptions: inspection.NewContextOptionService(db, permissionService),
+		WorkContext:              academic.NewWorkContextService(db),
+		AttendanceMutations:      inspection.NewMutationService(db, manualAttendance, permissionService),
+		Dashboard:                dashboard.NewService(db, academicService, organizationService, permissionService),
+		Workflow:                 workflow.NewService(db, permissionService),
 	}
 }
 

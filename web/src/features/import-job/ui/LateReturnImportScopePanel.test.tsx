@@ -1,0 +1,48 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { InspectionImportScopePanel } from './InspectionImportScopePanel'
+const mocks = vi.hoisted(() => ({ current: vi.fn(), context: vi.fn(), batch: vi.fn(), drawer: vi.fn() }))
+vi.mock('../../attendance/hooks/useAttendancePermissions', () => ({ useCurrentAcademicWeek: mocks.current }))
+vi.mock('../hooks/useImportContext', () => ({ useImportContext: mocks.context }))
+vi.mock('../hooks/useImportBatch', () => ({ useImportBatch: mocks.batch }))
+vi.mock('./AttendanceImportDrawer', () => ({ AttendanceImportDrawer: (props: unknown) => { mocks.drawer(props); return <div>已选择晚归导入目标</div> } }))
+const query = (data: unknown) => ({ data, isError: false, isLoading: false, refetch: vi.fn() })
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.current.mockReturnValue(query({ week: null }))
+  mocks.batch.mockReturnValue(query(undefined))
+  mocks.context.mockImplementation(({ kind }) => query({ items: kind === 'semesters' ? [{ id: 'semester', label: '测试学期' }] : kind === 'weeks' ? [{ id: 'week', label: '第 1 周' }] : [{ id: 'department', label: '测试部门' }] }))
+})
+const setup = (batchId?: string) => render(<InspectionImportScopePanel typeCode="LATE_RETURN" inspectionTypeId="late-return" batchId={batchId} onBatchIdChange={vi.fn()} onClose={vi.fn()} />)
+it('requires an explicit destination when there is no current academic week', async () => {
+  setup()
+  expect(screen.getByRole('button', { name: '准备导入' })).toBeDisabled()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '导入学期' }))
+  fireEvent.click(await screen.findByText('测试学期'))
+  expect(screen.getByRole('button', { name: '准备导入' })).toBeDisabled()
+  expect(mocks.context).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'departments', semesterId: 'semester', weekId: '' }), false, 'LATE_RETURN')
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '导入周次' }))
+  fireEvent.click(await screen.findByText('第 1 周'))
+  fireEvent.click(screen.getByRole('button', { name: '准备导入' }))
+  expect(mocks.drawer).toHaveBeenLastCalledWith(expect.objectContaining({ typeCode: 'LATE_RETURN', context: { semesterId: 'semester', weekId: 'week', inspectionTypeId: 'late-return', departmentId: '' } }))
+})
+it('shows a retryable failure instead of an empty destination', () => {
+  const refetch = vi.fn()
+  mocks.current.mockReturnValue({ ...query(undefined), isError: true, refetch })
+  setup()
+  expect(screen.getByText('导入范围加载失败，请重试。')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
+  expect(refetch).toHaveBeenCalledOnce()
+  expect(mocks.drawer).not.toHaveBeenCalled()
+})
+it('refuses a batch belonging to another inspection type', () => {
+  mocks.batch.mockReturnValue(query({ semesterId: 'semester', weekId: 'week', departmentId: 'department', inspectionTypeId: 'attendance' }))
+  setup('wrong-batch')
+  expect(screen.getByText('该批次不属于晚归检查。')).toBeInTheDocument()
+  expect(mocks.drawer).not.toHaveBeenCalled()
+})
+it('resumes the authoritative batch scope without carrying over list filters', () => {
+  mocks.batch.mockReturnValue(query({ semesterId: 'semester', weekId: 'week', departmentId: 'department', inspectionTypeId: 'late-return' }))
+  setup('batch')
+  expect(mocks.drawer).toHaveBeenLastCalledWith(expect.objectContaining({ batchId: 'batch', context: { semesterId: 'semester', weekId: 'week', departmentId: 'department', inspectionTypeId: 'late-return' } }))
+})

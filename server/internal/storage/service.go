@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ const (
 	RetentionArchive      = "ARCHIVE"
 
 	FailureStorageUnavailable = "STORAGE_UNAVAILABLE"
+	FailureFileTooLarge       = "FILE_TOO_LARGE"
 	FailureIntegrityMismatch  = "INTEGRITY_MISMATCH"
 	FailureObjectMissing      = "OBJECT_MISSING"
 	FailureOrphanedImport     = "ORPHANED_IMPORT_SOURCE"
@@ -84,8 +86,11 @@ type FileRepository interface {
 	FindFile(context.Context, string) (File, error)
 	MarkFileAvailable(context.Context, File, audit.Mutation) error
 	MarkFileFailed(context.Context, File, audit.Mutation) error
+	MarkImportSourceDiscarded(context.Context, File, audit.Mutation) error
+	RecordFileCleanup(context.Context, string, bool, audit.Mutation) error
+	RecordFileRecoveryDeferred(context.Context, string, audit.Mutation) error
 	MarkFileMissing(context.Context, File, audit.Mutation) error
-	ListFileReconciliationCandidates(context.Context, time.Time, int) ([]File, error)
+	ListFileReconciliationCandidates(context.Context, string, time.Time, int) ([]File, error)
 	RecordFileAudit(context.Context, audit.Mutation) error
 }
 
@@ -144,7 +149,7 @@ func (s *Service) Store(ctx context.Context, input StoreInput, metadata audit.Me
 	file.UpdatedAt = s.now().UTC()
 	mutation := fileMutation(metadata, audit.ActionFileUploadSucceeded, file.ID, StatusPending, file)
 	if err := s.repository.MarkFileAvailable(ctx, file, mutation); err != nil {
-		_ = s.objects.Remove(ctx, file.ObjectKey)
+		// A failed state write may mean another worker already owns the object.
 		return file, err
 	}
 	return file, nil
@@ -155,7 +160,7 @@ func (s *Service) Open(ctx context.Context, id string, metadata audit.Metadata) 
 	if err != nil {
 		return File{}, Object{}, err
 	}
-	if file.Status != StatusAvailable {
+	if file.Status != StatusAvailable || file.Bucket == "" || file.Bucket != s.objects.Bucket() {
 		return file, Object{}, ErrFileUnavailable
 	}
 	object, err := s.objects.Open(ctx, file.ObjectKey)
@@ -184,7 +189,7 @@ func (s *Service) ReadVerified(ctx context.Context, id string, metadata audit.Me
 	if err != nil {
 		return File{}, nil, err
 	}
-	if file.Status != StatusAvailable {
+	if file.Status != StatusAvailable || file.Bucket == "" || file.Bucket != s.objects.Bucket() {
 		return file, nil, ErrFileUnavailable
 	}
 	if file.SizeBytes < 0 || file.SizeBytes > s.maxSize {
@@ -213,20 +218,20 @@ func (s *Service) ReadVerified(ctx context.Context, id string, metadata audit.Me
 	return file, content, nil
 }
 
-// Discard marks an AVAILABLE object recoverable before attempting best-effort object removal.
+// Discard reclaims only an unbound import source owned by the requesting actor.
 func (s *Service) Discard(ctx context.Context, id string, metadata audit.Metadata) error {
 	file, err := s.repository.FindFile(ctx, id)
 	if err != nil {
 		return err
 	}
-	if file.Status != StatusAvailable {
+	if file.Status != StatusAvailable || file.Bucket == "" || file.Bucket != s.objects.Bucket() || file.RetentionType != RetentionImportSource || metadata.ActorID == "" || file.CreatedBy != metadata.ActorID {
 		return ErrFileUnavailable
 	}
 	file.Status, file.FailureCode, file.FailureMessage = StatusFailed, FailureOrphanedImport, "导入源文件未关联业务批次"
-	if err := s.repository.MarkFileFailed(ctx, file, fileMutation(metadata, audit.ActionFileUploadFailed, file.ID, StatusAvailable, file)); err != nil {
+	if err := s.repository.MarkImportSourceDiscarded(ctx, file, fileMutation(metadata, audit.ActionFileUploadFailed, file.ID, StatusAvailable, file)); err != nil {
 		return err
 	}
-	return s.objects.Remove(ctx, file.ObjectKey)
+	return s.cleanupFailedFile(ctx, file, metadata)
 }
 
 func (s *Service) markReadAnomaly(ctx context.Context, file File, code, message string, cause error, metadata audit.Metadata) error {
@@ -244,14 +249,19 @@ func (s *Service) Reconcile(ctx context.Context, staleBefore time.Time, limit in
 	if limit <= 0 {
 		return result, ErrInvalidFile
 	}
-	files, err := s.repository.ListFileReconciliationCandidates(ctx, staleBefore, limit)
+	files, err := s.repository.ListFileReconciliationCandidates(ctx, s.objects.Bucket(), staleBefore, limit)
 	if err != nil {
 		return result, err
 	}
 	for _, file := range files {
+		// A configuration mismatch must never read, delete, or change metadata for another bucket.
+		if file.Bucket == "" || file.Bucket != s.objects.Bucket() {
+			result.Failed++
+			continue
+		}
 		switch file.Status {
 		case StatusFailed:
-			if err := s.objects.Remove(ctx, file.ObjectKey); err != nil {
+			if err := s.cleanupFailedFile(ctx, file, metadata); err != nil {
 				result.Failed++
 			} else {
 				result.Cleaned++
@@ -267,26 +277,55 @@ func (s *Service) Reconcile(ctx context.Context, staleBefore time.Time, limit in
 	return result, nil
 }
 
+// Persist every cleanup attempt so completed rows leave the queue and failed rows yield their place.
+func (s *Service) cleanupFailedFile(ctx context.Context, file File, metadata audit.Metadata) error {
+	removeErr := s.objects.Remove(ctx, file.ObjectKey)
+	action := audit.ActionFileObjectRemoved
+	if removeErr != nil {
+		action = audit.ActionFileCleanupFailed
+	}
+	mutation := fileMutation(metadata, action, file.ID, StatusFailed, file)
+	if err := s.repository.RecordFileCleanup(ctx, file.ID, removeErr == nil, mutation); err != nil {
+		return err
+	}
+	return removeErr
+}
+
 func (s *Service) recoverPending(ctx context.Context, file File, metadata audit.Metadata) error {
+	if file.SizeBytes < 0 {
+		_, err := s.failStore(ctx, file, ErrIntegrityMismatch, metadata)
+		return err
+	}
+	if s.maxSize <= 0 || file.SizeBytes > s.maxSize || file.SizeBytes == math.MaxInt64 {
+		_, err := s.failStore(ctx, file, ErrFileTooLarge, metadata)
+		return err
+	}
 	object, err := s.objects.Open(ctx, file.ObjectKey)
 	if err != nil {
-		_, failureErr := s.failStore(ctx, file, err, metadata)
-		return failureErr
+		if errors.Is(err, ErrObjectMissing) {
+			_, failureErr := s.failStore(ctx, file, err, metadata)
+			return failureErr
+		}
+		return s.deferRecovery(ctx, file, err, metadata)
 	}
 	defer object.Body.Close()
-	buffered := bufio.NewReader(object.Body)
+	if object.Info.Size != file.SizeBytes {
+		_, err := s.failStore(ctx, file, ErrIntegrityMismatch, metadata)
+		return err
+	}
+	// Read one extra byte to detect overflow without consuming an unbounded stream.
+	buffered := bufio.NewReader(io.LimitReader(object.Body, file.SizeBytes+1))
 	detected, err := detectContentType(buffered)
 	if err != nil {
-		_, failureErr := s.failStore(ctx, file, err, metadata)
-		return failureErr
+		return s.deferRecovery(ctx, file, err, metadata)
 	}
 	hash := sha256.New()
 	read, err := io.Copy(hash, buffered)
-	if err != nil || read != file.SizeBytes || object.Info.Size != file.SizeBytes {
-		if err == nil {
-			err = ErrIntegrityMismatch
-		}
-		_, failureErr := s.failStore(ctx, file, err, metadata)
+	if err != nil {
+		return s.deferRecovery(ctx, file, err, metadata)
+	}
+	if read != file.SizeBytes {
+		_, failureErr := s.failStore(ctx, file, ErrIntegrityMismatch, metadata)
 		return failureErr
 	}
 	file.DetectedContentType = detected
@@ -296,16 +335,24 @@ func (s *Service) recoverPending(ctx context.Context, file File, metadata audit.
 	return s.repository.MarkFileAvailable(ctx, file, fileMutation(metadata, audit.ActionFileUploadSucceeded, file.ID, StatusPending, file))
 }
 
+// Temporary read failures preserve bytes and yield the queue position for later candidates.
+func (s *Service) deferRecovery(ctx context.Context, file File, cause error, metadata audit.Metadata) error {
+	if err := s.repository.RecordFileRecoveryDeferred(ctx, file.ID, fileMutation(metadata, audit.ActionFileRecoveryDeferred, file.ID, StatusPending, file)); err != nil {
+		return err
+	}
+	return cause
+}
+
 func (s *Service) failStore(ctx context.Context, file File, cause error, metadata audit.Metadata) (File, error) {
 	file.Status = StatusFailed
 	file.FailureCode, file.FailureMessage = stableFailure(cause)
 	file.UpdatedAt = s.now().UTC()
 	mutation := fileMutation(metadata, audit.ActionFileUploadFailed, file.ID, StatusPending, file)
 	if err := s.repository.MarkFileFailed(ctx, file, mutation); err != nil {
-		_ = s.objects.Remove(ctx, file.ObjectKey)
+		// A failed state write may mean another worker already owns the object.
 		return file, err
 	}
-	_ = s.objects.Remove(ctx, file.ObjectKey)
+	_ = s.cleanupFailedFile(ctx, file, metadata)
 	return file, cause
 }
 
@@ -338,6 +385,8 @@ func detectContentType(reader *bufio.Reader) (string, error) {
 
 func stableFailure(err error) (string, string) {
 	switch {
+	case errors.Is(err, ErrFileTooLarge):
+		return FailureFileTooLarge, "文件超过配置大小限制"
 	case errors.Is(err, ErrObjectMissing):
 		return FailureObjectMissing, "对象不存在"
 	case errors.Is(err, ErrIntegrityMismatch):

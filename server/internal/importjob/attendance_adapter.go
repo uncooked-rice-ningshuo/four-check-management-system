@@ -33,6 +33,7 @@ type ValidationError struct {
 }
 
 type AttendanceImportScope struct {
+	TypeCode         string
 	ExcludeRecordID  string
 	InspectionTypeID string
 	SemesterID       string
@@ -71,6 +72,9 @@ type AttendanceClassReference struct {
 type AttendanceCourseReference struct {
 	ID, Name, ClassID string
 	ClassroomIDs      []string
+	// ScheduleKeys bind each classroom to an ISO weekday (1=Monday, 7=Sunday).
+	ScheduleKeys   []string
+	ScheduleRanges []string
 }
 
 type AttendanceClassroomReference struct {
@@ -78,6 +82,7 @@ type AttendanceClassroomReference struct {
 }
 
 type AttendanceReferences struct {
+	WeekPenaltyMultiplier *int
 	StudentsByNo          map[string]AttendanceStudentReference
 	ClassesByName         map[string]AttendanceClassReference
 	CoursesByClassAndName map[string]AttendanceCourseReference
@@ -118,6 +123,13 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 	if err != nil {
 		return AttendanceValidationResult{}, fmt.Errorf("load attendance references: %w", err)
 	}
+	if scope.TypeCode == inspection.InspectionTypeAttendance && references.WeekPenaltyMultiplier == nil {
+		return AttendanceValidationResult{}, inspection.ErrAttendancePenaltyUnconfigured
+	}
+	recordLabel := "到课率"
+	if scope.TypeCode == "UNATTENDED_CLASSROOM" {
+		recordLabel = "无机课堂"
+	}
 	result := AttendanceValidationResult{Rows: make([]AttendanceValidationRow, 0, len(rows))}
 	keys := make([]string, 0, len(rows))
 	seen := make(map[string]int, len(rows))
@@ -141,7 +153,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 		row := &result.Rows[index]
 		if row.Record.DedupKey != "" {
 			if _, exists := existing[row.Record.DedupKey]; exists {
-				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有到课率记录重复", row.RowNo), "按本行学生、课程、检查日期时间和节次核对有权查看的记录；需修正时使用编辑，不要重复导入"))
+				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有%s记录重复", row.RowNo, recordLabel), "按本行学生、课程、检查日期时间和节次核对有权查看的记录；需修正时使用编辑，不要重复导入"))
 			}
 		}
 		if len(row.Errors) == 0 {
@@ -215,6 +227,18 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	if value("absence_date") != "" && dateErr != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", "日期格式无效", "使用 YYYY-MM-DD 格式"))
 	}
+	if dateErr == nil && courseOK && classroomOK && scope.TypeCode != inspection.InspectionTypeUnattended {
+		weekday := int(date.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		prefix := classroom.ID + ":" + strconv.Itoa(weekday)
+		if !contains(course.ScheduleKeys, prefix) {
+			result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "absence_date", "旷课日期与课程教室安排不一致", "核对该课程、教室的授课星期"))
+		} else if first, last, valid := inspection.ParseCoursePeriod(period); !valid || !scheduledCoursePeriod(course.ScheduleRanges, prefix, first, last) {
+			result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "period", "旷课节次不在课程安排内", "填写实际排定节次内的缺课范围"))
+		}
+	}
 	clock, timeErr := time.ParseInLocation("15:04", value("absence_time"), location)
 	if value("absence_time") != "" && timeErr != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidTime, "absence_time", "时间格式无效", "使用 HH:MM 的 24 小时格式"))
@@ -229,6 +253,11 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	hours, hoursErr := strconv.ParseFloat(value("absence_hours"), 64)
 	if value("absence_hours") != "" && (hoursErr != nil || hours <= 0 || hours > 24) {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "旷课学时格式或范围无效", "填写大于 0 且不超过 24 的数字"))
+	} else if value("absence_hours") != "" {
+		expected, validPeriod := inspection.AttendanceHoursForPeriod(period)
+		if !validPeriod || hours != expected {
+			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课学时与节次不一致", "每节课按 1 学时填写，核对缺课节次"))
+		}
 	}
 	if utf8.RuneCountInString(period) > 64 {
 		result.Errors = append(result.Errors, validationError(ErrorTextTooLong, "period", "节次文本过长", "将节次控制在 64 个字符内"))
@@ -260,6 +289,21 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 func contains(values []string, candidate string) bool {
 	for _, value := range values {
 		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func scheduledCoursePeriod(ranges []string, prefix string, first, last int) bool {
+	for _, value := range ranges {
+		parts := strings.Split(value, ":")
+		if len(parts) != 4 || parts[0]+":"+parts[1] != prefix {
+			continue
+		}
+		start, startErr := strconv.Atoi(parts[2])
+		end, endErr := strconv.Atoi(parts[3])
+		if startErr == nil && endErr == nil && start <= first && end >= last {
 			return true
 		}
 	}

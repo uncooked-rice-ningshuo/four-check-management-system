@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"four-check-management-system/server/internal/inspection"
 )
 
 type fakeAttendanceReferenceRepository struct {
@@ -29,13 +31,15 @@ func (f *fakeAttendanceReferenceRepository) FindExistingAttendanceKeys(_ context
 }
 
 func validAttendanceReferences() AttendanceReferences {
+	multiplier := 1
 	return AttendanceReferences{
+		WeekPenaltyMultiplier: &multiplier,
 		StudentsByNo: map[string]AttendanceStudentReference{
 			"S20260001": {ID: "student-1", StudentNo: "S20260001", Name: "测试学生甲", ClassID: "class-1", ClassName: "示例班级A", Grade: "2026"},
 			"S20260002": {ID: "student-2", StudentNo: "S20260002", Name: "测试学生乙", ClassID: "class-1", ClassName: "示例班级A", Grade: "2026"},
 		},
 		ClassesByName:         map[string]AttendanceClassReference{"示例班级A": {ID: "class-1", Name: "示例班级A", Grade: "2026"}},
-		CoursesByClassAndName: map[string]AttendanceCourseReference{attendanceCourseKey("class-1", "数据结构"): {ID: "course-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}}},
+		CoursesByClassAndName: map[string]AttendanceCourseReference{attendanceCourseKey("class-1", "数据结构"): {ID: "course-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}, ScheduleKeys: []string{"room-1:3"}, ScheduleRanges: []string{"room-1:3:1:2"}}},
 		ClassroomsByCode:      map[string]AttendanceClassroomReference{"A101": {ID: "room-1", Code: "A101"}},
 	}
 }
@@ -43,6 +47,7 @@ func validAttendanceReferences() AttendanceReferences {
 func attendanceImportScope() AttendanceImportScope {
 	location := time.FixedZone("CST", 8*60*60)
 	return AttendanceImportScope{
+		TypeCode:         "ATTENDANCE_RATE",
 		InspectionTypeID: "inspection-attendance", SemesterID: "semester-1", WeekID: "week-1",
 		DepartmentID: "department-study", ImportBatchID: "batch-1", CreatedBy: "account-1",
 		WeekStart: time.Date(2026, 6, 15, 0, 0, 0, 0, location), WeekEnd: time.Date(2026, 6, 21, 0, 0, 0, 0, location),
@@ -83,6 +88,43 @@ func TestAttendanceAdapterNormalizesValidRowsWithOneBulkPrefetch(t *testing.T) {
 	}
 	if record.OccurredAt.Format(time.RFC3339) != "2026-06-17T08:00:00+08:00" || record.DedupKey == "" {
 		t.Fatalf("normalized occurrence/key = %s / %q", record.OccurredAt.Format(time.RFC3339), record.DedupKey)
+	}
+}
+
+func TestAttendanceAdapterRejectsUnconfiguredWeekBeforePreview(t *testing.T) {
+	references := validAttendanceReferences()
+	references.WeekPenaltyMultiplier = nil
+	repository := &fakeAttendanceReferenceRepository{references: references}
+	_, err := NewAttendanceAdapter(repository).Validate(context.Background(), attendanceImportScope(), []ParsedRow{attendanceParsedRow(5, "S20260001")})
+	if !errors.Is(err, inspection.ErrAttendancePenaltyUnconfigured) || repository.existingCalls != 0 {
+		t.Fatalf("unconfigured week error = %v, duplicate lookups = %d", err, repository.existingCalls)
+	}
+}
+
+func TestAttendanceAdapterRejectsWrongTeachingDay(t *testing.T) {
+	row := attendanceParsedRow(5, "S20260001")
+	row.Values["absence_date"] = "2026-06-18"
+	result, err := NewAttendanceAdapter(&fakeAttendanceReferenceRepository{references: validAttendanceReferences()}).Validate(context.Background(), attendanceImportScope(), []ParsedRow{row})
+	if err != nil || result.ValidCount != 0 || !hasValidationCode(result.Rows[0].Errors, ErrorReferenceMismatch) {
+		t.Fatalf("wrong-day course schedule accepted: %#v, %v", result, err)
+	}
+}
+
+func TestAttendanceAdapterRejectsPeriodOutsideSchedule(t *testing.T) {
+	row := attendanceParsedRow(5, "S20260001")
+	row.Values["period"] = "第3-4节"
+	result, err := NewAttendanceAdapter(&fakeAttendanceReferenceRepository{references: validAttendanceReferences()}).Validate(context.Background(), attendanceImportScope(), []ParsedRow{row})
+	if err != nil || result.ValidCount != 0 || !hasValidationCode(result.Rows[0].Errors, ErrorReferenceMismatch) {
+		t.Fatalf("unscheduled sections accepted: %#v, %v", result, err)
+	}
+}
+
+func TestAttendanceAdapterRejectsHoursThatDoNotMatchSections(t *testing.T) {
+	row := attendanceParsedRow(5, "S20260001")
+	row.Values["absence_hours"] = "1"
+	result, err := NewAttendanceAdapter(&fakeAttendanceReferenceRepository{references: validAttendanceReferences()}).Validate(context.Background(), attendanceImportScope(), []ParsedRow{row})
+	if err != nil || result.ValidCount != 0 || !hasValidationCode(result.Rows[0].Errors, ErrorInvalidHours) {
+		t.Fatalf("mismatched actual hours accepted: %#v, %v", result, err)
 	}
 }
 
@@ -157,7 +199,7 @@ func TestAttendanceAdapterDetectsBatchAndExistingDuplicates(t *testing.T) {
 func TestAttendanceAdapterDisambiguatesSameCourseNameByClass(t *testing.T) {
 	references := validAttendanceReferences()
 	references.CoursesByClassAndName = map[string]AttendanceCourseReference{
-		attendanceCourseKey("class-1", "数据结构"): {ID: "course-class-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}},
+		attendanceCourseKey("class-1", "数据结构"): {ID: "course-class-1", Name: "数据结构", ClassID: "class-1", ClassroomIDs: []string{"room-1"}, ScheduleKeys: []string{"room-1:3"}, ScheduleRanges: []string{"room-1:3:1:2"}},
 		attendanceCourseKey("class-2", "数据结构"): {ID: "course-class-2", Name: "数据结构", ClassID: "class-2", ClassroomIDs: []string{"room-2"}},
 	}
 	repository := &fakeAttendanceReferenceRepository{references: references, existing: map[string]struct{}{}}

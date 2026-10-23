@@ -47,7 +47,8 @@ func TestAttendanceMutationsPostgresIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondInput := input
-	secondInput.Period = "9-10"
+	secondInput.Period = "第1节"
+	secondInput.AbsenceHours = 1
 	second, err := manual.Create(ctx, actor, secondInput, audit.Metadata{})
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +61,20 @@ func TestAttendanceMutationsPostgresIntegration(t *testing.T) {
 	if updated.ID != first.ID || updated.CreatedBy != first.CreatedBy || updated.Source != first.Source || updated.RowVersion != 2 || updated.Remark != input.Remark {
 		t.Fatal("identity or version changed incorrectly")
 	}
+	if updated.PenaltyMultiplier == nil || *updated.PenaltyMultiplier != 1 || updated.PenaltyHours == nil || *updated.PenaltyHours != 2 {
+		t.Fatal("edited attendance lost penalty snapshot", updated)
+	}
+	memberActor := inspection.ManualActor{ID: fixture.accountID, IsMember: true, PrimaryDepartmentID: integrationDepartmentID}
+	memberInput := secondInput
+	memberInput.DepartmentID = uuid.NewString()
+	if _, err = service.Update(ctx, memberActor, second.ID, inspection.AttendanceEditInput{Version: second.RowVersion, Reason: "成员越权", Record: memberInput}, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
+		t.Fatalf("member changed legacy attendance department: %v", err)
+	}
+	memberInput.DepartmentID = ""
+	if _, err = service.Update(ctx, memberActor, second.ID, inspection.AttendanceEditInput{Version: second.RowVersion, Reason: "成员原部门更正", Record: memberInput}, audit.Metadata{}); err != nil {
+		t.Fatalf("member empty department was not resolved: %v", err)
+	}
+	second.RowVersion++
 	if _, err = service.Update(ctx, actor, first.ID, inspection.AttendanceEditInput{Version: 1, Reason: "旧版本", Record: input}, audit.Metadata{}); !errors.Is(err, inspection.ErrRecordVersionConflict) {
 		t.Fatalf("stale version=%v", err)
 	}

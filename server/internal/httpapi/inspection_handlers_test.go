@@ -7,6 +7,7 @@ import (
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/inspection"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestInspectionHTTPContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	stub := &inspectionHTTPStub{}
-	router := NewRouter(svc, false, AdminServices{Inspections: stub})
+	router := NewRouter(svc, false, AdminServices{Inspections: stub, InspectionOptions: stub, InspectionContextOptions: stub})
 	id := uuid.NewString()
 	input := map[string]any{"semesterId": id, "weekId": id, "inspectionTypeId": id, "departmentId": id, "details": map[string]any{}}
 	for _, route := range []struct {
@@ -66,6 +67,8 @@ func TestInspectionHTTPContracts(t *testing.T) {
 		body         any
 		status       int
 	}{
+		{"GET", "/api/v1/inspections/entry-options", nil, 200},
+		{"GET", "/api/v1/inspections/context-options", nil, 200},
 		{"POST", "/api/v1/inspections", input, 201}, {"GET", "/api/v1/inspections", nil, 200}, {"GET", "/api/v1/inspections/" + id, nil, 200},
 		{"PATCH", "/api/v1/inspections/" + id, map[string]any{"version": 1, "reason": "核对", "record": input}, 200},
 		{"DELETE", "/api/v1/inspections/" + id, map[string]any{"version": 1, "reason": "重复"}, 204},
@@ -82,14 +85,17 @@ func TestInspectionHTTPContracts(t *testing.T) {
 			if r.Code != route.status {
 				t.Fatalf("%d %s", r.Code, r.Body.String())
 			}
+			if strings.HasSuffix(route.path, "-options") && !strings.Contains(r.Body.String(), "\"items\":") {
+				t.Fatal("missing option page", r.Body.String())
+			}
 			for _, failure := range []struct {
 				err    error
 				status int
 				code   string
-			}{{inspection.ErrInspectionRequest, 400, "INVALID_REQUEST"}, {inspection.ErrScopeMismatch, 403, "FORBIDDEN_SCOPE"}, {inspection.ErrRecordNotFound, 404, "INSPECTION_NOT_FOUND"}, {inspection.ErrRecordVersionConflict, 409, "VERSION_CONFLICT"}, {inspection.ErrRecordNotEditable, 409, "RECORD_NOT_EDITABLE"}, {inspection.ErrAttendanceDuplicate, 409, "RECORD_ALREADY_EXISTS"}, {errors.New("private SQL"), 500, "INSPECTION_FAILED"}} {
+			}{{inspection.ErrInspectionRequest, 400, "INVALID_REQUEST"}, {inspection.ErrScopeMismatch, 403, "FORBIDDEN_SCOPE"}, {inspection.ErrRecordNotFound, 404, "INSPECTION_NOT_FOUND"}, {inspection.ErrRecordVersionConflict, 409, "VERSION_CONFLICT"}, {inspection.ErrRecordNotEditable, 409, "RECORD_NOT_EDITABLE"}, {inspection.ErrAttendanceDuplicate, 409, "RECORD_ALREADY_EXISTS"}, {errors.New("private SQL"), 500, "INSPECTION_FAILED"}, {&pgconn.PgError{Code: "42P01", Message: "relation department_submissions does not exist"}, 500, "INSPECTION_FAILED"}} {
 				stub.err = failure.err
 				r = performJSON(router, route.method, route.path, route.body, tokens.AccessToken)
-				if r.Code != failure.status || !strings.Contains(r.Body.String(), failure.code) || strings.Contains(r.Body.String(), "private SQL") {
+				if r.Code != failure.status || !strings.Contains(r.Body.String(), failure.code) || strings.Contains(r.Body.String(), "private SQL") || strings.Contains(r.Body.String(), "department_submissions") {
 					t.Fatalf("%d %s", r.Code, r.Body.String())
 				}
 			}
@@ -109,4 +115,16 @@ func TestInspectionHTTPContracts(t *testing.T) {
 	if r.Code != 403 {
 		t.Fatal("password guard")
 	}
+}
+
+func (s *inspectionHTTPStub) EntryOptions(_ context.Context, a inspection.ManualActor, _ inspection.EntryOptionQuery) (inspection.EntryOptionPage, error) {
+	s.calls++
+	s.actor = a
+	return inspection.EntryOptionPage{Items: []inspection.EntryOption{}, Page: 1, PageSize: 20}, s.err
+}
+
+func (s *inspectionHTTPStub) ContextOptions(_ context.Context, a inspection.ManualActor, _ inspection.ContextOptionQuery) (inspection.ContextOptionPage, error) {
+	s.calls++
+	s.actor = a
+	return inspection.ContextOptionPage{EntryOptionPage: inspection.EntryOptionPage{Items: []inspection.EntryOption{}, Page: 1, PageSize: 20}}, s.err
 }

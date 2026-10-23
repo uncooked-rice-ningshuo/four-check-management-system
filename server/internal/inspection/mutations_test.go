@@ -26,6 +26,23 @@ func TestAttendanceMutationRequiresEditableDraftAndVersion(t *testing.T) {
 	}
 }
 
+func TestReturnedAttendanceCanBeCorrectedButNotDeleted(t *testing.T) {
+	record := AttendanceRecord{Status: RecordStatusReturned, RowVersion: 3, HasSubmission: true}
+	if err := validateAttendanceEditRecord(record, 3); err != nil {
+		t.Fatalf("returned edit: %v", err)
+	}
+	if err := validateMutationRecord(record, 3); !errors.Is(err, ErrRecordNotEditable) {
+		t.Fatalf("returned delete: %v", err)
+	}
+	if err := validateAttendanceEditRecord(record, 2); !errors.Is(err, ErrRecordVersionConflict) {
+		t.Fatalf("stale returned edit: %v", err)
+	}
+	record.HasReportLock = true
+	if err := validateAttendanceEditRecord(record, 3); !errors.Is(err, ErrRecordNotEditable) {
+		t.Fatalf("report-locked returned edit: %v", err)
+	}
+}
+
 func TestDeleteRejectsMissingVersionsReasonsAndDuplicateTargets(t *testing.T) {
 	s := NewMutationService(nil, nil, nil)
 	for _, input := range []DeleteAttendanceInput{

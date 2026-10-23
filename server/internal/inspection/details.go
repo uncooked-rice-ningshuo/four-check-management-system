@@ -22,15 +22,17 @@ type InspectionDetails interface{ inspectionDetails() }
 
 // CourseAbsenceDetails contains fields shared by the two course absence models.
 type CourseAbsenceDetails struct {
-	StudentID    string  `json:"studentId"`
-	ClassID      string  `json:"classId"`
-	CourseID     string  `json:"courseId"`
-	ClassroomID  string  `json:"classroomId"`
-	Date         string  `json:"date"`
-	Time         string  `json:"time"`
-	Period       string  `json:"period"`
-	AbsenceHours float64 `json:"absenceHours"`
-	Remark       string  `json:"remark,omitempty"`
+	StudentID         string   `json:"studentId"`
+	ClassID           string   `json:"classId"`
+	CourseID          string   `json:"courseId"`
+	ClassroomID       string   `json:"classroomId"`
+	Date              string   `json:"date"`
+	Time              string   `json:"time"`
+	Period            string   `json:"period"`
+	AbsenceHours      float64  `json:"absenceHours"`
+	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
+	PenaltyHours      *float64 `json:"penaltyHours,omitempty"`
+	Remark            string   `json:"remark,omitempty"`
 }
 
 // AttendanceDetails and UnattendedClassroomDetails share storage but retain distinct domain types.

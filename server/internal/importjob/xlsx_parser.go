@@ -3,6 +3,7 @@ package importjob
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -98,6 +99,14 @@ func NewAttendanceXLSXParser(maxCompressedBytes int64) *XLSXParser {
 	})
 }
 
+// NewUnattendedXLSXParser shares the hardened parser while rejecting other template types.
+func NewUnattendedXLSXParser(maxCompressedBytes int64) *XLSXParser {
+	config := NewAttendanceXLSXParser(maxCompressedBytes).config
+	config.ExpectedTemplateCode = "UNATTENDED_CLASSROOM_IMPORT"
+	config.ExpectedSheetName = "无机课堂导入"
+	return NewXLSXParser(config)
+}
+
 func NewXLSXParser(config ParserConfig) *XLSXParser {
 	config.Limits = defaultXLSXLimits(config.Limits)
 	if config.DataStartRow == 0 {
@@ -132,6 +141,10 @@ func (p *XLSXParser) Parse(filename string, content []byte) (ParsedWorkbook, err
 	sheets := book.GetSheetList()
 	if len(sheets) != 1 || sheets[0] != p.config.ExpectedSheetName {
 		return ParsedWorkbook{}, parseError(ErrorInvalidWorkbook, "工作簿必须且只能包含指定业务工作表")
+	}
+	visible, err := book.GetSheetVisible(sheets[0])
+	if err != nil || !visible {
+		return ParsedWorkbook{}, parseError(ErrorInvalidWorkbook, "业务工作表必须可见")
 	}
 	rows, err := book.GetRows(sheets[0])
 	if err != nil {
@@ -169,6 +182,9 @@ func (p *XLSXParser) parseRows(sheetName string, rows [][]string) (ParsedWorkboo
 		Fields: append([]TemplateField(nil), p.config.Fields...), Rows: make([]ParsedRow, 0),
 	}
 	for index := p.config.DataStartRow - 1; index < len(rows); index++ {
+		if hasExtraValues(rows[index], len(p.config.Fields)) {
+			return ParsedWorkbook{}, parseError(ErrorInvalidWorkbook, fmt.Sprintf("第 %d 行包含模板以外的数据列", index+1))
+		}
 		values := normalizedRow(rows[index], len(p.config.Fields))
 		if blankRow(values) {
 			continue
@@ -231,6 +247,30 @@ func preflightXLSXArchive(content []byte, limits XLSXLimits) error {
 			return parseError(ErrorXLSXArchiveLimitExceeded, "XLSX 解压总量超过限制")
 		}
 		totalUncompressed += file.UncompressedSize64
+	}
+	// Inspect bounded worksheet XML before GetRows: cached formula results can
+	// otherwise look like literal input, including formulas outside visible rows.
+	for _, file := range reader.File {
+		if !strings.HasPrefix(file.Name, "xl/worksheets/") || !strings.HasSuffix(file.Name, ".xml") {
+			continue
+		}
+		content, err := readLimitedZipEntry(file, limits.MaxEntryUncompressedBytes)
+		if err != nil {
+			return parseError(ErrorXLSXArchiveLimitExceeded, "无法安全读取 XLSX 工作表")
+		}
+		decoder := xml.NewDecoder(bytes.NewReader(content))
+		for {
+			token, err := decoder.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return parseError(ErrorInvalidWorkbook, "工作表 XML 无效")
+			}
+			if start, ok := token.(xml.StartElement); ok && start.Name.Local == "f" {
+				return parseError(ErrorInvalidWorkbook, "导入工作表不允许公式，请转换为文本或数值后重试")
+			}
+		}
 	}
 	contentTypes, ok := zipEntry(reader.File, "[Content_Types].xml")
 	if !ok {

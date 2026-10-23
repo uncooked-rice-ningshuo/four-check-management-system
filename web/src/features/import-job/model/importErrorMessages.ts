@@ -2,6 +2,8 @@ const messages: Record<string, string> = {
   FORBIDDEN_SCOPE: '无权访问当前学期、周次或部门的数据',
   VERSION_CONFLICT: '数据已被其他人更新，请刷新后重试',
   FILE_TOO_LARGE: '文件超过上传大小限制',
+  RECORD_ALREADY_EXISTS: '已有相同检查记录，请修正文件并重新上传校验',
+  IMPORT_PREVIEW_STALE: '基础数据或检查范围已变化，请重新上传并校验后确认',
   BATCH_HAS_ERRORS: '请先修正预览中的错误行',
   INVALID_FILE: '请选择有效的 XLSX 文件',
   INVALID_FILE_TYPE: '仅支持无宏的 XLSX 文件',

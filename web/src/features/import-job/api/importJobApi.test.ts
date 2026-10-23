@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { importJobApi } from './importJobApi'
+import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../../entities/inspection/model/inspectionScope'
 
 const context = { semesterId: 'semester-1', weekId: 'week-1', inspectionTypeId: 'type-attendance', departmentId: 'department-study' }
 
@@ -7,12 +8,24 @@ describe('importJobApi', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('lets the browser set the multipart boundary', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'batch-1', version: 1 }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, id: 'batch-1', version: 1, templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 0 }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
     await importJobApi.uploadAttendance(context, new File(['xlsx'], 'attendance.xlsx'), { id: 'template-1', version: 1 })
     const init = fetchMock.mock.calls[0][1] as RequestInit
     expect(init.body).toBeInstanceOf(FormData)
     expect(new Headers(init.headers).has('Content-Type')).toBe(false)
+  })
+
+  it('rejects an attendance upload response that loses its selected class', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, id: 'batch-1', version: 1, templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 1, validRows: 1, invalidRows: 0, importedRows: 0 }), { status: 201, headers: { 'Content-Type': 'application/json' } })))
+    await expect(importJobApi.uploadAttendance({ ...context, classId: 'selected-class' }, new File(['xlsx'], 'attendance.xlsx'), { id: 'template-1', version: 1 })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+
+  it('accepts a college-level batch returned with no department', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, departmentId: '', id: 'college-batch', version: 1, templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 1, validRows: 1, invalidRows: 0, importedRows: 0 }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const batch = await importJobApi.uploadAttendance({ ...context, departmentId: COLLEGE_DEPARTMENT_OPTION_ID }, new File(['xlsx'], 'attendance.xlsx'), { id: 'template-1', version: 1 })
+    expect(batch.departmentId).toBe('')
   })
 
   it('sends pagination, expected version and idempotency key', async () => {

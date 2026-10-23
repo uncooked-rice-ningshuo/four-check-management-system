@@ -23,11 +23,20 @@ const (
 	ActionFileUploadSucceeded     Action = "FILE_UPLOAD_SUCCEEDED"
 	ActionFileUploadFailed        Action = "FILE_UPLOAD_FAILED"
 	ActionFileRead                Action = "FILE_READ"
+	ActionFileObjectRemoved       Action = "FILE_OBJECT_REMOVED"
+	ActionFileCleanupFailed       Action = "FILE_CLEANUP_FAILED"
+	ActionFileRecoveryDeferred    Action = "FILE_RECOVERY_DEFERRED"
 	ActionFileIntegrityAnomaly    Action = "FILE_INTEGRITY_ANOMALY"
 	ActionInspectionRecordUpdated Action = "INSPECTION_RECORD_UPDATED"
 	ActionInspectionRecordDeleted Action = "INSPECTION_RECORD_DELETED"
 	ActionInspectionRecordCreated Action = "INSPECTION_RECORD_CREATED"
+	ActionImportBatchCancelled    Action = "IMPORT_CANCELLED"
 	ActionImportBatchConfirmed    Action = "IMPORT_BATCH_CONFIRMED"
+	ActionImportBatchRolledBack   Action = "IMPORT_BATCH_ROLLED_BACK"
+	ActionDepartmentSubmitted     Action = "DEPARTMENT_SUBMITTED"
+	ActionDepartmentReturned      Action = "DEPARTMENT_RETURNED"
+	ActionDepartmentConfirmed     Action = "DEPARTMENT_CONFIRMED"
+	ActionDepartmentResubmitted   Action = "DEPARTMENT_RESUBMITTED"
 )
 
 var (

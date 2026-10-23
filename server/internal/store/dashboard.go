@@ -32,6 +32,7 @@ func (p *Postgres) Aggregate(ctx context.Context, query dashboard.AggregateQuery
 		if err := rows.Scan(
 			&value.DepartmentID, &value.InspectionTypeID, &value.Total, &value.Draft,
 			&value.PendingReview, &value.Returned, &value.Confirmed, &value.Locked,
+			&value.BatchTotal, &value.BatchPending, &value.BatchReturned, &value.BatchConfirmed,
 		); err != nil {
 			return nil, err
 		}
@@ -103,20 +104,30 @@ func dashboardScopeSetSQL(scopes []dashboard.DataScope, args *[]any) string {
 
 const dashboardAggregateSQL = `WITH authorized(department_id, inspection_type_id) AS (
 	SELECT * FROM unnest($3::text[], $4::text[])
+), record_counts AS (
+	SELECT a.department_id, a.inspection_type_id,
+	COUNT(ir.id)::int AS total,
+	COUNT(ir.id) FILTER (WHERE ir.status = 'DRAFT')::int AS draft,
+	COUNT(ir.id) FILTER (WHERE ir.status = 'PENDING_REVIEW')::int AS pending_review,
+	COUNT(ir.id) FILTER (WHERE ir.status = 'RETURNED')::int AS returned,
+	COUNT(ir.id) FILTER (WHERE ir.status = 'CONFIRMED')::int AS confirmed,
+	COUNT(ir.id) FILTER (WHERE ir.status = 'LOCKED')::int AS locked
+	FROM authorized a LEFT JOIN inspection_records ir
+	ON COALESCE(ir.department_id::text,'') = a.department_id AND ir.inspection_type_id::text = a.inspection_type_id
+	AND ir.semester_id = $1::uuid AND ir.week_id = $2::uuid AND ir.deleted_at IS NULL
+	GROUP BY a.department_id, a.inspection_type_id
+), batch_counts AS (
+	SELECT COALESCE(ds.department_id::text,'') AS department_id, ds.inspection_type_id::text AS inspection_type_id,
+	COUNT(*)::int AS total,
+	COUNT(*) FILTER (WHERE ds.status='PENDING_REVIEW')::int AS pending_review,
+	COUNT(*) FILTER (WHERE ds.status='RETURNED')::int AS returned,
+	COUNT(*) FILTER (WHERE ds.status='CONFIRMED')::int AS confirmed
+	FROM department_submissions ds JOIN authorized a ON a.department_id=COALESCE(ds.department_id::text,'')
+	AND a.inspection_type_id=ds.inspection_type_id::text
+	WHERE ds.semester_id=$1::uuid AND ds.week_id=$2::uuid
+	GROUP BY ds.department_id, ds.inspection_type_id
 )
-SELECT a.department_id, a.inspection_type_id,
-	COUNT(ir.id)::int,
-	COUNT(ir.id) FILTER (WHERE ir.status = 'DRAFT')::int,
-	COUNT(ir.id) FILTER (WHERE ir.status = 'PENDING_REVIEW')::int,
-	COUNT(ir.id) FILTER (WHERE ir.status = 'RETURNED')::int,
-	COUNT(ir.id) FILTER (WHERE ir.status = 'CONFIRMED')::int,
-	COUNT(ir.id) FILTER (WHERE ir.status = 'LOCKED')::int
-FROM authorized a
-LEFT JOIN inspection_records ir
-	ON ir.department_id::text = a.department_id
-	AND ir.inspection_type_id::text = a.inspection_type_id
-	AND ir.semester_id = $1::uuid
-	AND ir.week_id = $2::uuid
-	AND ir.deleted_at IS NULL
-GROUP BY a.department_id, a.inspection_type_id
-ORDER BY a.department_id, a.inspection_type_id`
+SELECT r.department_id,r.inspection_type_id,r.total,r.draft,r.pending_review,r.returned,r.confirmed,r.locked,
+	COALESCE(b.total,0),COALESCE(b.pending_review,0),COALESCE(b.returned,0),COALESCE(b.confirmed,0)
+FROM record_counts r LEFT JOIN batch_counts b ON b.department_id=r.department_id AND b.inspection_type_id=r.inspection_type_id
+ORDER BY r.department_id,r.inspection_type_id`

@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"four-check-management-system/server/internal/audit"
+	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/inspection"
 	"github.com/gin-gonic/gin"
 	"io"
+	"log"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type inspectionHTTPService interface {
@@ -32,7 +36,7 @@ func (h *handler) inspectionActor(c *gin.Context) (inspection.ManualActor, bool)
 		writeError(c, 503, "SERVICE_UNAVAILABLE", "检查记录服务尚未就绪")
 		return inspection.ManualActor{}, false
 	}
-	return inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin}, true
+	return inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}, true
 }
 func bindInspection(c *gin.Context, v any) bool {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
@@ -155,7 +159,7 @@ func writeInspectionError(c *gin.Context, err error) {
 	var validation *inspection.DetailsValidationError
 	switch {
 	case errors.As(err, &validation):
-		c.JSON(422, gin.H{"error": gin.H{"code": "VALIDATION_FAILED", "message": "请核对检查明细", "details": validation.Issues}})
+		c.JSON(422, gin.H{"code": "VALIDATION_FAILED", "message": "请核对检查明细", "details": validation.Issues})
 	case errors.Is(err, inspection.ErrInspectionRequest):
 		writeError(c, 400, "INVALID_REQUEST", "请核对记录标识、版本、操作原因及筛选参数")
 	case errors.Is(err, inspection.ErrScopeMismatch):
@@ -168,9 +172,75 @@ func writeInspectionError(c *gin.Context, err error) {
 		writeError(c, 409, "RECORD_NOT_EDITABLE", "仅未提交且未锁定的草稿可以修改或删除")
 	case errors.Is(err, inspection.ErrAttendanceDuplicate):
 		writeError(c, 409, "RECORD_ALREADY_EXISTS", "相同检查记录已存在，请核对日期、时间或轮次")
+	case errors.Is(err, inspection.ErrAttendancePenaltyUnconfigured):
+		writeError(c, 409, "ATTENDANCE_WEEK_RULE_UNCONFIGURED", "该周到课率违纪计入规则尚未配置，请联系管理员先完成校历配置")
+	case errors.Is(err, inspection.ErrAttendanceLegacyRuleUnknown):
+		writeError(c, 409, "ATTENDANCE_LEGACY_RULE_UNKNOWN", "历史记录的违纪计入口径尚未确认，请先完成历史数据核对")
 	case errors.Is(err, inspection.ErrInvalidAttendanceRecord):
 		writeError(c, 422, "VALIDATION_FAILED", "基础数据、关联关系或配置已变化，请刷新后核对")
 	default:
+		var pgError *pgconn.PgError
+		if errors.As(err, &pgError) {
+			if pgError.Code == "42P01" {
+				log.Printf("inspection failed: route=%s sqlState=%s missingRelation=%s", c.FullPath(), pgError.Code, pgError.Message)
+			} else {
+				log.Printf("inspection failed: route=%s sqlState=%s", c.FullPath(), pgError.Code)
+			}
+		} else {
+			log.Printf("inspection failed: route=%s errorType=%T", c.FullPath(), err)
+		}
 		writeError(c, 500, "INSPECTION_FAILED", "操作失败，请稍后重试")
 	}
+}
+
+type inspectionOptionHTTPService interface {
+	EntryOptions(context.Context, inspection.ManualActor, inspection.EntryOptionQuery) (inspection.EntryOptionPage, error)
+}
+
+func (h *handler) inspectionEntryOptions(c *gin.Context) {
+	a, ok := h.inspectionActor(c)
+	if !ok {
+		return
+	}
+	if h.inspectionOptions == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "录入选项服务尚未就绪")
+		return
+	}
+	var q inspection.EntryOptionQuery
+	if c.ShouldBindQuery(&q) != nil {
+		writeError(c, 400, "INVALID_REQUEST", "分页或筛选格式无效")
+		return
+	}
+	page, err := h.inspectionOptions.EntryOptions(c, a, q)
+	if err != nil {
+		writeInspectionError(c, err)
+		return
+	}
+	c.JSON(200, page)
+}
+
+type inspectionContextOptionHTTPService interface {
+	ContextOptions(context.Context, inspection.ManualActor, inspection.ContextOptionQuery) (inspection.ContextOptionPage, error)
+}
+
+func (h *handler) inspectionContextOptionList(c *gin.Context) {
+	a, ok := h.inspectionActor(c)
+	if !ok {
+		return
+	}
+	if h.inspectionContextOptions == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "检查选项服务尚未就绪")
+		return
+	}
+	var q inspection.ContextOptionQuery
+	if c.ShouldBindQuery(&q) != nil {
+		writeError(c, 400, "INVALID_REQUEST", "分页或筛选格式无效")
+		return
+	}
+	page, err := h.inspectionContextOptions.ContextOptions(c, a, q)
+	if err != nil {
+		writeInspectionError(c, err)
+		return
+	}
+	c.JSON(200, page)
 }

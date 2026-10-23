@@ -307,14 +307,14 @@ func TestParseBatchRejectsDuplicateParsingAndOldVersion(t *testing.T) {
 func TestCancelBatchAllowsOnlyRecoverableIdleStates(t *testing.T) {
 	for _, status := range []string{BatchStatusUploaded, BatchStatusParseFailed, BatchStatusPreviewReady, BatchStatusConfirmFailed} {
 		repository := &memoryImportRepository{batch: previewBatch(status)}
-		batch, err := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{}).CancelBatch(context.Background(), "batch-1", 1)
+		batch, err := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{}).CancelBatch(context.Background(), "batch-1", 1, audit.Metadata{ActorID: "actor-1"})
 		if err != nil || batch.Status != BatchStatusCancelled {
 			t.Errorf("cancel %s = %#v, %v", status, batch, err)
 		}
 	}
 	for _, status := range []string{BatchStatusParsing, BatchStatusConfirming, BatchStatusConfirmed, BatchStatusCancelled} {
 		repository := &memoryImportRepository{batch: previewBatch(status)}
-		_, err := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{}).CancelBatch(context.Background(), "batch-1", 1)
+		_, err := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{}).CancelBatch(context.Background(), "batch-1", 1, audit.Metadata{ActorID: "actor-1"})
 		if !errors.Is(err, ErrInvalidBatchTransition) {
 			t.Errorf("cancel %s error = %v", status, err)
 		}
@@ -449,5 +449,17 @@ func TestConfirmBatchLeavesServiceViewUnchangedWhenTransactionRollsBack(t *testi
 	}
 	if repository.batch.Status != BatchStatusPreviewReady || repository.batch.ImportedRows != 0 || repository.batch.ConfirmIdempotencyKey != "" {
 		t.Fatalf("batch changed after rollback = %#v", repository.batch)
+	}
+}
+
+func (r *memoryImportRepository) CancelImportBatch(ctx context.Context, batch Batch, metadata audit.Metadata) (Batch, error) {
+	return r.UpdateImportBatchState(ctx, batch.ID, batch.Version, BatchStatusCancelled, BatchFailure{})
+}
+
+func TestCancelBatchRequiresAuditActor(t *testing.T) {
+	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded)}
+	_, err := NewService(repository, &fakeVerifiedFileReader{}, &fakeWorkbookParser{}, &fakeAttendanceValidator{}).CancelBatch(context.Background(), "batch-1", 1, audit.Metadata{})
+	if !errors.Is(err, ErrInvalidBatch) || len(repository.transitions) != 0 {
+		t.Fatal("missing actor accepted", err)
 	}
 }

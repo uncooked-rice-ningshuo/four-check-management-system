@@ -1,10 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+vi.mock('./ImportRollbackPanel', () => ({ ImportRollbackPanel: () => null }))
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ImportBatch, ImportRow } from '../../../entities/import-job/model/importJob'
 import { ApiError } from '../../../shared/api/httpClient'
 import { AttendanceImportDrawer } from './AttendanceImportDrawer'
 
+const contextQuery = vi.fn()
+vi.mock('../hooks/useImportContext', () => ({ useImportContext: (...args: unknown[]) => contextQuery(...args) }))
 const templateQuery = vi.fn()
 const batchQuery = vi.fn()
 const rowsQuery = vi.fn()
@@ -20,7 +23,7 @@ vi.mock('../hooks/useImportBatch', () => ({
 }))
 
 const context = { semesterId: 'semester-1', weekId: 'week-1', inspectionTypeId: 'type-attendance', departmentId: 'department-study' }
-const scopeLabels = { inspectionType: '到课率', semester: '2026-2027 学年上学期', week: '第 1 周' }
+const scopeOptions = { inspectionType: { id: context.inspectionTypeId, name: '到课率' }, semesters: [{ id: context.semesterId, name: '2026-2027 学年上学期' }], weeks: [{ id: context.weekId, semesterId: context.semesterId, weekNo: 1 }] }
 const batch = (overrides: Partial<ImportBatch> = {}): ImportBatch => ({
   id: 'batch-1', inspectionTypeId: context.inspectionTypeId, semesterId: context.semesterId, weekId: context.weekId,
   departmentId: context.departmentId, templateId: 'template-1', templateVersion: 3, status: 'PREVIEW_READY',
@@ -34,17 +37,146 @@ const row = (overrides: Partial<ImportRow> = {}): ImportRow => ({
 })
 
 function setup(batchId?: string, onBatchIdChange = vi.fn()) {
-  return render(<MemoryRouter><AttendanceImportDrawer open context={context} scopeLabels={scopeLabels} departments={[{ id: 'department-study', name: '学习部' }]} batchId={batchId} onBatchIdChange={onBatchIdChange} onClose={vi.fn()} /></MemoryRouter>)
+  return render(<MemoryRouter><AttendanceImportDrawer open context={context} scopeOptions={scopeOptions} departments={[{ id: 'department-study', name: '学习部' }]} batchId={batchId} onBatchIdChange={onBatchIdChange} onClose={vi.fn()} /></MemoryRouter>)
 }
 
 describe('AttendanceImportDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    contextQuery.mockImplementation((query: { kind: string }) => ({ data: { items: query.kind === 'grades' ? [{ id: '2026级', label: '2026级' }] : [{ id: 'class-1', label: '测试班级' }] }, isLoading: false, isError: false }))
     templateQuery.mockReturnValue({ data: { file: new Blob(['xlsx']), template: { id: 'template-1', version: 3 } }, isLoading: false })
     batchQuery.mockReturnValue({ data: undefined, isLoading: false })
     rowsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })
     uploadMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
     confirmMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  })
+
+  it('uses the member department independently of a broader list filter', () => {
+    render(<MemoryRouter><AttendanceImportDrawer open context={{...context,departmentId:'other-department'}} memberDepartmentId="department-study" scopeOptions={scopeOptions} departments={[{id:'department-study',name:'学习部'}]} onBatchIdChange={vi.fn()} onClose={vi.fn()}/></MemoryRouter>)
+    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({departmentId:'department-study'})
+    expect(screen.getByRole('combobox',{name:'导入目标部门'})).toBeDisabled()
+    expect(screen.getByText('导入归属部门')).toBeInTheDocument()
+  })
+
+  it('blocks a member import when their department is outside the authorized target options', () => {
+    render(<MemoryRouter><AttendanceImportDrawer open context={context} memberDepartmentId="other-department" scopeOptions={scopeOptions} departments={[{id:'department-study',name:'学习部'}]} onBatchIdChange={vi.fn()} onClose={vi.fn()}/></MemoryRouter>)
+    expect(screen.getByText('当前账号所属部门无此范围的导入权限，请联系管理员。')).toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'上传并生成预览'})).toBeDisabled()
+  })
+
+  it('selects import class independently of attendance list filters', () => {
+    render(<MemoryRouter><AttendanceImportDrawer open context={{ ...context, classId: 'list-class', grade: 'list-grade' }} scopeOptions={scopeOptions} departments={[{ id: context.departmentId, name: '学习部' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
+    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: undefined, grade: undefined })
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '导入目标班级' }))
+    fireEvent.click(screen.getByText('测试班级'))
+    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: 'class-1', grade: undefined })
+  })
+
+  it('restores the original class and grade when restarting an invalid resumed batch', async () => {
+    batchQuery.mockReturnValue({ data: batch({ classId: 'class-1', grade: '2026级', invalidRows: 1 }), isLoading: false })
+    const onBatchIdChange = vi.fn()
+    setup('batch-1', onBatchIdChange)
+    expect(screen.getByText('测试班级')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重新上传文件' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保留原批次并重新上传' }))
+    await waitFor(() => expect(onBatchIdChange).toHaveBeenCalledWith(undefined))
+    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: 'class-1', grade: '2026级' })
+  })
+
+  it('keeps the batch calendar when restarting from a different attendance list week', async () => {
+    batchQuery.mockReturnValue({ data: batch({ invalidRows: 1 }), isLoading: false })
+    render(<MemoryRouter><AttendanceImportDrawer open context={{ ...context, weekId: 'week-2' }} scopeOptions={{ ...scopeOptions, weeks: [...scopeOptions.weeks, { id: 'week-2', semesterId: context.semesterId, weekNo: 2 }] }} departments={[{ id: context.departmentId, name: '学习部' }]} batchId="batch-1" onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '重新上传文件' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保留原批次并重新上传' }))
+    await waitFor(() => expect(templateQuery.mock.lastCall?.[0].weekId).toBe('week-1'))
+  })
+
+  it('does not present an unavailable restored class as an unrestricted target', () => {
+    render(<MemoryRouter><AttendanceImportDrawer open context={context} initialImportScope={{ ...context, classId: 'unavailable-class' }} scopeOptions={scopeOptions} departments={[{ id: context.departmentId, name: '学习部' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
+    expect(screen.getByText('原导入目标已不可用，请重新选择班级或年级后上传')).toBeInTheDocument()
+    expect(screen.getByText('原目标班级不可用，请重新选择')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '上传并生成预览' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /下载标准模板/ })).toBeDisabled()
+  })
+
+  it('blocks upload on target-option failure and exposes retry', () => {
+    const refetch = vi.fn()
+    contextQuery.mockReturnValue({ isError: true, isLoading: false, refetch })
+    setup()
+    expect(screen.getByRole('button', { name: '上传并生成预览' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '重试目标选项' }))
+    expect(refetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears a completed batch when closing so the next import starts fresh', async () => {
+    batchQuery.mockReturnValue({ data: batch({ status: 'CONFIRMED', importedRows: 2 }), isLoading: false })
+    const onBatchIdChange = vi.fn()
+    setup('batch-1', onBatchIdChange)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onBatchIdChange).toHaveBeenCalledWith(undefined)
+  })
+
+  it('shows business names rather than internal IDs in the confirmation dialog', async () => {
+    batchQuery.mockReturnValue({ data: batch(), isLoading: false })
+    setup('batch-1')
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 条记录' }))
+    const dialog = (await screen.findByRole('button', { name: '确认写入草稿记录' })).closest<HTMLElement>('[role=dialog]')
+    if (!dialog) throw new Error('Missing confirmation dialog')
+    expect(dialog).toHaveTextContent('到课率')
+    expect(dialog).toHaveTextContent('2026-2027 学年上学期')
+    expect(dialog).toHaveTextContent('第 1 周')
+    expect(dialog).toHaveTextContent('学习部')
+    for (const id of Object.values(context)) expect(dialog).not.toHaveTextContent(id)
+  })
+
+  it.each(['PREVIEW_READY', 'PARSE_FAILED'] as const)('starts a new upload from %s only after confirmation', async status => {
+    batchQuery.mockReturnValue({ data: batch({ status, invalidRows: 1, validRows: 1 }), isLoading: false })
+    const onBatchIdChange = vi.fn()
+    setup('batch-1', onBatchIdChange)
+    fireEvent.click(screen.getByRole('button', { name: '重新上传文件' }))
+    const dialog = (await screen.findByRole('button', { name: '保留原批次并重新上传' })).closest<HTMLElement>('[role=dialog]')
+    if (!dialog) throw new Error('Missing restart dialog')
+    expect(dialog).toHaveTextContent('原批次和审计记录会保留')
+    expect(onBatchIdChange).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '保留原批次并重新上传' }))
+    await waitFor(() => expect(onBatchIdChange).toHaveBeenCalledWith(undefined))
+  })
+
+  it('reuses the confirmation key after a temporary failure', async () => {
+    const mutateAsync = vi.fn().mockRejectedValueOnce(new ApiError(500, 'INTERNAL_ERROR', 'failure')).mockResolvedValueOnce({ importedRows: 2 })
+    batchQuery.mockReturnValue({ data: batch(), isLoading: false })
+    confirmMutation.mockReturnValue({ mutateAsync, isPending: false })
+    setup('batch-1')
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 条记录' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认写入草稿记录' }))
+    await screen.findByText('操作失败，请稍后重试')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认写入到课率草稿' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 条记录' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认写入草稿记录' }))
+    await screen.findByText('已成功导入 2 条草稿记录')
+    expect(mutateAsync.mock.calls[1][0]).toEqual(mutateAsync.mock.calls[0][0])
+  })
+
+  it('uses the resumed batch week instead of the current list week', async () => {
+    batchQuery.mockReturnValue({ data: batch(), isLoading: false })
+    render(<MemoryRouter><AttendanceImportDrawer open context={{ ...context, weekId: 'week-2' }} scopeOptions={{ ...scopeOptions, weeks: [...scopeOptions.weeks, { id: 'week-2', semesterId: context.semesterId, weekNo: 2 }] }} departments={[{ id: context.departmentId, name: '学习部' }]} batchId="batch-1" onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 条记录' }))
+    const dialog = (await screen.findByRole('button', { name: '确认写入草稿记录' })).closest<HTMLElement>('[role=dialog]')
+    expect(dialog).toHaveTextContent('第 1 周')
+    expect(dialog).not.toHaveTextContent('第 2 周')
+  })
+
+  it('blocks confirmation if the batch scope cannot be resolved', () => {
+    batchQuery.mockReturnValue({ data: batch({ weekId: 'unknown-week' }), isLoading: false })
+    setup('batch-1')
+    expect(screen.getByText('批次范围信息不可用，请刷新页面后核对')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认导入 2 条记录' })).toBeDisabled()
+  })
+
+  it.each(['UPLOADED', 'PARSING', 'CONFIRMED'] as const)('does not offer replacement for a %s batch', status => {
+    batchQuery.mockReturnValue({ data: batch({ status }), isLoading: false })
+    setup('batch-1')
+    expect(screen.queryByRole('button', { name: '重新上传文件' })).not.toBeInTheDocument()
   })
 
   it('rejects non-xlsx files before upload', async () => {
@@ -65,13 +197,13 @@ describe('AttendanceImportDrawer', () => {
 
   it('selects the target department inside the drawer when the list filter is empty', async () => {
 	const emptyDepartmentContext = { ...context, departmentId: '' }
-	render(<MemoryRouter><AttendanceImportDrawer open context={emptyDepartmentContext} scopeLabels={scopeLabels} departments={[{ id: 'department-study', name: '学习部' }, { id: 'department-office', name: '办公室' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
+	render(<MemoryRouter><AttendanceImportDrawer open context={emptyDepartmentContext} scopeOptions={scopeOptions} departments={[{ id: 'department-study', name: '学习部' }, { id: 'department-office', name: '办公室' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
 
 	expect(screen.getByRole('combobox', { name: '导入目标部门' })).toBeInTheDocument()
-	expect(templateQuery).toHaveBeenLastCalledWith(expect.objectContaining({ departmentId: '' }), false)
+	expect(templateQuery).toHaveBeenLastCalledWith(expect.objectContaining({ departmentId: '' }), false, 'ATTENDANCE_RATE')
 	fireEvent.mouseDown(screen.getByRole('combobox', { name: '导入目标部门' }))
 	fireEvent.click(await screen.findByText('学习部'))
-	expect(templateQuery).toHaveBeenLastCalledWith(expect.objectContaining({ departmentId: 'department-study' }), true)
+	expect(templateQuery).toHaveBeenLastCalledWith(expect.objectContaining({ departmentId: 'department-study' }), true, 'ATTENDANCE_RATE')
   })
 
   it('shows the import scope as business names in a structured layout', () => {

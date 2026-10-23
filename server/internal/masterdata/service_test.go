@@ -55,6 +55,9 @@ func (m *memoryRepository) UpdateMasterData(_ context.Context, actorID string, r
 func (m *memoryRepository) ListMasterDataChanges(context.Context, string, string) ([]Change, error) {
 	return m.changes, nil
 }
+func (m *memoryRepository) HygieneAreaInspectionScope(context.Context, string, string) (string, error) {
+	return "30000000-0000-0000-0000-000000000003", nil
+}
 
 func TestCreateValidatesEntitySpecificRequiredFields(t *testing.T) {
 	svc := NewService(newMemoryRepository())

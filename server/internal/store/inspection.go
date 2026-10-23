@@ -66,6 +66,9 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 		if mode == "read" {
 			return action(permission.ActionInspectionView)
 		}
+		if mode == "review" {
+			return action(permission.ActionInspectionReview)
+		}
 		*args = append(*args, a.ActorID)
 		owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
 		return "((" + owner + " AND " + action(permission.ActionInspectionEnter) + ") OR " + action(permission.ActionInspectionManage) + ")"
@@ -105,18 +108,34 @@ func (t *inspectionTx) Audit(ctx context.Context, m audit.Metadata, e audit.Entr
 }
 func (t *inspectionTx) Context(ctx context.Context, i inspection.InspectionInput) (inspection.InspectionContext, error) {
 	c := inspection.InspectionContext{DetailContext: inspection.DetailContext{SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID}}
-	err := t.tx.QueryRow(ctx, `SELECT it.code,sem.academic_year_id,w.start_date::text,w.end_date::text FROM semester_weeks w
+	if i.DepartmentID == "" {
+		err := t.tx.QueryRow(ctx, `SELECT it.code,sem.academic_year_id,w.start_date::text,w.end_date::text,w.attendance_penalty_multiplier FROM semester_weeks w
+ JOIN semesters sem ON sem.id=w.semester_id JOIN academic_years y ON y.id=sem.academic_year_id
+ JOIN inspection_types it ON it.id=$3
+ WHERE w.id=$1 AND sem.id=$2 AND w.enabled AND sem.enabled AND y.enabled AND it.enabled
+ FOR SHARE OF w,sem,y,it`, i.WeekID, i.SemesterID, i.InspectionTypeID).Scan(&c.TypeCode, &c.AcademicYearID, &c.WeekStart, &c.WeekEnd, &c.AttendancePenaltyMultiplier)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c, inspection.ErrInvalidAttendanceRecord
+		}
+		return c, err
+	}
+	err := t.tx.QueryRow(ctx, `SELECT it.code,sem.academic_year_id,w.start_date::text,w.end_date::text,w.attendance_penalty_multiplier FROM semester_weeks w
  JOIN semesters sem ON sem.id=w.semester_id JOIN academic_years y ON y.id=sem.academic_year_id
  JOIN inspection_types it ON it.id=$3 JOIN departments d ON d.id=$4
  JOIN department_inspection_scopes ds ON ds.inspection_type_id=it.id AND ds.department_id=d.id
  WHERE w.id=$1 AND sem.id=$2 AND w.enabled AND sem.enabled AND y.enabled AND it.enabled AND d.enabled AND ds.enabled AND ds.can_enter
- FOR SHARE OF w,sem,y,it,d,ds`, i.WeekID, i.SemesterID, i.InspectionTypeID, i.DepartmentID).Scan(&c.TypeCode, &c.AcademicYearID, &c.WeekStart, &c.WeekEnd)
+	 FOR SHARE OF w,sem,y,it,d,ds`, i.WeekID, i.SemesterID, i.InspectionTypeID, i.DepartmentID).Scan(&c.TypeCode, &c.AcademicYearID, &c.WeekStart, &c.WeekEnd, &c.AttendancePenaltyMultiplier)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, inspection.ErrInvalidAttendanceRecord
 	}
 	return c, err
 }
 func (t *inspectionTx) References(ctx context.Context, r inspection.InspectionRecord, c inspection.InspectionContext, a inspection.MutationAccess, owner string) (inspection.InspectionReferences, error) {
+	return t.lockReferences(ctx, r, c, func(scope permission.Scope) bool { return inspection.AllowsInspectionScope(a, scope, owner) })
+}
+
+// lockReferences separates reference integrity from the caller's already compiled scope.
+func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.InspectionRecord, c inspection.InspectionContext, allowed func(permission.Scope) bool) (inspection.InspectionReferences, error) {
 	var refs inspection.InspectionReferences
 	student, class, course, classroom, dorm, area, h, rooms := inspection.InspectionDetailReferences(r.Details)
 	classes := []string{class}
@@ -134,7 +153,7 @@ func (t *inspectionTx) References(ctx context.Context, r inspection.InspectionRe
 			return refs, referenceError(err)
 		}
 		scope := permission.Scope{AcademicYearID: c.AcademicYearID, SemesterID: r.SemesterID, WeekID: r.WeekID, InspectionTypeID: r.InspectionTypeID, DepartmentID: r.DepartmentID, ClassID: v.ID, Grade: v.Grade}
-		if !inspection.AllowsInspectionScope(a, scope, owner) {
+		if !allowed(scope) {
 			return refs, inspection.ErrScopeMismatch
 		}
 		refs.Classes = append(refs.Classes, v)
@@ -167,6 +186,21 @@ func (t *inspectionTx) References(ctx context.Context, r inspection.InspectionRe
 		}
 		if err := check(`SELECT true FROM course_schedules WHERE course_id=$1 AND semester_id=$2 AND classroom_id=$3 LIMIT 1 FOR SHARE`, course, r.SemesterID, classroom); err != nil {
 			return refs, err
+		}
+		if r.TypeCode == inspection.InspectionTypeAttendance {
+			// Attendance records must match the actual teaching day; a semester-level
+			// relationship alone permits a wrong-day or unscheduled-section absence.
+			details, ok := r.Details.(*inspection.AttendanceDetails)
+			if !ok {
+				return refs, inspection.ErrInvalidAttendanceRecord
+			}
+			first, last, valid := inspection.ParseCoursePeriod(details.Period)
+			if !valid {
+				return refs, inspection.ErrInvalidAttendanceRecord
+			}
+			if err := check(`SELECT true FROM course_schedules WHERE course_id=$1 AND semester_id=$2 AND classroom_id=$3 AND weekday=EXTRACT(ISODOW FROM $4::date) AND start_section<=$5 AND end_section>=$6 LIMIT 1 FOR SHARE`, course, r.SemesterID, classroom, r.Normalized.Date, first, last); err != nil {
+				return refs, err
+			}
 		}
 	}
 	lockDorm := func(id string, building string) error {
@@ -214,16 +248,21 @@ func referenceError(err error) error {
 }
 
 const inspectionFrom = ` FROM inspection_records ir JOIN semesters sem ON sem.id=ir.semester_id JOIN inspection_types it ON it.id=ir.inspection_type_id `
-const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,ir.department_id,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL`
+const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,ir.class_name_snapshot,ir.grade_snapshot`
+const inspectionEditableSQL = `ir.locked_by_report_id IS NULL AND (
+ (ir.status='DRAFT' AND ir.submission_id IS NULL)
+ OR (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS(
+  SELECT 1 FROM department_submissions ds WHERE ds.id=ir.submission_id AND ds.status='RETURNED')))`
 
 func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.MutationAccess, mode string, lock bool) (inspection.InspectionRecord, error) {
 	args := []any{id}
-	sql := inspectionColumns + inspectionFrom + ` WHERE ir.id=$1 AND ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, mode, &args)
+	editable := inspectionAccessSQL(a, "mutate", &args)
+	sql := inspectionColumns + `,(` + inspectionEditableSQL + ` AND ` + editable + `)` + inspectionFrom + ` WHERE ir.id=$1 AND ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, mode, &args)
 	if lock {
 		sql += " FOR UPDATE OF ir"
 	}
 	var r inspection.InspectionRecord
-	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock)
+	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.Grade, &r.CanEdit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, inspection.ErrRecordNotFound
 	}
@@ -235,6 +274,13 @@ func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.Mutatio
 		return r, err
 	}
 	r.Details, err = inspection.DecodeStoredInspectionDetails(r.TypeCode, raw)
+	if err != nil {
+		return r, err
+	}
+	if err = t.responsibilityLabels(ctx, &r); err != nil {
+		return r, err
+	}
+	err = t.currentReferenceLabels(ctx, &r)
 	return r, err
 }
 func (p *Postgres) GetInspection(ctx context.Context, id string, a inspection.MutationAccess) (inspection.InspectionRecord, error) {
@@ -258,6 +304,9 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 			args = append(args, filter.value)
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
+	}
+	if f.CollegeOnly {
+		where += " AND ir.department_id IS NULL"
 	}
 	if f.ClassID != "" {
 		args = append(args, f.ClassID)
@@ -314,7 +363,7 @@ func (t *inspectionTx) readDetails(ctx context.Context, r inspection.InspectionR
 	switch r.TypeCode {
 	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
 		table = "attendance_details"
-		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text)`
+		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
 	case inspection.InspectionTypeMorning:
 		table = "morning_exercise_details"
 		extra = personal + ` || jsonb_build_object('absenceCount',d.absence_count)`
@@ -350,6 +399,8 @@ func (t *inspectionTx) Save(ctx context.Context, r inspection.InspectionRecord, 
 		sn, name = r.References.Students[0].Number, r.References.Students[0].Name
 		cn, grade = r.References.Classes[0].Name, r.References.Classes[0].Grade
 	}
+	r.StudentNumber, r.StudentName, r.ClassName, r.Grade = sn, name, cn, grade
+	r.CanEdit = true
 	raw, err := json.Marshal(r.Details)
 	if err != nil {
 		return r, err
@@ -373,13 +424,20 @@ func (t *inspectionTx) Save(ctx context.Context, r inspection.InspectionRecord, 
 	}
 	args := []any{r.ID, r.InspectionTypeID, r.SemesterID, r.WeekID, r.DepartmentID, student, sn, name, class, cn, grade, occurred, r.Normalized.ViolationCount, remark, r.Normalized.DuplicateKey, r.CreatedBy, r.Normalized.OccurrenceKind, date, r.Normalized.Round}
 	if old == nil {
-		err = t.tx.QueryRow(ctx, `INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,dedup_key,created_by,occurrence_kind,inspection_date,inspection_round,source,status,row_version)
- VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,$13,$14,$15,$16,$17,NULLIF($18,'')::date,NULLIF($19,''),'MANUAL','DRAFT',1) RETURNING created_at,updated_at,row_version`, args...).Scan(&r.CreatedAt, &r.UpdatedAt, &r.RowVersion)
+		if r.Source != inspection.RecordSourceManual && r.Source != inspection.RecordSourceExcel {
+			return r, inspection.ErrInspectionRequest
+		}
+		if (r.Source == inspection.RecordSourceExcel) != (r.ImportBatchID != "") {
+			return r, inspection.ErrInspectionRequest
+		}
+		args = append(args, r.Source, r.ImportBatchID)
+		err = t.tx.QueryRow(ctx, `INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,dedup_key,created_by,occurrence_kind,inspection_date,inspection_round,source,status,row_version,import_batch_id)
+ VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,$13,$14,$15,$16,$17,NULLIF($18,'')::date,NULLIF($19,''),$20,'DRAFT',1,NULLIF($21,'')::uuid) RETURNING created_at,updated_at,row_version`, args...).Scan(&r.CreatedAt, &r.UpdatedAt, &r.RowVersion)
 	} else {
 		args = append(args, old.RowVersion)
 		guard := inspectionAccessSQL(a, "mutate", &args)
-		err = t.tx.QueryRow(ctx, `UPDATE inspection_records ir SET inspection_type_id=$2,semester_id=$3,week_id=$4,department_id=$5,student_id=NULLIF($6,'')::uuid,student_no_snapshot=$7,student_name_snapshot=$8,class_id=NULLIF($9,'')::uuid,class_name_snapshot=$10,grade_snapshot=$11,occurred_at=$12,violation_count=$13,remark=$14,dedup_key=$15,created_by=$16,occurrence_kind=$17,inspection_date=NULLIF($18,'')::date,inspection_round=NULLIF($19,''),row_version=ir.row_version+1,updated_at=now()
- FROM semesters sem WHERE sem.id=ir.semester_id AND ir.id=$1 AND ir.row_version=$20 AND ir.deleted_at IS NULL AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL AND `+guard+` RETURNING ir.updated_at,ir.row_version`, args...).Scan(&r.UpdatedAt, &r.RowVersion)
+		err = t.tx.QueryRow(ctx, `UPDATE inspection_records ir SET inspection_type_id=$2,semester_id=$3,week_id=$4,department_id=NULLIF($5,'')::uuid,student_id=NULLIF($6,'')::uuid,student_no_snapshot=$7,student_name_snapshot=$8,class_id=NULLIF($9,'')::uuid,class_name_snapshot=$10,grade_snapshot=$11,occurred_at=$12,violation_count=$13,remark=$14,dedup_key=$15,created_by=$16,occurrence_kind=$17,inspection_date=NULLIF($18,'')::date,inspection_round=NULLIF($19,''),row_version=ir.row_version+1,updated_at=now()
+	 FROM semesters sem WHERE sem.id=ir.semester_id AND ir.id=$1 AND ir.row_version=$20 AND ir.deleted_at IS NULL AND `+inspectionEditableSQL+` AND `+guard+` RETURNING ir.updated_at,ir.row_version`, args...).Scan(&r.UpdatedAt, &r.RowVersion)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, inspection.ErrRecordVersionConflict
@@ -390,16 +448,29 @@ func (t *inspectionTx) Save(ctx context.Context, r inspection.InspectionRecord, 
 	if err = t.writeDetails(ctx, r, old != nil); err != nil {
 		return r, err
 	}
-	return r, nil
+	if r.TypeCode == inspection.InspectionTypeAttendance {
+		stored, readErr := t.readDetails(ctx, r)
+		if readErr != nil {
+			return r, readErr
+		}
+		if readErr = json.Unmarshal(stored, r.Details); readErr != nil {
+			return r, readErr
+		}
+	}
+	if err = t.responsibilityLabels(ctx, &r); err != nil {
+		return r, err
+	}
+	err = t.currentReferenceLabels(ctx, &r)
+	return r, err
 }
 func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.InspectionRecord, updating bool) error {
 	var sql string
 	var args []any
 	switch v := r.Details.(type) {
 	case *inspection.AttendanceDetails:
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails)
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.UnattendedClassroomDetails:
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails)
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, nil)
 	case *inspection.MorningAttendanceDetails:
 		sql = `INSERT INTO morning_exercise_details(record_id,absence_count) VALUES($1,$2) ON CONFLICT(record_id) DO UPDATE SET absence_count=excluded.absence_count`
 		args = []any{r.ID, v.AbsenceCount}
@@ -449,8 +520,8 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	}
 	return nil
 }
-func courseDetailSQL(id string, v inspection.CourseAbsenceDetails) (string, []any) {
-	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text) VALUES($1,$2,$3,$4,$5) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text`, []any{id, v.CourseID, v.ClassroomID, v.AbsenceHours, v.Period}
+func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *int) (string, []any) {
+	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier`, []any{id, v.CourseID, v.ClassroomID, v.AbsenceHours, v.Period, multiplier}
 }
 func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord, a inspection.MutationAccess) error {
 	args := []any{r.ID, r.RowVersion}
@@ -461,6 +532,70 @@ func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord
 	}
 	if tag.RowsAffected() != 1 {
 		return inspection.ErrRecordVersionConflict
+	}
+	return nil
+}
+
+// currentReferenceLabels runs only after record authorization or validated writes.
+// Disabled referenced objects remain readable; these labels do not enter audit snapshots.
+func (t *inspectionTx) currentReferenceLabels(ctx context.Context, r *inspection.InspectionRecord) error {
+	_, _, course, classroom, dormitory, area, _, _ := inspection.InspectionDetailReferences(r.Details)
+	if course == "" && classroom == "" && dormitory == "" && area == "" {
+		return nil
+	}
+	return t.tx.QueryRow(ctx, `SELECT
+ COALESCE((SELECT name FROM courses WHERE id=NULLIF($1,'')::uuid),''),
+ COALESCE((SELECT b.name || ' ' || cr.room_no FROM classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE cr.id=NULLIF($2,'')::uuid),''),
+ COALESCE((SELECT a.name || ' ' || b.name || ' ' || d.room_no FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas a ON a.id=b.dormitory_area_id WHERE d.id=NULLIF($3,'')::uuid),''),
+ COALESCE((SELECT b.name || ' ' || cr.room_no || ' / ' || ar.name FROM classroom_hygiene_areas ar JOIN classrooms cr ON cr.id=ar.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='CLASSROOM_HYGIENE'),
+ (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitory, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentAreaName)
+}
+
+// responsibilityLabels reads only snapshots attached to an already authorized record.
+func (t *inspectionTx) responsibilityLabels(ctx context.Context, r *inspection.InspectionRecord) error {
+	if r.TypeCode != inspection.InspectionTypeDormitoryHygiene &&
+		r.TypeCode != inspection.InspectionTypeClassroomHygiene &&
+		r.TypeCode != inspection.InspectionTypePublicDormitoryHygiene {
+		return nil
+	}
+	read := func(query string) ([]inspection.EntryOption, error) {
+		rows, err := t.tx.Query(ctx, query, r.ID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		items := make([]inspection.EntryOption, 0)
+		for rows.Next() {
+			var item inspection.EntryOption
+			if err = rows.Scan(&item.ID, &item.Label); err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		return items, rows.Err()
+	}
+	var err error
+	r.ResponsibleClasses, err = read(`SELECT class_id,class_name_snapshot || '（' || grade_snapshot || '级）' FROM inspection_responsibility_classes WHERE record_id=$1 ORDER BY class_id`)
+	if err != nil {
+		return err
+	}
+	r.ResponsibleStudents, err = read(`SELECT student_id,student_name_snapshot || '（' || student_no_snapshot || '）' FROM inspection_responsibility_students WHERE record_id=$1 ORDER BY student_id`)
+	if err != nil {
+		return err
+	}
+	if r.TypeCode == inspection.InspectionTypePublicDormitoryHygiene {
+		r.ResponsibleDormitories, err = read(`SELECT d.id,da.name || ' ' || b.name || ' ' || d.room_no
+ FROM inspection_responsibility_dormitories rd JOIN dormitories d ON d.id=rd.dormitory_id
+ JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id
+ WHERE rd.record_id=$1 ORDER BY d.id`)
+		if err != nil {
+			return err
+		}
+	}
+	_, _, _, _, _, _, hygiene, _ := inspection.InspectionDetailReferences(r.Details)
+	if hygiene != nil && hygiene.ReasonCode != "" {
+		return t.tx.QueryRow(ctx, `SELECT COALESCE((SELECT di.label FROM dictionary_items di JOIN dictionary_types dt ON dt.id=di.type_id
+ WHERE dt.code=$1 AND di.value=$2),'')`, r.TypeCode+"_REASON", hygiene.ReasonCode).Scan(&r.CurrentReasonLabel)
 	}
 	return nil
 }

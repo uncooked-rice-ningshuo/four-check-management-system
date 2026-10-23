@@ -11,18 +11,20 @@ import (
 )
 
 const (
-	KindFaculty           = "faculties"
-	KindGrade             = "grades"
-	KindDormitoryArea     = "dormitory-areas"
-	KindDormitoryBuilding = "dormitory-buildings"
-	KindTeachingBuilding  = "teaching-buildings"
-	KindMajor             = "majors"
-	KindStaff             = "staff"
-	KindClass             = "classes"
-	KindDormitory         = "dormitories"
-	KindClassroom         = "classrooms"
-	KindCourse            = "courses"
-	KindStudent           = "students"
+	KindFaculty                    = "faculties"
+	KindGrade                      = "grades"
+	KindDormitoryArea              = "dormitory-areas"
+	KindDormitoryBuilding          = "dormitory-buildings"
+	KindTeachingBuilding           = "teaching-buildings"
+	KindMajor                      = "majors"
+	KindStaff                      = "staff"
+	KindClass                      = "classes"
+	KindDormitory                  = "dormitories"
+	KindClassroom                  = "classrooms"
+	KindCourse                     = "courses"
+	KindStudent                    = "students"
+	KindClassroomHygieneArea       = "classroom-hygiene-areas"
+	KindPublicDormitoryHygieneArea = "public-dormitory-hygiene-areas"
 )
 
 var (
@@ -52,6 +54,7 @@ type Record struct {
 	TeachingBuildingID  string           `json:"teachingBuildingId,omitempty"`
 	DormitoryAreaID     string           `json:"dormitoryAreaId,omitempty"`
 	DormitoryBuildingID string           `json:"dormitoryBuildingId,omitempty"`
+	FloorUnit           string           `json:"floorUnit,omitempty"`
 	Gender              string           `json:"gender,omitempty"`
 	Phone               string           `json:"phone,omitempty"`
 	Grade               string           `json:"grade,omitempty"`
@@ -132,6 +135,7 @@ type Repository interface {
 	CreateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	UpdateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	ListMasterDataChanges(context.Context, string, string) ([]Change, error)
+	HygieneAreaInspectionScope(context.Context, string, string) (string, error)
 }
 
 type Service struct{ repository Repository }
@@ -225,6 +229,17 @@ func (s *Service) ListChanges(ctx context.Context, kind, id string) ([]Change, e
 	return s.repository.ListMasterDataChanges(ctx, kind, id)
 }
 
+// HygieneAreaInspectionScope resolves the configured department/type mapping for scoped area maintenance.
+func (s *Service) HygieneAreaInspectionScope(ctx context.Context, kind, departmentID string) (string, error) {
+	if kind != KindClassroomHygieneArea && kind != KindPublicDormitoryHygieneArea {
+		return "", ErrInvalidKind
+	}
+	if _, err := uuid.Parse(departmentID); err != nil {
+		return "", ErrInvalidRelation
+	}
+	return s.repository.HygieneAreaInspectionScope(ctx, kind, departmentID)
+}
+
 func (s *Service) validateRelations(ctx context.Context, record Record) error {
 	relations := []struct {
 		kind, id string
@@ -236,11 +251,11 @@ func (s *Service) validateRelations(ctx context.Context, record Record) error {
 		{KindStaff, record.TeacherID, false},
 		{KindClass, record.ClassID, false},
 		{KindDormitory, record.DormitoryID, false},
-		{KindClassroom, record.ClassroomID, false},
+		{KindClassroom, record.ClassroomID, record.Kind == KindClassroomHygieneArea},
 		{KindTeachingBuilding, record.TeachingBuildingID, record.Kind == KindClassroom},
 		{KindGrade, record.GradeID, record.Kind == KindClass || record.Kind == KindStudent},
 		{KindDormitoryArea, record.DormitoryAreaID, record.Kind == KindDormitoryBuilding},
-		{KindDormitoryBuilding, record.DormitoryBuildingID, record.Kind == KindDormitory},
+		{KindDormitoryBuilding, record.DormitoryBuildingID, record.Kind == KindDormitory || record.Kind == KindPublicDormitoryHygieneArea},
 	}
 	for _, classID := range record.ClassIDs {
 		relations = append(relations, struct {
@@ -290,7 +305,7 @@ func (s *Service) validateRelations(ctx context.Context, record Record) error {
 
 func validKind(kind string) bool {
 	switch kind {
-	case KindFaculty, KindGrade, KindDormitoryArea, KindDormitoryBuilding, KindTeachingBuilding, KindMajor, KindStaff, KindClass, KindDormitory, KindClassroom, KindCourse, KindStudent:
+	case KindFaculty, KindGrade, KindDormitoryArea, KindDormitoryBuilding, KindTeachingBuilding, KindMajor, KindStaff, KindClass, KindDormitory, KindClassroom, KindCourse, KindStudent, KindClassroomHygieneArea, KindPublicDormitoryHygieneArea:
 		return true
 	default:
 		return false
@@ -312,6 +327,10 @@ func validRecord(record Record) bool {
 		return record.DormitoryBuildingID != "" && record.RoomNo != ""
 	case KindClassroom:
 		return record.TeachingBuildingID != "" && record.RoomNo != ""
+	case KindClassroomHygieneArea:
+		return record.ClassroomID != "" && len([]rune(record.Name)) <= 128
+	case KindPublicDormitoryHygieneArea:
+		return record.DormitoryBuildingID != "" && record.FloorUnit != "" && len([]rune(record.FloorUnit)) <= 64 && len([]rune(record.Name)) <= 128
 	case KindStudent:
 		return record.GradeID != ""
 	case KindCourse:
@@ -337,6 +356,7 @@ func normalize(record *Record) {
 	record.CampusArea = strings.TrimSpace(record.CampusArea)
 	record.BuildingNo = strings.TrimSpace(record.BuildingNo)
 	record.RoomNo = strings.TrimSpace(record.RoomNo)
+	record.FloorUnit = strings.TrimSpace(record.FloorUnit)
 	record.ScheduleText = strings.TrimSpace(record.ScheduleText)
 	record.EnrollmentStatus = strings.ToUpper(strings.TrimSpace(record.EnrollmentStatus))
 	classIDs := make([]string, 0, len(record.ClassIDs))

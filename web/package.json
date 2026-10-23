@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:browser": "python3 ../server/scripts/verify-browser.py"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",

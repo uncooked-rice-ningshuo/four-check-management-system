@@ -31,42 +31,72 @@ type InspectionEdit struct {
 
 // InspectionRecord is the shared API aggregate, with typed details and immutable provenance.
 type InspectionRecord struct {
-	ID               string               `json:"id"`
-	SemesterID       string               `json:"semesterId"`
-	WeekID           string               `json:"weekId"`
-	InspectionTypeID string               `json:"inspectionTypeId"`
-	TypeCode         string               `json:"typeCode"`
-	DepartmentID     string               `json:"departmentId"`
-	Details          InspectionDetails    `json:"details"`
-	Status           string               `json:"status"`
-	Source           string               `json:"source"`
-	ImportBatchID    string               `json:"importBatchId,omitempty"`
-	RowVersion       int                  `json:"rowVersion"`
-	CreatedBy        string               `json:"createdBy"`
-	CreatedAt        time.Time            `json:"createdAt"`
-	UpdatedAt        time.Time            `json:"updatedAt"`
-	HasSubmission    bool                 `json:"-"`
-	HasReportLock    bool                 `json:"-"`
-	Normalized       ValidatedDetails     `json:"-"`
-	References       InspectionReferences `json:"-"`
+	// CanEdit is an interaction hint; mutations always recheck scope, state and version.
+	CanEdit bool `json:"canEdit"`
+	// Current reference labels are live master-data names, never historical snapshots.
+	CurrentDormitoryName string `json:"currentDormitoryName"`
+	CurrentCourseName    string `json:"currentCourseName"`
+	CurrentClassroomName string `json:"currentClassroomName"`
+	CurrentAreaName      string `json:"currentAreaName,omitempty"`
+	// Responsibility labels are persisted snapshots, so later master-data renames do not rewrite history.
+	ResponsibleClasses  []EntryOption `json:"responsibleClasses,omitempty"`
+	ResponsibleStudents []EntryOption `json:"responsibleStudents,omitempty"`
+	// Room labels are current master-data names; this relation has no name snapshot column.
+	ResponsibleDormitories []EntryOption `json:"responsibleDormitories,omitempty"`
+	CurrentReasonLabel     string        `json:"currentReasonLabel,omitempty"`
+	// Display fields are persisted record snapshots, not current master-data values.
+	StudentNumber     string               `json:"studentNumber"`
+	StudentName       string               `json:"studentName"`
+	ClassName         string               `json:"className"`
+	Grade             string               `json:"grade"`
+	ID                string               `json:"id"`
+	SemesterID        string               `json:"semesterId"`
+	WeekID            string               `json:"weekId"`
+	InspectionTypeID  string               `json:"inspectionTypeId"`
+	TypeCode          string               `json:"typeCode"`
+	DepartmentID      string               `json:"departmentId"`
+	Details           InspectionDetails    `json:"details"`
+	PenaltyMultiplier *int                 `json:"-"`
+	Status            string               `json:"status"`
+	Source            string               `json:"source"`
+	ImportBatchID     string               `json:"importBatchId,omitempty"`
+	RowVersion        int                  `json:"rowVersion"`
+	CreatedBy         string               `json:"createdBy"`
+	CreatedAt         time.Time            `json:"createdAt"`
+	UpdatedAt         time.Time            `json:"updatedAt"`
+	HasSubmission     bool                 `json:"-"`
+	HasReportLock     bool                 `json:"-"`
+	Normalized        ValidatedDetails     `json:"-"`
+	References        InspectionReferences `json:"-"`
 }
 
 // ClassReference and StudentReference are server-owned snapshots used for scope and persistence.
-type ClassReference struct{ ID, Name, Grade string }
-type StudentReference struct{ ID, ClassID, Number, Name string }
+type ClassReference struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Grade string `json:"grade"`
+}
+type StudentReference struct {
+	ID      string `json:"id"`
+	ClassID string `json:"classId"`
+	Number  string `json:"number"`
+	Name    string `json:"name"`
+}
 type InspectionReferences struct {
-	Classes  []ClassReference
-	Students []StudentReference
+	Classes  []ClassReference   `json:"classes"`
+	Students []StudentReference `json:"students"`
 }
 
 // InspectionContext is locked in the write transaction to prevent configuration changes during validation.
 type InspectionContext struct {
 	DetailContext
-	TypeCode, AcademicYearID string
+	TypeCode, AcademicYearID    string
+	AttendancePenaltyMultiplier *int
 }
 
 // InspectionFilter supports bounded, structured list queries.
 type InspectionFilter struct {
+	CollegeOnly      bool   `form:"-"`
 	SemesterID       string `form:"semesterId"`
 	WeekID           string `form:"weekId"`
 	InspectionTypeID string `form:"inspectionTypeId"`
@@ -130,16 +160,26 @@ func (s *RecordService) access(ctx context.Context, a ManualActor) (MutationAcce
 	return result, err
 }
 func normalizeInspectionInput(i *InspectionInput) error {
-	for _, p := range []*string{&i.SemesterID, &i.WeekID, &i.InspectionTypeID, &i.DepartmentID} {
+	if i.DepartmentID == CollegeDepartmentOptionID {
+		i.DepartmentID = ""
+	}
+	for _, p := range []*string{&i.SemesterID, &i.WeekID, &i.InspectionTypeID} {
 		v, ok := canonicalDetailID(*p)
 		if !ok {
 			return ErrInspectionRequest
 		}
 		*p = v
 	}
+	if i.DepartmentID != "" {
+		v, ok := canonicalDetailID(i.DepartmentID)
+		if !ok {
+			return ErrInspectionRequest
+		}
+		i.DepartmentID = v
+	}
 	return nil
 }
-func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i InspectionInput, a MutationAccess, owner string) (InspectionRecord, error) {
+func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i InspectionInput, a MutationAccess, owner string, prior *InspectionRecord) (InspectionRecord, error) {
 	c, err := tx.Context(ctx, i)
 	if err != nil {
 		return InspectionRecord{}, err
@@ -148,7 +188,22 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 	if len(issues) > 0 {
 		return InspectionRecord{}, &DetailsValidationError{issues}
 	}
+	multiplier := c.AttendancePenaltyMultiplier
+	if c.TypeCode == InspectionTypeAttendance && prior != nil && prior.HasSubmission {
+		previous, previousOK := prior.Details.(*AttendanceDetails)
+		current, currentOK := v.Details.(*AttendanceDetails)
+		if previousOK && currentOK && prior.WeekID == i.WeekID && previous.Date == current.Date {
+			if previous.PenaltyMultiplier == nil {
+				return InspectionRecord{}, ErrAttendanceLegacyRuleUnknown
+			}
+			multiplier = previous.PenaltyMultiplier
+		}
+	}
+	if c.TypeCode == InspectionTypeAttendance && multiplier == nil {
+		return InspectionRecord{}, ErrAttendancePenaltyUnconfigured
+	}
 	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}
+	r.PenaltyMultiplier = multiplier
 	refs, err := tx.References(ctx, r, c, a, owner)
 	if err != nil {
 		return InspectionRecord{}, err
@@ -157,6 +212,11 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 	return r, nil
 }
 func (s *RecordService) Create(ctx context.Context, actor ManualActor, i InspectionInput, m audit.Metadata) (InspectionRecord, error) {
+	departmentID, err := ResolveEntryDepartment(actor, i.DepartmentID)
+	if err != nil {
+		return InspectionRecord{}, err
+	}
+	i.DepartmentID = departmentID
 	if err := normalizeInspectionInput(&i); err != nil {
 		return InspectionRecord{}, err
 	}
@@ -167,7 +227,7 @@ func (s *RecordService) Create(ctx context.Context, actor ManualActor, i Inspect
 	var result InspectionRecord
 	m.ActorID = actor.ID
 	err = s.repository.WithInspectionTransaction(ctx, func(tx InspectionTransaction) error {
-		r, e := s.prepare(ctx, tx, i, a, "")
+		r, e := s.prepare(ctx, tx, i, a, "", nil)
 		if e != nil {
 			return e
 		}
@@ -194,6 +254,10 @@ func (s *RecordService) Detail(ctx context.Context, actor ManualActor, id string
 	return s.repository.GetInspection(ctx, id, a)
 }
 func (s *RecordService) List(ctx context.Context, actor ManualActor, f InspectionFilter) (InspectionPage, error) {
+	if f.DepartmentID == CollegeDepartmentOptionID {
+		f.DepartmentID = ""
+		f.CollegeOnly = true
+	}
 	for _, p := range []*string{&f.SemesterID, &f.WeekID, &f.InspectionTypeID, &f.DepartmentID, &f.ClassID} {
 		if *p != "" {
 			v, ok := canonicalDetailID(*p)
@@ -235,11 +299,25 @@ func (s *RecordService) List(ctx context.Context, actor ManualActor, f Inspectio
 func validateInspectionMutation(r InspectionRecord, version int) error {
 	return ValidateMutationRecord(AttendanceRecord{Status: r.Status, RowVersion: r.RowVersion, HasSubmission: r.HasSubmission, HasReportLock: r.HasReportLock}, version)
 }
+func validateInspectionUpdate(r InspectionRecord, version int) error {
+	if r.Status == RecordStatusReturned && r.HasSubmission && !r.HasReportLock {
+		if r.RowVersion != version {
+			return ErrRecordVersionConflict
+		}
+		return nil
+	}
+	return validateInspectionMutation(r, version)
+}
 func (s *RecordService) Update(ctx context.Context, actor ManualActor, id string, i InspectionEdit, m audit.Metadata) (InspectionRecord, error) {
 	id, ok := canonicalDetailID(id)
 	if !ok || i.Version < 1 || !validMutationReason(i.Reason) {
 		return InspectionRecord{}, ErrInspectionRequest
 	}
+	departmentID, err := ResolveEntryDepartment(actor, i.Record.DepartmentID)
+	if err != nil {
+		return InspectionRecord{}, err
+	}
+	i.Record.DepartmentID = departmentID
 	if err := normalizeInspectionInput(&i.Record); err != nil {
 		return InspectionRecord{}, err
 	}
@@ -255,17 +333,24 @@ func (s *RecordService) Update(ctx context.Context, actor ManualActor, id string
 		if e != nil {
 			return e
 		}
-		if e = validateInspectionMutation(old, i.Version); e != nil {
+		if e = validateInspectionUpdate(old, i.Version); e != nil {
 			return e
 		}
 		if old.InspectionTypeID != i.Record.InspectionTypeID {
 			return ErrInspectionRequest
 		}
-		r, e := s.prepare(ctx, tx, i.Record, a, old.CreatedBy)
+		if actor.IsMember && old.DepartmentID != i.Record.DepartmentID {
+			return ErrScopeMismatch
+		}
+		if old.HasSubmission && (old.SemesterID != i.Record.SemesterID || old.WeekID != i.Record.WeekID || old.DepartmentID != i.Record.DepartmentID) {
+			return ErrRecordNotEditable
+		}
+		r, e := s.prepare(ctx, tx, i.Record, a, old.CreatedBy, &old)
 		if e != nil {
 			return e
 		}
 		r.ID, r.CreatedBy, r.Source, r.ImportBatchID, r.CreatedAt = old.ID, old.CreatedBy, old.Source, old.ImportBatchID, old.CreatedAt
+		r.Status, r.HasSubmission, r.HasReportLock = old.Status, old.HasSubmission, old.HasReportLock
 		result, e = tx.Save(ctx, r, &old, a)
 		if e != nil {
 			return e

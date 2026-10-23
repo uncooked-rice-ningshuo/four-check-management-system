@@ -36,6 +36,9 @@ func validDetails(code string) map[string]json.RawMessage {
 		if f.Key == "result" {
 			value = `"QUALIFIED"`
 		}
+		if code == InspectionTypeAttendance && f.Key == "period" {
+			value = `"1-2"`
+		}
 		if f.Key == "round" {
 			continue
 		}
@@ -256,7 +259,7 @@ func TestValidateDetailsBoundaries(t *testing.T) {
 				}
 			}
 			for _, field := range d.Fields {
-				if field.MaxLength > 0 && field.Key != "round" {
+				if field.MaxLength > 0 && field.Key != "round" && !(d.Code == InspectionTypeAttendance && field.Key == "period") {
 					f := validDetails(d.Code)
 					f[field.Key], _ = json.Marshal(strings.Repeat("字", field.MaxLength))
 					if _, issues := validateFixture(d.Code, f); len(issues) != 0 {
@@ -287,11 +290,10 @@ func TestValidateDetailsBoundaries(t *testing.T) {
 	}
 	f := validDetails("ATTENDANCE_RATE")
 	f["absenceHours"] = json.RawMessage(`24`)
-	if _, issues := validateFixture("ATTENDANCE_RATE", f); len(issues) != 0 {
-		t.Fatal(issues)
-	}
-	f["period"] = json.RawMessage(`"1\u001f2"`)
 	_, issues := validateFixture("ATTENDANCE_RATE", f)
+	requireIssue(t, issues, "details.absenceHours", "PERIOD_HOURS_MISMATCH")
+	f["period"] = json.RawMessage(`"1\u001f2"`)
+	_, issues = validateFixture("ATTENDANCE_RATE", f)
 	requireIssue(t, issues, "details.period", "INVALID_FORMAT")
 	f = validDetails("LATE_RETURN")
 	f["remark"] = json.RawMessage(`"safe\u0000text"`)

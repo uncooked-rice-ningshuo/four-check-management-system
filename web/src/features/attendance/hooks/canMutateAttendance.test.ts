@@ -10,6 +10,9 @@ it('separates own entry permission from others management permission', () => {
  expect(canMutateAttendance(record, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE')])).toBe(true)
  expect(canMutateAttendance(record, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE'), grant('INSPECTION_MANAGE', 'DENY')])).toBe(false)
 })
-it.each(['PENDING_REVIEW', 'RETURNED', 'CONFIRMED', 'LOCKED'])('hides %s actions even for super admins', status => {
+it('allows a scoped member to correct a returned record', () => {
+ expect(canMutateAttendance({ ...record, status: 'RETURNED' }, { id: 'owner', isSuperAdmin: false }, [grant('INSPECTION_ENTER')])).toBe(true)
+})
+it.each(['PENDING_REVIEW', 'CONFIRMED', 'LOCKED'])('hides %s actions even for super admins', status => {
  expect(canMutateAttendance({ ...record, status }, { id: 'root', isSuperAdmin: true }, [])).toBe(false)
 })

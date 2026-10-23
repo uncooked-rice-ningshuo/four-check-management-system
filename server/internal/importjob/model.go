@@ -29,6 +29,7 @@ var (
 	ErrBatchNotFound            = errors.New("import batch not found")
 	ErrBatchVersionConflict     = errors.New("import batch version conflict")
 	ErrInvalidBatchTransition   = errors.New("invalid import batch transition")
+	ErrPreviewStale             = errors.New("import preview references changed")
 	ErrBatchHasErrors           = errors.New("import batch has validation errors")
 	ErrBatchAlreadyConfirmed    = errors.New("import batch already confirmed with another idempotency key")
 	ErrInvalidIdempotencyKey    = errors.New("invalid idempotency key")
@@ -40,6 +41,8 @@ var (
 )
 
 type Batch struct {
+	TypeCode              string         `json:"-"`
+	TemplateCode          string         `json:"-"`
 	ID                    string         `json:"id"`
 	InspectionTypeID      string         `json:"inspectionTypeId"`
 	SemesterID            string         `json:"semesterId"`
@@ -75,14 +78,15 @@ type BatchFailure struct {
 }
 
 type ImportRow struct {
-	ID               string                      `json:"id"`
-	BatchID          string                      `json:"batchId"`
-	RowNo            int                         `json:"rowNo"`
-	RawData          map[string]string           `json:"rawData"`
-	NormalizedRecord inspection.AttendanceRecord `json:"normalizedRecord"`
-	ValidationStatus string                      `json:"validationStatus"`
-	Errors           []ValidationError           `json:"errors"`
-	RecordID         string                      `json:"recordId,omitempty"`
+	NormalizedInspection *InspectionImportRecord     `json:"normalizedInspection,omitempty"`
+	ID                   string                      `json:"id"`
+	BatchID              string                      `json:"batchId"`
+	RowNo                int                         `json:"rowNo"`
+	RawData              map[string]string           `json:"rawData"`
+	NormalizedRecord     inspection.AttendanceRecord `json:"normalizedRecord"`
+	ValidationStatus     string                      `json:"validationStatus"`
+	Errors               []ValidationError           `json:"errors"`
+	RecordID             string                      `json:"recordId,omitempty"`
 }
 
 type ImportRowPage struct {

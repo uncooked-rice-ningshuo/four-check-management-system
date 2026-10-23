@@ -57,6 +57,20 @@ func TestCreateWeekRejectsInvalidRange(t *testing.T) {
 	}
 }
 
+func TestWeekPenaltyMultiplierDefaultsToOrdinaryWeek(t *testing.T) {
+	svc := NewService(&memoryRepository{})
+	input := Week{SemesterID: "semester", WeekNo: 1, StartDate: date("2026-09-07"), EndDate: date("2026-09-13")}
+	defaulted, err := svc.CreateWeek(context.Background(), input)
+	if err != nil || defaulted.AttendancePenaltyMultiplier == nil || *defaulted.AttendancePenaltyMultiplier != 1 {
+		t.Fatalf("ordinary week did not default to 1x: %+v, %v", defaulted, err)
+	}
+	invalid := 3
+	input.AttendancePenaltyMultiplier = &invalid
+	if _, err := svc.CreateWeek(context.Background(), input); err != ErrInvalidInput {
+		t.Fatalf("invalid multiplier accepted: %v", err)
+	}
+}
+
 func TestCurrentWeekCanBeEmpty(t *testing.T) {
 	week, err := NewService(&memoryRepository{}).CurrentWeek(context.Background(), date("2026-08-23"))
 	if err != nil || week != nil {

@@ -5,8 +5,11 @@ import type { User } from '../../entities/user/model/user'
 export type AuthState = {
   user: User | null
   loading: boolean
+  recoveryError: string | null
+  recoverSession: () => Promise<User | null>
   signIn: (input: { loginName: string; password: string }) => Promise<User>
   signOut: () => Promise<void>
+  changePassword: (input: { currentPassword: string; newPassword: string }) => Promise<void>
 }
 
 export const AuthContext = createContext<AuthState | null>(null)

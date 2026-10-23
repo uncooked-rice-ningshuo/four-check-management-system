@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"four-check-management-system/server/internal/audit"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/storage"
 	"github.com/google/uuid"
 )
@@ -16,6 +17,7 @@ type Repository interface {
 	CreateImportBatch(context.Context, Batch) error
 	FindImportBatch(context.Context, string) (Batch, error)
 	UpdateImportBatchState(context.Context, string, int, string, BatchFailure) (Batch, error)
+	CancelImportBatch(context.Context, Batch, audit.Metadata) (Batch, error)
 	ReplaceImportPreview(context.Context, Batch, []ImportRow) (Batch, error)
 	ConfirmAttendanceImport(context.Context, ConfirmBatchInput, audit.Mutation) (ConfirmResult, error)
 	FindPublishedImportTemplate(context.Context, string) (Template, error)
@@ -35,10 +37,12 @@ type AttendanceRowValidator interface {
 }
 
 type Service struct {
-	repository Repository
-	files      VerifiedFileReader
-	parser     WorkbookParser
-	validator  AttendanceRowValidator
+	inspectionValidators map[string]InspectionRowValidator
+	repository           Repository
+	files                VerifiedFileReader
+	parser               WorkbookParser
+	parsers              map[string]WorkbookParser
+	validator            AttendanceRowValidator
 }
 
 type ParseBatchInput struct {
@@ -65,8 +69,11 @@ func NewService(repository Repository, files VerifiedFileReader, parser Workbook
 }
 
 func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Batch, error) {
+	if input.DepartmentID == inspection.CollegeDepartmentOptionID {
+		input.DepartmentID = ""
+	}
 	if strings.TrimSpace(input.InspectionTypeID) == "" || strings.TrimSpace(input.SemesterID) == "" ||
-		strings.TrimSpace(input.WeekID) == "" || strings.TrimSpace(input.DepartmentID) == "" ||
+		strings.TrimSpace(input.WeekID) == "" ||
 		strings.TrimSpace(input.TemplateID) == "" || input.TemplateVersion < 1 || strings.TrimSpace(input.CreatedBy) == "" {
 		return Batch{}, ErrInvalidBatch
 	}
@@ -131,20 +138,32 @@ func (s *Service) ParseBatch(ctx context.Context, input ParseBatchInput) (Batch,
 	if err != nil {
 		return Batch{}, s.failParsing(ctx, batch, stableParseFailure(err), err)
 	}
-	workbook, err := s.parser.Parse(file.OriginalName, content)
+	parser := s.parser
+	if s.parsers != nil {
+		var supported bool
+		parser, supported = s.parsers[batch.TypeCode]
+		if !supported {
+			return Batch{}, s.failParsing(ctx, batch, BatchFailure{Code: string(ErrorInvalidWorkbook), Message: "当前检查类型不支持此导入格式"}, ErrInvalidBatch)
+		}
+	}
+	workbook, err := parser.Parse(file.OriginalName, content)
 	if err != nil {
 		return Batch{}, s.failParsing(ctx, batch, stableParseFailure(err), err)
 	}
-	if workbook.TemplateVersion != batch.TemplateVersion {
+	if workbook.TemplateVersion != batch.TemplateVersion || batch.TemplateCode != "" && workbook.TemplateCode != batch.TemplateCode {
 		err = parseError(ErrorTemplateVersionMismatch, "模板版本与批次记录不一致")
 		return Batch{}, s.failParsing(ctx, batch, stableParseFailure(err), err)
 	}
-	validation, err := s.validator.Validate(ctx, AttendanceImportScope{
-		InspectionTypeID: batch.InspectionTypeID, SemesterID: batch.SemesterID, WeekID: batch.WeekID,
+	scope := AttendanceImportScope{
+		TypeCode: batch.TypeCode, InspectionTypeID: batch.InspectionTypeID, SemesterID: batch.SemesterID, WeekID: batch.WeekID,
 		DepartmentID: batch.DepartmentID, ImportBatchID: batch.ID, CreatedBy: batch.CreatedBy,
 		ClassID: batch.ClassID, Grade: batch.Grade,
 		WeekStart: batch.WeekStart, WeekEnd: batch.WeekEnd, Location: batch.Location,
-	}, workbook.Rows)
+	}
+	if validator := s.inspectionValidators[batch.TypeCode]; validator != nil {
+		return s.parseInspectionPreview(ctx, batch, scope, workbook.Rows, validator)
+	}
+	validation, err := s.validator.Validate(ctx, scope, workbook.Rows)
 	if err != nil {
 		return Batch{}, s.failParsing(ctx, batch, BatchFailure{Code: string(ErrorInvalidWorkbook), Message: "导入数据校验失败"}, err)
 	}
@@ -159,7 +178,10 @@ func (s *Service) ParseBatch(ctx context.Context, input ParseBatchInput) (Batch,
 	return previewBatch, nil
 }
 
-func (s *Service) CancelBatch(ctx context.Context, id string, expectedVersion int) (Batch, error) {
+func (s *Service) CancelBatch(ctx context.Context, id string, expectedVersion int, metadata audit.Metadata) (Batch, error) {
+	if strings.TrimSpace(metadata.ActorID) == "" {
+		return Batch{}, ErrInvalidBatch
+	}
 	batch, err := s.repository.FindImportBatch(ctx, id)
 	if err != nil {
 		return Batch{}, err
@@ -170,7 +192,7 @@ func (s *Service) CancelBatch(ctx context.Context, id string, expectedVersion in
 	if err := ValidateBatchTransition(batch.Status, BatchStatusCancelled); err != nil {
 		return Batch{}, err
 	}
-	return s.repository.UpdateImportBatchState(ctx, id, expectedVersion, BatchStatusCancelled, BatchFailure{})
+	return s.repository.CancelImportBatch(ctx, batch, metadata)
 }
 
 func (s *Service) ConfirmBatch(ctx context.Context, input ConfirmBatchInput) (ConfirmResult, error) {

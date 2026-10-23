@@ -1,0 +1,14 @@
+FROM registry-1.docker.io/library/golang:1.25-alpine AS build
+WORKDIR /src
+COPY server/go.mod server/go.sum ./
+RUN go mod download
+COPY server/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/api ./cmd/api \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/publish-attendance-template ./cmd/publish-attendance-template \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/reconcile-files ./cmd/reconcile-files
+FROM registry-1.docker.io/library/alpine:3.21
+RUN apk add --no-cache ca-certificates wget && adduser -D -H app
+COPY --from=build /out/ /usr/local/bin/
+USER app
+EXPOSE 8080
+ENTRYPOINT ["api"]

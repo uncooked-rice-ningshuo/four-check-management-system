@@ -9,9 +9,12 @@ import { useAttendanceFilterOptions, useAttendancePermissions, useCurrentAcademi
 import { useAttendanceRecords } from '../../features/attendance/hooks/useAttendanceRecords'
 import { importErrorMessage } from '../../features/import-job/model/importErrorMessages'
 import { AttendanceImportDrawer } from '../../features/import-job/ui/AttendanceImportDrawer'
-import { ManualAttendanceDrawer } from '../../features/attendance/ui/ManualAttendanceDrawer'
+import { CourseCreatePanel } from '../../features/course-inspection/ui/CourseCreatePanel'
 import { AttendanceMutationDialogs } from '../../features/attendance/ui/AttendanceMutationDialogs'
 import { canMutateAttendance } from '../../features/attendance/hooks/canMutateAttendance'
+import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
+import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
+import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../entities/inspection/model/inspectionScope'
 import { ApiError } from '../../shared/api/httpClient'
 
 type AttendanceSearchValues = {
@@ -93,7 +96,10 @@ export function AttendancePage() {
 	const records = useAttendanceRecords(filters, listReady)
 	const canMutate = (record: AttendanceRecord) => Boolean(user && canMutateAttendance(record, user, permissions.data?.permissions, options?.semesters.find(semester => semester.id === record.semesterId)?.academicYearId))
   const selected = selection.filter(item => records.data?.items.some(record => record.id === item.id) && canMutate(item))
-  const canImport = Boolean(user?.isSuperAdmin || permissions.data?.permissions.some(permission => permission.action === 'INSPECTION_ENTER' && permission.effect === 'ALLOW'))
+  const selectedDrafts = selected.flatMap(item => item.status === 'DRAFT' && item.semesterId && item.weekId && item.inspectionTypeId
+    ? [{ id: item.id, rowVersion: item.rowVersion, status: item.status, semesterId: item.semesterId, weekId: item.weekId, departmentId: item.departmentId ?? '', inspectionTypeId: item.inspectionTypeId }] : [])
+  const canReview = Boolean(user?.isSuperAdmin || (attendanceTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', attendanceTypeId)))
+  const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId, user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined)))
 	const error = records.error instanceof ApiError ? records.error : undefined
 	const responsibleDepartmentNames = (options?.responsibleDepartments ?? []).map(item => item.name).join('、')
 	const departmentCount = options?.departments.length ?? 0
@@ -116,7 +122,7 @@ export function AttendancePage() {
 		Object.entries(entries).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
 		next.set('page', String(nextPage))
 		next.set('pageSize', String(nextPageSize))
-		setSearch(next)
+		setSearch(next, { state: location.state })
 	}
 	const searchValues: AttendanceSearchValues = {
 		semesterId,
@@ -152,7 +158,9 @@ export function AttendancePage() {
 			{ title: '课程', dataIndex: 'courseName', width: 180, search: false, ellipsis: true },
 			{ title: '检查时间', dataIndex: 'occurredAt', width: 180, search: false, renderText: value => dateTimeFormatter.format(new Date(value)) },
 			{ title: '节次', dataIndex: 'period', width: 100, search: false },
-			{ title: '旷课学时', dataIndex: 'absenceHours', width: 110, search: false },
+			{ title: '实际旷课学时', dataIndex: 'absenceHours', width: 125, search: false },
+			{ title: '违纪计入倍数', dataIndex: 'penaltyMultiplier', width: 125, search: false, render: (_, record) => record.penaltyMultiplier ? `${record.penaltyMultiplier} 倍` : '历史待核对' },
+			{ title: '违纪计入学时', dataIndex: 'penaltyHours', width: 125, search: false, render: (_, record) => record.penaltyHours ?? '历史待核对' },
 			{ title: '数据来源', dataIndex: 'source', width: 110, search: false, render: (_, record) => <Tag>{sourceLabels[record.source] ?? record.source}</Tag> },
 			{ title: '数据状态', dataIndex: 'status', width: 110, search: false, render: (_, record) => <Tag color={record.status === 'CONFIRMED' ? 'green' : record.status === 'RETURNED' ? 'red' : 'blue'}>{statusLabels[record.status as keyof typeof statusLabels] ?? record.status}</Tag> },
 		)
@@ -178,8 +186,8 @@ export function AttendancePage() {
 			className="attendance-records-table"
 			cardBordered
 			rowKey="id"
-			columns={[...columns, { title: '操作', valueType: 'option', width: 140, fixed: 'right', render: (_, record) => canMutate(record) ? <Space><Button type="link" onClick={() => setEditId(record.id)}>编辑</Button><Button type="link" danger onClick={() => setDeleting([record])}>删除</Button></Space> : null }]}
-      rowSelection={{ selectedRowKeys: selected.map(record => record.id), onChange: (_, rows) => setSelection(rows), getCheckboxProps: record => ({ disabled: !canMutate(record) }) }}
+			columns={[...columns, { title: '操作', valueType: 'option', width: 240, fixed: 'right', render: (_, record) => canMutate(record) ? <Space>{record.importBatchId && <Button type="link" onClick={() => { updateImportBatchId(record.importBatchId); setDrawerOpen(true) }}>导入批次</Button>}<Button type="link" onClick={() => setEditId(record.id)}>编辑</Button>{record.status === 'DRAFT' && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</Space> : null }]}
+      rowSelection={{ selectedRowKeys: selectedDrafts.map(record => record.id), onChange: (_, rows) => setSelection(rows), getCheckboxProps: record => ({ disabled: !canMutate(record) || record.status !== 'DRAFT' }) }}
 			loading={permissions.isLoading || currentWeek.isLoading || filterOptions.isLoading || records.isLoading}
 			dataSource={listReady && !records.isError ? records.data?.items ?? [] : []}
 			headerTitle={<Space size={10}><span>到课率记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag></Space>}
@@ -188,22 +196,19 @@ export function AttendancePage() {
 			onSubmit={values => replaceSearch({ ...searchValues, ...values })}
 			onReset={() => replaceSearch({ semesterId, weekId, sort: 'occurredAtDesc' })}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
-			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), ...(selected.length ? [<Button key="delete" danger onClick={() => setDeleting(selected)}>批量删除（{selected.length}）</Button>] : [])]}
+			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
 			scroll={{ x: 1320 }}
 			locale={{ emptyText: <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}
 		/>
-		{(editId || deleting.length > 0) && <AttendanceMutationDialogs options={options} editId={editId} deleting={deleting} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
-		{manualOpen && options && <ManualAttendanceDrawer options={options} initialSemesterId={semesterId || undefined} initialWeekId={weekId || undefined} onClose={() => setManualOpen(false)} />}
-		{drawerOpen && <AttendanceImportDrawer
+		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
+		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => setManualOpen(false)} />}
+		{drawerOpen && options && <AttendanceImportDrawer
 			open={drawerOpen}
+			memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined}
 			context={context}
-			scopeLabels={{
-				inspectionType: options?.inspectionType.name ?? '到课率',
-				semester: options?.semesters.find(item => item.id === context.semesterId)?.name ?? '未选择学期',
-				week: options?.weeks.find(item => item.id === context.weekId) ? `第 ${options?.weeks.find(item => item.id === context.weekId)?.weekNo} 周` : '未选择周次',
-			}}
-			departments={(options?.responsibleDepartments ?? []).filter(department => options?.departments.some(allowed => allowed.id === department.id))}
+			scopeOptions={options}
+			departments={[...(options?.responsibleDepartments ?? []).filter(department => options?.departments.some(allowed => allowed.id === department.id)), ...(user?.systemRole !== 'MEMBER' ? (options?.departments ?? []).filter(department => department.id === COLLEGE_DEPARTMENT_OPTION_ID) : [])]}
 			batchId={importBatchId}
 			onBatchIdChange={updateImportBatchId}
 			onClose={() => setDrawerOpen(false)}

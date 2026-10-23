@@ -37,8 +37,10 @@ type ManualAttendanceInput struct {
 
 // ManualActor is supplied by authentication, never decoded from the request body.
 type ManualActor struct {
-	ID           string
-	IsSuperAdmin bool
+	ID                  string
+	IsSuperAdmin        bool
+	IsMember            bool
+	PrimaryDepartmentID string
 }
 
 // ManualValidationError exposes safe field validation feedback.
@@ -79,6 +81,11 @@ func NewManualService(r manualRepository, v manualValidator, c manualCalendar, o
 
 // Create authorizes the requested and resolved scope before persisting an audited manual draft.
 func (s *ManualService) Create(ctx context.Context, actor ManualActor, input ManualAttendanceInput, metadata audit.Metadata) (AttendanceRecord, error) {
+	departmentID, err := ResolveEntryDepartment(actor, input.DepartmentID)
+	if err != nil {
+		return AttendanceRecord{}, err
+	}
+	input.DepartmentID = departmentID
 	input.ExcludeRecordID = ""
 	record, err := s.prepare(ctx, actor, input, "")
 	if err != nil {
@@ -92,7 +99,7 @@ func (s *ManualService) Create(ctx context.Context, actor ManualActor, input Man
 }
 
 func (s *ManualService) prepare(ctx context.Context, actor ManualActor, input ManualAttendanceInput, ownerID string) (AttendanceRecord, error) {
-	for _, value := range []string{actor.ID, input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID, input.ClassID, input.Grade} {
+	for _, value := range []string{actor.ID, input.SemesterID, input.WeekID, input.InspectionTypeID, input.ClassID, input.Grade} {
 		if strings.TrimSpace(value) == "" {
 			return AttendanceRecord{}, ErrInvalidAttendanceRecord
 		}
@@ -158,7 +165,7 @@ func (s *ManualService) prepare(ctx context.Context, actor ManualActor, input Ma
 			mapped = true
 		}
 	}
-	if !validType || !validDepartment || !mapped {
+	if !validType || (input.DepartmentID != "" && (!validDepartment || !mapped)) {
 		return AttendanceRecord{}, ErrScopeMismatch
 	}
 	record, err := s.validator.ValidateManualAttendance(ctx, input, week, actor.ID)

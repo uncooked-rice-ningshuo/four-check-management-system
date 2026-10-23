@@ -21,8 +21,13 @@ async function fillForm() {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: label }))
     fireEvent.click(screen.getByText(text, { selector: '.ant-select-item-option-content' }))
   }
-  for (const [label, value] of [['学号', 'S001'], ['姓名', '虚构同学'], ['课程名称', '数据结构'], ['上课教室', '博学楼 101'], ['检查日期', '2026-09-06'], ['检查时间', '08:00'], ['节次', '1-2'], ['旷课学时', '2']]) {
+  for (const [label, value] of [['学号', 'S001'], ['姓名', '虚构同学'], ['课程名称', '数据结构'], ['上课教室', '博学楼 101'], ['节次', '1-2'], ['旷课学时', '2']]) {
     fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  }
+  for (const [label, value] of [['检查日期', '2026-09-06'], ['检查时间', '08:00']]) {
+    const picker = screen.getByLabelText(label)
+    fireEvent.change(picker, { target: { value } })
+    fireEvent.keyDown(picker, { key: 'Enter' })
   }
 }
 it('creates using the form target and server-owned snapshots then closes', async () => {
@@ -32,7 +37,7 @@ it('creates using the form target and server-owned snapshots then closes', async
   await fillForm()
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', absenceHours: 2 }))
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', date: '2026-09-06', time: '08:00', absenceHours: 2 }))
   expect(save.mock.calls[0][0]).not.toHaveProperty('status')
 })
 it.each([['FORBIDDEN_SCOPE', '无权在所选部门'], ['RECORD_ALREADY_EXISTS', '相同记录已存在'], ['VALIDATION_FAILED', '姓名不一致']])('retains form values after %s', async (code, message) => {

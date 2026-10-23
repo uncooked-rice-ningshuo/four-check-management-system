@@ -7,16 +7,23 @@ import { OrganizationConfigPage } from '../pages/admin/OrganizationConfigPage'
 import { RegistrationReviewPage } from '../pages/admin/RegistrationReviewPage'
 import { UserManagementPage } from '../pages/admin/UserManagementPage'
 import { MasterDataPage } from '../pages/admin/MasterDataPage'
+import { HygieneAreaPage } from '../pages/admin/HygieneAreaPage'
 import { DictionaryPage } from '../pages/admin/DictionaryPage'
 import { ChangePasswordPage } from '../pages/auth/ChangePasswordPage'
 import { LoginPage } from '../pages/auth/LoginPage'
 import { RegisterPage } from '../pages/auth/RegisterPage'
 import { RegisterResultPage } from '../pages/auth/RegisterResultPage'
 import { HomePage } from '../pages/home/HomePage'
+import { LateReturnPage } from '../pages/inspection/LateReturnPage'
+import { MorningAttendancePage } from '../pages/inspection/MorningAttendancePage'
+import { ClassroomHygienePage } from '../pages/inspection/ClassroomHygienePage'
+import { PublicDormitoryHygienePage } from '../pages/inspection/PublicDormitoryHygienePage'
+import { DormitoryHygienePage } from '../pages/inspection/DormitoryHygienePage'
+import { UnattendedClassroomPage } from '../pages/inspection/UnattendedClassroomPage'
+import { InspectionTypeRoute } from './router/InspectionTypeRoute'
 import { AttendancePage } from '../pages/inspection/AttendancePage'
 import { AppLayout } from './layouts/AppLayout'
 import { ProtectedRoute } from './router/ProtectedRoute'
-import { EffectivePermissionRoute } from './router/EffectivePermissionRoute'
 import { SuperAdminOnly, SuperAdminRoute } from './router/SuperAdminRoute'
 
 const protectedPage = (page: ReactNode) => <ProtectedRoute>{page}</ProtectedRoute>
@@ -41,7 +48,14 @@ export default function App() {
 				<Route path="profile" element={<AccountProfilePage />} />
 				<Route path="security" element={<AccountSecurityPage />} />
 			</Route>
-			<Route path="inspections/attendance" element={<EffectivePermissionRoute action="INSPECTION_VIEW"><AttendancePage /></EffectivePermissionRoute>} />
+			<Route path="inspections/attendance" element={<InspectionTypeRoute typeCode="ATTENDANCE_RATE"><AttendancePage /></InspectionTypeRoute>} />
+			<Route path="admin/hygiene-areas" element={<HygieneAreaPage />} />
+			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
+			<Route path="inspections/morning-attendance" element={<InspectionTypeRoute typeCode="MORNING_ATTENDANCE"><MorningAttendancePage /></InspectionTypeRoute>} />
+			<Route path="inspections/public-dormitory-hygiene" element={<InspectionTypeRoute typeCode="PUBLIC_DORMITORY_HYGIENE"><PublicDormitoryHygienePage /></InspectionTypeRoute>} />
+			<Route path="inspections/classroom-hygiene" element={<InspectionTypeRoute typeCode="CLASSROOM_HYGIENE"><ClassroomHygienePage /></InspectionTypeRoute>} />
+			<Route path="inspections/dormitory-hygiene" element={<InspectionTypeRoute typeCode="DORMITORY_HYGIENE"><DormitoryHygienePage /></InspectionTypeRoute>} />
+			<Route path="inspections/unattended-classroom" element={<InspectionTypeRoute typeCode="UNATTENDED_CLASSROOM"><UnattendedClassroomPage /></InspectionTypeRoute>} />
 		</Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>

@@ -117,7 +117,7 @@ const catalog: InspectionDefinition[] = [
     "extensionTable": "attendance_details",
     "granularity": "STUDENT_COURSE_EVENT",
     "templateVersion": 1,
-    "templateStatus": "PLANNED",
+    "templateStatus": "ACTIVE",
     "fields": [
       {
         "key": "studentId",
@@ -196,7 +196,7 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
     "rules": [
       "Course absence semantics match attendance; inspectionTypeId keeps records separate."
     ]
@@ -207,7 +207,7 @@ const catalog: InspectionDefinition[] = [
     "extensionTable": "classroom_hygiene_details",
     "granularity": "OBJECT_INSPECTION",
     "templateVersion": 1,
-    "templateStatus": "PLANNED",
+    "templateStatus": "ACTIVE",
     "fields": [
       {
         "key": "classroomId",
@@ -304,7 +304,7 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
     "rules": [
       "Exactly one of time or round is required; time is Asia/Shanghai local time.",
       "Duplicate event identity uses date plus TIME/time or ROUND/trimmed round.",
@@ -321,7 +321,7 @@ const catalog: InspectionDefinition[] = [
     "extensionTable": "morning_exercise_details",
     "granularity": "STUDENT_DAY",
     "templateVersion": 1,
-    "templateStatus": "PLANNED",
+    "templateStatus": "ACTIVE",
     "fields": [
       {
         "key": "studentId",
@@ -371,7 +371,8 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE",
+      "IMPORT"],
     "rules": [
       "Morning exercise and sign-in stay one type, without activityKind.",
       "One event per student/day; absenceCount is server-owned 1, totals are derived."
@@ -383,7 +384,7 @@ const catalog: InspectionDefinition[] = [
     "extensionTable": "dorm_hygiene_details",
     "granularity": "OBJECT_INSPECTION",
     "templateVersion": 1,
-    "templateStatus": "PLANNED",
+    "templateStatus": "ACTIVE",
     "fields": [
       {
         "key": "dormitoryId",
@@ -473,7 +474,7 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
     "rules": [
       "Exactly one of time or round is required; time is Asia/Shanghai local time.",
       "Duplicate event identity uses date plus TIME/time or ROUND/trimmed round.",
@@ -490,7 +491,7 @@ const catalog: InspectionDefinition[] = [
     "extensionTable": "late_return_details",
     "granularity": "STUDENT_EVENT",
     "templateVersion": 1,
-    "templateStatus": "PLANNED",
+    "templateStatus": "ACTIVE",
     "fields": [
       {
         "key": "studentId",
@@ -545,7 +546,8 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE",
+      "IMPORT"],
     "rules": [
       "Split multiple students into individual events.",
       "Date/time normalize to occurredAt; violation count is server-owned 1."
@@ -653,7 +655,7 @@ const catalog: InspectionDefinition[] = [
       "BATCH_DELETE",
       "IMPORT"
     ],
-    "availableActions": [],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE"],
     "rules": [
       "Exactly one of time or round is required; time is Asia/Shanghai local time.",
       "Duplicate event identity uses date plus TIME/time or ROUND/trimmed round.",

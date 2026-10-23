@@ -26,19 +26,35 @@ func TestInspectionCatalog(t *testing.T) {
 			}
 			seen[f.Key] = true
 		}
-		if d.Code != "ATTENDANCE_RATE" && len(d.AvailableActions) != 0 {
-			t.Fatalf("unimplemented actions enabled for %s", d.Code)
-		}
+
 	}
 	if len(tables) != 6 {
 		t.Fatalf("tables=%d", len(tables))
 	}
+	l, _ := LookupInspectionDefinition("LATE_RETURN")
+	if !reflect.DeepEqual(l.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || l.TemplateStatus != "ACTIVE" {
+		t.Fatal("late return import capability missing")
+	}
 	a, _ := LookupInspectionDefinition("ATTENDANCE_RATE")
 	u, _ := LookupInspectionDefinition("UNATTENDED_CLASSROOM")
+	if !reflect.DeepEqual(u.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || u.TemplateStatus != "ACTIVE" {
+		t.Fatal("unattended import capability missing")
+	}
 	if a.ExtensionTable != u.ExtensionTable || !reflect.DeepEqual(a.Fields, u.Fields) {
 		t.Fatal("course absence schemas drifted")
 	}
+	c, _ := LookupInspectionDefinition("CLASSROOM_HYGIENE")
+	if !reflect.DeepEqual(c.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || c.TemplateStatus != "ACTIVE" {
+		t.Fatal("classroom import capability missing")
+	}
 	m, _ := LookupInspectionDefinition("MORNING_ATTENDANCE")
+	h, _ := LookupInspectionDefinition("DORMITORY_HYGIENE")
+	if !reflect.DeepEqual(h.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || h.TemplateStatus != "ACTIVE" {
+		t.Fatal("dormitory hygiene import capability missing")
+	}
+	if !reflect.DeepEqual(m.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || m.TemplateStatus != "ACTIVE" {
+		t.Fatal("morning import capability missing")
+	}
 	for _, f := range m.Fields {
 		if f.Key == "activityKind" {
 			t.Fatal("morning activities must stay one type")
@@ -46,6 +62,9 @@ func TestInspectionCatalog(t *testing.T) {
 	}
 	for _, code := range []string{"DORMITORY_HYGIENE", "CLASSROOM_HYGIENE", "PUBLIC_DORMITORY_HYGIENE"} {
 		d, _ := LookupInspectionDefinition(code)
+		if code == "PUBLIC_DORMITORY_HYGIENE" && (!reflect.DeepEqual(d.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE"}) || d.TemplateStatus != "PLANNED") {
+			t.Fatal("verified manual actions missing or unverified import enabled", code)
+		}
 		if d.Granularity != "OBJECT_INSPECTION" {
 			t.Fatal(code)
 		}

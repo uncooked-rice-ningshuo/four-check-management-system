@@ -1,0 +1,218 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: four_check
+      POSTGRES_USER: four_check
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请先运行 init-env.py}
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U four_check -d four_check
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+    command:
+    - postgres
+    - -c
+    - shared_buffers=64MB
+    - -c
+    - max_connections=30
+    pull_policy: never
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: four_check
+      PGUSER: four_check
+      PGPASSWORD: ${POSTGRES_PASSWORD:?请先运行 init-env.py}
+    volumes:
+    - ./migrations:/migrations:ro
+    - ./migrate.sh:/migrate.sh:ro
+    command:
+    - sh
+    - /migrate.sh
+    depends_on:
+      postgres:
+        condition: service_healthy
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    pull_policy: never
+  minio:
+    image: four-check-minio:RELEASE.2025-10-15T17-29-55Z
+    command:
+    - server
+    - /data
+    - --console-address
+    - :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MinIO 根账号}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MinIO 根密码}
+    volumes:
+    - minio_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - '-'
+      - http://localhost:9000/minio/health/ready
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+    pull_policy: never
+  minio-init:
+    image: four-check-mc:RELEASE.2025-08-13T08-35-41Z
+    entrypoint:
+    - /bin/sh
+    - -c
+    command:
+    - 'set -eu
+
+      case "$${MINIO_BUCKET}" in ''''|*[!a-z0-9.-]*) echo ''invalid MINIO_BUCKET''
+      >&2; exit 1;; esac
+
+      test "$${MINIO_ACCESS_KEY}" != "$${MINIO_ROOT_USER}"
+
+      mc alias set bootstrap http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+
+      mc mb --ignore-existing "bootstrap/$${MINIO_BUCKET}"
+
+      mc version enable "bootstrap/$${MINIO_BUCKET}"
+
+      mc anonymous set none "bootstrap/$${MINIO_BUCKET}"
+
+      sed "s/BUCKET_PLACEHOLDER/$${MINIO_BUCKET}/g" /config/app-policy.json > /tmp/app-policy.json
+
+      mc admin policy create bootstrap four-check-app /tmp/app-policy.json
+
+      mc admin user add bootstrap "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"
+
+      mc admin policy attach bootstrap four-check-app --user "$${MINIO_ACCESS_KEY}"
+
+      '
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 中设置 MinIO 根账号}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MinIO 根密码}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MinIO 应用账号}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请在 .env 中设置 MinIO 应用密钥}
+      MINIO_BUCKET: ${MINIO_BUCKET:-four-check-files}
+    volumes:
+    - ./app-policy.json:/config/app-policy.json:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    pull_policy: never
+  api:
+    environment:
+      DATABASE_URL: postgres://four_check:${POSTGRES_PASSWORD:?请先运行 init-env.py}@postgres:5432/four_check?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?请先运行 init-env.py}
+      COOKIE_SECURE: 'false'
+      BOOTSTRAP_ADMIN_LOGIN: ${BOOTSTRAP_ADMIN_LOGIN:-admin}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-系统管理员}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?请在 .env 中设置初始管理员密码}
+      TRUSTED_PROXY_CIDRS: 172.30.88.10/32
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MinIO 应用账号}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请在 .env 中设置 MinIO 应用密钥}
+      MINIO_BUCKET: ${MINIO_BUCKET:-four-check-files}
+      MINIO_USE_TLS: 'false'
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_MAX_FILE_SIZE_BYTES: ${MINIO_MAX_FILE_SIZE_BYTES:-52428800}
+      MINIO_CONNECT_TIMEOUT: ${MINIO_CONNECT_TIMEOUT:-5s}
+      MINIO_OPERATION_TIMEOUT: ${MINIO_OPERATION_TIMEOUT:-30s}
+      GOMEMLIMIT: 192MiB
+      GOMAXPROCS: '2'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - '-'
+      - http://localhost:8080/health/ready
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+    image: four-check-api:ip-trial-20260922
+    pull_policy: never
+  web:
+    ports:
+    - 8088:80
+    depends_on:
+      api:
+        condition: service_healthy
+    platform: linux/amd64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    restart: unless-stopped
+    image: four-check-web:ip-trial-20260922
+    volumes:
+    - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      default:
+        ipv4_address: 172.30.88.10
+    pull_policy: never
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - '-'
+      - http://127.0.0.1/health/ready
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+volumes:
+  postgres_data: null
+  minio_data: null
+name: four-check-ip-trial
+networks:
+  default:
+    ipam:
+      config:
+      - subnet: 172.30.88.0/24

@@ -50,7 +50,6 @@ func TestNewAttendanceRecordRejectsMissingContext(t *testing.T) {
 		{"inspection type", func(input *AttendanceInput) { input.InspectionTypeID = "" }},
 		{"semester", func(input *AttendanceInput) { input.SemesterID = "" }},
 		{"week", func(input *AttendanceInput) { input.WeekID = "" }},
-		{"department", func(input *AttendanceInput) { input.DepartmentID = "" }},
 		{"student", func(input *AttendanceInput) { input.StudentID = "" }},
 		{"class", func(input *AttendanceInput) { input.ClassID = "" }},
 		{"course", func(input *AttendanceInput) { input.CourseID = "" }},
@@ -64,6 +63,15 @@ func TestNewAttendanceRecordRejectsMissingContext(t *testing.T) {
 				t.Fatalf("error = %v, want ErrInvalidAttendanceRecord", err)
 			}
 		})
+	}
+}
+
+func TestNewAttendanceRecordAllowsCollegeScope(t *testing.T) {
+	input := validAttendanceInput()
+	input.DepartmentID = ""
+	record, err := NewAttendanceRecord(input)
+	if err != nil || record.DepartmentID != "" {
+		t.Fatalf("college attendance record = %+v, %v", record, err)
 	}
 }
 

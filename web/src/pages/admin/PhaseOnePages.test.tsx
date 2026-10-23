@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { Modal } from 'antd'
+import { Modal, message } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RegisterPage } from '../auth/RegisterPage'
@@ -11,7 +11,7 @@ import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
 import type { MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
-import { assignUserRole, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType } from '../../shared/api/adminApi'
+import { assignUserRole, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -35,7 +35,7 @@ vi.mock('../../shared/api/authApi', () => ({ registerAccount: vi.fn() }))
 
 const renderPage = (element: React.ReactNode) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><MemoryRouter>{element}</MemoryRouter></QueryClientProvider>)
+  return { ...render(<QueryClientProvider client={client}><MemoryRouter>{element}</MemoryRouter></QueryClientProvider>), client }
 }
 
 describe('阶段一管理页面', () => {
@@ -141,6 +141,43 @@ describe('阶段一管理页面', () => {
 	expect(screen.queryByText('CONFIGURATION_VIEW')).not.toBeInTheDocument()
   })
 
+  it('权限详情分别展示同一动作对应的部门和检查类型', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '办公室成员', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'office', organizationRoleId: 'role-1' }])
+    vi.mocked(getCatalogs).mockResolvedValue({ departments: [{ id: 'office', code: 'OFFICE', name: '学生会办公室', enabled: true }], organizationRoles: [], inspectionTypes: [{ id: 'attendance', code: 'ATTENDANCE', name: '到课率', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 1 }, { id: 'hygiene', code: 'HYGIENE', name: '宿舍卫生', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 2 }] })
+    vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'user-1', systemRole: 'MEMBER', permissions: [
+      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { departmentId: 'office', inspectionTypeId: 'attendance' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
+      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { departmentId: 'office', inspectionTypeId: 'hygiene' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
+    ] })
+    renderPage(<UserManagementPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '权限详情' }))
+    expect(await screen.findByText('部门：学生会办公室；检查类型：到课率')).toBeInTheDocument()
+    expect(screen.getByText('部门：学生会办公室；检查类型：宿舍卫生')).toBeInTheDocument()
+  })
+
+  it('重置密码由服务端生成并只在结果弹窗显示', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+    vi.mocked(resetUserPassword).mockResolvedValue({ temporaryPassword: 'generated-password-123456' })
+    renderPage(<UserManagementPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '重置密码' }))
+    expect(screen.queryByLabelText('新临时密码')).not.toBeInTheDocument()
+    expect(screen.getByText(/下一弹窗显示/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确 定' }))
+    await waitFor(() => expect(resetUserPassword).toHaveBeenCalledWith('user-1'))
+    expect(await screen.findByText('generated-password-123456')).toBeInTheDocument()
+    expect(screen.getByText('密码重置成功')).toBeInTheDocument()
+    expect(screen.getAllByText('24010001')).toHaveLength(3)
+    expect(screen.getByText('初始密码')).toBeInTheDocument()
+  })
+
+  it('未分配部门和组织角色使用与系统角色一致的标签样式', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+    renderPage(<UserManagementPage />)
+    await screen.findByRole('cell', { name: '张三' })
+    const unassigned = screen.getAllByText('未分配')
+    expect(unassigned).toHaveLength(2)
+    for (const label of unassigned) expect(label).toHaveClass('ant-tag', 'user-assignment-tag')
+  })
+
   it('权限详情把后端 null 集合按空列表展示而不会白屏', async () => {
 	vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
 	vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'user-1', systemRole: 'MEMBER', permissions: null } as never)
@@ -156,21 +193,95 @@ describe('阶段一管理页面', () => {
 	expect(screen.getByText('暂无用户单独规则')).toBeVisible()
   })
 
-  it('归属保存成功后清除草稿并禁用保存按钮', async () => {
+  it('用户读取失败不显示正常空态，重试后恢复列表', async () => {
+    vi.mocked(getUsers).mockRejectedValueOnce(new Error('request failed')).mockResolvedValue([])
+    renderPage(<UserManagementPage />)
+    expect(await screen.findByText('用户列表加载失败')).toBeVisible()
+    expect(screen.queryByText('暂无用户')).not.toBeInTheDocument()
+    expect(screen.queryByText('共 0 名用户')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试用户列表' }))
+    expect(await screen.findByText('暂无用户')).toBeVisible()
+    expect(screen.queryByText('用户列表加载失败')).not.toBeInTheDocument()
+  })
+
+  it('组织目录读取失败不误报归属停用，重试后恢复名称', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'department-1', organizationRoleId: 'role-1' }])
+    vi.mocked(getCatalogs).mockRejectedValueOnce(new Error('request failed')).mockResolvedValue({ departments: [{ id: 'department-1', code: 'ONE', name: '部门一', enabled: true }], organizationRoles: [{ id: 'role-1', code: 'MEMBER', name: '委员', enabled: true, sortOrder: 1 }], inspectionTypes: [] })
+    renderPage(<UserManagementPage />)
+    expect(await screen.findByText('组织目录加载失败')).toBeVisible()
+    expect(screen.queryByText('部门已停用')).not.toBeInTheDocument()
+    expect(screen.queryByText('角色已停用')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试组织目录' }))
+    expect(await screen.findByText('部门一')).toBeVisible()
+    expect(screen.queryByText('组织目录加载失败')).not.toBeInTheDocument()
+  })
+
+  it('编辑中组织目录刷新失败保留输入，恢复前不提交', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+    const { client } = renderPage(<UserManagementPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('姓名'), { target: { value: '未保存姓名' } })
+    vi.mocked(getCatalogs).mockRejectedValue(new Error('request failed'))
+    await client.invalidateQueries({ queryKey: ['admin-catalogs'] })
+    await waitFor(() => expect(within(dialog).getByText('组织目录加载失败，请重试后保存')).toBeVisible())
+    expect(within(dialog).getByLabelText('姓名')).toHaveValue('未保存姓名')
+    expect(within(dialog).getByRole('button', { name: '确 定' })).toBeDisabled()
+    const form = dialog.querySelector('form')
+    if (!form) throw new Error('Editor form missing')
+    const saveError = vi.spyOn(message, 'error')
+    fireEvent.submit(form)
+    await waitFor(() => expect(saveError).toHaveBeenCalledWith('组织目录加载失败，请重试后保存'))
+    saveError.mockRestore()
+    expect(updateUser).not.toHaveBeenCalled()
+    vi.mocked(getCatalogs).mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] })
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试组织目录' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '确 定' })).not.toBeDisabled())
+    expect(within(dialog).getByLabelText('姓名')).toHaveValue('未保存姓名')
+  })
+
+  it('未分配账号可只修改姓名，失败保留输入并原位重试', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }])
+    vi.mocked(updateUser).mockRejectedValueOnce(new Error('账号状态已变化，请刷新后重试')).mockResolvedValue({ id: 'user-1' } as never)
+    renderPage(<UserManagementPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('姓名'), { target: { value: '保留的新姓名' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确 定' }))
+    await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(1))
+    await screen.findByText('账号状态已变化，请刷新后重试')
+    expect(within(dialog).getByLabelText('姓名')).toHaveValue('保留的新姓名')
+    expect(assignUserRole).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '确 定' }))
+    await waitFor(() => expect(updateUser).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(assignUserRole).not.toHaveBeenCalled()
+  })
+
+  it('编辑表单回显归属，并在保存时提交部门和角色', async () => {
     vi.mocked(getUsers).mockResolvedValue([{ accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '张三', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'department-1', organizationRoleId: 'role-1' }])
     vi.mocked(getCatalogs).mockResolvedValue({ departments: [{ id: 'department-1', code: 'ONE', name: '部门一', enabled: true }, { id: 'department-2', code: 'TWO', name: '部门二', enabled: true }], organizationRoles: [{ id: 'role-1', code: 'MEMBER', name: '委员', enabled: true, sortOrder: 1 }], inspectionTypes: [] })
     vi.mocked(assignUserRole).mockResolvedValue(undefined)
+    vi.mocked(updateUser).mockResolvedValue({ id: 'user-1' } as never)
     renderPage(<UserManagementPage />)
 
-    const saveButton = await screen.findByRole('button', { name: '保存归属' })
-    expect(saveButton).toBeDisabled()
-    fireEvent.mouseDown(screen.getByLabelText('张三所属部门'))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByDisplayValue('24010001')).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('张三')).toBeInTheDocument()
+    expect(within(dialog).getByText('部门一')).toBeInTheDocument()
+    expect(within(dialog).getByText('委员')).toBeInTheDocument()
+    for (const control of within(dialog).getAllByRole('combobox')) {
+      expect(document.querySelectorAll(`[id="${control.id}"]`)).toHaveLength(1)
+    }
+    expect(within(dialog).getByRole('combobox', { name: '系统角色' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: '组织角色' })).toBeInTheDocument()
+    fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: '所属部门' }))
     fireEvent.click(await screen.findByText('部门二'))
-    expect(saveButton).toBeEnabled()
-    fireEvent.click(saveButton)
+    fireEvent.click(within(dialog).getByRole('button', { name: '确 定' }))
 
     await waitFor(() => expect(assignUserRole).toHaveBeenCalled())
-    await waitFor(() => expect(saveButton).toBeDisabled())
+    expect(assignUserRole).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'department-2', organizationRoleId: 'role-1' }))
   })
 
   it('基础数据页面使用分类导航和 ProTable 新增入口', async () => {

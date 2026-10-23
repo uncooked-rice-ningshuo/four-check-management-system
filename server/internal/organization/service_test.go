@@ -2,6 +2,8 @@ package organization
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"four-check-management-system/server/internal/audit"
@@ -11,6 +13,7 @@ type memoryRepository struct {
 	catalogs  Catalogs
 	scopes    []DepartmentInspectionScope
 	mutations []audit.Mutation
+	users     []UserAssignment
 }
 
 func (m *memoryRepository) ListCatalogs(context.Context, bool) (Catalogs, error) {
@@ -36,7 +39,7 @@ func (m *memoryRepository) UpdateInspectionType(_ context.Context, i InspectionT
 	m.mutations = append(m.mutations, mutation)
 	return i, nil
 }
-func (m *memoryRepository) ListUsers(context.Context) ([]UserAssignment, error) { return nil, nil }
+func (m *memoryRepository) ListUsers(context.Context) ([]UserAssignment, error) { return m.users, nil }
 func (m *memoryRepository) AssignUserRole(_ context.Context, assignment UserAssignment, mutation audit.Mutation) error {
 	m.mutations = append(m.mutations, mutation)
 	return nil
@@ -63,6 +66,17 @@ func TestAdminCatalogsReturnEmptyCollectionsAsArrays(t *testing.T) {
 	}
 }
 
+func TestAdminUsersReturnEmptyCollectionAsArray(t *testing.T) {
+	users, err := NewService(&memoryRepository{}).ListUsers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(users)
+	if err != nil || string(encoded) != "[]" {
+		t.Fatalf("empty users JSON = %s, error = %v", encoded, err)
+	}
+}
+
 func TestScopeRequiresDepartmentAndInspectionType(t *testing.T) {
 	svc := NewService(&memoryRepository{})
 	err := svc.UpsertScope(context.Background(), DepartmentInspectionScope{CanView: true})
@@ -83,5 +97,38 @@ func TestCreateDepartmentProvidesOrganizationAuditMutation(t *testing.T) {
 	mutation := repository.mutations[0]
 	if mutation.Metadata.ActorID != "admin-1" || mutation.Entry.Action != audit.ActionOrganizationUpdated || mutation.Entry.ResourceID != created.ID {
 		t.Fatalf("mutation = %+v", mutation)
+	}
+}
+
+func TestAssignmentAuditUsesStoredAccountFieldsAndRejectsMissingTarget(t *testing.T) {
+	current := UserAssignment{SessionVersion: 12, AccountID: "user", LoginName: "real-login", StudentNo: "real-student", Name: "Real name", Status: "ACTIVE", SystemRole: "MEMBER"}
+	repo := &memoryRepository{users: []UserAssignment{current}}
+	svc := NewService(repo)
+	requested := UserAssignment{SessionVersion: 999, AccountID: "user", LoginName: "forged", Name: "Forged", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: "new-department", OrganizationRoleID: "new-role"}
+	if err := svc.AssignUserRole(context.Background(), requested); err != nil {
+		t.Fatal(err)
+	}
+	after, ok := repo.mutations[0].Entry.After.(UserAssignment)
+	if !ok || after.SessionVersion != current.SessionVersion || after.Name != current.Name || after.LoginName != current.LoginName || after.SystemRole != current.SystemRole || after.Status != current.Status || after.IsSuperAdmin || after.DepartmentID != "new-department" || after.OrganizationRoleID != "new-role" {
+		t.Fatal("client forged authoritative audit fields")
+	}
+	requested.AccountID = "missing"
+	if err := svc.AssignUserRole(context.Background(), requested); err == nil || len(repo.mutations) != 1 {
+		t.Fatal("missing target mutated or audited")
+	}
+}
+
+func TestAssignmentVersionCannotBeProvidedOrExposedAsJSON(t *testing.T) {
+	var assignment UserAssignment
+	if err := json.Unmarshal([]byte(`{"accountId":"user","SessionVersion":999,"sessionVersion":999}`), &assignment); err != nil {
+		t.Fatal(err)
+	}
+	if assignment.SessionVersion != 0 {
+		t.Fatal("client injected internal version")
+	}
+	assignment.SessionVersion = 12
+	encoded, err := json.Marshal(assignment)
+	if err != nil || strings.Contains(strings.ToLower(string(encoded)), "sessionversion") {
+		t.Fatal("internal version exposed", err)
 	}
 }

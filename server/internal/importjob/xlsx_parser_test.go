@@ -350,3 +350,56 @@ func columnName(column int) string {
 	}
 	return result
 }
+
+func TestXLSXParserRejectsFormulasHiddenSheetsAndExtraData(t *testing.T) {
+	base := makeXLSX(t, []workbookSheet{{Name: "到课率导入", Rows: attendanceRows(validDataRow())}}, nil)
+	for _, test := range []struct{ name, entry, old, replacement string }{
+		{"cached formula", "xl/worksheets/sheet1.xml", `<row r="5">`, `<row r="5"><c r="K5"><f>1+1</f><v>2</v></c>`},
+		{"shared formula", "xl/worksheets/sheet1.xml", `<row r="5">`, `<row r="5"><c r="K5"><f t="shared" si="0"/><v>2</v></c>`},
+		{"hidden sheet", "xl/workbook.xml", `<sheet name=`, `<sheet state="hidden" name=`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed := rewriteWorkbookPart(t, base, test.entry, func(text string) string { return strings.Replace(text, test.old, test.replacement, 1) })
+			requireParserCode(t, NewAttendanceXLSXParser(16<<20), "unsafe.xlsx", changed, ErrorInvalidWorkbook)
+		})
+	}
+	extra := makeXLSX(t, []workbookSheet{{Name: "到课率导入", Rows: attendanceRows(append(validDataRow(), "unexpected"))}}, nil)
+	requireParserCode(t, NewAttendanceXLSXParser(16<<20), "extra.xlsx", extra, ErrorInvalidWorkbook)
+}
+
+func rewriteWorkbookPart(t *testing.T, content []byte, name string, change func(string) string) []byte {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result bytes.Buffer
+	writer := zip.NewWriter(&result)
+	for _, file := range archive.File {
+		input, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = input.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if file.Name == name {
+			body = []byte(change(string(body)))
+		}
+		output, err := writer.Create(file.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = output.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return result.Bytes()
+}

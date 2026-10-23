@@ -1,0 +1,178 @@
+async (page) => {
+  const fixture = __FIXTURE__
+  const output = __OUTPUT__
+  const base = page.url().split('/').slice(0, 3).join('/')
+  const cases = []
+  const browserErrors = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  const check = (value, message) => { if (!value) throw new Error(message) }
+  const select = async (scope, label, option) => {
+    await scope.getByRole('combobox', { name: new RegExp(label + '$') }).click()
+    await page.locator('.ant-select-dropdown:visible').getByText(option, { exact:true }).click()
+  }
+  const response = async (method, path, action, status) => {
+    const [result] = await Promise.all([page.waitForResponse(r => r.request().method() === method && r.url().split('?')[0].split('/').slice(3).join('/').replace(/^/, '/') === path), action()])
+    check(result.status() === status, `${method} ${path}: expected ${status}, got ${result.status()}`)
+    return result
+  }
+  const openImport = async () => {
+    await page.getByRole('button', { name: '批量导入到课率', exact: true }).click()
+    return page.getByRole('dialog', { name: '批量导入到课率', exact: true })
+  }
+  const fresh = async () => {
+    // Full navigation intentionally starts a new independent batch, retaining old
+    // batch audit history. Resume is tested separately before confirming.
+    await page.goto(base + '/inspections/attendance')
+    await page.getByRole('heading', { name: '到课率检查', exact: true }).waitFor()
+  }
+  await fresh()
+  await page.getByText('当前范围暂无到课率记录', { exact: true }).waitFor()
+  let drawer = await openImport()
+  await select(drawer, '导入目标部门', '学习部')
+  const [download] = await Promise.all([page.waitForEvent('download'), drawer.getByRole('button', { name: '下载标准模板' }).click()])
+  await download.saveAs(`${output}/downloaded-template.xlsx`)
+  check(download.suggestedFilename().endsWith('.xlsx'), 'Wrong download filename')
+  await drawer.locator('input[type=file]').setInputFiles(fixture.badFile)
+  await drawer.getByText('仅支持无宏的 .xlsx 文件', { exact: true }).waitFor()
+  check(!await drawer.getByRole('button', { name: '上传并生成预览' }).isEnabled(), 'Invalid extension enabled upload')
+  cases.push('已发布模板真实下载、非 XLSX 文件前端拦截')
+  await drawer.locator('input[type=file]').setInputFiles(fixture.validFile)
+  const upload = await response('POST', '/api/v1/imports/attendance', () => drawer.getByRole('button', { name: '上传并生成预览' }).click(), 201)
+  const batch = await upload.json()
+  await drawer.getByText('校验通过', { exact: true }).waitFor()
+  await drawer.getByRole('cell', { name: '000001', exact: true }).waitFor()
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: '保留并关闭', exact: true }).click()
+  await drawer.waitFor({ state: 'hidden' })
+  drawer = await openImport()
+  await drawer.getByText('校验通过', { exact: true }).waitFor()
+  cases.push('真实上传和两行预览、学号前导零、关闭后恢复未确认批次')
+  await drawer.getByRole('button', { name: '确认导入 2 条记录' }).click()
+  await response('POST', `/api/v1/imports/${batch.id}/confirm`, () => page.getByRole('button', { name: '确认写入草稿记录' }).click(), 200)
+  await drawer.getByText('已成功导入 2 条草稿记录', { exact: true }).waitFor()
+
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await drawer.waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '导入批次', exact: true }).first().click()
+  drawer = page.getByRole('dialog', { name: '批量导入到课率', exact: true })
+  await drawer.getByText('已成功导入 2 条草稿记录', { exact: true }).waitFor()
+  await drawer.getByRole('button', { name: '整批回滚', exact: true }).click()
+  let modal = page.getByRole('dialog', { name: '确认整批回滚', exact: true })
+  await modal.getByRole('button', { name: '确认回滚全部记录', exact: true }).click()
+  await modal.getByText('请填写回滚原因', { exact: true }).waitFor()
+  await modal.getByLabel('回滚原因').fill('隔离浏览器整批误导入回归')
+  const fail = route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'IMPORT_SERVICE_UNAVAILABLE', message: '导入服务暂时不可用' }) })
+  await page.route('**/api/v1/imports/*/rollback', fail)
+  await modal.getByRole('button', { name: '确认回滚全部记录', exact: true }).click()
+  await modal.getByText('回滚失败，请稍后重试。', { exact: true }).waitFor()
+  check(await modal.getByLabel('回滚原因').inputValue() === '隔离浏览器整批误导入回归', 'Failure lost reason')
+  await page.unroute('**/api/v1/imports/*/rollback', fail)
+  await response('POST', `/api/v1/imports/${batch.id}/rollback`, () => modal.getByRole('button', { name: '确认回滚全部记录', exact: true }).click(), 200)
+  await modal.waitFor({ state: 'hidden' })
+  await drawer.getByText('已整批回滚 2 条记录', { exact: true }).waitFor()
+  check(await drawer.getByText('已成功导入 2 条草稿记录', { exact: true }).count() === 0, 'Stale import success after rollback')
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await drawer.waitFor({ state: 'hidden' })
+  await page.getByText('当前范围暂无到课率记录', { exact: true }).waitFor()
+  cases.push('列表批次入口、整批二次确认、必填原因、500保留重试、成功后批次与列表缓存同步')
+  drawer = await openImport()
+  await select(drawer, '导入目标部门', '学习部')
+  await drawer.locator('input[type=file]').setInputFiles(fixture.validFile)
+  const uploaded = await response('POST', '/api/v1/imports/attendance', () => drawer.getByRole('button', { name: '上传并生成预览' }).click(), 201)
+  const second = await uploaded.json()
+  await drawer.getByRole('button', { name: '确认导入 2 条记录' }).click()
+  await response('POST', `/api/v1/imports/${second.id}/confirm`, () => page.getByRole('button', { name: '确认写入草稿记录' }).click(), 200)
+  await drawer.getByText('已成功导入 2 条草稿记录', { exact: true }).waitFor()
+  const context = await page.context().browser().newContext()
+  let remainingDraftId = ''
+  try {
+    const login = await context.request.post(base + '/api/v1/auth/login', { data: { loginName: 'browser-admin', password: fixture.authPassword } })
+    check(login.status() === 200, 'Isolated admin login failed')
+    const headers = { Authorization: 'Bearer ' + (await login.json()).accessToken }
+    const list = await (await context.request.get(base + '/api/v1/inspections?inspectionTypeId=' + second.inspectionTypeId, { headers })).json()
+    const original = list.items[0]
+    remainingDraftId = original.id
+    const editableDetails={...original.details,remark:'已核对修改'}
+    delete editableDetails.penaltyMultiplier
+    delete editableDetails.penaltyHours
+    const patch = await context.request.patch(base + '/api/v1/inspections/' + original.id, { headers, data: { version: original.rowVersion, reason: '阻止回滚的真实编辑', record: { semesterId: original.semesterId, weekId: original.weekId, inspectionTypeId: original.inspectionTypeId, departmentId: original.departmentId, details: editableDetails } } })
+    check(patch.status() === 200, 'Could not prepare edited record')
+    const unauth = await context.request.post(base + '/api/v1/imports/' + second.id + '/rollback', { data: { version: second.version, reason: '未授权' } })
+    check(unauth.status() === 401, 'Unauthenticated rollback accepted')
+    await drawer.getByRole('button', { name: '整批回滚', exact: true }).click()
+    modal = page.getByRole('dialog', { name: '确认整批回滚', exact: true })
+    await modal.getByLabel('回滚原因').fill('应安全拒绝')
+    const rejected = await response('POST', `/api/v1/imports/${second.id}/rollback`, () => modal.getByRole('button', { name: '确认回滚全部记录', exact: true }).click(), 409)
+    check((await rejected.json()).code === 'IMPORT_ROLLBACK_UNSAFE', 'Wrong unsafe rollback code')
+    await modal.getByText('批次含已修改、已提交、已锁定或缺失记录，不能整批回滚', { exact: true }).waitFor()
+    check(await modal.getByLabel('回滚原因').inputValue() === '应安全拒绝', '409 lost reason')
+    const after = await (await context.request.get(base + '/api/v1/inspections?inspectionTypeId=' + second.inspectionTypeId, { headers })).json()
+    check(after.total === 2, 'Rejected rollback removed part of the batch')
+    const importedDraft = after.items.find(item => item.status === 'DRAFT' && item.importBatchId === second.id && item.id !== original.id)
+    check(importedDraft, 'Confirmed import did not leave another submit-ready draft')
+    const submission = await context.request.post(base + '/api/v1/department-submissions', {
+      headers,
+      data: {
+        scope: { semesterId: importedDraft.semesterId, weekId: importedDraft.weekId, departmentId: importedDraft.departmentId, inspectionTypeId: importedDraft.inspectionTypeId },
+        records: [{ id: importedDraft.id, version: importedDraft.rowVersion }],
+        idempotencyKey: 'attendance-import-submit-' + second.id,
+      },
+    })
+    check(submission.status() === 201, 'Confirmed import draft could not enter department submission')
+    const submitted = await submission.json()
+    check(submitted.records?.length === 1 && submitted.records[0].status === 'PENDING_REVIEW', 'Imported record submission response incomplete')
+  } finally { await context.close() }
+  await modal.getByRole('button', { name: /取\s*消/ }).click()
+  await modal.waitFor({ state: 'hidden' })
+  await drawer.getByRole('button', { name: '整批回滚', exact: true }).click()
+  modal = page.getByRole('dialog', { name: '确认整批回滚', exact: true })
+  check(await modal.getByLabel('回滚原因').inputValue() === '', 'Reopen leaked previous reason')
+  cases.push('回滚后可重新导入；真实编辑后整批409零改动、401保护、关闭重开清空输入')
+  cases.push('确认导入后的另一条草稿可进入部门提交批次并返回待审核记录')
+  await modal.getByRole('button', { name: /取\s*消/ }).click()
+  await modal.waitFor({ state: 'hidden' })
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await drawer.waitFor({ state: 'hidden' })
+  await page.reload()
+  await page.getByRole('heading', { name: '到课率检查', exact: true }).waitFor()
+  const draftRow = page.locator(`tr[data-row-key="${remainingDraftId}"]`)
+  await draftRow.getByRole('checkbox').check()
+  await page.getByRole('button', { name: '提交所选草稿（1）' }).click()
+  const submit = page.getByRole('dialog', { name: '确认提交所选记录？' })
+  const committed = await response('POST', '/api/v1/department-submissions', () => submit.getByRole('button', { name: '确认提交' }).click(), 201)
+  const uiBatch = await committed.json()
+  await submit.waitFor({ state: 'hidden' })
+  await draftRow.getByText('待审核').waitFor()
+  cases.push('导入草稿经到课率页面选择和二次确认进入部门待审核批次')
+  await page.getByRole('button', { name: '部门提交批次' }).click()
+  const submissions = page.getByRole('dialog', { name: '部门提交批次' })
+  const submittedRow = submissions.locator(`tr[data-row-key="${uiBatch.id}"]`)
+  await submittedRow.getByRole('button', { name: '退回', exact: true }).click()
+  const returnDialog = page.getByRole('dialog', { name: '退回提交批次' })
+  await returnDialog.getByLabel('退回原因').fill('核对到课率记录')
+  await returnDialog.getByRole('button', { name: '确认退回' }).click()
+  await returnDialog.waitFor({ state: 'hidden' })
+  await submittedRow.getByText('已退回').waitFor()
+  await submittedRow.locator('.ant-table-row-expand-icon').click()
+  await submissions.getByRole('button', { name: /更正第\s*1\s*条记录/ }).click()
+  await submissions.waitFor({ state: 'hidden' })
+  const correction = page.getByRole('dialog', { name: '编辑到课率记录' })
+  await correction.getByLabel('备注').fill('到课率退回后更正')
+  await correction.getByLabel('修改原因').fill('部门退回后核对')
+  await correction.getByRole('button', { name: '保存修改' }).click()
+  await correction.waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '部门提交批次' }).click()
+  await submittedRow.getByRole('button', { name: '重提', exact: true }).click()
+  const resubmit = page.getByRole('dialog', { name: '重新提交该批次？' })
+  await resubmit.getByRole('button', { name: '重新提交' }).click()
+  await resubmit.waitFor({ state: 'hidden' })
+  await submittedRow.getByText('待部门审核').waitFor()
+  await submittedRow.getByRole('button', { name: '确认', exact: true }).click()
+  const confirm = page.getByRole('dialog', { name: '确认该批次？' })
+  await confirm.getByRole('button', { name: '确认批次' }).click()
+  await confirm.waitFor({ state: 'hidden' })
+  await submittedRow.getByText('部门已确认').waitFor()
+  cases.push('到课率页面退回后从批次更正原记录、原批次重提并确认')
+  check(browserErrors.length === 0, 'Browser runtime errors')
+  return { cases, browserErrors, batchId: batch.id, secondBatchId: second.id, browserVersion: page.context().browser().version(), faultInjection: ['回滚POST 500'] }
+}

@@ -41,9 +41,12 @@ func (r *accounts) FindByLoginName(_ context.Context, no string) (auth.Account, 
 	}
 	return a, nil
 }
-func (r *accounts) UpdatePassword(_ context.Context, id, hash string, mustChange bool, _ audit.Mutation) error {
+func (r *accounts) UpdatePassword(_ context.Context, id, hash string, mustChange bool, version int, _ audit.Mutation) error {
 	for key, value := range r.values {
 		if value.ID == id {
+			if value.SessionVersion != version {
+				return auth.ErrVersionConflict
+			}
 			value.PasswordHash, value.MustChangePassword = hash, mustChange
 			value.SessionVersion++
 			r.values[key] = value
@@ -92,6 +95,9 @@ func (r *accounts) FindByID(_ context.Context, id string) (auth.Account, error) 
 func (r *accounts) UpdateAccount(_ context.Context, account auth.Account, _ audit.Mutation) (auth.Account, error) {
 	for key, value := range r.values {
 		if value.ID == account.ID {
+			if value.SessionVersion != account.SessionVersion {
+				return auth.Account{}, auth.ErrVersionConflict
+			}
 			delete(r.values, key)
 			account.PasswordHash = value.PasswordHash
 			account.SessionVersion = value.SessionVersion + 1
@@ -101,9 +107,12 @@ func (r *accounts) UpdateAccount(_ context.Context, account auth.Account, _ audi
 	}
 	return auth.Account{}, auth.ErrAccountNotFound
 }
-func (r *accounts) SetStatus(_ context.Context, id, status string, _ audit.Mutation) (auth.Account, error) {
+func (r *accounts) SetStatus(_ context.Context, id, status string, expectedVersion int, _ audit.Mutation) (auth.Account, error) {
 	for key, value := range r.values {
 		if value.ID == id {
+			if value.SessionVersion != expectedVersion {
+				return auth.Account{}, auth.ErrVersionConflict
+			}
 			value.Status = status
 			value.SessionVersion++
 			r.values[key] = value
@@ -180,6 +189,9 @@ func (r *masterRepository) UpdateMasterData(_ context.Context, _ string, record 
 func (r *masterRepository) ListMasterDataChanges(context.Context, string, string) ([]masterdata.Change, error) {
 	return nil, nil
 }
+func (r *masterRepository) HygieneAreaInspectionScope(context.Context, string, string) (string, error) {
+	return "30000000-0000-0000-0000-000000000003", nil
+}
 
 type dictionaryRepository struct {
 	types []dictionary.Type
@@ -215,18 +227,29 @@ func (r *dictionaryRepository) UpdateDictionaryItem(_ context.Context, value dic
 	return value, nil
 }
 
-func (r *sessions) Save(_ context.Context, s auth.RefreshSession) error {
+func (r *sessions) Save(_ context.Context, s auth.RefreshSession, _ int) error {
 	r.values[s.TokenHash] = s
 	return nil
 }
-func (r *sessions) Consume(_ context.Context, h string, now time.Time) (auth.RefreshSession, error) {
+func (r *sessions) FindRefreshSession(_ context.Context, h string, now time.Time) (auth.RefreshSession, error) {
 	s, ok := r.values[h]
-	if !ok || s.RevokedAt != nil {
+	if !ok || s.RevokedAt != nil || !s.ExpiresAt.After(now) {
 		return auth.RefreshSession{}, auth.ErrInvalidRefreshToken
 	}
-	s.RevokedAt = &now
-	r.values[h] = s
 	return s, nil
+}
+func (r *sessions) Rotate(ctx context.Context, hash string, now time.Time, next auth.RefreshSession, _ int) error {
+	s, err := r.FindRefreshSession(ctx, hash, now)
+	if err != nil {
+		return err
+	}
+	if s.AccountID != next.AccountID {
+		return auth.ErrInvalidRefreshToken
+	}
+	s.RevokedAt = &now
+	r.values[hash] = s
+	r.values[next.TokenHash] = next
+	return nil
 }
 func (r *sessions) Revoke(_ context.Context, h string, now time.Time) error {
 	s := r.values[h]
@@ -313,14 +336,21 @@ func TestSuperAdminCanCreateUpdateDisableAndResetUser(t *testing.T) {
 	tokens, _ := svc.Login(context.Background(), "admin", "InitialPassword123")
 	router := NewRouter(svc, false)
 
-	createdResponse := performJSON(router, http.MethodPost, "/api/v1/admin/users", map[string]any{"studentNo": "24010001", "name": "管理员创建", "temporaryPassword": "TemporaryPassword123", "systemRole": "MEMBER"}, tokens.AccessToken)
+	createdResponse := performJSON(router, http.MethodPost, "/api/v1/admin/users", map[string]any{"studentNo": "24010001", "name": "管理员创建", "systemRole": "MEMBER"}, tokens.AccessToken)
 	if createdResponse.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
 	}
 	var created struct {
-		ID string `json:"id"`
+		ID                string `json:"id"`
+		TemporaryPassword string `json:"temporaryPassword"`
 	}
 	_ = json.Unmarshal(createdResponse.Body.Bytes(), &created)
+	if len(created.TemporaryPassword) < 12 || createdResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("created credential response invalid")
+	}
+	if _, err := svc.Login(context.Background(), "24010001", created.TemporaryPassword); err != nil {
+		t.Fatalf("generated credential cannot log in: %v", err)
+	}
 	updated := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID, map[string]any{"studentNo": "24010001", "name": "已修改", "systemRole": "ADMIN"}, tokens.AccessToken)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
@@ -329,9 +359,16 @@ func TestSuperAdminCanCreateUpdateDisableAndResetUser(t *testing.T) {
 	if disabled.Code != http.StatusOK {
 		t.Fatalf("disable status=%d body=%s", disabled.Code, disabled.Body.String())
 	}
-	reset := performJSON(router, http.MethodPost, "/api/v1/admin/users/"+created.ID+"/reset-password", map[string]string{"temporaryPassword": "ReplacementPassword123"}, tokens.AccessToken)
-	if reset.Code != http.StatusNoContent {
+	reset := performJSON(router, http.MethodPost, "/api/v1/admin/users/"+created.ID+"/reset-password", map[string]string{}, tokens.AccessToken)
+	if reset.Code != http.StatusOK {
 		t.Fatalf("reset status=%d body=%s", reset.Code, reset.Body.String())
+	}
+	var resetResult struct {
+		TemporaryPassword string `json:"temporaryPassword"`
+	}
+	_ = json.Unmarshal(reset.Body.Bytes(), &resetResult)
+	if len(resetResult.TemporaryPassword) < 12 || resetResult.TemporaryPassword == created.TemporaryPassword || reset.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("reset credential response invalid")
 	}
 }
 
@@ -487,6 +524,34 @@ func TestSystemAdminCanManageMasterDataButMemberCannot(t *testing.T) {
 	denied := performJSON(router, http.MethodGet, "/api/v1/admin/master-data/faculties?page=1&pageSize=20", nil, memberToken)
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("member status=%d body=%s", denied.Code, denied.Body.String())
+	}
+}
+
+func TestHygieneAreaScopedMasterDataGrantDoesNotOpenGeneralCatalog(t *testing.T) {
+	repository := &accounts{values: map[string]auth.Account{}}
+	svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
+	_, _ = svc.Register(context.Background(), auth.RegisterInput{StudentNo: "area-member", Name: "area-member", Password: "Password123", RequestedDepartmentID: "department-1", RequestedOrgRoleID: "role-1"})
+	account := repository.values["area-member"]
+	account.Status = auth.StatusActive
+	repository.values["area-member"] = account
+	tokens, _ := svc.Login(context.Background(), "area-member", "Password123")
+	departmentID := "10000000-0000-0000-0000-000000000002"
+	typeID := "30000000-0000-0000-0000-000000000003"
+	permissionRepo := &permissionRepository{profile: permission.AccessProfile{SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{{Action: permission.ActionMasterDataManage, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentID, InspectionTypeID: typeID}, Enabled: true}}}}
+	router := NewRouter(svc, false, AdminServices{Permission: permission.NewService(permissionRepo), MasterData: masterdata.NewService(&masterRepository{records: map[string]masterdata.Record{}})})
+	areaURL := "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=" + departmentID
+	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusOK {
+		t.Fatalf("scoped area listing status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, path := range []string{"/api/v1/admin/master-data/faculties", "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=10000000-0000-0000-0000-000000000004", "/api/v1/admin/hygiene-areas/faculties?departmentId=" + departmentID} {
+		response := performJSON(router, http.MethodGet, path, nil, tokens.AccessToken)
+		if response.Code == http.StatusOK {
+			t.Fatalf("scope leaked to %s", path)
+		}
+	}
+	permissionRepo.profile.Rules = append(permissionRepo.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{DepartmentID: departmentID}, Enabled: true})
+	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusForbidden {
+		t.Fatalf("DENY did not override scoped grant: %d %s", response.Code, response.Body.String())
 	}
 }
 

@@ -1,5 +1,6 @@
+import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render as testingRender, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppLayout } from '../../app/layouts/AppLayout'
@@ -38,6 +39,7 @@ describe('超级管理员页面', () => {
 
   it('提供注册审核、用户、组织、学期、基础数据和字典入口', () => {
     render(<MemoryRouter initialEntries={['/admin/academic']}><Routes><Route path="/admin" element={<AppLayout />}><Route path="academic" element={<div>内容</div>} /></Route></Routes></MemoryRouter>)
+    fireEvent.click(screen.getByText('基础功能'))
     expect(screen.getByText('注册申请')).toBeInTheDocument()
     expect(screen.getByText('用户与角色')).toBeInTheDocument()
     expect(screen.getByText('组织与业务')).toBeInTheDocument()
@@ -57,6 +59,8 @@ describe('超级管理员页面', () => {
     render(<MemoryRouter initialEntries={['/inspections/attendance']}><Routes><Route path="/inspections" element={<AppLayout />}><Route path="attendance" element={<div>到课率内容</div>} /></Route></Routes></MemoryRouter>)
 
     expect(screen.getByRole('link', { name: '工作台' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('基础功能'))
+    fireEvent.click(screen.getByText('系统配置'))
     expect(screen.getByText('注册申请')).toBeInTheDocument()
     expect(screen.getByText('基础数据')).toBeInTheDocument()
     expect(screen.getByText('到课率检查')).toBeInTheDocument()
@@ -75,6 +79,7 @@ describe('超级管理员页面', () => {
     permissionsQuery.mockReturnValue({ data: { permissions: [{ action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { departmentId: 'department-study' }, sources: [] }] }, isLoading: false })
     render(<MemoryRouter initialEntries={['/admin']}><Routes><Route path="/admin" element={<AppLayout />}><Route index element={<div>概览内容</div>} /></Route></Routes></MemoryRouter>)
 
+    fireEvent.click(screen.getByText('日常检查'))
     expect(screen.getByText('到课率检查')).toBeInTheDocument()
   })
 
@@ -136,3 +141,14 @@ describe('超级管理员页面', () => {
 })
 
 vi.mock('../../features/work-context/WorkContextBar', () => ({ WorkContextBar: () => null }))
+
+vi.mock('../../features/course-inspection/model/queries', () => ({
+  useInspectionContext: (query: { typeCode: string }) => ({ data: { inspectionTypeId: query.typeCode, items: [] }, isLoading: false }),
+}))
+
+vi.mock('../../shared/api/hygieneAreaApi', () => ({ hygieneAreaApi: { targets: vi.fn().mockResolvedValue([]) } }))
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}

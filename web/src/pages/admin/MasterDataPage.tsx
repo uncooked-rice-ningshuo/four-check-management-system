@@ -119,7 +119,8 @@ export function MasterDataPage() {
     onError: error => message.error(error.message),
   })
   const toggle = useMutation({ mutationFn: (record: MasterDataRecord) => updateMasterData({ ...record, enabled: !record.enabled }), onSuccess: refresh, onError: error => message.error(error.message) })
-  const initializeEditorForm = (record: MasterDataRecord | null = editing) => {
+  // Initialize once after mounting; an animation callback would erase early input.
+  const initializeEditorForm = (record: MasterDataRecord | null) => {
     form.resetFields()
     if (record) {
       form.setFieldsValue(kind === 'grades' ? { ...record, name: record.name.replace(/级$/, '') } : record)
@@ -186,7 +187,7 @@ export function MasterDataPage() {
           options={{ reload: () => void records.refetch(), density: true, setting: true }} pagination={{ current: page, pageSize: 20, total: records.data?.total, onChange: setPage, showSizeChanger: false }} locale={{ emptyText: <Empty description={`暂无${config.label}数据`} /> }} />
       </div>
     </Card>
-    <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} afterOpenChange={open => { if (open) initializeEditorForm() }} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>
+    <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>
       <Form name={`master-data-${kind}-editor`} form={form} layout="vertical" onFinish={values => save.mutate(values)} preserve={false}>
         {config.identifierLabel && <Form.Item name="code" label={config.identifierLabel} rules={[{ required: true, message: `请输入${config.identifierLabel}` }]}><Input disabled={Boolean(editing)} autoComplete="off" /></Form.Item>}
         {kind === 'grades' && <Form.Item name="name" label="年级" rules={[{ required: true, message: '请输入年级' }, { pattern: /^\d{4}$/, message: '请输入4位年份，例如2025' }]}><Input disabled={Boolean(editing)} autoComplete="off" placeholder="例如：2025" maxLength={4} inputMode="numeric" /></Form.Item>}

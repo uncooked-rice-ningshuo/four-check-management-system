@@ -54,7 +54,12 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.dorm_hygiene_details') IS NOT NULL
 		AND to_regclass('public.classroom_hygiene_details') IS NOT NULL
 		AND to_regclass('public.public_dormitory_hygiene_details') IS NOT NULL
-		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')`).Scan(&ready)
+		AND to_regclass('public.department_submissions') IS NOT NULL
+		AND to_regclass('public.department_submission_revisions') IS NOT NULL
+		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')
+			AND tgname='department_submission_revisions_append_only' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
+ AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='files' AND column_name='object_removed_at')`).Scan(&ready)
 	if err != nil {
 		return fmt.Errorf("database schema readiness: %w", err)
 	}
@@ -162,6 +167,28 @@ func (p *Postgres) MarkFileFailed(ctx context.Context, file storage.File, mutati
 	})
 }
 
+// MarkImportSourceDiscarded serializes compensation with batch binding on the file row.
+func (p *Postgres) MarkImportSourceDiscarded(ctx context.Context, file storage.File, mutation audit.Mutation) error {
+	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		current, err := scanFile(tx.QueryRow(ctx, fileSelect+` WHERE id=$1 FOR UPDATE`, file.ID))
+		if err != nil {
+			return err
+		}
+		if current.Status != storage.StatusAvailable || current.RetentionType != storage.RetentionImportSource || mutation.Metadata.ActorID == "" || current.CreatedBy != mutation.Metadata.ActorID {
+			return storage.ErrFileUnavailable
+		}
+		var bound bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM import_batches WHERE original_file_id=$1)`, file.ID).Scan(&bound); err != nil {
+			return err
+		}
+		if bound {
+			return storage.ErrFileUnavailable
+		}
+		_, err = tx.Exec(ctx, `UPDATE files SET status='FAILED',failure_code=$2,failure_message=$3,updated_at=now() WHERE id=$1`, file.ID, file.FailureCode, file.FailureMessage)
+		return err
+	})
+}
+
 // MarkFileMissing atomically enforces AVAILABLE -> MISSING after an object lookup proves absence.
 func (p *Postgres) MarkFileMissing(ctx context.Context, file storage.File, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
@@ -174,9 +201,32 @@ func (p *Postgres) MarkFileMissing(ctx context.Context, file storage.File, mutat
 	})
 }
 
+// RecordFileCleanup commits a removal marker or retry timestamp together with its audit.
+func (p *Postgres) RecordFileCleanup(ctx context.Context, id string, removed bool, mutation audit.Mutation) error {
+	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE files SET object_removed_at=CASE WHEN $2 THEN now() ELSE NULL END,updated_at=now()
+   WHERE id=$1 AND status='FAILED' AND object_removed_at IS NULL`, id, removed)
+		if err == nil && tag.RowsAffected() == 0 {
+			return storage.ErrFileUnavailable
+		}
+		return err
+	})
+}
+
+// RecordFileRecoveryDeferred preserves PENDING metadata while yielding a transiently failing row.
+func (p *Postgres) RecordFileRecoveryDeferred(ctx context.Context, id string, mutation audit.Mutation) error {
+	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE files SET updated_at=now() WHERE id=$1 AND status='PENDING'`, id)
+		if err == nil && tag.RowsAffected() == 0 {
+			return storage.ErrFileUnavailable
+		}
+		return err
+	})
+}
+
 // ListFileReconciliationCandidates selects only stale recoverable rows; it never enumerates MinIO.
-func (p *Postgres) ListFileReconciliationCandidates(ctx context.Context, staleBefore time.Time, limit int) ([]storage.File, error) {
-	rows, err := p.Pool.Query(ctx, fileSelect+` WHERE status IN ('PENDING','FAILED') AND updated_at < $1 ORDER BY updated_at,id LIMIT $2`, staleBefore, limit)
+func (p *Postgres) ListFileReconciliationCandidates(ctx context.Context, bucket string, staleBefore time.Time, limit int) ([]storage.File, error) {
+	rows, err := p.Pool.Query(ctx, fileSelect+` WHERE bucket=$1 AND status IN ('PENDING','FAILED') AND object_removed_at IS NULL AND updated_at < $2 ORDER BY updated_at,id LIMIT $3`, bucket, staleBefore, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -262,43 +312,71 @@ func scanAccount(r row) (auth.Account, error) {
 }
 
 func (p *Postgres) UpdateAccount(ctx context.Context, account auth.Account, mutation audit.Mutation) (auth.Account, error) {
+	var updated auth.Account
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		tag, execErr := tx.Exec(ctx, `UPDATE accounts SET login_name=$2,student_no=$3,name=$4,system_role=$5,
-			session_version=session_version+1,updated_at=now() WHERE id=$1 AND NOT is_super_admin`, account.ID, account.LoginName, account.StudentNo, account.Name, account.SystemRole)
+			session_version=session_version+1,updated_at=now() WHERE id=$1 AND NOT is_super_admin AND session_version=$6`, account.ID, account.LoginName, account.StudentNo, account.Name, account.SystemRole, account.SessionVersion)
 		if execErr == nil && tag.RowsAffected() == 0 {
-			return auth.ErrAccountNotFound
+			return auth.ErrVersionConflict
 		}
+		if execErr != nil {
+			return execErr
+		}
+		if execErr = revokeAccountSessionsTx(ctx, tx, account.ID); execErr != nil {
+			return execErr
+		}
+		updated, execErr = scanAccount(tx.QueryRow(ctx, accountSelect+` WHERE id=$1`, account.ID))
 		return execErr
 	})
 	if err != nil {
 		return auth.Account{}, err
 	}
-	return p.FindByID(ctx, account.ID)
+	return updated, nil
 }
 
-func (p *Postgres) SetStatus(ctx context.Context, accountID, status string, mutation audit.Mutation) (auth.Account, error) {
+func (p *Postgres) SetStatus(ctx context.Context, accountID, status string, expectedVersion int, mutation audit.Mutation) (auth.Account, error) {
+	var updated auth.Account
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		tag, execErr := tx.Exec(ctx, `UPDATE accounts SET status=$2,session_version=session_version+1,updated_at=now()
-			WHERE id=$1 AND NOT is_super_admin`, accountID, status)
+			WHERE id=$1 AND NOT is_super_admin AND session_version=$3`, accountID, status, expectedVersion)
 		if execErr == nil && tag.RowsAffected() == 0 {
-			return auth.ErrAccountNotFound
+			return auth.ErrVersionConflict
 		}
+		if execErr != nil {
+			return execErr
+		}
+		if execErr = revokeAccountSessionsTx(ctx, tx, accountID); execErr != nil {
+			return execErr
+		}
+		updated, execErr = scanAccount(tx.QueryRow(ctx, accountSelect+` WHERE id=$1`, accountID))
 		return execErr
 	})
 	if err != nil {
 		return auth.Account{}, err
 	}
-	return p.FindByID(ctx, accountID)
+	return updated, nil
 }
 
-func (p *Postgres) UpdatePassword(ctx context.Context, accountID, passwordHash string, mustChange bool, mutation audit.Mutation) error {
+func (p *Postgres) UpdatePassword(ctx context.Context, accountID, passwordHash string, mustChange bool, expectedVersion int, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		tag, execErr := tx.Exec(ctx, `UPDATE accounts SET password_hash=$2,must_change_password=$3,session_version=session_version+1,updated_at=now() WHERE id=$1`, accountID, passwordHash, mustChange)
+		// Password verification used this version. Reject a delayed write after
+		// another password, status, role or permission change has committed.
+		tag, execErr := tx.Exec(ctx, `UPDATE accounts SET password_hash=$2,must_change_password=$3,session_version=session_version+1,updated_at=now() WHERE id=$1 AND session_version=$4`, accountID, passwordHash, mustChange, expectedVersion)
 		if execErr == nil && tag.RowsAffected() == 0 {
-			return auth.ErrAccountNotFound
+			return auth.ErrVersionConflict
 		}
-		return execErr
+		if execErr != nil {
+			return execErr
+		}
+		return revokeAccountSessionsTx(ctx, tx, accountID)
 	})
+}
+
+// The account row is already locked by its mutation; keep the same account →
+// session lock order as refresh rotation and permission changes.
+func revokeAccountSessionsTx(ctx context.Context, tx pgx.Tx, accountID string) error {
+	_, err := tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=now() WHERE account_id=$1 AND revoked_at IS NULL`, accountID)
+	return err
 }
 
 func (p *Postgres) ListPending(ctx context.Context) ([]auth.Account, error) {
@@ -352,33 +430,67 @@ func (p *Postgres) ReviewRegistration(ctx context.Context, accountID, reviewerID
 	return p.FindByID(ctx, accountID)
 }
 
-// Save 保存已经哈希处理的刷新会话，不持久化原始刷新令牌。
-func (p *Postgres) Save(ctx context.Context, s auth.RefreshSession) error {
-	_, err := p.Pool.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,expires_at) VALUES($1,$2,$3,$4)`, s.ID, s.AccountID, s.TokenHash, s.ExpiresAt)
-	return err
-}
-
-// Consume 以原子方式撤销并返回一条有效刷新会话。
-func (p *Postgres) Consume(ctx context.Context, hash string, now time.Time) (auth.RefreshSession, error) {
-	// 行锁保证“检查有效性—撤销令牌”属于同一原子操作；如果没有 FOR UPDATE，
-	// 两个并发刷新请求可能同时通过校验并创建两条有效会话。
+// Save persists only the hashed credential, after checking the account snapshot
+// used by Login. Its account lock serializes with password/status/role changes.
+func (p *Postgres) Save(ctx context.Context, s auth.RefreshSession, expectedVersion int) error {
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
-		return auth.RefreshSession{}, err
+		return err
 	}
 	defer tx.Rollback(ctx)
+	var accountID string
+	err = tx.QueryRow(ctx, `SELECT id FROM accounts WHERE id=$1 AND status='ACTIVE' AND session_version=$2 FOR UPDATE`, s.AccountID, expectedVersion).Scan(&accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.ErrInvalidCredentials
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,expires_at) VALUES($1,$2,$3,$4)`, s.ID, accountID, s.TokenHash, s.ExpiresAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// FindRefreshSession reads a candidate without consuming it. Rotate must check it
+// again under a lock; this read alone never authorizes credential issuance.
+func (p *Postgres) FindRefreshSession(ctx context.Context, hash string, now time.Time) (auth.RefreshSession, error) {
 	var s auth.RefreshSession
-	err = tx.QueryRow(ctx, `SELECT id,account_id,token_hash,expires_at,revoked_at FROM refresh_sessions WHERE token_hash=$1 FOR UPDATE`, hash).Scan(&s.ID, &s.AccountID, &s.TokenHash, &s.ExpiresAt, &s.RevokedAt)
-	if err != nil || s.RevokedAt != nil || !s.ExpiresAt.After(now) {
+	err := p.Pool.QueryRow(ctx, `SELECT id,account_id,token_hash,expires_at,revoked_at FROM refresh_sessions WHERE token_hash=$1`, hash).Scan(&s.ID, &s.AccountID, &s.TokenHash, &s.ExpiresAt, &s.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (s.RevokedAt != nil || !s.ExpiresAt.After(now))) {
 		return auth.RefreshSession{}, auth.ErrInvalidRefreshToken
 	}
-	if _, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=$2 WHERE token_hash=$1`, hash, now); err != nil {
-		return auth.RefreshSession{}, err
+	return s, err
+}
+
+// Rotate commits consumption and replacement together. Lock the account before
+// sessions, matching password/status/permission mutations and preventing a stale
+// account read from creating a session after those mutations have invalidated it.
+func (p *Postgres) Rotate(ctx context.Context, hash string, now time.Time, replacement auth.RefreshSession, expectedVersion int) error {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return auth.RefreshSession{}, err
+	defer tx.Rollback(ctx)
+	var accountID string
+	err = tx.QueryRow(ctx, `SELECT id FROM accounts WHERE id=$1 AND status='ACTIVE' AND session_version=$2 FOR UPDATE`, replacement.AccountID, expectedVersion).Scan(&accountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.ErrInvalidRefreshToken
 	}
-	return s, nil
+	if err != nil {
+		return err
+	}
+	consumed, err := tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=$2 WHERE token_hash=$1 AND account_id=$3 AND revoked_at IS NULL AND expires_at>$2`, hash, now, accountID)
+	if err != nil {
+		return err
+	}
+	if consumed.RowsAffected() != 1 {
+		return auth.ErrInvalidRefreshToken
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,expires_at) VALUES($1,$2,$3,$4)`, replacement.ID, accountID, replacement.TokenHash, replacement.ExpiresAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // Revoke 在退出登录时幂等地作废刷新会话。
@@ -501,7 +613,7 @@ func (p *Postgres) UpsertScope(ctx context.Context, value organization.Departmen
 
 func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment, error) {
 	rows, err := p.Pool.Query(ctx, `SELECT a.id,a.login_name,COALESCE(a.student_no,''),a.name,a.status,a.system_role,a.is_super_admin,a.must_change_password,
-		COALESCE(a.primary_department_id::text,''),COALESCE(u.organization_role_id::text,'')
+		COALESCE(a.primary_department_id::text,''),COALESCE(u.organization_role_id::text,''),a.session_version
 		FROM accounts a LEFT JOIN user_org_roles u ON u.account_id=a.id ORDER BY a.created_at`)
 	if err != nil {
 		return nil, err
@@ -511,7 +623,7 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment
 	for rows.Next() {
 		var value organization.UserAssignment
 		if err := rows.Scan(&value.AccountID, &value.LoginName, &value.StudentNo, &value.Name, &value.Status, &value.SystemRole,
-			&value.IsSuperAdmin, &value.MustChangePassword, &value.DepartmentID, &value.OrganizationRoleID); err != nil {
+			&value.IsSuperAdmin, &value.MustChangePassword, &value.DepartmentID, &value.OrganizationRoleID, &value.SessionVersion); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
@@ -521,8 +633,30 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment
 
 func (p *Postgres) AssignUserRole(ctx context.Context, value organization.UserAssignment, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE accounts SET primary_department_id=$2,session_version=session_version+1,updated_at=now() WHERE id=$1`, value.AccountID, value.DepartmentID); err != nil {
+		// Hold reference locks through assignment commit so concurrent disabling
+		// cannot invalidate a reference between validation and the account write.
+		var referenceID string
+		for _, reference := range []struct{ query, id string }{
+			{`SELECT id FROM departments WHERE id=$1 AND enabled FOR SHARE`, value.DepartmentID},
+			{`SELECT id FROM organization_roles WHERE id=$1 AND enabled FOR SHARE`, value.OrganizationRoleID},
+		} {
+			if _, err := uuid.Parse(reference.id); err != nil {
+				return organization.ErrInvalidInput
+			}
+			err := tx.QueryRow(ctx, reference.query, reference.id).Scan(&referenceID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return organization.ErrInvalidInput
+			}
+			if err != nil {
+				return err
+			}
+		}
+		tag, err := tx.Exec(ctx, `UPDATE accounts SET primary_department_id=$2,session_version=session_version+1,updated_at=now() WHERE id=$1 AND session_version=$3`, value.AccountID, value.DepartmentID, value.SessionVersion)
+		if err != nil {
 			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return auth.ErrVersionConflict
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM user_org_roles WHERE account_id=$1`, value.AccountID); err != nil {
 			return err
@@ -530,7 +664,7 @@ func (p *Postgres) AssignUserRole(ctx context.Context, value organization.UserAs
 		if _, err := tx.Exec(ctx, `INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) VALUES($1,$2,$3,$4)`, uuid.NewString(), value.AccountID, value.DepartmentID, value.OrganizationRoleID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE account_id=$1 AND revoked_at IS NULL`, value.AccountID)
+		_, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE account_id=$1 AND revoked_at IS NULL`, value.AccountID)
 		return err
 	})
 }
@@ -699,6 +833,10 @@ func masterDataFilter(query masterdata.Query, codeColumn, nameColumn string) (st
 	switch query.Kind {
 	case masterdata.KindClassroom:
 		add("teaching_building_id", query.TeachingBuildingID)
+	case masterdata.KindClassroomHygieneArea:
+		add("classroom_id", query.ClassroomID)
+	case masterdata.KindPublicDormitoryHygieneArea:
+		add("dormitory_building_id", query.DormitoryBuildingID)
 	case masterdata.KindDormitoryBuilding:
 		add("dormitory_area_id", query.DormitoryAreaID)
 	case masterdata.KindMajor:
@@ -771,6 +909,21 @@ func (p *Postgres) AcademicSemesterExists(ctx context.Context, id string) (bool,
 	return exists, err
 }
 
+func (p *Postgres) HygieneAreaInspectionScope(ctx context.Context, kind, departmentID string) (string, error) {
+	code := "CLASSROOM_HYGIENE"
+	if kind == masterdata.KindPublicDormitoryHygieneArea {
+		code = "PUBLIC_DORMITORY_HYGIENE"
+	}
+	var inspectionTypeID string
+	err := p.Pool.QueryRow(ctx, `SELECT it.id FROM department_inspection_scopes ds
+ JOIN inspection_types it ON it.id=ds.inspection_type_id JOIN departments d ON d.id=ds.department_id
+ WHERE ds.department_id=$1 AND it.code=$2 AND ds.enabled AND it.enabled AND d.enabled`, departmentID, code).Scan(&inspectionTypeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", masterdata.ErrInvalidRelation
+	}
+	return inspectionTypeID, err
+}
+
 func (p *Postgres) CreateMasterData(ctx context.Context, actorID string, value masterdata.Record, mutation audit.Mutation) (masterdata.Record, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		if err := insertMasterRecord(ctx, tx, value); err != nil {
@@ -820,6 +973,9 @@ func masterDataError(err error) error {
 		return masterdata.ErrDuplicateCode
 	case "faculties_name_key", "grades_name_key", "classes_name_key":
 		return masterdata.ErrDuplicateName
+	// PostgreSQL truncates this composite constraint name, including the name column.
+	case "public_dormitory_hygiene_area_dormitory_building_id_floor_u_key":
+		return masterdata.ErrDuplicateName
 	default:
 		if strings.Contains(databaseError.ConstraintName, "name") {
 			return masterdata.ErrDuplicateName
@@ -851,7 +1007,7 @@ func serverManagedMasterRecordSelect(kind string) (string, string, string, strin
 	columns := []string{
 		"id", empty, "name", "enabled", empty, empty, empty, empty, empty, empty, empty, empty, empty,
 		empty, "0", empty, empty, empty, empty, "0", empty, empty, empty, empty, "created_at", "updated_at",
-		empty, "ARRAY[]::text[]", "'[]'::jsonb",
+		empty, "ARRAY[]::text[]", "'[]'::jsonb", empty,
 	}
 	table, identifierColumn, nameColumn := "", "name", "name"
 	switch kind {
@@ -879,6 +1035,10 @@ func serverManagedMasterRecordSelect(kind string) (string, string, string, strin
 		table, identifierColumn = "classrooms", "room_no"
 		nameColumn = "(SELECT name FROM teaching_buildings WHERE id=classrooms.teaching_building_id) || ' ' || room_no"
 		columns[2], columns[16], columns[18] = nameColumn, "teaching_building_id::text", "room_no"
+	case masterdata.KindClassroomHygieneArea:
+		table, columns[10] = "classroom_hygiene_areas", "classroom_id::text"
+	case masterdata.KindPublicDormitoryHygieneArea:
+		table, columns[23], columns[29] = "public_dormitory_hygiene_areas", "dormitory_building_id::text", "floor_unit"
 	case masterdata.KindCourse:
 		table, columns[7] = "courses", "COALESCE(teacher_id::text,'')"
 		columns[27] = "ARRAY(SELECT class_id::text FROM course_classes WHERE course_id=courses.id ORDER BY class_id)"
@@ -901,7 +1061,7 @@ func scanMasterRecord(r row, kind string) (masterdata.Record, error) {
 		&value.HeadTeacherID, &value.TeacherID, &value.ClassID, &value.DormitoryID, &value.ClassroomID, &value.Gender,
 		&value.Phone, &value.Grade, &value.EnrolledSize, &value.CampusArea, &value.TeachingBuildingID, &value.BuildingNo,
 		&value.RoomNo, &ignoredFloor, &value.ScheduleText, &value.EnrollmentStatus, &value.DormitoryAreaID,
-		&value.DormitoryBuildingID, &value.CreatedAt, &value.UpdatedAt, &value.GradeID, &value.ClassIDs, &schedulesJSON)
+		&value.DormitoryBuildingID, &value.CreatedAt, &value.UpdatedAt, &value.GradeID, &value.ClassIDs, &schedulesJSON, &value.FloorUnit)
 	if err == nil && len(schedulesJSON) > 0 {
 		err = json.Unmarshal(schedulesJSON, &value.Schedules)
 	}
@@ -931,6 +1091,10 @@ func insertMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 		_, err = tx.Exec(ctx, `INSERT INTO dormitories(id,room_no,dormitory_building_id,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.RoomNo, value.DormitoryBuildingID, value.Enabled)
 	case masterdata.KindClassroom:
 		_, err = tx.Exec(ctx, `INSERT INTO classrooms(id,teaching_building_id,room_no,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.TeachingBuildingID, value.RoomNo, value.Enabled)
+	case masterdata.KindClassroomHygieneArea:
+		_, err = tx.Exec(ctx, `INSERT INTO classroom_hygiene_areas(id,classroom_id,name,enabled) VALUES($1,$2,$3,$4)`, value.ID, value.ClassroomID, value.Name, value.Enabled)
+	case masterdata.KindPublicDormitoryHygieneArea:
+		_, err = tx.Exec(ctx, `INSERT INTO public_dormitory_hygiene_areas(id,dormitory_building_id,floor_unit,name,enabled) VALUES($1,$2,$3,$4,$5)`, value.ID, value.DormitoryBuildingID, value.FloorUnit, value.Name, value.Enabled)
 	case masterdata.KindCourse:
 		_, err = tx.Exec(ctx, `INSERT INTO courses(id,name,teacher_id,enabled) VALUES($1,$2,NULLIF($3,'')::uuid,$4)`, value.ID, value.Name, value.TeacherID, value.Enabled)
 		if err == nil {
@@ -967,6 +1131,10 @@ func updateMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 		_, err = tx.Exec(ctx, `UPDATE dormitories SET room_no=$2,dormitory_building_id=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.RoomNo, value.DormitoryBuildingID, value.Enabled)
 	case masterdata.KindClassroom:
 		_, err = tx.Exec(ctx, `UPDATE classrooms SET teaching_building_id=$2,room_no=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.TeachingBuildingID, value.RoomNo, value.Enabled)
+	case masterdata.KindClassroomHygieneArea:
+		_, err = tx.Exec(ctx, `UPDATE classroom_hygiene_areas SET classroom_id=$2,name=$3,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.ClassroomID, value.Name, value.Enabled)
+	case masterdata.KindPublicDormitoryHygieneArea:
+		_, err = tx.Exec(ctx, `UPDATE public_dormitory_hygiene_areas SET dormitory_building_id=$2,floor_unit=$3,name=$4,enabled=$5,updated_at=now() WHERE id=$1`, value.ID, value.DormitoryBuildingID, value.FloorUnit, value.Name, value.Enabled)
 	case masterdata.KindCourse:
 		_, err = tx.Exec(ctx, `UPDATE courses SET name=$2,teacher_id=NULLIF($3,'')::uuid,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.TeacherID, value.Enabled)
 		if err == nil {
@@ -1119,14 +1287,14 @@ func (p *Postgres) List(ctx context.Context) (academic.Calendar, error) {
 		result.Semesters = append(result.Semesters, value)
 	}
 	semesterRows.Close()
-	weekRows, err := p.Pool.Query(ctx, `SELECT id,semester_id,week_no,start_date,end_date,enabled,note FROM semester_weeks ORDER BY start_date DESC`)
+	weekRows, err := p.Pool.Query(ctx, `SELECT id,semester_id,week_no,start_date,end_date,enabled,note,attendance_penalty_multiplier FROM semester_weeks ORDER BY start_date DESC`)
 	if err != nil {
 		return result, err
 	}
 	defer weekRows.Close()
 	for weekRows.Next() {
 		var value academic.Week
-		if err := weekRows.Scan(&value.ID, &value.SemesterID, &value.WeekNo, &value.StartDate, &value.EndDate, &value.Enabled, &value.Note); err != nil {
+		if err := weekRows.Scan(&value.ID, &value.SemesterID, &value.WeekNo, &value.StartDate, &value.EndDate, &value.Enabled, &value.Note, &value.AttendancePenaltyMultiplier); err != nil {
 			return result, err
 		}
 		result.Weeks = append(result.Weeks, value)
@@ -1168,7 +1336,7 @@ func (p *Postgres) UpdateSemester(ctx context.Context, value academic.Semester, 
 
 func (p *Postgres) CreateWeek(ctx context.Context, value academic.Week, mutation audit.Mutation) (academic.Week, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		_, execErr := tx.Exec(ctx, `INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date,enabled,note) VALUES($1,$2,$3,$4,$5,$6,$7)`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note)
+		_, execErr := tx.Exec(ctx, `INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date,enabled,note,attendance_penalty_multiplier) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note, value.AttendancePenaltyMultiplier)
 		return execErr
 	})
 	return value, err
@@ -1176,7 +1344,7 @@ func (p *Postgres) CreateWeek(ctx context.Context, value academic.Week, mutation
 
 func (p *Postgres) UpdateWeek(ctx context.Context, value academic.Week, mutation audit.Mutation) (academic.Week, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		_, execErr := tx.Exec(ctx, `UPDATE semester_weeks SET semester_id=$2,week_no=$3,start_date=$4,end_date=$5,enabled=$6,note=$7 WHERE id=$1`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note)
+		_, execErr := tx.Exec(ctx, `UPDATE semester_weeks SET semester_id=$2,week_no=$3,start_date=$4,end_date=$5,enabled=$6,note=$7,attendance_penalty_multiplier=$8 WHERE id=$1`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note, value.AttendancePenaltyMultiplier)
 		return execErr
 	})
 	return value, err
@@ -1211,7 +1379,7 @@ func (p *Postgres) ListAttendance(ctx context.Context, query inspection.Attendan
 			&record.ID, &record.InspectionTypeID, &record.SemesterID, &record.WeekID, &record.DepartmentID,
 			&record.StudentID, &record.StudentNoSnapshot, &record.StudentNameSnapshot, &record.ClassID,
 			&record.ClassNameSnapshot, &record.GradeSnapshot, &record.CourseID, &record.CourseName,
-			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours,
+			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours, &record.PenaltyMultiplier, &record.PenaltyHours,
 			&record.PeriodText, &record.Remark, &record.Source, &record.Status, &record.ImportBatchID,
 			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.CreatedAt, &record.UpdatedAt,
 		); err != nil {
@@ -1235,8 +1403,10 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		WHERE ir.semester_id = $1::uuid
 		  AND ir.week_id = $2::uuid
 		  AND ir.inspection_type_id = $3::uuid
-		  AND (($4::text <> '' AND ir.department_id = $4::uuid)
-		       OR ($4::text = '' AND (cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[]))))
+		  AND (($4::text = '00000000-0000-0000-0000-000000000000' AND ir.department_id IS NULL)
+		       OR ($4::text <> '' AND $4::text <> '00000000-0000-0000-0000-000000000000' AND ir.department_id = $4::uuid)
+		       OR ($4::text = '' AND (cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[])
+		         OR (ir.department_id IS NULL AND '00000000-0000-0000-0000-000000000000'=ANY($10::text[])))))
 		  AND ($5::text = '' OR ir.class_id = $5::uuid)
 		  AND ($6::text = '' OR ir.grade_snapshot = $6)
 		  AND ($7::text = '' OR ir.student_no_snapshot ILIKE '%' || $7 || '%'
@@ -1245,11 +1415,11 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		  AND ($9::text = '' OR ir.source = $9)
 		  AND ir.deleted_at IS NULL`
 	countSQL := `SELECT count(*)` + where
-	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,ir.department_id,
+	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),
 		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
 		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
 		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
-		ir.occurred_at,ad.absence_hours,ad.period_text,ir.remark,ir.source,ir.status,
+		ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,
 		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
 		ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
 	departmentIDs := query.DepartmentIDs
@@ -1285,9 +1455,14 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference),
 		CoursesByClassAndName: make(map[string]importjob.AttendanceCourseReference), ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
 	}
+	if lookup.WeekID != "" {
+		if err := p.Pool.QueryRow(ctx, `SELECT attendance_penalty_multiplier FROM semester_weeks WHERE id=$1::uuid AND semester_id=$2::uuid`, lookup.WeekID, lookup.SemesterID).Scan(&result.WeekPenaltyMultiplier); err != nil {
+			return result, err
+		}
+	}
 	studentRows, err := p.Pool.Query(ctx, `SELECT s.id,s.student_no,s.name,s.class_id,c.name,g.name
 		FROM students s JOIN classes c ON c.id=s.class_id JOIN grades g ON g.id=c.grade_id
-		WHERE s.enabled AND c.enabled AND s.student_no = ANY($1::text[])
+		WHERE s.enabled AND c.enabled AND g.enabled AND s.student_no = ANY($1::text[])
 		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.StudentNos, lookup.ClassID, lookup.Grade)
 	if err != nil {
 		return result, err
@@ -1307,7 +1482,7 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	studentRows.Close()
 
 	classRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,g.name FROM classes c JOIN grades g ON g.id=c.grade_id
-		WHERE c.enabled AND c.name = ANY($1::text[])
+		WHERE c.enabled AND g.enabled AND c.name = ANY($1::text[])
 		AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.ClassNames, lookup.ClassID, lookup.Grade)
 	if err != nil {
 		return result, err
@@ -1327,7 +1502,9 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	classRows.Close()
 
 	courseRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,cc.class_id::text,
-		ARRAY(SELECT DISTINCT cs.classroom_id::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text)
+		ARRAY(SELECT DISTINCT cs.classroom_id::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text),
+		ARRAY(SELECT DISTINCT cs.classroom_id::text || ':' || cs.weekday::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text || ':' || cs.weekday::text),
+		ARRAY(SELECT DISTINCT cs.classroom_id::text || ':' || cs.weekday::text || ':' || cs.start_section::text || ':' || cs.end_section::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text || ':' || cs.weekday::text || ':' || cs.start_section::text || ':' || cs.end_section::text)
 		FROM courses c JOIN course_classes cc ON cc.course_id=c.id
 		WHERE c.enabled AND c.name = ANY($1::text[]) AND ($2='' OR cc.class_id=NULLIF($2,'')::uuid)
 		  AND EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid)`, lookup.CourseNames, lookup.ClassID, lookup.SemesterID)
@@ -1336,7 +1513,7 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	}
 	for courseRows.Next() {
 		var value importjob.AttendanceCourseReference
-		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomIDs); err != nil {
+		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomIDs, &value.ScheduleKeys, &value.ScheduleRanges); err != nil {
 			courseRows.Close()
 			return result, err
 		}
@@ -1377,7 +1554,7 @@ func (p *Postgres) FindExistingAttendanceKeys(ctx context.Context, scope importj
 		return result, nil
 	}
 	rows, err := p.Pool.Query(ctx, `SELECT dedup_key FROM inspection_records
-		WHERE semester_id=$1::uuid AND week_id=$2::uuid AND inspection_type_id=$3::uuid AND department_id=$4::uuid
+		WHERE semester_id=$1::uuid AND week_id=$2::uuid AND inspection_type_id=$3::uuid AND department_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 		  AND ($5='' OR class_id=NULLIF($5,'')::uuid) AND ($6='' OR grade_snapshot=$6)
 		  AND dedup_key = ANY($7::text[]) AND deleted_at IS NULL AND ($8='' OR id<>NULLIF($8,'')::uuid)`,
 		scope.SemesterID, scope.WeekID, scope.InspectionTypeID, scope.DepartmentID, scope.ClassID, scope.Grade, keys, scope.ExcludeRecordID)
@@ -1402,13 +1579,29 @@ func (p *Postgres) FindImportBatch(ctx context.Context, id string) (importjob.Ba
 
 // CreateImportBatch persists the initial UPLOADED state after private storage has verified the source file.
 func (p *Postgres) CreateImportBatch(ctx context.Context, batch importjob.Batch) error {
-	_, err := p.Pool.Exec(ctx, `INSERT INTO import_batches(
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// The same lock is acquired by compensation, preventing a batch from binding a discarded file.
+	source, err := scanFile(tx.QueryRow(ctx, fileSelect+` WHERE id=$1 FOR UPDATE`, batch.OriginalFileID))
+	if err != nil {
+		return err
+	}
+	if source.Status != storage.StatusAvailable || source.RetentionType != storage.RetentionImportSource || batch.CreatedBy == "" || source.CreatedBy != batch.CreatedBy {
+		return storage.ErrFileUnavailable
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO import_batches(
 		id,inspection_type_id,semester_id,week_id,department_id,class_id,grade,original_file_id,template_id,template_version,
 		status,total_rows,valid_rows,invalid_rows,imported_rows,version,created_by,created_at,updated_at
-	) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,$8,$9,$10,$11,0,0,0,0,$12,$13,$14,$15)`,
+	) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8,$9,$10,$11,0,0,0,0,$12,$13,$14,$15)`,
 		batch.ID, batch.InspectionTypeID, batch.SemesterID, batch.WeekID, batch.DepartmentID, batch.ClassID, batch.Grade, batch.OriginalFileID,
 		batch.TemplateID, batch.TemplateVersion, batch.Status, batch.Version, batch.CreatedBy, batch.CreatedAt, batch.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) FindPublishedImportTemplate(ctx context.Context, inspectionTypeID string) (importjob.Template, error) {
@@ -1442,7 +1635,16 @@ func (p *Postgres) ListImportRows(ctx context.Context, batchID string, page, pag
 		if err := json.Unmarshal(raw, &value.RawData); err != nil {
 			return importjob.ImportRowPage{}, err
 		}
-		if err := json.Unmarshal(normalized, &value.NormalizedRecord); err != nil {
+		var typed importjob.InspectionImportRecord
+		if err := json.Unmarshal(normalized, &typed); err != nil {
+			return importjob.ImportRowPage{}, err
+		}
+		if typed.SchemaVersion != 0 {
+			if typed.SchemaVersion != 1 {
+				return importjob.ImportRowPage{}, importjob.ErrInvalidBatch
+			}
+			value.NormalizedInspection = &typed
+		} else if err := json.Unmarshal(normalized, &value.NormalizedRecord); err != nil {
 			return importjob.ImportRowPage{}, err
 		}
 		if err := json.Unmarshal(validationErrors, &value.Errors); err != nil {
@@ -1486,6 +1688,9 @@ func (p *Postgres) ReplaceImportPreview(ctx context.Context, batch importjob.Bat
 		var normalized any = map[string]any{}
 		if row.ValidationStatus == importjob.RowStatusValid {
 			normalized = row.NormalizedRecord
+			if row.NormalizedInspection != nil {
+				normalized = row.NormalizedInspection
+			}
 			validRows++
 		} else {
 			invalidRows++
@@ -1524,11 +1729,12 @@ func (p *Postgres) ReplaceImportPreview(ctx context.Context, batch importjob.Bat
 	return batch, nil
 }
 
-const importBatchSelect = `SELECT b.id,b.inspection_type_id,b.semester_id,b.week_id,b.department_id,COALESCE(b.class_id::text,''),b.grade,b.original_file_id,
+const importBatchSelect = `SELECT b.id,b.inspection_type_id,b.semester_id,b.week_id,COALESCE(b.department_id::text,''),COALESCE(b.class_id::text,''),b.grade,b.original_file_id,
 	b.template_id,b.template_version,b.status,b.total_rows,b.valid_rows,b.invalid_rows,b.imported_rows,b.version,
 	COALESCE(b.confirm_idempotency_key,''),b.failure_code,b.failure_message,b.created_by,b.created_at,b.updated_at,
-	COALESCE(b.confirmed_at,'epoch'::timestamptz),COALESCE(b.cancelled_at,'epoch'::timestamptz),w.start_date,w.end_date
-	FROM import_batches b JOIN semester_weeks w ON w.id=b.week_id`
+	COALESCE(b.confirmed_at,'epoch'::timestamptz),COALESCE(b.cancelled_at,'epoch'::timestamptz),w.start_date,w.end_date,it.code,t.code
+	FROM import_batches b JOIN semester_weeks w ON w.id=b.week_id
+	JOIN inspection_types it ON it.id=b.inspection_type_id JOIN import_templates t ON t.id=b.template_id`
 
 type importBatchScanner interface {
 	Scan(...any) error
@@ -1540,7 +1746,7 @@ func scanImportBatch(row importBatchScanner) (importjob.Batch, error) {
 		&batch.ID, &batch.InspectionTypeID, &batch.SemesterID, &batch.WeekID, &batch.DepartmentID, &batch.ClassID, &batch.Grade, &batch.OriginalFileID,
 		&batch.TemplateID, &batch.TemplateVersion, &batch.Status, &batch.TotalRows, &batch.ValidRows, &batch.InvalidRows,
 		&batch.ImportedRows, &batch.Version, &batch.ConfirmIdempotencyKey, &batch.FailureCode, &batch.FailureMessage,
-		&batch.CreatedBy, &batch.CreatedAt, &batch.UpdatedAt, &batch.ConfirmedAt, &batch.CancelledAt, &batch.WeekStart, &batch.WeekEnd,
+		&batch.CreatedBy, &batch.CreatedAt, &batch.UpdatedAt, &batch.ConfirmedAt, &batch.CancelledAt, &batch.WeekStart, &batch.WeekEnd, &batch.TypeCode, &batch.TemplateCode,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return importjob.Batch{}, importjob.ErrBatchNotFound
@@ -1563,7 +1769,7 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 	err = tx.QueryRow(ctx, `SELECT status,total_rows,valid_rows,invalid_rows,imported_rows,version,
 		COALESCE(confirm_idempotency_key,''),template_version
 		FROM import_batches WHERE id=$1 AND semester_id=$2::uuid AND week_id=$3::uuid
-		  AND inspection_type_id=$4::uuid AND department_id=$5::uuid
+		  AND inspection_type_id=$4::uuid AND department_id IS NOT DISTINCT FROM NULLIF($5,'')::uuid
 		  AND COALESCE(class_id::text,'')=$6 AND grade=$7 AND created_by=$8::uuid FOR UPDATE`,
 		input.BatchID, input.Scope.SemesterID, input.Scope.WeekID, input.Scope.InspectionTypeID, input.Scope.DepartmentID, input.Scope.ClassID, input.Scope.Grade, input.Scope.ActorID,
 	).Scan(&status, &totalRows, &validRows, &invalidRows, &importedRows, &version, &idempotencyKey, &templateVersion)
@@ -1594,8 +1800,10 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 		return importjob.ConfirmResult{}, err
 	}
 	type confirmedRow struct {
-		id     string
-		record inspection.AttendanceRecord
+		id       string
+		record   inspection.AttendanceRecord
+		typed    *importjob.InspectionImportRecord
+		prepared inspection.InspectionRecord
 	}
 	confirmedRows := make([]confirmedRow, 0, validRows)
 	for rows.Next() {
@@ -1605,14 +1813,27 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 			rows.Close()
 			return importjob.ConfirmResult{}, err
 		}
-		if err := json.Unmarshal(normalized, &row.record); err != nil {
+		var typed importjob.InspectionImportRecord
+		if err := json.Unmarshal(normalized, &typed); err != nil {
 			rows.Close()
-			return importjob.ConfirmResult{}, fmt.Errorf("decode normalized import row: %w", err)
+			return importjob.ConfirmResult{}, fmt.Errorf("decode import schema: %w", err)
 		}
-		row.record.DedupKey = inspection.AttendanceDedupKey(row.record)
-		if !confirmationRecordMatches(row.record, input) {
-			rows.Close()
-			return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
+		if typed.SchemaVersion != 0 {
+			if !inspectionImportMatches(typed, input) {
+				rows.Close()
+				return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
+			}
+			row.typed = &typed
+		} else {
+			if err := json.Unmarshal(normalized, &row.record); err != nil {
+				rows.Close()
+				return importjob.ConfirmResult{}, fmt.Errorf("decode normalized import row: %w", err)
+			}
+			row.record.DedupKey = inspection.AttendanceDedupKey(row.record)
+			if !confirmationRecordMatches(row.record, input) {
+				rows.Close()
+				return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
+			}
 		}
 		confirmedRows = append(confirmedRows, row)
 	}
@@ -1624,22 +1845,56 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 	if len(confirmedRows) != validRows {
 		return importjob.ConfirmResult{}, importjob.ErrBatchHasErrors
 	}
+	lockedContext, err := lockInspectionImportContext(ctx, tx, input.Scope)
+	if err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	if lockedContext.TypeCode == inspection.InspectionTypeAttendance && lockedContext.AttendancePenaltyMultiplier == nil {
+		return importjob.ConfirmResult{}, inspection.ErrAttendancePenaltyUnconfigured
+	}
+	for i := range confirmedRows {
+		row := &confirmedRows[i]
+		if row.typed != nil {
+			row.prepared, err = prepareInspectionImport(ctx, tx, lockedContext, *row.typed, input)
+			if err != nil {
+				return importjob.ConfirmResult{}, err
+			}
+		} else if err := lockCourseImportReferences(ctx, tx, lockedContext, row.record); err != nil {
+			return importjob.ConfirmResult{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE import_batches SET status='CONFIRMING',updated_at=now() WHERE id=$1`, input.BatchID); err != nil {
 		return importjob.ConfirmResult{}, err
 	}
 	for _, row := range confirmedRows {
+		if row.typed != nil {
+			if _, err := (&inspectionTx{tx: tx}).Save(ctx, row.prepared, nil, inspection.MutationAccess{}); err != nil {
+				return importjob.ConfirmResult{}, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE import_rows SET record_id=$2 WHERE id=$1 AND batch_id=$3`, row.id, row.prepared.ID, input.BatchID); err != nil {
+				return importjob.ConfirmResult{}, err
+			}
+			continue
+		}
 		record := row.record
 		if _, err := tx.Exec(ctx, `INSERT INTO inspection_records(
 			id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,
 			class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,source,status,import_batch_id,dedup_key,row_version,created_by
-		) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,1,$13,$14,$15,$16,$17,$18,$19)`,
+		) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,1,$13,$14,$15,$16,$17,$18,$19)`,
 			record.ID, record.InspectionTypeID, record.SemesterID, record.WeekID, record.DepartmentID, record.StudentID,
 			record.StudentNoSnapshot, record.StudentNameSnapshot, record.ClassID, record.ClassNameSnapshot, record.GradeSnapshot,
 			record.OccurredAt, record.Remark, record.Source, record.Status, input.BatchID, record.DedupKey, record.RowVersion, record.CreatedBy); err != nil {
+			if errors.Is(inspectionDBError(err), inspection.ErrAttendanceDuplicate) {
+				return importjob.ConfirmResult{}, inspection.ErrAttendanceDuplicate
+			}
 			return importjob.ConfirmResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id)
-			VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid)`, record.ID, record.CourseID, record.AbsenceHours, record.PeriodText, record.ClassroomID); err != nil {
+		var multiplier *int
+		if lockedContext.TypeCode == inspection.InspectionTypeAttendance {
+			multiplier = lockedContext.AttendancePenaltyMultiplier
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier)
+			VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6)`, record.ID, record.CourseID, record.AbsenceHours, record.PeriodText, record.ClassroomID, multiplier); err != nil {
 			return importjob.ConfirmResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE import_rows SET record_id=$2 WHERE id=$1 AND batch_id=$3`, row.id, record.ID, input.BatchID); err != nil {

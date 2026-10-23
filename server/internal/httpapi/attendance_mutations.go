@@ -61,12 +61,19 @@ func (h *handler) updateAttendance(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
+	actor := inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}
+	departmentID, err := inspection.ResolveEntryDepartment(actor, input.Record.DepartmentID)
+	if err != nil {
+		writeError(c, 403, "FORBIDDEN_SCOPE", "当前账号无有效录入部门或不能选择其他部门")
+		return
+	}
+	input.Record.DepartmentID = departmentID
 	for _, id := range []string{input.Record.SemesterID, input.Record.WeekID, input.Record.DepartmentID, input.Record.ClassID, input.Record.InspectionTypeID} {
 		if !validMutationID(c, id) {
 			return
 		}
 	}
-	r, err := h.attendanceMutations.Update(c, inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin}, c.Param("id"), input, requestMetadata(c, ""))
+	r, err := h.attendanceMutations.Update(c, actor, c.Param("id"), input, requestMetadata(c, ""))
 	if err != nil {
 		writeAttendanceMutationError(c, err)
 		return
@@ -135,6 +142,8 @@ func writeAttendanceMutationError(c *gin.Context, err error) {
 		writeError(c, 409, "RECORD_NOT_EDITABLE", "仅未提交且未锁定的草稿可编辑或删除")
 	case errors.Is(err, inspection.ErrAttendanceDuplicate):
 		writeError(c, 409, "RECORD_ALREADY_EXISTS", "存在相同记录，请核对后重试")
+	case errors.Is(err, inspection.ErrAttendancePenaltyUnconfigured):
+		writeError(c, 409, "ATTENDANCE_WEEK_RULE_UNCONFIGURED", "该周到课率违纪计入规则尚未配置，请联系管理员先完成校历配置")
 	case errors.Is(err, inspection.ErrInvalidAttendanceRecord):
 		writeError(c, 422, "VALIDATION_FAILED", "请核对记录、版本号和操作原因")
 	case errors.As(err, &v):

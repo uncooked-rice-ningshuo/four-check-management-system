@@ -1,8 +1,11 @@
+vi.mock('../../features/import-job/hooks/useImportContext', () => ({ useImportContext: () => ({ data: { items: [] }, isLoading: false, isError: false }) }))
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
 import { AttendancePage } from './AttendancePage'
+vi.mock('../../features/department-submission/ui/DepartmentSubmissionActions', () => ({ DepartmentSubmissionActions: () => null }))
+vi.mock('../../features/course-inspection/ui/CourseCreatePanel', () => ({ CourseCreatePanel: () => <div role="dialog" aria-label="新增到课率记录"><input role="combobox" aria-label="目标部门" /></div> }))
 
 const recordsQuery = vi.fn()
 const permissionsQuery = vi.fn()
@@ -50,6 +53,14 @@ describe('AttendancePage', () => {
 		currentWeekQuery.mockReturnValue({ data: { week: null }, isLoading: false })
 		filterOptionsQuery.mockReturnValue({ data: filterOptions, isLoading: false, isError: false })
   })
+
+	it('hides entry actions when an attendance-specific deny removes a broader grant', () => {
+		recordsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })
+		permissionsQuery.mockReturnValue({ data: { permissions: [permission('INSPECTION_VIEW'), { action: 'INSPECTION_ENTER', effect: 'ALLOW', scope: { departmentId: 'department-study' }, sources: [] }, { action: 'INSPECTION_ENTER', effect: 'DENY', scope: { departmentId: 'department-study', inspectionTypeId: 'type-attendance' }, sources: [] }] }, isLoading: false })
+		render(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
+		expect(screen.queryByRole('button', { name: '新增记录' })).not.toBeInTheDocument()
+		expect(screen.queryByRole('button', { name: '批量导入到课率' })).not.toBeInTheDocument()
+	})
 
 	it('uses ProTable filters and keeps fixed business context out of the query form', () => {
 		recordsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })

@@ -1,19 +1,23 @@
 # 计算机学院日常管理系统
 
-当前已完成阶段 1 本轮确认范围：React/Ant Design 前端、Go API、PostgreSQL、私有 MinIO 对象存储和 Docker Compose 本地环境，以及账号登录与注册审核、用户全生命周期、权限计算与来源解释、部门与角色、七类检查类型映射、学年学期周次、十二类基础数据（含年级、宿舍区、宿舍楼和教学楼）、字典管理和追加式审计基础设施。
+阶段 1 基础平台已有实现：React/Ant Design 前端、Go API、PostgreSQL、私有 MinIO 对象存储和 Docker Compose 配置，以及账号登录与注册审核、用户全生命周期、权限计算与来源解释、部门与角色、七类检查类型映射、学年学期周次、十二类基础数据（含年级、宿舍区、宿舍楼和教学楼）、字典管理和追加式审计基础设施。代码实现不等于当前运行环境或上线验收已通过。
 
 基础数据当前支持人工新增、编辑、启停、按名称/状态/关联字段筛选和变更记录。院系、年级、专业、班级、宿舍层级、教室和课程统一使用后端生成的 UUID，管理员不再填写人工编码；学号、工号、宿舍号和教室位置仍作为真实业务信息维护。课程支持多个班级共同上课，并按“学期 + 星期 + 第几节 + 教室”维护结构化排课，每天最多 10 节、每节 45 分钟。Excel 的“上传解析预览 → 确认入库”两阶段导入属于阶段 2。学生身份证号在采集必要性和明文查看权限定稿前不采集。
 
-## 当前实施状态（2026-09-06）
+## 当前实施状态（2026-10-05）
 
-阶段 2 在 `feat-0.1-2` 的现有工作区继续，尚未整体完成。已实现到课率查询与两阶段导入、统一侧边栏和真实数据工作台；已补到课率手工新增、未提交草稿编辑及单条/批量软删除；其余六类检查、退回记录修正、部门提交审核流程及完整跨角色验收仍待补齐。
+阶段 2 在 `feat-0.1-2` 的现有工作区继续，五类代码与隔离交付已完成，总门禁等待用户验收。七类检查已有字段、统一 API 和手工草稿页面；到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类是当前开发与验收范围，教室卫生和公共宿舍卫生后续规则待需求方确认，已有能力保留以便未来接入。五类导入、整批回滚、按成员批次提交、部门按周汇总、退回更正、重提、确认及工作台批次统计已有代码和隔离回归证据。本机业务库迁移已到 `021`，校级无部门记录进入独立校级批次，到课率按每节 1 实际学时、周配置 1/2 倍计算违纪计入学时；本机 API 已重载并返回就绪。Task 17/18 的五类隔离验收已有成套证据，目标环境登录态业务验收和 Task 19 已执行，总门禁等待目标登录态业务验收。具体状态和下一步见[项目状态](docs/project-status.md)。
 
-工作台统一位于 `/`；管理员访问 `/admin` 经管理守卫后重定向到 `/`，具体管理页面保留独立鉴权。“我的待办”统计本人创建的草稿和退回记录；部门状态展示完整授权范围内的部门整体数据。最新决策、任务状态、验证边界及下一步顺序见[交接记录](docs/plans/2026-09-06-project-handover.md)。到课率 CRUD 与工作台的最新[真实浏览器增量验收](docs/plans/2026-09-06-attendance-browser-verification.md)已补齐，完整 MinIO 与跨角色总门禁仍开放。
+工作台统一位于 `/`；管理员访问 `/admin` 经管理守卫后重定向到 `/`，具体管理页面保留独立鉴权。“我的待办”统计本人创建且有权查看的草稿和退回记录；部门状态展示完整授权范围内的记录数与批次数。[09-06 浏览器验收](docs/plans/2026-09-06-attendance-browser-verification.md)及[09-21 补验](docs/reviews/2026-09-21-expanded-e2e.md)是历史增量证据。最新五类部门流程的隔离证据见[验收记录](docs/reviews/2026-10-04-department-submission-foundation.md)。
+
+**目标运行证据边界：** 10-05 在本机联调权限下确认业务 API 8080、前端 5173 与 PostgreSQL 5432 正在运行；备份后补齐 014–021，本机 API 已重载，`/health/ready` 返回 200。普通沙箱下的端口探测误报拒绝连接，不能据此判断服务停机。浏览器通过的是一次性 PostgreSQL/MinIO 和当前源码构成的隔离环境；目标库四类只读仓储查询通过，用户已确认四类已登录页面刷新后无错误，五类模板已登录下载成功。最终代码的目标登录态业务写入和完整角色验收仍待用户自主执行。
 
 ## 本地运行
 
+以下为 Compose 启动方式，不是当前机器正在正常运行的证明。已有 `.env` 不要覆盖；该命令会启动服务并应用目标 Compose 数据库的待执行迁移，运行前按 AGENTS.md 核对授权、数据及连接目标。
+
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 # 编辑 .env，为管理员、MinIO 根账号和 MinIO 应用账号分别设置独立强凭证
 docker compose up --build
 ```
@@ -24,12 +28,18 @@ Compose 从已包含安全修复的 `RELEASE.2025-10-15T17-29-55Z` 源码构建�
 
 首次启动会幂等创建 `admin` 系统账号，不要求学号且不会在后续启动时覆盖密码。首次登录必须修改初始密码。普通用户注册后进入 `PENDING`，由超级管理员审核通过后启用。
 
+首次启动**不会自动交付已发布的到课率模板**。模板需要文件对象、元数据、版本与发布配置齐全；已新增默认只预览、显式 `--apply` 才发布的运维命令。10-05 已按用户授权在这台机器的 `four_check` 业务库发布当前五类 v1 模板，并核对文件与对象摘要；其他环境仍须单独发布和验收。见[模板交付说明](docs/reviews/2026-09-21-attendance-template-publication.md)及[本机修复记录](docs/reviews/2026-10-05-four-list-layout-and-runtime-fix.md)。
+
+本地开发的 Vite 代理配置为 `5173 → localhost:8080`；Compose 对外入口为 `8088`，内部 API 为 `api:8080`，内部数据库为 `postgres:5432`。宿主机原生 PostgreSQL 与 Compose 数据库可能并存，迁移前必须核对 API 实际目标，不能只看端口或容器名。存活检查不等于就绪；还需 `/health/ready` 和已登录业务验证。不要为排障输出 `.env` 全文、Token 或完整数据库连接串。
+
 ## 测试
 
+先核对 `node --version`、`pnpm --version` 与 `web/package.json`。当前指定 pnpm@11.7.0；09-20 已用本机现有 Node 24.12.0 与 pnpm 11.7.0 完成验证，默认 PATH 仍可能指向旧版，执行前须自行核对。外部服务 SKIP、超时或中断必须单列。
+
 ```bash
-docker run --rm -v "$PWD/server:/app" -w /app golang:1.25-alpine go test ./...
-cd web && pnpm test && pnpm build
-docker compose config
+(cd server && GOTOOLCHAIN=go1.25.0 go vet ./... && GOTOOLCHAIN=go1.25.0 go test ./...)
+(cd web && pnpm lint && pnpm test && pnpm build)
+docker compose config --quiet
 ```
 
 到课率导入的 PostgreSQL + MinIO 集成测试默认跳过；执行时必须连接可清空的临时数据库和测试专用 MinIO 账号，不得指向生产或共享数据环境。测试会执行仓库全部迁移、写入测试数据，并创建后自动清理独立 Bucket：
@@ -116,16 +126,24 @@ docker compose run --rm -v "$PWD/backups/$backup_id:/backup:ro" --entrypoint /bi
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `POST /api/v1/admin/users`：请求包含学号、姓名、系统角色；服务端生成临时密码，201 响应额外返回 `temporaryPassword`，仅展示一次。
+- `POST /api/v1/admin/users/:id/reset-password`：无需传入密码；200 响应返回新生成的 `temporaryPassword`。两种响应均设置 `Cache-Control: no-store`，不得记录或长期缓存密码。
 - `GET|POST|PUT /api/v1/admin/master-data/:kind`
 - `GET|POST|PUT /api/v1/admin/dictionaries`
 - `GET|POST|PUT|DELETE /api/v1/admin/users/:id/permission-rules`
 - `GET /api/v1/dashboard/workbench`
 - `GET /api/v1/inspections/attendance`
 - `POST /api/v1/inspections/attendance`（手工新增草稿）
-- `GET|PATCH|DELETE /api/v1/inspections/:id`（到课率编辑详情、编辑、软删除）
-- `POST /api/v1/inspections/batch`（到课率事务批量软删除）
+- `GET|POST /api/v1/inspections`（七类统一列表、创建）
+- `GET|PATCH|DELETE /api/v1/inspections/:id`（七类统一详情、草稿编辑、软删除）
+- `POST /api/v1/inspections/batch`（七类草稿事务批量软删除）
+- `GET|PATCH|DELETE /api/v1/inspections/attendance/:id`（现有到课率页面专用平铺契约）
+- `POST /api/v1/inspections/attendance/batch`（现有到课率页面批量删除）
+- `GET|PUT /api/v1/work-context`（工作周读取、受权临时覆盖/恢复）
 - `GET /health/live`
 - `GET /health/ready`
+
+Compose 的 API 健康检查使用 `/health/ready`，前端启动依赖 API 的 `service_healthy`：PostgreSQL 或对象存储未就绪时不放行启动。`/health/live` 只用于判断进程存活。Compose 不会因运行后的依赖失效自动停止已启动的前端；模板发布和业务初始化仍需单独验收。
 
 Access Token 只由前端保存在内存；Refresh Token 使用 HttpOnly、SameSite=Lax Cookie，并在刷新时轮换。
 
@@ -164,7 +182,7 @@ MANUAL_TEST_DATABASE_URL='<一次性空库连接串>' GOTOOLCHAIN=go1.25.0 \
 
 `INSPECTION_ENTER` 允许处理有效范围内本人草稿，独立 `INSPECTION_MANAGE` 允许处理有效范围内他人草稿。部长/副部长在允许录入的部门类型映射下默认取得管理权，也可通过权限规则单独授予或拒绝。动作分别应用拒绝规则；管理权不作为新增记录的录入权。
 
-编辑使用 `PATCH /api/v1/inspections/:id`，请求 `{version,reason,record}`，其中 `record` 与手工新增字段一致。单条删除请求 `{version,reason}`；批量请求 `{action:"DELETE",items:[{id,version}],reason}`，最多 100 条。原因必填且最多 255 字。详情接口用于编辑授权，不是通用只读详情接口。
+现有到课率页面编辑使用 `PATCH /api/v1/inspections/attendance/:id`，请求 `{version,reason,record}`，其中 `record` 与手工新增字段一致。单条删除用同一专用路径，请求 `{version,reason}`；批量使用 `/api/v1/inspections/attendance/batch`，请求 `{action:"DELETE",items:[{id,version}],reason}`，最多 100 条。原因必填且最多 255 字。该专用详情用于编辑授权；通用 `/inspections/:id` 则使用 INSPECTION_VIEW 并返回统一 details 结构，不能混用。见[API 契约](docs/plans/2026-09-06-inspection-api-contract.md)。
 
 只允许未提交且无通报锁定关联的 DRAFT；保留创建人、来源和导入关联。版本冲突返回 409 `VERSION_CONFLICT`，状态不允许返回 409 `RECORD_NOT_EDITABLE`，不存在或原范围无权返回 404 `INSPECTION_NOT_FOUND`，目标范围无权返回 403 `FORBIDDEN_SCOPE`。批量操作任一失败全部回滚，软删除保留明细和审计。
 
@@ -180,16 +198,62 @@ MUTATION_TEST_DATABASE_URL='<一次性空库连接串>' GOTOOLCHAIN=go1.25.0 \
 
 ### 七类字段目录与导入重复反馈
 
-七类字段决策已确认并实现前后端一致的元数据目录，详见[字段契约](docs/plans/2026-09-06-seven-inspection-field-review.md)。到课率/无机课堂共享扩展表，早锻炼/早签保持单一类型，卫生按对象检查记录并关联责任人/班级；其余六类的迁移、表单和接口仍待实施。
+七类字段目录与通用 API 已建立，详见[字段契约](docs/plans/2026-09-06-seven-inspection-field-review.md)。到课率/无机课堂共享扩展表，早锻炼/早签保持单一类型，卫生按对象检查记录并关联责任人/班级。当前后续开发只推进到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类；教室卫生和公共宿舍卫生的后续方案待需求方确认，既有代码与未来通报接入能力保留。当前完成度与目标环境证据见[项目状态](docs/project-status.md)，代码目录的 ACTIVE 不证明目标库已有发布模板。
 
 到课率预览对批内重复提示来源行与首条冲突行，对库内重复提示当前来源行，并展示本行学生、课程、日期时间及节次以便核对。重复不覆盖已有数据；如需修改，使用已有记录的版本校验编辑流程。不会返回无权查看的旧记录详情。
 
 ### 012 检查扩展迁移
 
-最新追加迁移为 `012_phase_two_inspection_extensions.sql`，已补齐五张业务扩展表、卫生区域和责任关联结构。Task 3 领域校验及 Task 4/5 七类通用 API、未提交草稿编辑/软删除/批删已实现。其余类型页面、Excel 适配器及退回修正仍待后续任务。[API 契约与调用方迁移](docs/plans/2026-09-06-inspection-api-contract.md)说明了范围规则、请求格式和到课率专用详情路径。
+`012_phase_two_inspection_extensions.sql` 补齐五张业务扩展表、卫生区域和责任关联结构；016/017 提供五类部门多批次提交与历史修订不可变，018/019 保存周处罚倍数与到课率记录快照，020 设置未标记周默认 1 倍，021 支持独立校级记录及批次。通用 API、七类手工草稿页面、五类当前范围的导入及部门流程代码已接入；本机业务库账本已到 021，完整角色总验收仍未完成。[API 契约与调用方迁移](docs/plans/2026-09-06-inspection-api-contract.md)说明了范围规则与请求格式。
 
 迁移验证：将 `EXTENSION_TEST_DATABASE_URL` 指向一次性空 PostgreSQL 库，在 `server/` 执行 `GOTOOLCHAIN=go1.25.0 go test ./internal/store -run TestPhaseTwoExtension -count=1 -v`。测试拒绝已有 accounts 表的数据库。已在独立临时库通过迁移、约束和历史数据保留验证。
 
 ### 工作上下文（2026-09-07）
 
-最新迁移为 `013_work_context_settings.sql`。统一外壳展示服务端工作周次；超级管理员可设置带到期时间的全局临时周次或恢复校历。版本冲突明确拒绝、变更写审计，到期自动回退，既有记录不改变。工作台与默认周次共用该结果。导航已补齐完全 DENY 的处理。[说明与验证](docs/plans/2026-09-07-navigation-work-context.md)。下一步为 Task 8/9 部门提交状态机与 API，其迁移编号暂排 014。
+`013` 建立服务端工作周次，`014` 处理整批回滚，`015` 记录失败文件对象清理进度，当前最新的 `016/017` 建立部门提交及不可变修订。统一外壳展示服务端工作周次；超级管理员可设置带到期时间的全局临时周次或恢复校历。版本冲突明确拒绝、变更写审计，到期自动回退，既有记录不改变。工作台按当前周分别显示记录和提交批次数。导航已补齐完全 DENY 的处理。[工作上下文历史验证](docs/plans/2026-09-07-navigation-work-context.md)与[当前后续顺序](docs/project-status.md)分别记录证据和待办。
+
+### 隔离数据库与对象存储检查
+
+本机已有 Docker、`postgres:16-alpine` 镜像、MinIO 二进制、Python 3 和 Go 时，从仓库根目录运行：
+
+```bash
+GOTOOLCHAIN=go1.25.0 python3 server/scripts/verify-integration.py
+```
+
+脚本使用随机凭据、仅绑定回环地址的临时 PostgreSQL 容器和 MinIO 进程，不读取 `.env`，不使用业务数据库或已有 Bucket。各迁移测试使用独立空库，覆盖 store/storage/importjob 和模板发布 CLI 的真实集成检查；任一包失败返回非零。结束后清理本次资源，JSON 报告保留在启动时打印的临时目录。它不启动业务 API，也不发布业务模板。
+
+### Playwright 浏览器回归
+
+已加入校历、到课率及基础平台回归，可从 `web/` 执行：
+
+```bash
+pnpm test:browser
+```
+
+入口是 `server/scripts/verify-browser.py`，用例位于 `web/e2e/`（校历、模板缺失、到课率及重传恢复、基础管理及账号流程）。需要 Node 24、Python 3、Go 1.25、Docker 及本地 `postgres:16-alpine` 镜像、`minio`、`mc`、Google Chrome，以及已经安装好的前端依赖。默认通过 npx 获取固定版本 `@playwright/cli@0.1.21`，首次需要网络；已有 CLI 时可通过 `PLAYWRIGHT_CLI_JS=/绝对路径/playwright-cli.js` 指定。没有增加生产依赖，也不要求安装 `@playwright/test`。
+
+脚本构建当前 API，启动全新 PostgreSQL/MinIO 和独立 Vite，使用随机测试账号完成真实登录与首次改密；通过发布命令交付隔离模板，验证下载字节、上传/预览/确认、草稿维护、连续导入、错误批次重传、真实 409 与确认响应丢失后的幂等恢复、基础管理代表性写操作、工作周覆盖、注册审核和禁用会话。API 仅使用受限 MinIO 应用账号。测试结束后清理本次服务，退出码反映成功或失败；报告、截图和快照在忽略提交的 `output/playwright/<run-id>/`。脚本不读取业务 `.env`，不连接业务数据库，不记录密码、Cookie 或令牌，不保存认证阶段的 trace。
+
+覆盖弹窗回显、真实日期冲突与重试、工作周即时刷新、失败输入保留和重载持久化；500/异常响应是明确的故障注入。到课率和代表性管理流程已有增量 E2E，不代表阶段二全部角色或七类页面验收完成。结果与边界见[最新 E2E 记录](docs/reviews/2026-09-21-import-recovery.md)，原校历结果见[历史记录](docs/reviews/2026-09-20-playwright-regression.md)。
+
+当前补验范围、发现及下一步见 [09-21 E2E 记录](docs/reviews/2026-09-21-expanded-e2e.md) 和 [实际实施顺序](docs/plans/2026-09-21-next-implementation.md)。十二类列表加载不等于十二类全部管理动作验收，隔离通过不等于目标业务环境通过。
+
+无机课堂隔离浏览器聚焦验证：在原 `verify-browser.py` 环境配置前加 `BROWSER_SUITE=unattended-classroom`，仍使用一次性 PostgreSQL/MinIO/API/Vite，并保留登录与校历前置回归。验证边界见[页面记录](docs/reviews/2026-09-21-unattended-classroom-page.md)。
+
+### 有界文件恢复命令
+
+数据库须已应用015。已配置目标`DATABASE_URL`与`MINIO_BUCKET`后，在`server/`运行只读预览：
+
+```bash
+go run ./cmd/reconcile-files --older-than 1h --limit 100
+```
+
+预览仅查询当前Bucket下过期的PENDING/FAILED文件，输出文件ID、状态、大小和更新时间，不连接MinIO、不改状态或审计。后续执行会重新查询候选；预览不是锁定清单。
+
+明确核对目标并取得对应环境操作授权后，配置API使用的MinIO凭据、TLS、Bucket和`MINIO_MAX_FILE_SIZE_BYTES`，显式执行一个批次：
+
+```bash
+go run ./cmd/reconcile-files --apply --actor-id '<启用中且已完成改密的超级管理员UUID>' --reason '恢复原因' --older-than 1h --limit 100 --timeout 60s
+```
+
+`older-than`至少5分钟，`limit`为1–1000，`timeout`为1秒–5分钟。PENDING完整对象恢复为AVAILABLE；确定缺失、长度异常、超限才进入FAILED；临时读故障保留并延后。FAILED删除成功留下清理标记与审计，不再重复入选。每次只处理一个批次，有失败时输出计数并退出1；修复原因后再次预览/执行。命令不会扫描整个Bucket、处理AVAILABLE孤立文件或自动建立定时任务。[设计](docs/plans/2026-10-04-file-reconciliation-cli-design.md)与[验收](docs/reviews/2026-10-04-file-reconciliation-cli.md)。

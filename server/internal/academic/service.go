@@ -42,6 +42,8 @@ type Week struct {
 	EndDate    time.Time `json:"endDate"`
 	Enabled    bool      `json:"enabled"`
 	Note       string    `json:"note"`
+	// Nil input means an ordinary week; the repository stores the effective 1x value.
+	AttendancePenaltyMultiplier *int `json:"attendancePenaltyMultiplier"`
 }
 
 type Calendar struct {
@@ -131,7 +133,8 @@ func (s *Service) CreateSemester(ctx context.Context, semester Semester, metadat
 }
 
 func (s *Service) CreateWeek(ctx context.Context, week Week, metadata ...audit.Metadata) (Week, error) {
-	if week.SemesterID == "" || week.WeekNo < 1 || week.WeekNo > 60 || invalidRange(week.StartDate, week.EndDate) {
+	defaultAttendancePenaltyMultiplier(&week)
+	if week.SemesterID == "" || week.WeekNo < 1 || week.WeekNo > 60 || invalidRange(week.StartDate, week.EndDate) || !validAttendancePenaltyMultiplier(week.AttendancePenaltyMultiplier) {
 		return Week{}, ErrInvalidInput
 	}
 	calendar, err := s.repository.List(ctx)
@@ -148,7 +151,8 @@ func (s *Service) CreateWeek(ctx context.Context, week Week, metadata ...audit.M
 }
 
 func (s *Service) UpdateWeek(ctx context.Context, week Week, metadata ...audit.Metadata) (Week, error) {
-	if week.ID == "" || week.SemesterID == "" || week.WeekNo < 1 || week.WeekNo > 60 || invalidRange(week.StartDate, week.EndDate) {
+	defaultAttendancePenaltyMultiplier(&week)
+	if week.ID == "" || week.SemesterID == "" || week.WeekNo < 1 || week.WeekNo > 60 || invalidRange(week.StartDate, week.EndDate) || !validAttendancePenaltyMultiplier(week.AttendancePenaltyMultiplier) {
 		return Week{}, ErrInvalidInput
 	}
 	calendar, err := s.repository.List(ctx)
@@ -161,6 +165,17 @@ func (s *Service) UpdateWeek(ctx context.Context, week Week, metadata ...audit.M
 		}
 	}
 	return s.repository.UpdateWeek(ctx, week, calendarMutation(metadata, "semesterWeek", week.ID, findWeek(calendar, week.ID), week))
+}
+
+func validAttendancePenaltyMultiplier(value *int) bool {
+	return value != nil && (*value == 1 || *value == 2)
+}
+
+func defaultAttendancePenaltyMultiplier(week *Week) {
+	if week.AttendancePenaltyMultiplier == nil {
+		ordinary := 1
+		week.AttendancePenaltyMultiplier = &ordinary
+	}
 }
 
 func (s *Service) CurrentWeek(ctx context.Context, date time.Time) (*Week, error) {

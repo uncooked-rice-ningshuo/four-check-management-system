@@ -32,11 +32,13 @@ const (
 )
 
 var (
-	ErrInvalidAttendanceRecord = errors.New("invalid attendance record")
-	ErrOccurredOutsideWeek     = errors.New("attendance occurrence is outside week")
-	ErrInspectionTypeMismatch  = errors.New("inspection type is not attendance")
-	ErrInvalidAttendanceQuery  = errors.New("invalid attendance query")
-	ErrScopeMismatch           = errors.New("attendance query is outside compiled scope")
+	ErrInvalidAttendanceRecord       = errors.New("invalid attendance record")
+	ErrAttendancePenaltyUnconfigured = errors.New("attendance week penalty is unconfigured")
+	ErrAttendanceLegacyRuleUnknown   = errors.New("historical attendance penalty rule is unknown")
+	ErrOccurredOutsideWeek           = errors.New("attendance occurrence is outside week")
+	ErrInspectionTypeMismatch        = errors.New("inspection type is not attendance")
+	ErrInvalidAttendanceQuery        = errors.New("invalid attendance query")
+	ErrScopeMismatch                 = errors.New("attendance query is outside compiled scope")
 )
 
 // AttendanceInput contains validated reference snapshots and week boundaries used to create an attendance draft.
@@ -85,6 +87,8 @@ type AttendanceRecord struct {
 	ClassroomCode       string    `json:"classroomCode,omitempty"`
 	OccurredAt          time.Time `json:"occurredAt"`
 	AbsenceHours        float64   `json:"absenceHours"`
+	PenaltyMultiplier   *int      `json:"penaltyMultiplier,omitempty"`
+	PenaltyHours        *float64  `json:"penaltyHours,omitempty"`
 	PeriodText          string    `json:"period"`
 	Remark              string    `json:"remark"`
 	Source              string    `json:"source"`
@@ -105,6 +109,10 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 	if missingAttendanceContext(input) || input.OccurredAt.IsZero() || input.WeekStart.IsZero() || input.WeekEnd.IsZero() ||
 		math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
 		strings.TrimSpace(input.PeriodText) == "" {
+		return AttendanceRecord{}, ErrInvalidAttendanceRecord
+	}
+	actualHours, validPeriod := AttendanceHoursForPeriod(input.PeriodText)
+	if !validPeriod || input.AbsenceHours != actualHours {
 		return AttendanceRecord{}, ErrInvalidAttendanceRecord
 	}
 	weekStart, weekEnd, occurredDate := attendanceBusinessDates(input)
@@ -143,7 +151,7 @@ func attendanceBusinessDates(input AttendanceInput) (time.Time, time.Time, time.
 
 func missingAttendanceContext(input AttendanceInput) bool {
 	values := []string{
-		input.InspectionTypeID, input.SemesterID, input.WeekID, input.DepartmentID, input.StudentID,
+		input.InspectionTypeID, input.SemesterID, input.WeekID, input.StudentID,
 		input.StudentNoSnapshot, input.StudentNameSnapshot, input.ClassID, input.ClassNameSnapshot,
 		input.GradeSnapshot, input.CourseID, input.CreatedBy,
 	}

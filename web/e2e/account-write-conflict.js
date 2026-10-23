@@ -1,0 +1,137 @@
+async(page)=>{
+ let stage='setup',routeCalls=0
+ try {
+ const base=page.url().split('/').slice(0,3).join('/')
+ const check=(ok,message)=>{if(!ok)throw new Error(message)}
+ await page.goto(base+'/admin/users')
+ await page.getByRole('button',{name:'新增用户',exact:true}).click()
+ let editor=page.locator('.ant-modal:visible').filter({hasText:'新增用户'})
+ await editor.getByLabel('学号/登录账号').fill('e2e-account-conflict')
+ await editor.getByLabel('姓名',{exact:true}).fill('E2E conflict user')
+ stage='create user request'
+ const [created]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/v1/admin/users')&&r.request().method()==='POST'),editor.getByRole('button',{name:/确\s*定/}).click()])
+ check(created.status()===201,'Real user creation failed')
+ const id=(await created.json()).id
+ check(typeof id==='string'&&/^[0-9a-f-]{36}$/i.test(id),'Created account ID missing')
+ await page.locator('.ant-modal:visible').filter({hasText:'用户创建成功'}).getByRole('button',{name:'我已记录并告知用户'}).click()
+ let row=page.getByRole('row').filter({hasText:'E2E conflict user'})
+ await row.getByRole('button',{name:'编辑',exact:true}).click()
+ const firstEditor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ for(const label of ['系统角色','所属部门','组织角色']){
+  const control=firstEditor.getByRole('combobox',{name:label==='系统角色'?/系统角色$/:label,exact:label!=='系统角色'})
+  await control.focus()
+  check(await control.evaluate(el=>document.activeElement===el),'Named control cannot receive keyboard focus: '+label)
+ }
+ check(await firstEditor.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict user','First unassigned edit did not populate')
+ await firstEditor.getByRole('button',{name:/取\s*消/}).click()
+ await page.getByRole('button',{name:'新增用户',exact:true}).click()
+ await page.locator('.ant-modal:visible').filter({hasText:'新增用户'}).getByRole('button',{name:/取\s*消/}).click()
+ await row.getByRole('button',{name:'编辑',exact:true}).click()
+ editor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ await editor.getByLabel('姓名',{exact:true}).fill('E2E conflict retained')
+ const path=`**/api/v1/admin/users/${id}`
+ const conflict=async route=>{routeCalls++;await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({code:'VERSION_CONFLICT',message:'账号状态已变化，请刷新后重试'})})}
+ await page.route(path,conflict)
+ stage='edit conflict response'
+ const [rejected]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id)&&r.request().method()==='PUT'),editor.getByRole('button',{name:/确\s*定/}).click()])
+ check(rejected.status()===409,'Edit conflict not injected')
+ await page.getByText('账号状态已变化，请刷新后重试',{exact:true}).waitFor()
+ check(await editor.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict retained','Conflict lost editor input')
+ await page.unroute(path,conflict)
+ stage='edit retry response'
+ const [retried]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id)&&r.request().method()==='PUT'),editor.getByRole('button',{name:/确\s*定/}).click()])
+ check(retried.status()===200,'Real edit retry failed')
+ await editor.waitFor({state:'hidden'})
+ row=page.getByRole('row').filter({hasText:'E2E conflict retained'})
+ await row.getByRole('button',{name:'编辑',exact:true}).click()
+ let reopened=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ check(await reopened.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict retained','Saved value not loaded on reopen')
+ await reopened.getByRole('button',{name:/取\s*消/}).click()
+ await page.getByRole('button',{name:'新增用户',exact:true}).click()
+ const secondCreate=page.locator('.ant-modal:visible').filter({hasText:'新增用户'})
+ await secondCreate.getByLabel('学号/登录账号').fill('e2e-account-second')
+ await secondCreate.getByLabel('姓名',{exact:true}).fill('E2E second user')
+ await secondCreate.getByRole('button',{name:/确\s*定/}).click()
+ await page.locator('.ant-modal:visible').filter({hasText:'用户创建成功'}).getByRole('button',{name:'我已记录并告知用户'}).click()
+ await page.getByRole('row').filter({hasText:'E2E second user'}).getByRole('button',{name:'编辑',exact:true}).click()
+ reopened=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ check(await reopened.getByLabel('姓名',{exact:true}).inputValue()==='E2E second user','Record B leaked record A')
+ await reopened.getByRole('button',{name:/取\s*消/}).click()
+ await row.getByRole('button',{name:'编辑',exact:true}).click()
+ reopened=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ check(await reopened.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict retained','Record A leaked record B')
+ await reopened.getByRole('button',{name:/取\s*消/}).click()
+ const statusPath=path+'/status'
+ await page.route(statusPath,conflict)
+ await row.getByRole('button',{name:/禁\s*用/}).click()
+ await page.locator('.ant-popconfirm').getByRole('button',{name:/确\s*定|确认/}).click()
+ await page.getByText('账号状态已变化，请刷新后重试',{exact:true}).waitFor()
+ check(await row.getByRole('button',{name:/禁\s*用/}).count()===1,'Failed status update changed displayed status')
+ await page.unroute(statusPath,conflict)
+ await row.getByRole('button',{name:/禁\s*用/}).click()
+ stage='status retry response'
+ const [statusRetry]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id+'/status')&&r.request().method()==='PUT'),page.locator('.ant-popconfirm').getByRole('button',{name:/确\s*定|确认/}).click()])
+ check(statusRetry.status()===200,'Real status retry failed')
+ await row.getByText('已禁用',{exact:true}).waitFor()
+ stage='assignment conflict and retry'
+ const secondRow=page.getByRole('row').filter({hasText:'E2E second user'})
+ await secondRow.getByRole('button',{name:'编辑',exact:true}).click()
+ const assignmentEditor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ for(const [label,value] of [['所属部门','学习部'],['组织角色','部门委员']]){
+  await assignmentEditor.getByRole('combobox',{name:label,exact:true}).click()
+  await page.locator('.ant-select-dropdown:visible').getByText(value,{exact:true}).click()
+ }
+ const assignmentPath='**/api/v1/admin/users/*/assignment'
+ await page.route(assignmentPath,conflict)
+ const [assignmentRejected]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/assignment')&&r.request().method()==='PUT'),assignmentEditor.getByRole('button',{name:/确\s*定/}).click()])
+ check(assignmentRejected.status()===409,'Assignment conflict not injected')
+ await page.getByText(/^基本信息已保存，但部门和组织角色更新失败/).waitFor()
+ await assignmentEditor.getByText('学习部',{exact:true}).waitFor()
+ await assignmentEditor.getByText('部门委员',{exact:true}).waitFor()
+ await page.unroute(assignmentPath,conflict)
+ const [assignmentRetried]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/assignment')&&r.request().method()==='PUT'),assignmentEditor.getByRole('button',{name:/确\s*定/}).click()])
+ check(assignmentRetried.status()===204,'Real assignment retry failed')
+ await assignmentEditor.waitFor({state:'hidden'})
+ await secondRow.getByText('学习部',{exact:true}).waitFor()
+ await secondRow.getByText('部门委员',{exact:true}).waitFor()
+ stage='user list failure recovery'
+ const unavailable=async route=>route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({code:'INTERNAL_ERROR',message:'服务暂不可用'})})
+ const usersPath='**/api/v1/admin/users'
+ await page.route(usersPath,unavailable)
+ await page.reload()
+ await page.getByText('用户列表加载失败',{exact:true}).waitFor()
+ check(await page.getByText('暂无用户',{exact:true}).count()===0,'User failure displayed normal empty state')
+ check(await page.getByText('共 0 名用户',{exact:true}).count()===0,'User failure displayed zero count')
+ await page.unroute(usersPath,unavailable)
+ await page.getByRole('button',{name:'重试用户列表',exact:true}).click()
+ await page.getByRole('row').filter({hasText:'E2E second user'}).waitFor()
+ stage='catalog initial failure recovery'
+ const catalogsPath='**/api/v1/admin/catalogs'
+ await page.route(catalogsPath,unavailable)
+ await page.reload()
+ await page.getByText('组织目录加载失败',{exact:true}).waitFor()
+ check(await page.getByText('部门已停用',{exact:true}).count()===0,'Catalog failure misreported disabled department')
+ check(await page.getByText('角色已停用',{exact:true}).count()===0,'Catalog failure misreported disabled role')
+ await page.unroute(catalogsPath,unavailable)
+ await page.getByRole('button',{name:'重试组织目录',exact:true}).click()
+ const restoredRow=page.getByRole('row').filter({hasText:'E2E second user'})
+ await restoredRow.getByText('学习部',{exact:true}).waitFor()
+ stage='catalog refetch failure preserves editor'
+ await restoredRow.getByRole('button',{name:'编辑',exact:true}).click()
+ const retainedEditor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ await retainedEditor.getByLabel('姓名',{exact:true}).fill('E2E unsaved retained')
+ await page.route(catalogsPath,unavailable)
+ await page.getByRole('img',{name:'reload',exact:true}).dispatchEvent('click')
+ await retainedEditor.getByText('组织目录加载失败，请重试后保存',{exact:true}).waitFor()
+ check(await retainedEditor.getByLabel('姓名',{exact:true}).inputValue()==='E2E unsaved retained','Catalog failure reset editor')
+ check(await retainedEditor.getByRole('button',{name:/确\s*定/}).isDisabled(),'Save remained enabled without catalog')
+ await page.unroute(catalogsPath,unavailable)
+ await retainedEditor.getByRole('button',{name:'重试组织目录',exact:true}).click()
+ await retainedEditor.getByText('组织目录加载失败，请重试后保存',{exact:true}).waitFor({state:'hidden'})
+ check(await retainedEditor.getByLabel('姓名',{exact:true}).inputValue()==='E2E unsaved retained','Catalog retry reset editor')
+ check(await retainedEditor.getByRole('button',{name:/确\s*定/}).isEnabled(),'Save did not recover')
+ await retainedEditor.getByRole('button',{name:/取\s*消/}).click()
+ return {cases:['用户列表500失败区分空态并原位重试','目录500不误报停用，编辑中刷新失败保留输入且恢复前禁止保存','归属409明确提示基本信息已保存，保留部门/角色并真实API重试成功','StrictMode首次编辑、新增取消后编辑、保存关闭重开、A/B切换不串值','账号编辑409保留输入，原弹窗真实API重试成功','启停409保留当前显示，二次确认后真实API重试成功'],faultInjection:['HTTP500用户/目录读取失败，向现有刷新控件派发click触发编辑中目录刷新','浏览器注入409响应；实际后端交错写入由独立PostgreSQL/race用例验证']}
+ } catch(error) {const forms=await page.locator('.ant-modal:visible form').evaluateAll(nodes=>nodes.map(form=>({name:form.getAttribute('name'),fields:[...form.querySelectorAll('input')].map(input=>({id:input.id,invalid:input.getAttribute('aria-invalid')}))})))
+ throw new Error(stage+'; routeCalls='+routeCalls+'; forms='+JSON.stringify(forms)+'; '+error.message)}
+}

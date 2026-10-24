@@ -17,6 +17,7 @@ import (
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
+	"four-check-management-system/server/internal/masterdataimport"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
@@ -72,7 +73,8 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 	manualAttendance := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academicService, organizationService, permissionService)
 	return httpapi.AdminServices{
 		Organization: organizationService, Academic: academicService, Permission: permissionService,
-		MasterData: masterdata.NewService(db), Dictionary: dictionary.NewService(db), Storage: storageService,
+		MasterData: masterdata.NewService(db), MasterDataImports: masterdataimport.NewService(db, db, maxUploadBytes),
+		Dictionary: dictionary.NewService(db), Storage: storageService,
 		ImportRollback: importjob.NewRollbackService(db, permissionService),
 		ImportJobs:     importjob.NewInspectionImportService(db, storageService, importjob.NewAttendanceAdapter(db), importjob.NewMorningAdapter(db), importjob.NewLateReturnAdapter(db), importjob.NewDormitoryHygieneAdapter(db), importjob.NewClassroomHygieneAdapter(db), maxUploadBytes),
 		Attendance:     inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,

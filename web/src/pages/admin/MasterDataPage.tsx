@@ -1,11 +1,11 @@
-import { HistoryOutlined, PlusOutlined } from '@ant-design/icons'
+import { DownloadOutlined, FileExcelOutlined, HistoryOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Row, Select, Space, Spin, Tag, Typography, message } from 'antd'
-import { useState } from 'react'
+import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Row, Select, Space, Spin, Table, Tag, Typography, message } from 'antd'
+import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import type { CourseSchedule, MasterDataChange, MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
-import { createMasterData, getAcademicCalendar, getDictionaries, getMasterData, getMasterDataChanges, updateMasterData, type MasterDataListParams } from '../../shared/api/adminApi'
+import type { CourseSchedule, MasterDataChange, MasterDataImportBatch, MasterDataImportPreviewRow, MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
+import { confirmMasterDataImportBatch, createMasterData, downloadMasterDataImportTemplate, getAcademicCalendar, getDictionaries, getMasterData, getMasterDataChanges, getMasterDataImportSpec, previewMasterDataImport, updateMasterData, type MasterDataListParams } from '../../shared/api/adminApi'
 
 type KindConfig = { label: string; singular: string; identifierLabel?: string }
 const kindConfigs: Record<MasterDataKind, KindConfig> = {
@@ -57,6 +57,11 @@ export function MasterDataPage() {
   const [editing, setEditing] = useState<MasterDataRecord | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [historyRecord, setHistoryRecord] = useState<MasterDataRecord | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importBatch, setImportBatch] = useState<MasterDataImportBatch | null>(null)
+  const [confirmIdempotencyKey, setConfirmIdempotencyKey] = useState('')
+  const importFileInput = useRef<HTMLInputElement>(null)
   const [form] = Form.useForm<Partial<MasterDataRecord>>()
   const selectedDormitoryAreaID = Form.useWatch('dormitoryAreaId', form)
   const selectedGradeID = Form.useWatch('gradeId', form)
@@ -106,6 +111,7 @@ export function MasterDataPage() {
     return (result.data?.items ?? []).filter(item => item.enabled).map(item => ({ value: item.value, label: item.label }))
   }
   const history = useQuery({ queryKey: ['master-data-history', kind, historyRecord?.id], queryFn: () => getMasterDataChanges(kind, historyRecord!.id), enabled: Boolean(historyRecord) })
+  const importSpec = useQuery({ queryKey: ['master-data-import-spec', kind], queryFn: () => getMasterDataImportSpec(kind), enabled: importOpen && kind !== 'courses' })
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['master-data', kind] })
     await client.invalidateQueries({ queryKey: ['master-data-reference', kind] })
@@ -119,6 +125,43 @@ export function MasterDataPage() {
     onError: error => message.error(error.message),
   })
   const toggle = useMutation({ mutationFn: (record: MasterDataRecord) => updateMasterData({ ...record, enabled: !record.enabled }), onSuccess: refresh, onError: error => message.error(error.message) })
+  const templateDownload = useMutation({
+    mutationFn: () => downloadMasterDataImportTemplate(kind),
+    onSuccess: ({ blob }) => {
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${kindConfigs[kind].label}导入模板.xlsx`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    },
+    onError: error => message.error(error.message),
+  })
+  const uploadImport = useMutation({
+    mutationFn: (file: File) => previewMasterDataImport(kind, file),
+    onSuccess: batch => setImportBatch(batch),
+    onError: error => message.error(error.message),
+  })
+  const confirmImport = useMutation({
+    mutationFn: (idempotencyKey: string) => {
+      if (!importBatch) throw new Error('导入预览不存在，请重新上传文件')
+      return confirmMasterDataImportBatch(kind, importBatch.id, importBatch.version, idempotencyKey)
+    },
+    onSuccess: async result => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['master-data'] }),
+        client.invalidateQueries({ queryKey: ['master-data-reference'] }),
+      ])
+      setImportOpen(false)
+      setImportBatch(null)
+      setImportFile(null)
+      setConfirmIdempotencyKey('')
+      message.success(`成功新增 ${result.importedRows} 条${kindConfigs[kind].singular}数据`)
+    },
+    onError: error => message.error(error.message),
+  })
   // Initialize once after mounting; an animation callback would erase early input.
   const initializeEditorForm = (record: MasterDataRecord | null) => {
     form.resetFields()
@@ -141,6 +184,28 @@ export function MasterDataPage() {
       setModalOpen(true)
     })
     initializeEditorForm(record)
+  }
+  const openImport = () => {
+    setImportFile(null)
+    setImportBatch(null)
+    setConfirmIdempotencyKey('')
+    uploadImport.reset()
+    confirmImport.reset()
+    setImportOpen(true)
+  }
+  const closeImport = () => {
+    if (uploadImport.isPending || confirmImport.isPending) return
+    setImportOpen(false)
+    setImportFile(null)
+    setImportBatch(null)
+    setConfirmIdempotencyKey('')
+    uploadImport.reset()
+    confirmImport.reset()
+  }
+  const startImportConfirmation = () => {
+    const key = confirmIdempotencyKey || window.crypto.randomUUID()
+    setConfirmIdempotencyKey(key)
+    confirmImport.mutate(key)
   }
   const config = kindConfigs[kind]
   const columns: ProColumns<MasterDataRecord>[] = [
@@ -183,10 +248,80 @@ export function MasterDataPage() {
       <div className="master-data-table-panel">
         <ProTable<MasterDataRecord, MasterDataListParams> key={kind} rowKey="id" loading={records.isFetching} dataSource={records.data?.items ?? []} columns={columns} search={{ labelWidth: 'auto', defaultCollapsed: false }} scroll={{ x: 'max-content' }}
           onSubmit={values => { setFilters(values); setPage(1) }} onReset={() => { setFilters({}); setPage(1) }}
-          toolbar={{ title: config.label, actions: [<Button key="create" type="primary" icon={<PlusOutlined aria-hidden />} onClick={openCreate}>新增{config.singular}</Button>] }}
+          toolbar={{ title: config.label, actions: [
+            ...(kind === 'courses' ? [] : [<Button key="import" icon={<FileExcelOutlined aria-hidden />} onClick={openImport}>导入Excel</Button>]),
+            <Button key="create" type="primary" icon={<PlusOutlined aria-hidden />} onClick={openCreate}>新增{config.singular}</Button>,
+          ] }}
           options={{ reload: () => void records.refetch(), density: true, setting: true }} pagination={{ current: page, pageSize: 20, total: records.data?.total, onChange: setPage, showSizeChanger: false }} locale={{ emptyText: <Empty description={`暂无${config.label}数据`} /> }} />
       </div>
     </Card>
+    <Modal
+      title={`导入${config.singular}`}
+      open={importOpen}
+      onCancel={closeImport}
+      width={1100}
+      destroyOnHidden
+      footer={importBatch ? <Space>
+        <Button onClick={closeImport} disabled={confirmImport.isPending}>关闭</Button>
+        {importBatch.invalidRows > 0
+          ? <Button onClick={() => { setImportBatch(null); uploadImport.reset() }}>重新选择文件</Button>
+          : <Popconfirm title={`确认新增 ${importBatch.validRows} 条${config.singular}数据？`} description="确认后将一次性新增整批数据；系统不会更新已有记录。" okText="确认导入" cancelText="再检查一下" onConfirm={startImportConfirmation}>
+            <Button type="primary" loading={confirmImport.isPending}>确认新增</Button>
+          </Popconfirm>}
+      </Space> : <Space>
+        <Button onClick={closeImport} disabled={uploadImport.isPending}>取消</Button>
+        <Button type="primary" icon={<UploadOutlined aria-hidden />} loading={uploadImport.isPending} disabled={!importFile} onClick={() => importFile && uploadImport.mutate(importFile)}>上传并预览</Button>
+      </Space>}
+    >
+      {!importBatch ? <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Alert type="info" showIcon title="本次只新增数据，不更新已有记录。请先下载当前分类模板；预览中任一行有错误时，整批都不能确认。" />
+        {importSpec.isError && <Alert type="error" showIcon title="导入字段说明加载失败" description="可重试加载字段说明；上传时服务端仍会按模板严格校验。" action={<Button size="small" onClick={() => void importSpec.refetch()}>重试</Button>} />}
+        {importSpec.data && <div className="master-data-import-field-list" aria-label="导入字段格式要求">
+          <Typography.Text strong>字段格式要求</Typography.Text>
+          {importSpec.data.fields.map(field => <Typography.Paragraph key={field.code} className="master-data-import-field-rule">
+            <Typography.Text strong>{field.header}{field.required ? '（必填）' : '（选填）'}</Typography.Text>：{field.format}
+          </Typography.Paragraph>)}
+        </div>}
+        <Space wrap>
+          <Button icon={<DownloadOutlined aria-hidden />} loading={templateDownload.isPending} disabled={importSpec.isLoading} onClick={() => templateDownload.mutate()}>下载当前分类模板</Button>
+          <Button icon={<FileExcelOutlined aria-hidden />} disabled={uploadImport.isPending} onClick={() => importFileInput.current?.click()}>选择 XLSX 文件</Button>
+          <Typography.Text type="secondary">{importFile?.name ?? '未选择文件'}</Typography.Text>
+          <input ref={importFileInput} type="file" accept=".xlsx" aria-label="选择基础数据导入文件" hidden onChange={event => {
+            setImportFile(event.currentTarget.files?.[0] ?? null)
+            event.currentTarget.value = ''
+          }} />
+        </Space>
+        {uploadImport.isError && <Alert type="error" showIcon title="文件校验失败" description={uploadImport.error.message} />}
+      </Space> : <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Alert
+          type={importBatch.invalidRows > 0 ? 'error' : 'success'}
+          showIcon
+          title={importBatch.invalidRows > 0 ? '预览发现错误，整批不能导入' : '预览通过，请核对后确认新增'}
+          description={`共 ${importBatch.totalRows} 行：${importBatch.validRows} 行通过，${importBatch.invalidRows} 行有错误。${importBatch.invalidRows > 0 ? '请修正文件并重新上传；系统不会导入其中的有效行。' : '确认后所有记录会在同一事务中新增。'}`}
+        />
+        <Table<MasterDataImportPreviewRow>
+          rowKey="rowNo"
+          size="small"
+          dataSource={importBatch.rows}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          scroll={{ x: 'max-content', y: 420 }}
+          columns={[
+            { title: 'Excel 行号', dataIndex: 'rowNo', width: 90, fixed: 'left' },
+            { title: '校验结果', dataIndex: 'status', width: 100, render: (status: string) => <Tag color={status === 'VALID' ? 'green' : 'red'}>{status === 'VALID' ? '通过' : '有错误'}</Tag> },
+            ...importBatch.fields.map(field => ({
+              title: `${field.header}${field.required ? ' *' : ''}`,
+              key: field.code,
+              width: 160,
+              render: (_: unknown, row: MasterDataImportPreviewRow) => row.values[field.code] || '—',
+            })),
+            { title: '错误说明', key: 'errors', width: 260, render: (_: unknown, row: MasterDataImportPreviewRow) => row.errors.length
+              ? <Space direction="vertical" size={0}>{row.errors.map((issue, index) => <Typography.Text type="danger" key={`${issue.field}-${index}`}>{importBatch.fields.find(field => field.code === issue.field)?.header ?? issue.field}：{issue.message}</Typography.Text>)}</Space>
+              : '—' },
+          ]}
+        />
+        {confirmImport.isError && <Alert type="error" showIcon title="确认导入失败" description={confirmImport.error.message} />}
+      </Space>}
+    </Modal>
     <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>
       <Form name={`master-data-${kind}-editor`} form={form} layout="vertical" onFinish={values => save.mutate(values)} preserve={false}>
         {config.identifierLabel && <Form.Item name="code" label={config.identifierLabel} rules={[{ required: true, message: `请输入${config.identifierLabel}` }]}><Input disabled={Boolean(editing)} autoComplete="off" /></Form.Item>}

@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"mime"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
+	"four-check-management-system/server/internal/masterdataimport"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
@@ -31,6 +34,7 @@ type AdminServices struct {
 	WorkContext              *academic.WorkContextService
 	Permission               *permission.Service
 	MasterData               *masterdata.Service
+	MasterDataImports        masterDataImportHTTPService
 	Dictionary               *dictionary.Service
 	Storage                  *storage.Service
 	PostgresReady            readinessChecker
@@ -81,6 +85,12 @@ type importFileHTTPService interface {
 	Discard(context.Context, string, audit.Metadata) error
 }
 
+type masterDataImportHTTPService interface {
+	Preview(context.Context, string, string, string, string, []byte, audit.Metadata) (masterdataimport.Batch, error)
+	GetBatch(context.Context, string, string, string) (masterdataimport.Batch, error)
+	Confirm(context.Context, masterdataimport.ConfirmInput) (masterdataimport.ConfirmResult, error)
+}
+
 type readinessChecker interface {
 	Ready(context.Context) error
 }
@@ -91,6 +101,7 @@ type handler struct {
 	academic                 *academic.Service
 	permission               *permission.Service
 	masterData               *masterdata.Service
+	masterDataImports        masterDataImportHTTPService
 	dictionary               *dictionary.Service
 	storage                  *storage.Service
 	postgresReady            readinessChecker
@@ -120,6 +131,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	if len(dependencies) > 0 {
 		h.organization, h.academic, h.permission = dependencies[0].Organization, dependencies[0].Academic, dependencies[0].Permission
 		h.masterData, h.dictionary = dependencies[0].MasterData, dependencies[0].Dictionary
+		h.masterDataImports = dependencies[0].MasterDataImports
 		h.storage = dependencies[0].Storage
 		h.postgresReady, h.objectStorageReady = dependencies[0].PostgresReady, dependencies[0].ObjectStorageReady
 		h.importJobs, h.attendance, h.importFiles = dependencies[0].ImportJobs, dependencies[0].Attendance, dependencies[0].ImportFiles
@@ -176,6 +188,11 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.PUT("/academic/weeks/:id", h.updateWeek)
 	masterDataAdmin := v1.Group("/admin", h.requireAction(permission.ActionMasterDataManage))
 	masterDataAdmin.GET("/master-data/:kind", h.listMasterData)
+	masterDataAdmin.GET("/master-data/:kind/import-spec", h.getMasterDataImportSpec)
+	masterDataAdmin.GET("/master-data/:kind/import-template", h.downloadMasterDataImportTemplate)
+	masterDataAdmin.POST("/master-data/:kind/imports", h.previewMasterDataImport)
+	masterDataAdmin.GET("/master-data/:kind/imports/:batchID", h.getMasterDataImportBatch)
+	masterDataAdmin.POST("/master-data/:kind/imports/:batchID/confirm", h.confirmMasterDataImportBatch)
 	masterDataAdmin.POST("/master-data/:kind", h.createMasterData)
 	masterDataAdmin.PUT("/master-data/:kind/:id", h.updateMasterData)
 	masterDataAdmin.GET("/master-data/:kind/:id/changes", h.listMasterDataChanges)
@@ -593,6 +610,179 @@ func (h *handler) listMasterDataChanges(c *gin.Context) {
 	result, err := h.masterData.ListChanges(c, c.Param("kind"), c.Param("id"))
 	writeResult(c, result, err)
 }
+
+func (h *handler) downloadMasterDataImportTemplate(c *gin.Context) {
+	spec, ok := masterdataimport.SpecFor(c.Param("kind"))
+	if !ok {
+		writeMasterDataImportError(c, masterdataimport.ErrInvalidKind)
+		return
+	}
+	content, err := masterdataimport.TemplateXLSX(spec.Kind)
+	if err != nil {
+		writeMasterDataImportError(c, err)
+		return
+	}
+	filename := spec.Label + "导入模板.xlsx"
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content)
+}
+
+func (h *handler) getMasterDataImportSpec(c *gin.Context) {
+	spec, ok := masterdataimport.SpecFor(c.Param("kind"))
+	if !ok {
+		writeMasterDataImportError(c, masterdataimport.ErrInvalidKind)
+		return
+	}
+	c.JSON(http.StatusOK, spec)
+}
+
+func (h *handler) previewMasterDataImport(c *gin.Context) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return
+	}
+	if h.masterDataImports == nil || h.importFiles == nil || h.importMaxUploadBytes <= 0 {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "基础数据导入服务尚未就绪")
+		return
+	}
+	if _, ok := masterdataimport.SpecFor(c.Param("kind")); !ok {
+		writeMasterDataImportError(c, masterdataimport.ErrInvalidKind)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, multipartRequestLimit(h.importMaxUploadBytes))
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+		} else {
+			writeError(c, http.StatusBadRequest, "INVALID_FILE", "请选择有效的 XLSX 文件")
+		}
+		return
+	}
+	if fileHeader.Size <= 0 {
+		writeError(c, http.StatusBadRequest, "INVALID_FILE", "上传文件不能为空")
+		return
+	}
+	if fileHeader.Size > h.importMaxUploadBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+		return
+	}
+	opened, err := fileHeader.Open()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_FILE", "无法读取上传文件")
+		return
+	}
+	content, readErr := io.ReadAll(io.LimitReader(opened, h.importMaxUploadBytes+1))
+	closeErr := opened.Close()
+	if readErr != nil || closeErr != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(readErr, &maxBytesError) {
+			writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+			return
+		}
+		writeError(c, http.StatusBadRequest, "INVALID_FILE", "无法读取上传文件")
+		return
+	}
+	if int64(len(content)) == 0 {
+		writeError(c, http.StatusBadRequest, "INVALID_FILE", "上传文件不能为空")
+		return
+	}
+	if int64(len(content)) > h.importMaxUploadBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
+		return
+	}
+	stored, err := h.importFiles.Store(c, storage.StoreInput{
+		OriginalName: fileHeader.Filename, DeclaredContentType: fileHeader.Header.Get("Content-Type"), Size: int64(len(content)),
+		RetentionType: storage.RetentionImportSource, CreatedBy: account.ID, Body: bytes.NewReader(content),
+	}, requestMetadata(c, ""))
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
+	batch, err := h.masterDataImports.Preview(c, c.Param("kind"), stored.ID, fileHeader.Filename, account.ID, content, requestMetadata(c, ""))
+	if err != nil {
+		h.discardUnboundImportSource(c, stored.ID)
+		writeMasterDataImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, batch)
+}
+
+func (h *handler) getMasterDataImportBatch(c *gin.Context) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return
+	}
+	if h.masterDataImports == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "基础数据导入服务尚未就绪")
+		return
+	}
+	batch, err := h.masterDataImports.GetBatch(c, c.Param("kind"), c.Param("batchID"), account.ID)
+	if err != nil {
+		writeMasterDataImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, batch)
+}
+
+func (h *handler) confirmMasterDataImportBatch(c *gin.Context) {
+	account, ok := h.currentAccount(c)
+	if !ok {
+		return
+	}
+	if h.masterDataImports == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "基础数据导入服务尚未就绪")
+		return
+	}
+	var input struct {
+		Version int `json:"version"`
+	}
+	if !bind(c, &input) {
+		return
+	}
+	result, err := h.masterDataImports.Confirm(c, masterdataimport.ConfirmInput{
+		BatchID: c.Param("batchID"), Kind: c.Param("kind"), ActorID: account.ID,
+		ExpectedVersion: input.Version, IdempotencyKey: c.GetHeader("Idempotency-Key"), Metadata: requestMetadata(c, ""),
+	})
+	if err != nil {
+		writeMasterDataImportError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func writeMasterDataImportError(c *gin.Context, err error) {
+	var parseError *importjob.ParseError
+	if errors.As(err, &parseError) {
+		writeError(c, http.StatusUnprocessableEntity, string(parseError.Code), parseError.Message)
+		return
+	}
+	switch {
+	case errors.Is(err, masterdataimport.ErrInvalidKind):
+		writeError(c, http.StatusBadRequest, "INVALID_MASTER_DATA_KIND", "该基础数据类型暂不支持 Excel 导入")
+	case errors.Is(err, masterdataimport.ErrBatchNotFound):
+		writeError(c, http.StatusNotFound, "MASTER_DATA_IMPORT_NOT_FOUND", "导入预览不存在或无权访问")
+	case errors.Is(err, masterdataimport.ErrBatchVersionConflict):
+		writeError(c, http.StatusConflict, "VERSION_CONFLICT", "导入预览已变化，请刷新后重试")
+	case errors.Is(err, masterdataimport.ErrBatchHasErrors):
+		writeError(c, http.StatusUnprocessableEntity, "IMPORT_HAS_ERRORS", "预览中仍有错误，请修正 Excel 后重新上传")
+	case errors.Is(err, masterdataimport.ErrAlreadyConfirmed):
+		writeError(c, http.StatusConflict, "IMPORT_ALREADY_CONFIRMED", "该批次已使用其他请求确认")
+	case errors.Is(err, masterdataimport.ErrInvalidIdempotencyKey), errors.Is(err, masterdataimport.ErrInvalidBatch):
+		writeError(c, http.StatusBadRequest, "INVALID_IMPORT_REQUEST", "导入确认参数无效")
+	case errors.Is(err, masterdataimport.ErrEmptyWorkbook):
+		writeError(c, http.StatusUnprocessableEntity, "EMPTY_IMPORT", "文件中没有可导入的数据行")
+	case errors.Is(err, masterdataimport.ErrPreviewStale):
+		writeError(c, http.StatusConflict, "IMPORT_PREVIEW_STALE", "预览关联的基础数据已变化，请重新上传并校验")
+	case errors.Is(err, masterdata.ErrDuplicateCode), errors.Is(err, masterdata.ErrDuplicateName), errors.Is(err, masterdata.ErrInvalidRelation):
+		writeDomainError(c, err)
+	default:
+		log.Printf("master data import failed: method=%s route=%s errorType=%T", c.Request.Method, c.FullPath(), err)
+		writeError(c, http.StatusInternalServerError, "MASTER_DATA_IMPORT_UNAVAILABLE", "基础数据导入失败，请稍后重试")
+	}
+}
+
 func (h *handler) listDictionaries(c *gin.Context) {
 	if h.dictionary == nil {
 		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "字典服务尚未就绪")

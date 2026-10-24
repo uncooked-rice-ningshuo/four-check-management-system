@@ -10,8 +10,8 @@ import { MasterDataPage } from './MasterDataPage'
 import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
-import type { MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
-import { assignUserRole, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getPendingRegistrations, getPermissionRules, getUsers, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
+import type { MasterDataImportBatch, MasterDataKind, MasterDataRecord, MasterDataImportSpec } from '../../entities/masterdata/model/masterData'
+import { assignUserRole, confirmMasterDataImportBatch, createMasterData, downloadMasterDataImportTemplate, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -27,6 +27,7 @@ vi.mock('../../shared/api/adminApi', () => ({
 	getAcademicCalendar: vi.fn().mockResolvedValue({ academicYears: [], semesters: [], weeks: [] }),
   getMasterData: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
   createMasterData: vi.fn(), updateMasterData: vi.fn(), getMasterDataChanges: vi.fn().mockResolvedValue([]),
+  getMasterDataImportSpec: vi.fn(), downloadMasterDataImportTemplate: vi.fn(), previewMasterDataImport: vi.fn(), getMasterDataImportBatch: vi.fn(), confirmMasterDataImportBatch: vi.fn(),
   getDictionaries: vi.fn().mockResolvedValue({ types: [], items: [] }),
   createDictionaryType: vi.fn(), updateDictionaryType: vi.fn(), createDictionaryItem: vi.fn(), updateDictionaryItem: vi.fn(),
 }))
@@ -46,6 +47,7 @@ describe('阶段一管理页面', () => {
     vi.mocked(getCatalogs).mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] })
 	vi.mocked(getDepartmentInspectionScopes).mockResolvedValue([])
     vi.mocked(getMasterData).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
+    vi.mocked(getMasterDataImportSpec).mockResolvedValue({ kind: 'students', templateCode: 'MASTER_DATA_STUDENTS', templateVersion: 1, sheetName: '学生导入', label: '学生', fields: [] })
     vi.mocked(getDictionaries).mockResolvedValue({ types: [], items: [] })
   })
 
@@ -289,7 +291,72 @@ describe('阶段一管理页面', () => {
     expect(await screen.findByRole('menuitem', { name: '学生' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: '班级' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增学生' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入Excel' })).toBeInTheDocument()
   })
+
+  it('基础数据 Excel 导入按分类展示字段、预览并确认整批新增', async () => {
+    const spec: MasterDataImportSpec = {
+      kind: 'faculties', templateCode: 'MASTER_DATA_FACULTIES', templateVersion: 1, sheetName: '院系导入', label: '院系',
+      fields: [{ code: 'name', header: '院系名称', required: true, maxRunes: 96, format: '必填，1–96 个字符' }],
+    }
+    const batch: MasterDataImportBatch = {
+      id: 'batch-1', kind: 'faculties', status: 'PREVIEW_READY', templateVersion: 1, fields: spec.fields,
+      totalRows: 1, validRows: 1, invalidRows: 0, version: 1, createdAt: '2026-10-24T00:00:00Z',
+      rows: [{ rowNo: 5, values: { name: '测试学院' }, status: 'VALID', errors: [], record: { id: 'faculty-1', kind: 'faculties', name: '测试学院', enabled: true } }],
+    }
+    vi.mocked(getMasterDataImportSpec).mockResolvedValue(spec)
+    vi.mocked(downloadMasterDataImportTemplate).mockResolvedValue({ blob: new Blob(), headers: new Headers() })
+    vi.mocked(previewMasterDataImport).mockResolvedValue(batch)
+    vi.mocked(confirmMasterDataImportBatch).mockResolvedValue({ batchId: 'batch-1', kind: 'faculties', status: 'CONFIRMED', importedRows: 1, version: 2 })
+    renderPage(<MasterDataPage />)
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: '院系' }))
+    fireEvent.click(await screen.findByRole('button', { name: '导入Excel' }))
+    const dialog = await screen.findByRole('dialog', { name: '导入院系' })
+    expect(await within(dialog).findByText(/院系名称（必填）/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '下载当前分类模板' }))
+    await waitFor(() => expect(downloadMasterDataImportTemplate).toHaveBeenCalledWith('faculties'))
+    const input = within(dialog).getByLabelText('选择基础数据导入文件')
+    fireEvent.change(input, { target: { files: [new File(['workbook'], 'faculties.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })] } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '上传并预览' }))
+
+    expect(await within(dialog).findByText('测试学院')).toBeVisible()
+    expect(previewMasterDataImport).toHaveBeenCalledWith('faculties', expect.objectContaining({ name: 'faculties.xlsx' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认新增' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认导入' }))
+    await waitFor(() => expect(confirmMasterDataImportBatch).toHaveBeenCalledWith('faculties', 'batch-1', 1, expect.any(String)))
+    expect(await screen.findByText('成功新增 1 条院系数据')).toBeVisible()
+  }, 15_000)
+
+  it('课程分类不显示基础数据 Excel 导入入口', async () => {
+    renderPage(<MasterDataPage />)
+    fireEvent.click(await screen.findByRole('menuitem', { name: '课程' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '新增课程' })).toBeVisible())
+    expect(screen.queryByRole('button', { name: '导入Excel' })).not.toBeInTheDocument()
+  })
+
+  it('基础数据 Excel 预览有错误时不提供确认新增入口', async () => {
+    vi.mocked(previewMasterDataImport).mockResolvedValue({
+      id: 'batch-with-errors', kind: 'faculties', status: 'PREVIEW_HAS_ERRORS', templateVersion: 1,
+      fields: [{ code: 'name', header: '院系名称', required: true, format: '必填' }], totalRows: 2, validRows: 1,
+      invalidRows: 1, version: 1, createdAt: '2026-10-24T00:00:00Z', rows: [
+        { rowNo: 5, values: { name: '可新增学院' }, status: 'VALID', errors: [] },
+        { rowNo: 6, values: { name: '重复学院' }, status: 'INVALID', errors: [{ field: 'name', message: '与已有基础数据重复' }] },
+      ],
+    })
+    renderPage(<MasterDataPage />)
+    fireEvent.click(await screen.findByRole('menuitem', { name: '院系' }))
+    fireEvent.click(await screen.findByRole('button', { name: '导入Excel' }))
+    const dialog = await screen.findByRole('dialog', { name: '导入院系' })
+    fireEvent.change(within(dialog).getByLabelText('选择基础数据导入文件'), {
+      target: { files: [new File(['workbook'], 'faculties.xlsx')] },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '上传并预览' }))
+    expect(await within(dialog).findByText('预览发现错误，整批不能导入')).toBeInTheDocument()
+    expect(within(dialog).getByText(/与已有基础数据重复/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '确认新增' })).not.toBeInTheDocument()
+    expect(confirmMasterDataImportBatch).not.toHaveBeenCalled()
+  }, 15_000)
 
   it('基础数据按业务分组在左侧导航并在右侧展示表格', async () => {
     const { container } = renderPage(<MasterDataPage />)

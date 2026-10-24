@@ -717,6 +717,17 @@ body {
   min-width: 0;
   padding: 6px 18px 18px;
 }
+.master-data-import-field-list {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid #e7edf2;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.master-data-import-field-rule { margin-block: 0 !important; }
 .course-schedule-list {
   display: grid;
   gap: 12px;

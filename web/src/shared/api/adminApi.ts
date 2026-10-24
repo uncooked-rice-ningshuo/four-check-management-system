@@ -2,9 +2,9 @@ import type { User } from '../../entities/user/model/user'
 import type { AcademicCalendar, AcademicYear, Semester, SemesterWeek } from '../../entities/academic/model/academic'
 import type { Department, DepartmentInspectionScope, InspectionType, OrganizationCatalogs, UserAssignment } from '../../entities/organization/model/organization'
 import type { EffectivePermissions, PermissionRule } from '../../entities/permission/model/permission'
-import type { MasterDataChange, MasterDataKind, MasterDataPage, MasterDataRecord } from '../../entities/masterdata/model/masterData'
+import type { MasterDataChange, MasterDataImportBatch, MasterDataImportConfirmResult, MasterDataImportSpec, MasterDataKind, MasterDataPage, MasterDataRecord } from '../../entities/masterdata/model/masterData'
 import type { DictionaryCatalog, DictionaryItem, DictionaryType } from '../../entities/dictionary/model/dictionary'
-import { apiRequest } from './httpClient'
+import { apiDownload, apiRequest } from './httpClient'
 import { parseOrganizationCatalogs, parseUserAssignments } from './adminReadResponses'
 
 export const getRegistrationOptions = () => apiRequest<OrganizationCatalogs>('/public/registration-options')
@@ -51,6 +51,17 @@ export const getMasterData = (kind: MasterDataKind, params: MasterDataListParams
 export const createMasterData = (kind: MasterDataKind, input: Omit<MasterDataRecord, 'id' | 'kind' | 'enabled'>) => apiRequest<MasterDataRecord>(`/admin/master-data/${kind}`, { method: 'POST', body: JSON.stringify(input) })
 export const updateMasterData = (input: MasterDataRecord) => apiRequest<MasterDataRecord>(`/admin/master-data/${input.kind}/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const getMasterDataChanges = (kind: MasterDataKind, id: string) => apiRequest<MasterDataChange[]>(`/admin/master-data/${kind}/${id}/changes`)
+export const getMasterDataImportSpec = (kind: MasterDataKind) => apiRequest<MasterDataImportSpec>(`/admin/master-data/${kind}/import-spec`)
+export const downloadMasterDataImportTemplate = (kind: MasterDataKind) => apiDownload(`/admin/master-data/${kind}/import-template`)
+export const previewMasterDataImport = (kind: MasterDataKind, file: File) => {
+  const body = new FormData()
+  body.set('file', file)
+  return apiRequest<MasterDataImportBatch>(`/admin/master-data/${kind}/imports`, { method: 'POST', body })
+}
+export const getMasterDataImportBatch = (kind: MasterDataKind, batchId: string) => apiRequest<MasterDataImportBatch>(`/admin/master-data/${kind}/imports/${batchId}`)
+export const confirmMasterDataImportBatch = (kind: MasterDataKind, batchId: string, version: number, idempotencyKey: string) => apiRequest<MasterDataImportConfirmResult>(`/admin/master-data/${kind}/imports/${batchId}/confirm`, {
+  method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ version }),
+})
 export const getDictionaries = (typeId = '') => apiRequest<DictionaryCatalog>(`/admin/dictionaries${typeId ? `?typeId=${encodeURIComponent(typeId)}` : ''}`)
 export const createDictionaryType = (input: Omit<DictionaryType, 'id' | 'system' | 'enabled'>) => apiRequest<DictionaryType>('/admin/dictionaries/types', { method: 'POST', body: JSON.stringify(input) })
 export const updateDictionaryType = (input: DictionaryType) => apiRequest<DictionaryType>(`/admin/dictionaries/types/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })

@@ -56,6 +56,7 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.public_dormitory_hygiene_details') IS NOT NULL
 		AND to_regclass('public.department_submissions') IS NOT NULL
 		AND to_regclass('public.department_submission_revisions') IS NOT NULL
+		AND to_regclass('public.master_data_import_batches') IS NOT NULL
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')
 			AND tgname='department_submission_revisions_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
@@ -178,7 +179,8 @@ func (p *Postgres) MarkImportSourceDiscarded(ctx context.Context, file storage.F
 			return storage.ErrFileUnavailable
 		}
 		var bound bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM import_batches WHERE original_file_id=$1)`, file.ID).Scan(&bound); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM import_batches WHERE original_file_id=$1)
+			OR EXISTS(SELECT 1 FROM master_data_import_batches WHERE source_file_id=$1)`, file.ID).Scan(&bound); err != nil {
 			return err
 		}
 		if bound {

@@ -244,6 +244,24 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             report['status'] = 'passed'
             print('PASS: department-submission', flush=True)
             raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'master-data-import':
+            fixture['invalidMasterDataImportFile'] = str(temp / 'master-data-malformed.xlsx')
+            Path(fixture['invalidMasterDataImportFile']).write_bytes(b'not a workbook')
+            suite = temp / 'master-data-import.js'
+            suite.write_text((ROOT / 'web/e2e/master-data-import.js').read_text().replace('__FIXTURE__', json.dumps(fixture, ensure_ascii=False)))
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(suite)))
+            (OUTPUT / 'master-data-import.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            report['suites'] = {'master-data-import': payload}
+            report['cases'] += payload['cases']
+            report['browserVersion'] = payload['browserVersion']
+            report['browserErrors'] = payload['browserErrors']
+            counts = run(sql_command('-tAc', "SELECT count(*),count(*) FILTER (WHERE status='FAILED'),count(*) FILTER (WHERE object_removed_at IS NOT NULL) FROM files WHERE original_name='master-data-malformed.xlsx'"), text=True).stdout.strip()
+            if counts != '1|1|1':
+                raise RuntimeError('Malformed master-data upload source compensation mismatch: ' + counts)
+            report['cases'].append('无效工作簿被拒绝后，PostgreSQL 记录失败状态且 MinIO 对象已清理')
+            report['status'] = 'passed'
+            print('PASS: master-data-import', flush=True)
+            raise SystemExit(0)
         if ENV.get('AUTH_NAVIGATION_DIAGNOSTIC') == '1':
             auth_fixture = dict(fixture, authPassword=changed_password)
             diagnostic = temp / 'auth-navigation.js'

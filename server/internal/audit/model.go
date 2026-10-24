@@ -31,6 +31,7 @@ const (
 	ActionInspectionRecordDeleted Action = "INSPECTION_RECORD_DELETED"
 	ActionInspectionRecordCreated Action = "INSPECTION_RECORD_CREATED"
 	ActionImportBatchCancelled    Action = "IMPORT_CANCELLED"
+	ActionImportBatchPreviewed    Action = "IMPORT_BATCH_PREVIEWED"
 	ActionImportBatchConfirmed    Action = "IMPORT_BATCH_CONFIRMED"
 	ActionImportBatchRolledBack   Action = "IMPORT_BATCH_ROLLED_BACK"
 	ActionDepartmentSubmitted     Action = "DEPARTMENT_SUBMITTED"

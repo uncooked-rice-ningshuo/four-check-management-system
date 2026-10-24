@@ -6,6 +6,7 @@ import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { CourseSchedule, MasterDataChange, MasterDataImportBatch, MasterDataImportPreviewRow, MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
 import { confirmMasterDataImportBatch, createMasterData, downloadMasterDataImportTemplate, getAcademicCalendar, getDictionaries, getMasterData, getMasterDataChanges, getMasterDataImportSpec, previewMasterDataImport, updateMasterData, type MasterDataListParams } from '../../shared/api/adminApi'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey'
 
 type KindConfig = { label: string; singular: string; identifierLabel?: string }
 const kindConfigs: Record<MasterDataKind, KindConfig> = {
@@ -203,7 +204,7 @@ export function MasterDataPage() {
     confirmImport.reset()
   }
   const startImportConfirmation = () => {
-    const key = confirmIdempotencyKey || window.crypto.randomUUID()
+    const key = confirmIdempotencyKey || createIdempotencyKey()
     setConfirmIdempotencyKey(key)
     confirmImport.mutate(key)
   }
@@ -255,11 +256,14 @@ export function MasterDataPage() {
           options={{ reload: () => void records.refetch(), density: true, setting: true }} pagination={{ current: page, pageSize: 20, total: records.data?.total, onChange: setPage, showSizeChanger: false }} locale={{ emptyText: <Empty description={`暂无${config.label}数据`} /> }} />
       </div>
     </Card>
-    <Modal
+    <Drawer
       title={`导入${config.singular}`}
       open={importOpen}
-      onCancel={closeImport}
-      width={1100}
+      onClose={closeImport}
+      size="min(1100px, calc(100vw - 16px))"
+      closable={!uploadImport.isPending && !confirmImport.isPending}
+      maskClosable={!uploadImport.isPending && !confirmImport.isPending}
+      keyboard={!uploadImport.isPending && !confirmImport.isPending}
       destroyOnHidden
       footer={importBatch ? <Space>
         <Button onClick={closeImport} disabled={confirmImport.isPending}>关闭</Button>
@@ -321,7 +325,7 @@ export function MasterDataPage() {
         />
         {confirmImport.isError && <Alert type="error" showIcon title="确认导入失败" description={confirmImport.error.message} />}
       </Space>}
-    </Modal>
+    </Drawer>
     <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>
       <Form name={`master-data-${kind}-editor`} form={form} layout="vertical" onFinish={values => save.mutate(values)} preserve={false}>
         {config.identifierLabel && <Form.Item name="code" label={config.identifierLabel} rules={[{ required: true, message: `请输入${config.identifierLabel}` }]}><Input disabled={Boolean(editing)} autoComplete="off" /></Form.Item>}

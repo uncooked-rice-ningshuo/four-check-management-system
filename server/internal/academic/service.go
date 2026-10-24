@@ -117,6 +117,11 @@ func (s *Service) UpdateSemester(ctx context.Context, semester Semester, metadat
 	if err != nil {
 		return Semester{}, err
 	}
+	for _, week := range calendar.Weeks {
+		if week.SemesterID == semester.ID && (week.StartDate.Before(semester.StartDate) || week.EndDate.After(semester.EndDate)) {
+			return Semester{}, ErrInvalidInput
+		}
+	}
 	return s.repository.UpdateSemester(ctx, semester, calendarMutation(metadata, "semester", semester.ID, findSemester(calendar, semester.ID), semester))
 }
 
@@ -141,6 +146,9 @@ func (s *Service) CreateWeek(ctx context.Context, week Week, metadata ...audit.M
 	if err != nil {
 		return Week{}, err
 	}
+	if err := ValidateWeekWithinSemester(calendar, week); err != nil {
+		return Week{}, err
+	}
 	for _, existing := range calendar.Weeks {
 		if existing.Enabled && existing.ID != week.ID && rangesOverlap(existing.StartDate, existing.EndDate, week.StartDate, week.EndDate) {
 			return Week{}, ErrDateOverlap
@@ -157,6 +165,9 @@ func (s *Service) UpdateWeek(ctx context.Context, week Week, metadata ...audit.M
 	}
 	calendar, err := s.repository.List(ctx)
 	if err != nil {
+		return Week{}, err
+	}
+	if err := ValidateWeekWithinSemester(calendar, week); err != nil {
 		return Week{}, err
 	}
 	for _, existing := range calendar.Weeks {
@@ -188,6 +199,19 @@ func invalidRange(start, end time.Time) bool {
 
 func invalidAcademicYearRange(start, end time.Time) bool {
 	return invalidRange(start, end) || end.Year() != start.Year()+1
+}
+
+// ValidateWeekWithinSemester enforces the same calendar boundary for manual edits and imports.
+func ValidateWeekWithinSemester(calendar Calendar, week Week) error {
+	for _, semester := range calendar.Semesters {
+		if semester.ID == week.SemesterID {
+			if week.StartDate.Before(semester.StartDate) || week.EndDate.After(semester.EndDate) {
+				return ErrInvalidInput
+			}
+			return nil
+		}
+	}
+	return ErrInvalidInput
 }
 
 func academicYearName(start time.Time) string {

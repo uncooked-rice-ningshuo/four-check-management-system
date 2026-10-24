@@ -4,6 +4,15 @@ import { afterEach } from 'vitest'
 
 afterEach(cleanup)
 
+const nativeComputedStyle = window.getComputedStyle.bind(window)
+window.getComputedStyle = ((element: Element, pseudoElement?: string) => {
+  // rc-util only asks jsdom for this pseudo style to measure scrollbar width.
+  // jsdom logs "not implemented", then returns the element's computed style anyway.
+  return pseudoElement === '::-webkit-scrollbar'
+    ? nativeComputedStyle(element)
+    : nativeComputedStyle(element, pseudoElement)
+}) as typeof window.getComputedStyle
+
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string) => ({

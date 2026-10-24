@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ProFormDateRangePicker, ProTable } from '@ant-design/pro-components'
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
+import { CloudUploadOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import type { AcademicYear, Semester, SemesterWeek } from '../../entities/academic/model/academic'
 import { academicYearOptions, buildAcademicYearDefaults, buildSemesterDefaults, currentAcademicYearStart, semesterTypeOptions, type SemesterCode } from '../../features/academic/model/academicCalendarRules'
 import { createAcademicYear, createSemester, createWeek, getAcademicCalendar, updateAcademicYear, updateSemester, updateWeek } from '../../shared/api/adminApi'
+import { AcademicWeekImportDrawer } from '../../features/academic/ui/AcademicWeekImportDrawer'
 
 type WeekFilters = { academicYearId?: string; semesterId?: string; dateRange?: [string, string] }
 
@@ -20,6 +22,7 @@ export function AcademicCalendarPage() {
   const [editing, setEditing] = useState<AcademicYear | Semester | SemesterWeek | null>(null)
   const [weekFilters, setWeekFilters] = useState<WeekFilters>({})
   const [weekPage, setWeekPage] = useState(1)
+  const [importOpen, setImportOpen] = useState(false)
   const [form] = Form.useForm()
   const client = useQueryClient()
   const calendar = useQuery({ queryKey: ['academic-calendar'], queryFn: getAcademicCalendar })
@@ -88,7 +91,7 @@ export function AcademicCalendarPage() {
   }
 
   return <section className="admin-page">
-    <div className="page-heading"><div><Typography.Title level={2}>学期与周次</Typography.Title><Typography.Paragraph>系统初始允许为空；配置后按日期自动识别当前工作周。</Typography.Paragraph></div><Space><Button onClick={() => openCreate('week')} disabled={!data.semesters.length}>新增周次</Button><Button onClick={() => openCreate('semester')} disabled={!data.academicYears.length}>新增学期</Button><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Space></div>
+    <div className="page-heading"><div><Typography.Title level={2}>学期与周次</Typography.Title><Typography.Paragraph>系统初始允许为空；配置后按日期自动识别当前工作周。</Typography.Paragraph></div><Space><Button icon={<CloudUploadOutlined />} onClick={() => setImportOpen(true)} disabled={!data.semesters.length}>导入周次</Button><Button onClick={() => openCreate('week')} disabled={!data.semesters.length}>新增周次</Button><Button onClick={() => openCreate('semester')} disabled={!data.academicYears.length}>新增学期</Button><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Space></div>
     {!calendar.isLoading && data.academicYears.length === 0 && <Card><Empty description="尚未配置学年和学期"><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Empty></Card>}
     {calendar.isError && <Alert type="error" showIcon title="学期周次加载失败" />}
     {data.academicYears.length > 0 && <Card><Tabs items={[
@@ -115,5 +118,6 @@ export function AcademicCalendarPage() {
         {modal === 'week' && <Form.Item name="note" label="备注"><Input /></Form.Item>}
       </Form>
     </Modal>
+    <AcademicWeekImportDrawer open={importOpen} calendar={data} onClose={() => setImportOpen(false)} />
   </section>
 }

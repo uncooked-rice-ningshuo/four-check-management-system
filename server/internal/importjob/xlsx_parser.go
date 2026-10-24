@@ -150,7 +150,30 @@ func (p *XLSXParser) Parse(filename string, content []byte) (ParsedWorkbook, err
 	if err != nil {
 		return ParsedWorkbook{}, parseError(ErrorInvalidWorkbook, "无法读取业务工作表")
 	}
+	if err := validateVisibleImportGrid(book, sheets[0], rows, len(p.config.Fields)); err != nil {
+		return ParsedWorkbook{}, err
+	}
 	return p.parseRows(sheets[0], rows)
+}
+
+func validateVisibleImportGrid(book *excelize.File, sheet string, rows [][]string, fieldCount int) error {
+	for rowNo := 3; rowNo <= len(rows); rowNo++ {
+		visible, err := book.GetRowVisible(sheet, rowNo)
+		if err != nil || !visible {
+			return parseError(ErrorInvalidWorkbook, "字段说明和业务数据行不能隐藏")
+		}
+	}
+	for columnNo := 1; columnNo <= fieldCount; columnNo++ {
+		column, err := excelize.ColumnNumberToName(columnNo)
+		if err != nil {
+			return parseError(ErrorInvalidWorkbook, "模板字段列无效")
+		}
+		visible, err := book.GetColVisible(sheet, column)
+		if err != nil || !visible {
+			return parseError(ErrorInvalidWorkbook, "模板字段列不能隐藏")
+		}
+	}
+	return nil
 }
 
 func excelizeLimit(value uint64) int64 {

@@ -367,6 +367,18 @@ func TestXLSXParserRejectsFormulasHiddenSheetsAndExtraData(t *testing.T) {
 	requireParserCode(t, NewAttendanceXLSXParser(16<<20), "extra.xlsx", extra, ErrorInvalidWorkbook)
 }
 
+func TestXLSXParserRejectsHiddenBusinessRowsAndColumns(t *testing.T) {
+	base := makeXLSX(t, []workbookSheet{{Name: "到课率导入", Rows: attendanceRows(validDataRow())}}, nil)
+	hiddenRow := rewriteWorkbookPart(t, base, "xl/worksheets/sheet1.xml", func(text string) string {
+		return strings.Replace(text, `<row r="5">`, `<row r="5" hidden="1">`, 1)
+	})
+	requireParserCode(t, attendanceParser(defaultTestLimits()), "hidden-row.xlsx", hiddenRow, ErrorInvalidWorkbook)
+	hiddenColumn := rewriteWorkbookPart(t, base, "xl/worksheets/sheet1.xml", func(text string) string {
+		return strings.Replace(text, `<sheetData>`, `<cols><col min="1" max="1" hidden="1"/></cols><sheetData>`, 1)
+	})
+	requireParserCode(t, attendanceParser(defaultTestLimits()), "hidden-column.xlsx", hiddenColumn, ErrorInvalidWorkbook)
+}
+
 func rewriteWorkbookPart(t *testing.T, content []byte, name string, change func(string) string) []byte {
 	t.Helper()
 	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))

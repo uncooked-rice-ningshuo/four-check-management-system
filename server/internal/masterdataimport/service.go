@@ -197,12 +197,12 @@ func primitiveRecord(spec TemplateSpec, values map[string]string, addError func(
 	if record.Code == "" {
 		record.Code = strings.ToUpper(trimmed["student_no"])
 	}
-	record.Gender = strings.ToUpper(trimmed["gender"])
+	record.Gender = trimmed["gender"]
 	if record.Gender == "" && (spec.Kind == masterdata.KindStaff || spec.Kind == masterdata.KindStudent) {
 		record.Gender = "UNKNOWN"
 	}
 	record.Phone = trimmed["phone"]
-	record.EnrollmentStatus = strings.ToUpper(trimmed["enrollment_status"])
+	record.EnrollmentStatus = trimmed["enrollment_status"]
 	if spec.Kind == masterdata.KindStudent && record.EnrollmentStatus == "" {
 		record.EnrollmentStatus = "ENROLLED"
 	}
@@ -612,37 +612,70 @@ func validateDictionaries(ctx context.Context, catalog Catalog, kind string, par
 	if kind != masterdata.KindStaff && kind != masterdata.KindStudent {
 		return nil
 	}
-	genderValues, err := catalog.EnabledDictionaryValues(ctx, "GENDER")
+	genderOptions, err := catalog.EnabledDictionaryOptions(ctx, "GENDER")
 	if err != nil {
 		return err
 	}
-	allowedGender := stringSet(genderValues)
 	for index := range parsed {
-		if valid[index] && !allowedGender[records[index].Gender] {
-			addError(index, "gender", "不是当前启用的 GENDER 字典值")
+		if valid[index] {
+			value, ok, ambiguous := resolveDictionaryOption(records[index].Gender, genderOptions)
+			if ambiguous {
+				addError(index, "gender", "输入内容匹配多条已启用 GENDER 字典项，请填写能唯一匹配的选项值")
+			} else if !ok {
+				addError(index, "gender", "不是当前启用的 GENDER 字典选项值或显示名称")
+			} else {
+				records[index].Gender = value
+			}
 		}
 	}
 	if kind == masterdata.KindStudent {
-		statusValues, err := catalog.EnabledDictionaryValues(ctx, "ENROLLMENT_STATUS")
+		statusOptions, err := catalog.EnabledDictionaryOptions(ctx, "ENROLLMENT_STATUS")
 		if err != nil {
 			return err
 		}
-		allowedStatus := stringSet(statusValues)
 		for index := range parsed {
-			if valid[index] && !allowedStatus[records[index].EnrollmentStatus] {
-				addError(index, "enrollment_status", "不是当前启用的 ENROLLMENT_STATUS 字典值")
+			if valid[index] {
+				value, ok, ambiguous := resolveDictionaryOption(records[index].EnrollmentStatus, statusOptions)
+				if ambiguous {
+					addError(index, "enrollment_status", "输入内容匹配多条已启用学籍状态字典项，请填写能唯一匹配的选项值")
+				} else if !ok {
+					addError(index, "enrollment_status", "不是当前启用的 ENROLLMENT_STATUS 字典选项值或显示名称")
+				} else {
+					records[index].EnrollmentStatus = value
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func stringSet(values []string) map[string]bool {
-	result := make(map[string]bool, len(values))
-	for _, value := range values {
-		result[strings.ToUpper(strings.TrimSpace(value))] = true
+func resolveDictionaryOption(input string, options []DictionaryOption) (value string, ok bool, ambiguous bool) {
+	input = strings.TrimSpace(input)
+	for _, option := range options {
+		if input == strings.TrimSpace(option.Value) {
+			return option.Value, true, false
+		}
 	}
-	return result
+	for _, option := range options {
+		if strings.EqualFold(input, strings.TrimSpace(option.Value)) {
+			if ok {
+				return "", false, true
+			}
+			value, ok = option.Value, true
+		}
+	}
+	if ok {
+		return value, true, false
+	}
+	for _, option := range options {
+		if strings.EqualFold(input, strings.TrimSpace(option.Label)) {
+			if ok {
+				return "", false, true
+			}
+			value, ok = option.Value, true
+		}
+	}
+	return value, ok, false
 }
 
 func markInFileDuplicates(kind string, parsed []importjob.ParsedRow, records []masterdata.Record, valid []bool, addError func(int, string, string)) {

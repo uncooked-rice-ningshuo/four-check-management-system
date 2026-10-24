@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"four-check-management-system/server/internal/academic"
+	"four-check-management-system/server/internal/academicimport"
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dashboard"
@@ -31,6 +32,7 @@ import (
 type AdminServices struct {
 	Organization             *organization.Service
 	Academic                 *academic.Service
+	AcademicWeekImports      academicWeekImportHTTPService
 	WorkContext              *academic.WorkContextService
 	Permission               *permission.Service
 	MasterData               *masterdata.Service
@@ -91,6 +93,12 @@ type masterDataImportHTTPService interface {
 	Confirm(context.Context, masterdataimport.ConfirmInput) (masterdataimport.ConfirmResult, error)
 }
 
+type academicWeekImportHTTPService interface {
+	Preview(context.Context, string, string, string, string, []byte, audit.Metadata) (academicimport.Batch, error)
+	GetBatch(context.Context, string, string) (academicimport.Batch, error)
+	Confirm(context.Context, academicimport.ConfirmInput) (academicimport.ConfirmResult, error)
+}
+
 type readinessChecker interface {
 	Ready(context.Context) error
 }
@@ -99,6 +107,7 @@ type handler struct {
 	auth                     *auth.Service
 	organization             *organization.Service
 	academic                 *academic.Service
+	academicWeekImports      academicWeekImportHTTPService
 	permission               *permission.Service
 	masterData               *masterdata.Service
 	masterDataImports        masterDataImportHTTPService
@@ -130,6 +139,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	h := &handler{auth: authService, secureCookie: secureCookie}
 	if len(dependencies) > 0 {
 		h.organization, h.academic, h.permission = dependencies[0].Organization, dependencies[0].Academic, dependencies[0].Permission
+		h.academicWeekImports = dependencies[0].AcademicWeekImports
 		h.masterData, h.dictionary = dependencies[0].MasterData, dependencies[0].Dictionary
 		h.masterDataImports = dependencies[0].MasterDataImports
 		h.storage = dependencies[0].Storage
@@ -186,6 +196,11 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.PUT("/academic/semesters/:id", h.updateSemester)
 	admin.POST("/academic/weeks", h.createWeek)
 	admin.PUT("/academic/weeks/:id", h.updateWeek)
+	admin.GET("/academic/weeks/import-spec", h.getAcademicWeekImportSpec)
+	admin.GET("/academic/weeks/import-template", h.downloadAcademicWeekImportTemplate)
+	admin.POST("/academic/weeks/imports", h.previewAcademicWeekImport)
+	admin.GET("/academic/weeks/imports/:batchID", h.getAcademicWeekImportBatch)
+	admin.POST("/academic/weeks/imports/:batchID/confirm", h.confirmAcademicWeekImportBatch)
 	masterDataAdmin := v1.Group("/admin", h.requireAction(permission.ActionMasterDataManage))
 	masterDataAdmin.GET("/master-data/:kind", h.listMasterData)
 	masterDataAdmin.GET("/master-data/:kind/import-spec", h.getMasterDataImportSpec)
@@ -623,6 +638,7 @@ func (h *handler) downloadMasterDataImportTemplate(c *gin.Context) {
 		return
 	}
 	filename := spec.Label + "导入模板.xlsx"
+	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content)
 }

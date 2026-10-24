@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import type { DepartmentSubmission, DepartmentSubmissionScope } from '../../../entities/inspection/model/departmentSubmission'
 import { departmentSubmissionApi } from '../../../shared/api/departmentSubmissionApi'
 import { ApiError } from '../../../shared/api/httpClient'
+import { createIdempotencyKey } from '../../../shared/utils/idempotencyKey'
 
 type SelectableRecord = DepartmentSubmissionScope & { id: string; rowVersion: number; status: string }
 type Props = {
@@ -69,7 +70,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
   const submit = () => {
   if (!scope) { void notice.warning('请选择同一学期、周次、归属和类型下的草稿记录'); return }
     const signature = selected.map(item => `${item.id}:${item.rowVersion}`).sort().join('|')
-    if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: crypto.randomUUID() }
+    if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: createIdempotencyKey() }
     setPendingSubmit({ scope, records: selected.map(item => ({ id: item.id, version: item.rowVersion })), key: retryKey.current.key })
   }
   const decide = (item: DepartmentSubmission, kind: 'confirm' | 'resubmit') => {

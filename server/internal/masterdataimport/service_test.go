@@ -10,7 +10,7 @@ import (
 
 type memoryCatalog struct {
 	records      map[string][]masterdata.Record
-	dictionaries map[string][]string
+	dictionaries map[string][]DictionaryOption
 }
 
 func (m memoryCatalog) FindMasterDataImportRecords(_ context.Context, kind string, keys []LookupKey, includeDisabled bool) ([]masterdata.Record, error) {
@@ -29,7 +29,7 @@ func (m memoryCatalog) FindMasterDataImportRecords(_ context.Context, kind strin
 	return result, nil
 }
 
-func (m memoryCatalog) EnabledDictionaryValues(_ context.Context, code string) ([]string, error) {
+func (m memoryCatalog) EnabledDictionaryOptions(_ context.Context, code string) ([]DictionaryOption, error) {
 	return m.dictionaries[code], nil
 }
 
@@ -68,7 +68,7 @@ func TestValidateStudentsResolvesNamesAndCanonicalizesIdentifiers(t *testing.T) 
 			masterdata.KindDormitoryBuilding: {{ID: "building-1", Kind: masterdata.KindDormitoryBuilding, Name: "1号楼", DormitoryAreaID: "area-1", Enabled: true}},
 			masterdata.KindDormitory:         {{ID: "dorm-1", Kind: masterdata.KindDormitory, Name: "401", RoomNo: "401", DormitoryBuildingID: "building-1", Enabled: true}},
 		},
-		dictionaries: map[string][]string{"GENDER": {"MALE", "FEMALE", "UNKNOWN"}, "ENROLLMENT_STATUS": {"ENROLLED", "SUSPENDED", "GRADUATED", "LEFT"}},
+		dictionaries: map[string][]DictionaryOption{"GENDER": {{Value: "MALE", Label: "男"}, {Value: "FEMALE", Label: "女"}, {Value: "UNKNOWN", Label: "未设置"}}, "ENROLLMENT_STATUS": {{Value: "ENROLLED", Label: "在籍"}, {Value: "SUSPENDED", Label: "休学"}, {Value: "GRADUATED", Label: "毕业"}, {Value: "LEFT", Label: "离校"}}},
 	}
 	service := NewService(nil, catalog, 16<<20)
 	spec, _ := SpecFor(masterdata.KindStudent)
@@ -91,13 +91,70 @@ func TestValidateStudentsResolvesNamesAndCanonicalizesIdentifiers(t *testing.T) 
 	}
 }
 
+func TestValidateStudentAcceptsDictionaryLabelsAndStoresCanonicalValues(t *testing.T) {
+	catalog := memoryCatalog{
+		records: map[string][]masterdata.Record{
+			masterdata.KindGrade: {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
+		},
+		dictionaries: map[string][]DictionaryOption{
+			"GENDER":            {{Value: "MALE", Label: "男"}, {Value: "FEMALE", Label: "女"}},
+			"ENROLLMENT_STATUS": {{Value: "ENROLLED", Label: "在籍"}},
+		},
+	}
+	service := NewService(nil, catalog, 16<<20)
+	spec, _ := SpecFor(masterdata.KindStudent)
+	rows, err := service.validateRows(context.Background(), spec, []importjob.ParsedRow{
+		{RowNo: 5, Values: map[string]string{
+			"student_no": "s001", "name": "学生甲", "grade_year": "2026", "gender": "男", "enrollment_status": "在籍",
+		}},
+		{RowNo: 6, Values: map[string]string{
+			"student_no": "s002", "name": "学生乙", "grade_year": "2026", "gender": "female", "enrollment_status": "ENROLLED",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Status != RowValid || rows[0].Record == nil || rows[1].Status != RowValid || rows[1].Record == nil {
+		t.Fatalf("dictionary display labels and values should be accepted: %+v", rows)
+	}
+	if rows[0].Record.Gender != "MALE" || rows[0].Record.EnrollmentStatus != "ENROLLED" {
+		t.Fatalf("dictionary labels should normalize to option values: %+v", rows[0].Record)
+	}
+	if rows[1].Record.Gender != "FEMALE" || rows[1].Record.EnrollmentStatus != "ENROLLED" {
+		t.Fatalf("dictionary option values should normalize case-insensitively: %+v", rows[1].Record)
+	}
+}
+
+func TestValidateStudentRejectsAmbiguousDictionaryLabel(t *testing.T) {
+	catalog := memoryCatalog{
+		records: map[string][]masterdata.Record{
+			masterdata.KindGrade: {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
+		},
+		dictionaries: map[string][]DictionaryOption{
+			"GENDER":            {{Value: "GENDER_A", Label: "自定义"}, {Value: "GENDER_B", Label: "自定义"}},
+			"ENROLLMENT_STATUS": {{Value: "ENROLLED", Label: "在籍"}},
+		},
+	}
+	service := NewService(nil, catalog, 16<<20)
+	spec, _ := SpecFor(masterdata.KindStudent)
+	rows, err := service.validateRows(context.Background(), spec, []importjob.ParsedRow{{RowNo: 5, Values: map[string]string{
+		"student_no": "s001", "name": "学生甲", "grade_year": "2026", "gender": "自定义", "enrollment_status": "在籍",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Status != RowInvalid || !hasRowError(rows[0], "gender") {
+		t.Fatalf("ambiguous dictionary display label should be rejected: %+v", rows[0])
+	}
+}
+
 func TestValidateStudentRejectsClassFromAnotherGrade(t *testing.T) {
 	catalog := memoryCatalog{
 		records: map[string][]masterdata.Record{
 			masterdata.KindGrade: {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
 			masterdata.KindClass: {{ID: "class-2025", Kind: masterdata.KindClass, Name: "软工2501", GradeID: "grade-2025", Enabled: true}},
 		},
-		dictionaries: map[string][]string{"GENDER": {"UNKNOWN"}, "ENROLLMENT_STATUS": {"ENROLLED"}},
+		dictionaries: map[string][]DictionaryOption{"GENDER": {{Value: "UNKNOWN", Label: "未设置"}}, "ENROLLMENT_STATUS": {{Value: "ENROLLED", Label: "在籍"}}},
 	}
 	service := NewService(nil, catalog, 16<<20)
 	spec, _ := SpecFor(masterdata.KindStudent)

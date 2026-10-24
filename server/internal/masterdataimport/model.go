@@ -37,6 +37,13 @@ type LookupKey struct {
 	RoomNo   string
 }
 
+// DictionaryOption keeps the persisted option value and user-facing label together
+// so spreadsheet imports can accept either representation and persist the value.
+type DictionaryOption struct {
+	Value string
+	Label string
+}
+
 type RowError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
@@ -87,7 +94,7 @@ type ConfirmResult struct {
 
 type Catalog interface {
 	FindMasterDataImportRecords(context.Context, string, []LookupKey, bool) ([]masterdata.Record, error)
-	EnabledDictionaryValues(context.Context, string) ([]string, error)
+	EnabledDictionaryOptions(context.Context, string) ([]DictionaryOption, error)
 }
 
 type Repository interface {

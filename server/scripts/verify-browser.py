@@ -13,6 +13,7 @@ import json
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 import hashlib
 import os
 from pathlib import Path
@@ -66,6 +67,76 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+def write_student_import_workbook(path, student_no):
+    codes = ['student_no', 'name', 'grade_year', 'faculty_name', 'major_name', 'class_name', 'dormitory_area_name', 'dormitory_building_name', 'room_no', 'gender', 'enrollment_status']
+    headers = ['学号', '姓名', '入学年份', '所属院系名称', '专业名称', '班级名称', '宿舍区名称', '宿舍楼名称', '宿舍号', '性别', '学籍状态']
+    rows = [
+        ['template_code', 'MASTER_DATA_STUDENTS', 'template_version', '1'],
+        codes,
+        headers,
+        ['只填写第5行及之后；保留模板表头。'],
+        [student_no, '临时导入学生', '2026', '', '', '', '', '', '', '', ''],
+    ]
+    def column_name(number):
+        result = ''
+        while number:
+            number, remainder = divmod(number - 1, 26)
+            result = chr(65 + remainder) + result
+        return result
+    sheet_rows = []
+    for row_number, values in enumerate(rows, start=1):
+        cells = ''.join(
+            f'<c r="{column_name(column_number)}{row_number}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+            for column_number, value in enumerate(values, start=1)
+        )
+        hidden = ' hidden="1"' if row_number in (1, 2) else ''
+        sheet_rows.append(f'<row r="{row_number}"{hidden}>{cells}</row>')
+    files = {
+        '[Content_Types].xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>''',
+        '_rels/.rels': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>''',
+        'xl/workbook.xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="学生导入" sheetId="1" r:id="rId1"/></sheets></workbook>''',
+        'xl/_rels/workbook.xml.rels': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>''',
+        'xl/worksheets/sheet1.xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>''' + ''.join(sheet_rows) + '''</sheetData></worksheet>''',
+    }
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as workbook:
+        for name, content in files.items():
+            workbook.writestr(name, content)
+
+
+def write_academic_week_import_workbook(path, week_no, start_date, end_date, multiplier='', template_code='ACADEMIC_WEEKS'):
+    rows = [
+        ['template_code', template_code, 'template_version', '1'],
+        ['week_no', 'start_date', 'end_date', 'note', 'attendance_penalty_multiplier'],
+        ['周次', '开始日期', '结束日期', '备注', '到课率违纪计入倍数'],
+        ['只填写第5行起的数据；日期YYYY-MM-DD；全部行有效后才能整批确认。'],
+        [str(week_no), start_date, end_date, '浏览器导入回归', multiplier],
+    ]
+    def column_name(number):
+        result = ''
+        while number:
+            number, remainder = divmod(number - 1, 26)
+            result = chr(65 + remainder) + result
+        return result
+    sheet_rows = []
+    for row_number, values in enumerate(rows, start=1):
+        cells = ''.join(
+            f'<c r="{column_name(column_number)}{row_number}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+            for column_number, value in enumerate(values, start=1)
+        )
+        hidden = ' hidden="1"' if row_number in (1, 2) else ''
+        sheet_rows.append(f'<row r="{row_number}"{hidden}>{cells}</row>')
+    files = {
+        '[Content_Types].xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>''',
+        '_rels/.rels': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>''',
+        'xl/workbook.xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="周次导入" sheetId="1" r:id="rId1"/></sheets></workbook>''',
+        'xl/_rels/workbook.xml.rels': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>''',
+        'xl/worksheets/sheet1.xml': '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>''' + ''.join(sheet_rows) + '''</sheetData></worksheet>''',
+    }
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as workbook:
+        for name, content in files.items():
+            workbook.writestr(name, content)
 
 
 def wait_url(url):
@@ -126,12 +197,16 @@ with tempfile.TemporaryDirectory(prefix='four-check-browser-') as temporary:
         # Dates move with the real API clock; expected values come from this fixture.
         anchor = today.year if today.month >= 9 else today.year - 1
         fixture = {'yearStart': f'{anchor}-09-01', 'yearEnd': f'{anchor+1}-08-31', 'weekStart': str(monday), 'weekEnd': str(monday+datetime.timedelta(days=6)), 'otherStart': str(monday+datetime.timedelta(days=7)), 'otherEnd': str(monday+datetime.timedelta(days=13))}
-        sql = f"""
-INSERT INTO academic_years(id,name,start_date,end_date) VALUES('b0000000-0000-0000-0000-000000000001','{anchor}-{anchor+1} 学年','{fixture['yearStart']}','{fixture['yearEnd']}');
-INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES('b0000000-0000-0000-0000-000000000002','b0000000-0000-0000-0000-000000000001','FIRST','浏览器回归学期','{fixture['yearStart']}','{fixture['yearEnd']}');
+        fixture['importDate'] = str(today)
+        week_seed_sql = '' if os.environ.get('BROWSER_SUITE') == 'academic-week-import' else f"""
 INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date,note,attendance_penalty_multiplier) VALUES
 ('b0000000-0000-0000-0000-000000000003','b0000000-0000-0000-0000-000000000002',1,'{fixture['weekStart']}','{fixture['weekEnd']}','浏览器回归 A',1),
 ('b0000000-0000-0000-0000-000000000004','b0000000-0000-0000-0000-000000000002',2,'{fixture['otherStart']}','{fixture['otherEnd']}','浏览器回归 B',1);
+"""
+        sql = f"""
+INSERT INTO academic_years(id,name,start_date,end_date) VALUES('b0000000-0000-0000-0000-000000000001','{anchor}-{anchor+1} 学年','{fixture['yearStart']}','{fixture['yearEnd']}');
+INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES('b0000000-0000-0000-0000-000000000002','b0000000-0000-0000-0000-000000000001','FIRST','浏览器回归学期','{fixture['yearStart']}','{fixture['yearEnd']}');
+{week_seed_sql}
 """
         run(sql_command('-v', 'ON_ERROR_STOP=1'), input=sql.encode())
         ids = {key: str(uuid.uuid4()) for key in ('faculty', 'grade', 'class', 'building', 'room', 'roomB', 'course', 'studentA', 'studentB', 'dormArea', 'dormBuilding', 'dormA', 'dormB')}
@@ -229,6 +304,37 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         cli('run-code', '--filename', str(login))
         report['cases'].append('真实登录、首次改密、重新登录')
         print('PASS: login and password change', flush=True)
+        if ENV.get('BROWSER_SUITE') == 'academic-week-import':
+            fixture['malformedAcademicWeekImportFile'] = str(temp / 'academic-week-corrupt.xlsx')
+            fixture['invalidAcademicWeekImportFile'] = str(temp / 'academic-week-invalid.xlsx')
+            fixture['validAcademicWeekImportFile'] = str(temp / 'academic-week-valid.xlsx')
+            write_academic_week_import_workbook(fixture['malformedAcademicWeekImportFile'], 1, fixture['importDate'], fixture['importDate'], template_code='WRONG_TEMPLATE')
+            write_academic_week_import_workbook(fixture['invalidAcademicWeekImportFile'], 0, fixture['importDate'], fixture['importDate'])
+            write_academic_week_import_workbook(fixture['validAcademicWeekImportFile'], 1, fixture['importDate'], fixture['importDate'])
+            suite = temp / 'academic-week-import.js'
+            suite.write_text((ROOT / 'web/e2e/academic-week-import.js').read_text().replace('__FIXTURE__', json.dumps(fixture, ensure_ascii=False)))
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(suite)))
+            (OUTPUT / 'academic-week-import.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            report['suites'] = {'academic-week-import': payload}
+            report['cases'] += payload['cases']
+            report['browserVersion'] = payload['browserVersion']
+            report['browserErrors'] = payload['browserErrors']
+            batch_counts = run(sql_command('-tAc', "SELECT count(*) FILTER (WHERE status='PREVIEW_HAS_ERRORS'),count(*) FILTER (WHERE status='PREVIEW_READY'),count(*) FILTER (WHERE status='CONFIRMED') FROM academic_week_import_batches"), text=True).stdout.strip()
+            if batch_counts != '1|1|1':
+                raise RuntimeError('Academic week import batch states mismatch: ' + batch_counts)
+            failed_source_count = run(sql_command('-tAc', "SELECT count(*) FROM files WHERE original_name='academic-week-corrupt.xlsx' AND status='FAILED' AND failure_code='ORPHANED_IMPORT_SOURCE' AND object_removed_at IS NOT NULL"), text=True).stdout.strip()
+            if failed_source_count != '1':
+                raise RuntimeError('Unbound malformed workbook source was not discarded: ' + failed_source_count)
+            week_count = run(sql_command('-tAc', "SELECT count(*) FROM semester_weeks WHERE semester_id='b0000000-0000-0000-0000-000000000002' AND week_no=1"), text=True).stdout.strip()
+            if week_count != '1':
+                raise RuntimeError('Confirmed academic week was not persisted exactly once: ' + week_count)
+            audit_counts = run(sql_command('-tAc', "SELECT count(*) FILTER (WHERE action='IMPORT_BATCH_PREVIEWED' AND resource_type='academic_week_import_batch'),count(*) FILTER (WHERE action='IMPORT_BATCH_CONFIRMED' AND resource_type='academic_week_import_batch'),count(*) FILTER (WHERE action='ACADEMIC_CALENDAR_CHANGED' AND resource_type='semesterWeek') FROM audit_logs"), text=True).stdout.strip()
+            if audit_counts != '3|1|1':
+                raise RuntimeError('Academic week import audit counts mismatch: ' + audit_counts)
+            report['cases'].append('PostgreSQL 隔离库确认新增一个周次并写入预览、确认及周次审计')
+            report['status'] = 'passed'
+            print('PASS: academic-week-import', flush=True)
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'department-submission':
             fixture.update(authPassword=changed_password, matrixPassword=secrets.token_hex(20))
             PRIVATE_VALUES.append(fixture['matrixPassword'])
@@ -247,6 +353,9 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         if ENV.get('BROWSER_SUITE') == 'master-data-import':
             fixture['invalidMasterDataImportFile'] = str(temp / 'master-data-malformed.xlsx')
             Path(fixture['invalidMasterDataImportFile']).write_bytes(b'not a workbook')
+            fixture['studentImportFile'] = str(temp / 'master-data-student.xlsx')
+            fixture['studentNo'] = 'AUTO' + RUN_ID.upper()
+            write_student_import_workbook(fixture['studentImportFile'], fixture['studentNo'])
             suite = temp / 'master-data-import.js'
             suite.write_text((ROOT / 'web/e2e/master-data-import.js').read_text().replace('__FIXTURE__', json.dumps(fixture, ensure_ascii=False)))
             payload = json.loads(cli('--raw', 'run-code', '--filename', str(suite)))
@@ -259,6 +368,10 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             if counts != '1|1|1':
                 raise RuntimeError('Malformed master-data upload source compensation mismatch: ' + counts)
             report['cases'].append('无效工作簿被拒绝后，PostgreSQL 记录失败状态且 MinIO 对象已清理')
+            student_count = run(sql_command('-tAc', f"SELECT count(*) FROM students WHERE student_no='{fixture['studentNo']}'"), text=True).stdout.strip()
+            if student_count != '1':
+                raise RuntimeError('Confirmed student import did not persist exactly one student: ' + student_count)
+            report['cases'].append('HTTP 环境 crypto.randomUUID 缺失时，学生确认仍发送接口、显示加载并写入隔离数据库')
             report['status'] = 'passed'
             print('PASS: master-data-import', flush=True)
             raise SystemExit(0)

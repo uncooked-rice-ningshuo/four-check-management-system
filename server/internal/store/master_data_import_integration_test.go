@@ -32,6 +32,20 @@ func TestMasterDataImportBatchIsAtomicAndIdempotentAgainstPostgres(t *testing.T)
 		return fileID
 	}
 	mutation := audit.Metadata{ActorID: actorID, RequestID: "master-data-import-test"}
+	genderOptions, err := database.EnabledDictionaryOptions(ctx, "GENDER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsDictionaryOption(genderOptions, "MALE", "男") {
+		t.Fatalf("enabled gender options omitted the persisted value/label pair: %+v", genderOptions)
+	}
+	statusOptions, err := database.EnabledDictionaryOptions(ctx, "ENROLLMENT_STATUS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsDictionaryOption(statusOptions, "ENROLLED", "在籍") {
+		t.Fatalf("enabled enrollment status options omitted the persisted value/label pair: %+v", statusOptions)
+	}
 	duplicateName := "既有院系-" + unique
 	if _, err := database.Pool.Exec(ctx, `INSERT INTO faculties(id,name,enabled) VALUES($1,$2,false)`, uuid.NewString(), duplicateName); err != nil {
 		t.Fatal(err)
@@ -127,4 +141,13 @@ func TestMasterDataImportBatchIsAtomicAndIdempotentAgainstPostgres(t *testing.T)
 	if err := database.Pool.QueryRow(ctx, `SELECT count(*) FROM faculties WHERE id=$1`, validRecordID).Scan(&partialCount); err != nil || partialCount != 1 {
 		t.Fatalf("committed row count = %d, %v", partialCount, err)
 	}
+}
+
+func containsDictionaryOption(options []masterdataimport.DictionaryOption, value, label string) bool {
+	for _, option := range options {
+		if option.Value == value && option.Label == label {
+			return true
+		}
+	}
+	return false
 }

@@ -57,8 +57,57 @@ func TestCreateWeekRejectsInvalidRange(t *testing.T) {
 	}
 }
 
+func TestCreateWeekRequiresDatesWithinSemester(t *testing.T) {
+	repository := &memoryRepository{calendar: Calendar{Semesters: []Semester{{
+		ID: "semester", StartDate: date("2026-09-01"), EndDate: date("2027-01-31"),
+	}}}}
+	service := NewService(repository)
+	for _, input := range []Week{
+		{SemesterID: "semester", WeekNo: 1, StartDate: date("2026-08-31"), EndDate: date("2026-09-06")},
+		{SemesterID: "semester", WeekNo: 2, StartDate: date("2027-01-31"), EndDate: date("2027-02-01")},
+	} {
+		if _, err := service.CreateWeek(context.Background(), input); err != ErrInvalidInput {
+			t.Fatalf("week outside semester accepted: %+v, error=%v", input, err)
+		}
+	}
+	valid := Week{SemesterID: "semester", WeekNo: 3, StartDate: date("2027-01-25"), EndDate: date("2027-01-31")}
+	if _, err := service.CreateWeek(context.Background(), valid); err != nil {
+		t.Fatalf("week on semester boundary rejected: %v", err)
+	}
+}
+
+func TestUpdateWeekRequiresDatesWithinSemester(t *testing.T) {
+	repository := &memoryRepository{calendar: Calendar{Semesters: []Semester{{
+		ID: "semester", StartDate: date("2026-09-01"), EndDate: date("2027-01-31"),
+	}}}}
+	input := Week{ID: "week", SemesterID: "semester", WeekNo: 1, StartDate: date("2026-08-31"), EndDate: date("2026-09-06")}
+	if _, err := NewService(repository).UpdateWeek(context.Background(), input); err != ErrInvalidInput {
+		t.Fatalf("week update outside semester accepted: error=%v", err)
+	}
+}
+
+func TestUpdateSemesterCannotExcludeExistingWeekDates(t *testing.T) {
+	repository := &memoryRepository{calendar: Calendar{
+		AcademicYears: []AcademicYear{{ID: "year", StartDate: date("2026-09-01"), EndDate: date("2027-08-31")}},
+		Semesters:     []Semester{{ID: "semester", AcademicYearID: "year", Code: "FIRST", StartDate: date("2026-09-01"), EndDate: date("2027-01-31")}},
+		Weeks:         []Week{{ID: "week", SemesterID: "semester", StartDate: date("2027-01-25"), EndDate: date("2027-01-31"), Enabled: true}},
+	}}
+	_, err := NewService(repository).UpdateSemester(context.Background(), Semester{
+		ID: "semester", AcademicYearID: "year", Code: "FIRST", StartDate: date("2026-09-01"), EndDate: date("2027-01-24"),
+	})
+	if err != ErrInvalidInput {
+		t.Fatalf("semester update excluded an existing week: error=%v", err)
+	}
+	if len(repository.mutations) != 0 {
+		t.Fatal("rejected semester update reached the repository")
+	}
+}
+
 func TestWeekPenaltyMultiplierDefaultsToOrdinaryWeek(t *testing.T) {
-	svc := NewService(&memoryRepository{})
+	repo := &memoryRepository{calendar: Calendar{Semesters: []Semester{{
+		ID: "semester", StartDate: date("2026-09-01"), EndDate: date("2027-01-31"),
+	}}}}
+	svc := NewService(repo)
 	input := Week{SemesterID: "semester", WeekNo: 1, StartDate: date("2026-09-07"), EndDate: date("2026-09-13")}
 	defaulted, err := svc.CreateWeek(context.Background(), input)
 	if err != nil || defaulted.AttendancePenaltyMultiplier == nil || *defaulted.AttendancePenaltyMultiplier != 1 {

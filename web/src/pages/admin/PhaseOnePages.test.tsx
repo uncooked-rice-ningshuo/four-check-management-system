@@ -11,7 +11,7 @@ import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
 import type { MasterDataImportBatch, MasterDataKind, MasterDataRecord, MasterDataImportSpec } from '../../entities/masterdata/model/masterData'
-import { assignUserRole, confirmMasterDataImportBatch, createMasterData, downloadMasterDataImportTemplate, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
+import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -294,38 +294,51 @@ describe('阶段一管理页面', () => {
     expect(screen.getByRole('button', { name: '导入Excel' })).toBeInTheDocument()
   })
 
-  it('基础数据 Excel 导入按分类展示字段、预览并确认整批新增', async () => {
+  it('学生 Excel 导入使用抽屉，并在 HTTP 环境没有 crypto.randomUUID 时仍可确认', async () => {
     const spec: MasterDataImportSpec = {
-      kind: 'faculties', templateCode: 'MASTER_DATA_FACULTIES', templateVersion: 1, sheetName: '院系导入', label: '院系',
-      fields: [{ code: 'name', header: '院系名称', required: true, maxRunes: 96, format: '必填，1–96 个字符' }],
+      kind: 'students', templateCode: 'MASTER_DATA_STUDENTS', templateVersion: 1, sheetName: '学生导入', label: '学生',
+      fields: [
+        { code: 'student_no', header: '学号', required: true, maxRunes: 32, format: '必填，文本，1–32 个字符' },
+        { code: 'name', header: '姓名', required: true, maxRunes: 64, format: '必填，1–64 个字符' },
+        { code: 'grade_year', header: '入学年份', required: true, format: '必填，4 位 ASCII 数字' },
+      ],
     }
     const batch: MasterDataImportBatch = {
-      id: 'batch-1', kind: 'faculties', status: 'PREVIEW_READY', templateVersion: 1, fields: spec.fields,
+      id: 'batch-1', kind: 'students', status: 'PREVIEW_READY', templateVersion: 1, fields: spec.fields,
       totalRows: 1, validRows: 1, invalidRows: 0, version: 1, createdAt: '2026-10-24T00:00:00Z',
-      rows: [{ rowNo: 5, values: { name: '测试学院' }, status: 'VALID', errors: [], record: { id: 'faculty-1', kind: 'faculties', name: '测试学院', enabled: true } }],
+      rows: [{ rowNo: 5, values: { student_no: 'S20260001', name: '测试学生', grade_year: '2026' }, status: 'VALID', errors: [] }],
     }
     vi.mocked(getMasterDataImportSpec).mockResolvedValue(spec)
-    vi.mocked(downloadMasterDataImportTemplate).mockResolvedValue({ blob: new Blob(), headers: new Headers() })
     vi.mocked(previewMasterDataImport).mockResolvedValue(batch)
-    vi.mocked(confirmMasterDataImportBatch).mockResolvedValue({ batchId: 'batch-1', kind: 'faculties', status: 'CONFIRMED', importedRows: 1, version: 2 })
+    let resolveConfirmation!: (result: Awaited<ReturnType<typeof confirmMasterDataImportBatch>>) => void
+    vi.mocked(confirmMasterDataImportBatch).mockReturnValue(new Promise(resolve => { resolveConfirmation = resolve }))
     renderPage(<MasterDataPage />)
 
-    fireEvent.click(await screen.findByRole('menuitem', { name: '院系' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '学生' }))
     fireEvent.click(await screen.findByRole('button', { name: '导入Excel' }))
-    const dialog = await screen.findByRole('dialog', { name: '导入院系' })
-    expect(await within(dialog).findByText(/院系名称（必填）/)).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '下载当前分类模板' }))
-    await waitFor(() => expect(downloadMasterDataImportTemplate).toHaveBeenCalledWith('faculties'))
+    const dialog = await screen.findByRole('dialog', { name: '导入学生' })
+    expect(dialog.closest('.ant-drawer-content-wrapper')).toBeInTheDocument()
+    expect(await within(dialog).findByText(/学号（必填）/)).toBeInTheDocument()
     const input = within(dialog).getByLabelText('选择基础数据导入文件')
-    fireEvent.change(input, { target: { files: [new File(['workbook'], 'faculties.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })] } })
+    fireEvent.change(input, { target: { files: [new File(['workbook'], 'students.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })] } })
     fireEvent.click(within(dialog).getByRole('button', { name: '上传并预览' }))
 
-    expect(await within(dialog).findByText('测试学院')).toBeVisible()
-    expect(previewMasterDataImport).toHaveBeenCalledWith('faculties', expect.objectContaining({ name: 'faculties.xlsx' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认新增' }))
-    fireEvent.click(await screen.findByRole('button', { name: '确认导入' }))
-    await waitFor(() => expect(confirmMasterDataImportBatch).toHaveBeenCalledWith('faculties', 'batch-1', 1, expect.any(String)))
-    expect(await screen.findByText('成功新增 1 条院系数据')).toBeVisible()
+    expect(await within(dialog).findByText('测试学生')).toBeVisible()
+    expect(previewMasterDataImport).toHaveBeenCalledWith('students', expect.objectContaining({ name: 'students.xlsx' }))
+
+    const originalRandomUUID = Object.getOwnPropertyDescriptor(window.crypto, 'randomUUID')
+    Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: undefined })
+    try {
+      fireEvent.click(within(dialog).getByRole('button', { name: '确认新增' }))
+      fireEvent.click(await screen.findByRole('button', { name: '确认导入' }))
+      await waitFor(() => expect(confirmMasterDataImportBatch).toHaveBeenCalledWith('students', 'batch-1', 1, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)))
+      await waitFor(() => expect(dialog.querySelector('.ant-btn-loading')).not.toBeNull())
+      resolveConfirmation({ batchId: 'batch-1', kind: 'students', status: 'CONFIRMED', importedRows: 1, version: 2 })
+      expect(await screen.findByText('成功新增 1 条学生数据')).toBeVisible()
+    } finally {
+      if (originalRandomUUID) Object.defineProperty(window.crypto, 'randomUUID', originalRandomUUID)
+      else Reflect.deleteProperty(window.crypto, 'randomUUID')
+    }
   }, 15_000)
 
   it('课程分类不显示基础数据 Excel 导入入口', async () => {

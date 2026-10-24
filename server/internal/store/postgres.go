@@ -57,6 +57,7 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.department_submissions') IS NOT NULL
 		AND to_regclass('public.department_submission_revisions') IS NOT NULL
 		AND to_regclass('public.master_data_import_batches') IS NOT NULL
+		AND to_regclass('public.academic_week_import_batches') IS NOT NULL
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')
 			AND tgname='department_submission_revisions_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
@@ -180,7 +181,8 @@ func (p *Postgres) MarkImportSourceDiscarded(ctx context.Context, file storage.F
 		}
 		var bound bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM import_batches WHERE original_file_id=$1)
-			OR EXISTS(SELECT 1 FROM master_data_import_batches WHERE source_file_id=$1)`, file.ID).Scan(&bound); err != nil {
+			OR EXISTS(SELECT 1 FROM master_data_import_batches WHERE source_file_id=$1)
+			OR EXISTS(SELECT 1 FROM academic_week_import_batches WHERE source_file_id=$1)`, file.ID).Scan(&bound); err != nil {
 			return err
 		}
 		if bound {
@@ -1330,6 +1332,16 @@ func (p *Postgres) CreateSemester(ctx context.Context, value academic.Semester, 
 
 func (p *Postgres) UpdateSemester(ctx context.Context, value academic.Semester, mutation audit.Mutation) (academic.Semester, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		if err := lockAcademicWeekWrites(ctx, tx); err != nil {
+			return err
+		}
+		var hasOutOfRangeWeek bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM semester_weeks WHERE semester_id=$1 AND (start_date<$2 OR end_date>$3))`, value.ID, value.StartDate, value.EndDate).Scan(&hasOutOfRangeWeek); err != nil {
+			return err
+		}
+		if hasOutOfRangeWeek {
+			return academic.ErrInvalidInput
+		}
 		_, execErr := tx.Exec(ctx, `UPDATE semesters SET academic_year_id=$2,code=$3,name=$4,start_date=$5,end_date=$6,enabled=$7 WHERE id=$1`, value.ID, value.AcademicYearID, value.Code, value.Name, value.StartDate, value.EndDate, value.Enabled)
 		return execErr
 	})
@@ -1338,6 +1350,12 @@ func (p *Postgres) UpdateSemester(ctx context.Context, value academic.Semester, 
 
 func (p *Postgres) CreateWeek(ctx context.Context, value academic.Week, mutation audit.Mutation) (academic.Week, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		if err := lockAcademicWeekWrites(ctx, tx); err != nil {
+			return err
+		}
+		if err := validateAcademicWeekWrite(ctx, tx, value, ""); err != nil {
+			return err
+		}
 		_, execErr := tx.Exec(ctx, `INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date,enabled,note,attendance_penalty_multiplier) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note, value.AttendancePenaltyMultiplier)
 		return execErr
 	})
@@ -1346,6 +1364,12 @@ func (p *Postgres) CreateWeek(ctx context.Context, value academic.Week, mutation
 
 func (p *Postgres) UpdateWeek(ctx context.Context, value academic.Week, mutation audit.Mutation) (academic.Week, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		if err := lockAcademicWeekWrites(ctx, tx); err != nil {
+			return err
+		}
+		if err := validateAcademicWeekWrite(ctx, tx, value, value.ID); err != nil {
+			return err
+		}
 		_, execErr := tx.Exec(ctx, `UPDATE semester_weeks SET semester_id=$2,week_no=$3,start_date=$4,end_date=$5,enabled=$6,note=$7,attendance_penalty_multiplier=$8 WHERE id=$1`, value.ID, value.SemesterID, value.WeekNo, value.StartDate, value.EndDate, value.Enabled, value.Note, value.AttendancePenaltyMultiplier)
 		return execErr
 	})

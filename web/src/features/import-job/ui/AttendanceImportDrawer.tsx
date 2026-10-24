@@ -5,6 +5,7 @@ import { Alert, Button, Descriptions, Drawer, Modal, Progress, Select, Space, St
 import { useMemo, useRef, useState } from 'react'
 import type { InspectionContext } from '../../../entities/inspection/model/inspection'
 import { ApiError } from '../../../shared/api/httpClient'
+import { createIdempotencyKey } from '../../../shared/utils/idempotencyKey'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
 import { useConfirmImport, useImportBatch, useImportRows, useImportTemplate, useUploadAttendanceImport } from '../hooks/useImportBatch'
 import { useImportContext } from '../hooks/useImportContext'
@@ -118,7 +119,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
     // A lost response must retry the same logical request, even if it committed.
     const attempt = confirmationAttempt.current
     if (attempt?.batchId !== activeBatch.id || attempt.version !== activeBatch.version) {
-      confirmationAttempt.current = { batchId: activeBatch.id, version: activeBatch.version, key: crypto.randomUUID() }
+      confirmationAttempt.current = { batchId: activeBatch.id, version: activeBatch.version, key: createIdempotencyKey() }
     }
     setConfirmOpen(true)
   }

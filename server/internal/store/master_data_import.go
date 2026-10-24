@@ -81,23 +81,23 @@ func (p *Postgres) FindMasterDataImportRecords(ctx context.Context, kind string,
 	return result, rows.Err()
 }
 
-func (p *Postgres) EnabledDictionaryValues(ctx context.Context, code string) ([]string, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT i.value
+func (p *Postgres) EnabledDictionaryOptions(ctx context.Context, code string) ([]masterdataimport.DictionaryOption, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT i.value, i.label
 		FROM dictionary_items i JOIN dictionary_types t ON t.id=i.type_id
 		WHERE t.code=$1 AND t.enabled AND i.enabled ORDER BY i.sort_order,i.value`, strings.ToUpper(strings.TrimSpace(code)))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	values := make([]string, 0)
+	options := make([]masterdataimport.DictionaryOption, 0)
 	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
+		var option masterdataimport.DictionaryOption
+		if err := rows.Scan(&option.Value, &option.Label); err != nil {
 			return nil, err
 		}
-		values = append(values, value)
+		options = append(options, option)
 	}
-	return values, rows.Err()
+	return options, rows.Err()
 }
 
 func (p *Postgres) CreateMasterDataImportBatch(ctx context.Context, batch masterdataimport.Batch, metadata audit.Metadata) error {

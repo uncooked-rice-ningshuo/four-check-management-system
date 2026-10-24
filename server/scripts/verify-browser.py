@@ -107,10 +107,15 @@ def write_student_import_workbook(path, student_no):
 
 def write_academic_week_import_workbook(path, week_no, start_date, end_date, multiplier='', template_code='ACADEMIC_WEEKS'):
     rows = [
-        ['template_code', template_code, 'template_version', '1'],
+        ['template_code', template_code, 'template_version', '2'],
         ['week_no', 'start_date', 'end_date', 'note', 'attendance_penalty_multiplier'],
         ['周次', '开始日期', '结束日期', '备注', '到课率违纪计入倍数'],
-        ['只填写第5行起的数据；日期YYYY-MM-DD；全部行有效后才能整批确认。'],
+        ['整数；必填，ASCII 十进制整数，范围 1–60；目标学期内不能重复。',
+         '日期文本；必填，严格 YYYY-MM-DD；必须位于所选学期范围内。',
+         '日期文本；必填，严格 YYYY-MM-DD；不得早于开始日期，且必须位于所选学期范围内。',
+         '文本；选填，最多 255 个 Unicode 字符；空白按空备注处理。',
+         '整数；选填，只能填写 1 或 2；留空按普通周 1 倍处理。'],
+        ['1', '2026-09-01', '2026-09-07', '示例备注', '1'],
         [str(week_no), start_date, end_date, '浏览器导入回归', multiplier],
     ]
     def column_name(number):

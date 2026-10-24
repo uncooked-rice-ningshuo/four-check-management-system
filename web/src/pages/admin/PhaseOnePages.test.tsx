@@ -11,7 +11,7 @@ import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
 import type { MasterDataImportBatch, MasterDataKind, MasterDataRecord, MasterDataImportSpec } from '../../entities/masterdata/model/masterData'
-import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getAcademicCalendar, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
+import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser } from '../../shared/api/adminApi'
 
 vi.mock('../../shared/api/adminApi', () => ({
   getRegistrationOptions: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
@@ -514,24 +514,18 @@ describe('阶段一管理页面', () => {
     expect(within(await screen.findByRole('dialog', { name: '新增院系' })).queryByLabelText('院系编码')).not.toBeInTheDocument()
   })
 
-  it('课程支持多班级和学期星期节次复合排课', async () => {
-    vi.mocked(getAcademicCalendar).mockResolvedValue({
-      academicYears: [],
-      semesters: [{ id: 'semester-1', academicYearId: 'year-1', code: 'FIRST', name: '2026—2027 学年第一学期', startDate: '2026-09-01T00:00:00Z', endDate: '2027-01-15T00:00:00Z', enabled: true }],
-      weeks: [],
-    })
+  it('课程主数据只维护课程名', async () => {
     renderPage(<MasterDataPage />)
 
     fireEvent.click(await screen.findByRole('menuitem', { name: '课程' }))
     fireEvent.click(await screen.findByRole('button', { name: '新增课程' }))
     const dialog = await screen.findByRole('dialog', { name: '新增课程' })
-    expect(within(dialog).queryByLabelText('课程编码')).not.toBeInTheDocument()
-    expect(within(dialog).getByLabelText('授课班级')).toHaveAttribute('role', 'combobox')
-    expect(within(dialog).getByLabelText('所属学期')).toHaveAttribute('role', 'combobox')
-    expect(within(dialog).getByLabelText('星期')).toHaveAttribute('role', 'combobox')
-    expect(within(dialog).getByLabelText('开始节次')).toHaveAttribute('aria-valuemin', '1')
-    expect(within(dialog).getByLabelText('结束节次')).toHaveAttribute('aria-valuemax', '10')
-    expect(within(dialog).getByText('45 分钟/节')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('课程名')).toHaveAttribute('maxLength', '128')
+    expect(within(dialog).queryByLabelText('授课教师')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('授课班级')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('所属学期')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('星期')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('开始节次')).not.toBeInTheDocument()
   })
 
   it('年级可独立维护且学生表单从年级基础数据中选择', async () => {

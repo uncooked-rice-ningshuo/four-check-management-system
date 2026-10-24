@@ -30,7 +30,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if scope.TypeCode == inspection.InspectionTypeMorning && q.Kind != "classes" && q.Kind != "students" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if (scope.TypeCode == inspection.InspectionTypeAttendance || scope.TypeCode == inspection.InspectionTypeUnattended) && q.Kind != "classes" && q.Kind != "students" && q.Kind != "courses" && q.Kind != "classrooms" && (q.Kind != "periods" || scope.TypeCode != inspection.InspectionTypeAttendance) {
+	if (scope.TypeCode == inspection.InspectionTypeAttendance || scope.TypeCode == inspection.InspectionTypeUnattended) && q.Kind != "classes" && q.Kind != "students" && q.Kind != "courses" && q.Kind != "classrooms" {
 		return result, inspection.ErrInspectionRequest
 	}
 	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" {
@@ -87,29 +87,20 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		base += " JOIN students s ON s.class_id=c.id "
 		where += " AND s.enabled"
 		columns = "s.id,s.name || '（' || s.student_no || '，' || c.name || '）' AS label"
-	case "courses", "classrooms":
-		base += " JOIN course_classes cc ON cc.class_id=c.id JOIN courses co ON co.id=cc.course_id JOIN course_schedules cs ON cs.course_id=co.id AND cs.semester_id=sem.id JOIN classrooms cr ON cr.id=cs.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id "
-		where += " AND co.enabled AND cr.enabled AND b.enabled"
-		if q.Date != "" {
-			args = append(args, q.Date)
-			where += fmt.Sprintf(" AND cs.weekday=EXTRACT(ISODOW FROM $%d::date)", len(args))
+	case "courses":
+		// A course is a label in the inspection record; its options do not depend
+		// on a selected class, date, classroom, semester schedule, or period.
+		base += " CROSS JOIN courses co "
+		where += " AND co.enabled"
+		if q.Keyword != "" {
+			args = append(args, q.Keyword)
+			where += fmt.Sprintf(" AND co.name ILIKE '%%' || $%d || '%%'", len(args))
 		}
-		if q.Kind == "courses" {
-			columns = "co.id,co.name AS label"
-		} else {
-			args = append(args, q.CourseID)
-			where += fmt.Sprintf(" AND co.id=$%d::uuid", len(args))
-			columns = "cr.id,b.name || ' ' || cr.room_no AS label"
-		}
-	case "periods":
-		base += ` JOIN course_classes cc ON cc.class_id=c.id JOIN courses co ON co.id=cc.course_id
- JOIN course_schedules cs ON cs.course_id=co.id AND cs.semester_id=sem.id
- JOIN classrooms cr ON cr.id=cs.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id
- CROSS JOIN LATERAL generate_series(cs.start_section::int,cs.end_section::int) first_section
- CROSS JOIN LATERAL generate_series(first_section,cs.end_section::int) last_section `
-		args = append(args, q.CourseID, q.ClassroomID, q.Date)
-		where += fmt.Sprintf(" AND co.enabled AND cr.enabled AND b.enabled AND co.id=$%d::uuid AND cr.id=$%d::uuid AND cs.weekday=EXTRACT(ISODOW FROM $%d::date)", len(args)-2, len(args)-1, len(args))
-		columns = "first_section::text || '-' || last_section::text AS id,'第 ' || first_section::text || CASE WHEN first_section=last_section THEN '' ELSE '—' || last_section::text END || ' 节' AS label"
+		columns = "co.id,co.name AS label"
+	case "classrooms":
+		base += " CROSS JOIN classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id "
+		where += " AND cr.enabled AND b.enabled"
+		columns = "cr.id,b.name || ' ' || cr.room_no AS label"
 	case "dormitories":
 		// Late-return writes require the student's assigned dormitory; never offer
 		// the whole housing catalog or rooms belonging to an unrelated student.

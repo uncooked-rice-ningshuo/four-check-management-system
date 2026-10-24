@@ -2,7 +2,8 @@ package inspection
 
 import (
 	"context"
-	"time"
+	"strings"
+	"unicode/utf8"
 )
 
 // EntryOptionQuery selects references within an explicit destination scope.
@@ -16,9 +17,9 @@ type EntryOptionQuery struct {
 	ClassID          string `form:"classId"`
 	StudentID        string `form:"studentId"`
 	CourseID         string `form:"courseId"`
-	Date             string `form:"date"`
 	ClassroomID      string `form:"classroomId"`
 	AreaID           string `form:"areaId"`
+	Keyword          string `form:"keyword"`
 	Kind             string `form:"kind"`
 	Page             int    `form:"page"`
 	PageSize         int    `form:"pageSize"`
@@ -54,6 +55,10 @@ func NewEntryOptionService(r EntryOptionRepository, p manualPermissions) *EntryO
 }
 
 func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor, q EntryOptionQuery) (EntryOptionPage, error) {
+	q.Keyword = strings.TrimSpace(q.Keyword)
+	if utf8.RuneCountInString(q.Keyword) > 128 || (q.Keyword != "" && q.Kind != "courses") {
+		return EntryOptionPage{}, ErrInspectionRequest
+	}
 	if actor.IsMember {
 		departmentID, err := ResolveEntryDepartment(actor, q.DepartmentID)
 		if err != nil {
@@ -75,26 +80,13 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 			*id = v
 		}
 	}
-	if q.Date != "" {
-		parsed, err := time.Parse("2006-01-02", q.Date)
-		if err != nil || parsed.Format("2006-01-02") != q.Date || (q.Kind != "courses" && q.Kind != "classrooms" && q.Kind != "periods") {
-			return EntryOptionPage{}, ErrInspectionRequest
-		}
-	}
 	switch q.Kind {
 	case "classes":
-	case "students", "courses":
+	case "students":
 		if q.ClassID == "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
-	case "classrooms":
-		if q.ClassID == "" || q.CourseID == "" {
-			return EntryOptionPage{}, ErrInspectionRequest
-		}
-	case "periods":
-		if q.ClassID == "" || q.CourseID == "" || q.ClassroomID == "" || q.Date == "" {
-			return EntryOptionPage{}, ErrInspectionRequest
-		}
+	case "courses", "classrooms":
 	case "dormitories":
 		if q.ClassID == "" || q.StudentID == "" {
 			return EntryOptionPage{}, ErrInspectionRequest
@@ -118,7 +110,7 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 	default:
 		return EntryOptionPage{}, ErrInspectionRequest
 	}
-	if q.Page < 0 || q.PageSize < 0 || q.PageSize > 200 || q.Page > 1000000 {
+	if q.Page < 0 || q.PageSize < 0 || q.PageSize > 200 || (q.Kind == "courses" && q.PageSize > 50) || q.Page > 1000000 {
 		return EntryOptionPage{}, ErrInspectionRequest
 	}
 	if q.Page == 0 {

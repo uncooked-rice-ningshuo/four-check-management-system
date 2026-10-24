@@ -39,11 +39,80 @@ func TestTemplateRoundTripsThroughLockedParser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workbook.TemplateCode != TemplateCode || workbook.TemplateVersion != 1 || len(workbook.Rows) != 1 || workbook.Rows[0].Values["week_no"] != "1" {
+	if workbook.TemplateCode != TemplateCode || workbook.TemplateVersion != 2 || len(workbook.Rows) != 1 || workbook.Rows[0].RowNo != 6 || workbook.Rows[0].Values["week_no"] != "1" {
 		t.Fatalf("parsed workbook = %+v", workbook)
 	}
 	if got := len(GetSpec().Fields); got != 5 {
 		t.Fatalf("field count = %d", got)
+	}
+}
+
+func TestTemplateShowsFieldFormatsAndExampleBeforeDataRows(t *testing.T) {
+	content, err := TemplateXLSX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+
+	rows, err := book.GetRows(SheetName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 5 {
+		t.Fatalf("template rows = %d, want format and example rows", len(rows))
+	}
+	wantFormats := make([]string, len(fields))
+	for index, field := range fields {
+		wantFormats[index] = field.Format
+	}
+	if len(rows[3]) != len(wantFormats) {
+		t.Fatalf("row 4 format columns = %d, want %d", len(rows[3]), len(wantFormats))
+	}
+	for index := range wantFormats {
+		if rows[3][index] != wantFormats[index] {
+			t.Errorf("row 4 column %d format = %q, want %q", index+1, rows[3][index], wantFormats[index])
+		}
+	}
+	wantExample := []string{"1", "2026-09-01", "2026-09-07", "示例备注", "1"}
+	if len(rows[4]) != len(wantExample) {
+		t.Fatalf("row 5 example columns = %d, want %d", len(rows[4]), len(wantExample))
+	}
+	for index := range wantExample {
+		if rows[4][index] != wantExample[index] {
+			t.Errorf("row 5 column %d example = %q, want %q", index+1, rows[4][index], wantExample[index])
+		}
+	}
+
+	parser, err := NewParser(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parser.Parse("weeks.xlsx", content)
+	if err != nil {
+		t.Fatalf("template example row should be ignored: %v", err)
+	}
+	if len(parsed.Rows) != 0 {
+		t.Fatalf("template example was parsed as business data: %+v", parsed.Rows)
+	}
+
+	oldTemplate, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldTemplate.Close()
+	if err := oldTemplate.SetCellValue(SheetName, "D1", 1); err != nil {
+		t.Fatal(err)
+	}
+	oldContent, err := oldTemplate.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parser.Parse("old-weeks.xlsx", oldContent.Bytes()); err == nil {
+		t.Fatal("parser accepted version 1 workbook with the old data start row")
 	}
 }
 
@@ -96,8 +165,8 @@ func TestPreviewAppliesRowRulesAndShowsTargetContext(t *testing.T) {
 func TestValidateRowsRejectsDatesOutsideSemesterAndInclusiveOverlap(t *testing.T) {
 	semester := academic.Semester{ID: "semester", StartDate: date("2026-09-01"), EndDate: date("2027-01-31")}
 	parsed := []importjob.ParsedRow{
-		{RowNo: 5, Values: map[string]string{"week_no": "1", "start_date": "2026-08-31", "end_date": "2026-09-06"}},
-		{RowNo: 6, Values: map[string]string{"week_no": "2", "start_date": "2026-09-06", "end_date": "2026-09-12"}},
+		{RowNo: 6, Values: map[string]string{"week_no": "1", "start_date": "2026-08-31", "end_date": "2026-09-06"}},
+		{RowNo: 7, Values: map[string]string{"week_no": "2", "start_date": "2026-09-06", "end_date": "2026-09-12"}},
 	}
 	rows, _ := validateRows(parsed, semester, nil, date("2026-09-01"))
 	if !hasFieldError(rows[0], "start_date") || !hasFieldError(rows[0], "start_date") || !hasFieldError(rows[1], "start_date") {
@@ -126,7 +195,7 @@ func workbookWithRows(t *testing.T, rows [][]any) []byte {
 	}
 	defer book.Close()
 	for index, row := range rows {
-		cell, err := excelize.CoordinatesToCellName(1, index+5)
+		cell, err := excelize.CoordinatesToCellName(1, index+6)
 		if err != nil {
 			t.Fatal(err)
 		}

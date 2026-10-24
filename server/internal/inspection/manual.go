@@ -26,7 +26,7 @@ type ManualAttendanceInput struct {
 	ClassName        string  `json:"className"`
 	StudentNo        string  `json:"studentNo"`
 	StudentName      string  `json:"studentName"`
-	CourseName       string  `json:"courseName"`
+	CourseID         string  `json:"courseId"`
 	Classroom        string  `json:"classroom"`
 	Date             string  `json:"date"`
 	Time             string  `json:"time"`
@@ -99,7 +99,7 @@ func (s *ManualService) Create(ctx context.Context, actor ManualActor, input Man
 }
 
 func (s *ManualService) prepare(ctx context.Context, actor ManualActor, input ManualAttendanceInput, ownerID string) (AttendanceRecord, error) {
-	for _, value := range []string{actor.ID, input.SemesterID, input.WeekID, input.InspectionTypeID, input.ClassID, input.Grade} {
+	for _, value := range []string{actor.ID, input.SemesterID, input.WeekID, input.InspectionTypeID, input.ClassID, input.CourseID, input.Grade} {
 		if strings.TrimSpace(value) == "" {
 			return AttendanceRecord{}, ErrInvalidAttendanceRecord
 		}

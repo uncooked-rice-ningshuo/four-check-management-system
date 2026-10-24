@@ -18,7 +18,7 @@ describe('attendanceApi', () => {
   it('posts manual business fields using the shared transport', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'record', source: 'MANUAL' }), { status: 201 }))
     vi.stubGlobal('fetch', fetchMock)
-    const input = { semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: 'department', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', studentName: '虚构同学', courseName: '数据结构', classroom: '博学楼 101', date: '2026-09-06', time: '08:00', period: '1-2', absenceHours: 2 }
+    const input = { semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: 'department', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', studentName: '虚构同学', courseId: 'course', classroom: '博学楼 101', date: '2026-09-06', time: '08:00', period: '1-2', absenceHours: 2 }
     await attendanceApi.create(input)
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/inspections/attendance', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }))
   })

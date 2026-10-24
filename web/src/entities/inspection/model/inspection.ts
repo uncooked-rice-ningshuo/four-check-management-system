@@ -64,7 +64,7 @@ export type ManualAttendanceInput = InspectionContext & {
   className: string
   studentNo: string
   studentName: string
-  courseName: string
+  courseId: string
   classroom: string
   date: string
   time: string

@@ -11,6 +11,15 @@ it('loads every reference page and preserves the explicit destination scope', as
  expect(request.mock.calls[1][0]).toContain('page=2')
  expect(request.mock.calls[1][0]).toContain('departmentId=department')
 })
+it('loads one fuzzy course search page with the bounded server page size', async () => {
+ request.mockResolvedValueOnce({ items: [{ id: 'course-1', label: '软件工程' }], total: 21, page: 2, pageSize: 20 })
+ const page = await courseInspectionApi.courseOptions({ semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: 'department', keyword: '软件', page: 2, pageSize: 20 })
+ expect(page.items).toEqual([{ id: 'course-1', label: '软件工程' }])
+ expect(request.mock.calls[0][0]).toContain('kind=courses')
+ expect(request.mock.calls[0][0]).toContain('keyword=%E8%BD%AF%E4%BB%B6')
+ expect(request.mock.calls[0][0]).toContain('page=2')
+ expect(request.mock.calls[0][0]).toContain('pageSize=20')
+})
 it('rejects malformed or stalled pages instead of displaying a successful empty state', async () => {
  request.mockResolvedValueOnce({total:0,page:1,pageSize:200})
  await expect(courseInspectionApi.contextOptions({purpose:'view',kind:'semesters'})).rejects.toThrow()

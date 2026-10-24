@@ -37,9 +37,6 @@ func (m *memoryRepository) MasterDataExists(_ context.Context, kind, id string) 
 	_, ok := m.records[key(kind, id)]
 	return ok, nil
 }
-func (m *memoryRepository) AcademicSemesterExists(_ context.Context, id string) (bool, error) {
-	return id == "semester-1", nil
-}
 func (m *memoryRepository) CreateMasterData(_ context.Context, actorID string, record Record, mutation audit.Mutation) (Record, error) {
 	m.records[key(record.Kind, record.ID)] = record
 	m.changes = append(m.changes, Change{EntityType: record.Kind, EntityID: record.ID, Action: "CREATE", ActorID: actorID})
@@ -167,39 +164,23 @@ func TestUpdateRejectsImmutableCode(t *testing.T) {
 	}
 }
 
-func TestCourseSupportsMultipleClassesAndStructuredSchedules(t *testing.T) {
-	repo := newMemoryRepository()
-	repo.records[key(KindClass, "class-1")] = Record{ID: "class-1", Kind: KindClass, Enabled: true}
-	repo.records[key(KindClass, "class-2")] = Record{ID: "class-2", Kind: KindClass, Enabled: true}
-	repo.records[key(KindClassroom, "room-1")] = Record{ID: "room-1", Kind: KindClassroom, Enabled: true}
-	created, err := NewService(repo).Create(context.Background(), "admin", Record{
-		Kind: KindCourse, Name: "数据结构", ClassIDs: []string{"class-1", "class-2"},
-		Schedules: []CourseSchedule{{SemesterID: "semester-1", Weekday: 1, StartSection: 1, EndSection: 2, ClassroomID: "room-1"}},
+func TestCourseRequiresOnlyANameAndIgnoresLegacyRelationships(t *testing.T) {
+	created, err := NewService(newMemoryRepository()).Create(context.Background(), "admin", Record{
+		Kind: KindCourse, Name: " 数据结构 ", FacultyID: "legacy-faculty", ClassID: "legacy-class", ClassroomID: "legacy-room",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.ClassIDs) != 2 || len(created.Schedules) != 1 || created.Schedules[0].ID == "" {
+	if created.Name != "数据结构" || created.FacultyID != "" || created.ClassID != "" || created.ClassroomID != "" {
 		t.Fatalf("created = %+v", created)
 	}
 }
 
-func TestCourseRejectsInvalidOrOverlappingSchedules(t *testing.T) {
-	tests := []struct {
-		name      string
-		schedules []CourseSchedule
-	}{
-		{name: "period above ten", schedules: []CourseSchedule{{SemesterID: "semester-1", Weekday: 1, StartSection: 9, EndSection: 11}}},
-		{name: "end before start", schedules: []CourseSchedule{{SemesterID: "semester-1", Weekday: 1, StartSection: 4, EndSection: 3}}},
-		{name: "overlap", schedules: []CourseSchedule{{SemesterID: "semester-1", Weekday: 1, StartSection: 1, EndSection: 2}, {SemesterID: "semester-1", Weekday: 1, StartSection: 2, EndSection: 3}}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := NewService(newMemoryRepository()).Create(context.Background(), "admin", Record{Kind: KindCourse, Name: "数据结构", Schedules: test.schedules})
-			if !errors.Is(err, ErrInvalidSchedule) {
-				t.Fatalf("error = %v, want %v", err, ErrInvalidSchedule)
-			}
-		})
+func TestCourseRejectsBlankOrOverlongNames(t *testing.T) {
+	for _, name := range []string{"", "   ", string(make([]rune, 129))} {
+		if _, err := NewService(newMemoryRepository()).Create(context.Background(), "admin", Record{Kind: KindCourse, Name: name}); !errors.Is(err, ErrInvalidRecord) {
+			t.Errorf("course name length %d error = %v, want %v", len([]rune(name)), err, ErrInvalidRecord)
+		}
 	}
 }
 

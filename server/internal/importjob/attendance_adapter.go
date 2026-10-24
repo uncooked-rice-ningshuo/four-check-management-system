@@ -58,6 +58,7 @@ type AttendanceReferenceLookup struct {
 	StudentNos       []string
 	ClassNames       []string
 	CourseNames      []string
+	CourseIDs        []string
 	ClassroomCodes   []string
 }
 
@@ -69,13 +70,7 @@ type AttendanceClassReference struct {
 	ID, Name, Grade string
 }
 
-type AttendanceCourseReference struct {
-	ID, Name, ClassID string
-	ClassroomIDs      []string
-	// ScheduleKeys bind each classroom to an ISO weekday (1=Monday, 7=Sunday).
-	ScheduleKeys   []string
-	ScheduleRanges []string
-}
+type AttendanceCourseReference struct{ ID, Name string }
 
 type AttendanceClassroomReference struct {
 	ID, Code string
@@ -85,7 +80,8 @@ type AttendanceReferences struct {
 	WeekPenaltyMultiplier *int
 	StudentsByNo          map[string]AttendanceStudentReference
 	ClassesByName         map[string]AttendanceClassReference
-	CoursesByClassAndName map[string]AttendanceCourseReference
+	CoursesByName         map[string]AttendanceCourseReference
+	CoursesByID           map[string]AttendanceCourseReference
 	ClassroomsByCode      map[string]AttendanceClassroomReference
 }
 
@@ -169,10 +165,10 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	result := AttendanceValidationRow{RowNo: row.RowNo, Errors: make([]ValidationError, 0)}
 	value := func(field string) string { return strings.TrimSpace(row.Values[field]) }
 	studentNo, studentName, className := value("student_no"), value("student_name"), value("class_name")
-	courseName, classroomCode := value("course_name"), value("classroom_code")
+	courseName, courseID, classroomCode := value("course_name"), value("course_id"), value("classroom_code")
 	period, remark := value("period"), value("remark")
 	for field, fieldValue := range map[string]string{
-		"student_no": studentNo, "student_name": studentName, "class_name": className, "course_name": courseName,
+		"student_no": studentNo, "student_name": studentName, "class_name": className,
 		"absence_date": value("absence_date"), "absence_time": value("absence_time"), "period": period,
 		"absence_hours": value("absence_hours"), "classroom_code": classroomCode,
 	} {
@@ -180,13 +176,18 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 			result.Errors = append(result.Errors, validationError(ErrorRequiredField, field, "必填字段不能为空", "填写模板要求的值"))
 		}
 	}
+	if courseName == "" && courseID == "" {
+		result.Errors = append(result.Errors, validationError(ErrorRequiredField, "course_name", "必填字段不能为空", "选择或填写有效课程名"))
+	}
 	student, studentOK := references.StudentsByNo[studentNo]
 	class, classOK := references.ClassesByName[className]
 	var course AttendanceCourseReference
-	courseOK := false
-	if classOK {
-		course, courseOK = references.CoursesByClassAndName[attendanceCourseKey(class.ID, courseName)]
+	if courseID != "" {
+		course, _ = references.CoursesByID[courseID]
+	} else if courseName != "" {
+		course, _ = references.CoursesByName[courseName]
 	}
+	courseOK := course.ID != ""
 	classroom, classroomOK := references.ClassroomsByCode[classroomCode]
 	if studentNo != "" && !studentOK {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "student_no", "学号不存在或不在当前数据范围", "核对学号及当前检查范围"))
@@ -194,8 +195,8 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	if className != "" && !classOK {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "class_name", "班级不存在或不在当前数据范围", "使用系统中的有效班级名称"))
 	}
-	if courseName != "" && !courseOK {
-		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "course_name", "课程不存在或不在当前数据范围", "使用系统中的有效课程名称"))
+	if (courseName != "" || courseID != "") && !courseOK {
+		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "course_name", "课程不存在或已停用", "选择系统中可用的课程名"))
 	}
 	if classroomCode != "" && !classroomOK {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceNotFound, "classroom_code", "教室不存在或不在当前数据范围", "使用系统中的完整教室位置"))
@@ -212,12 +213,6 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	if classOK && scope.Grade != "" && class.Grade != scope.Grade {
 		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "class_name", "年级不在当前授权范围", "使用当前授权年级的班级"))
 	}
-	if courseOK && classOK && course.ClassID != "" && course.ClassID != class.ID {
-		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "course_name", "课程与班级不一致", "使用该班级当前课程"))
-	}
-	if courseOK && classroomOK && len(course.ClassroomIDs) > 0 && !contains(course.ClassroomIDs, classroom.ID) {
-		result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "classroom_code", "教室与课程安排不一致", "使用课程安排中的教室"))
-	}
 
 	location := scope.Location
 	if location == nil {
@@ -226,18 +221,6 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	date, dateErr := time.ParseInLocation("2006-01-02", value("absence_date"), location)
 	if value("absence_date") != "" && dateErr != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", "日期格式无效", "使用 YYYY-MM-DD 格式"))
-	}
-	if dateErr == nil && courseOK && classroomOK && scope.TypeCode != inspection.InspectionTypeUnattended {
-		weekday := int(date.Weekday())
-		if weekday == 0 {
-			weekday = 7
-		}
-		prefix := classroom.ID + ":" + strconv.Itoa(weekday)
-		if !contains(course.ScheduleKeys, prefix) {
-			result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "absence_date", "旷课日期与课程教室安排不一致", "核对该课程、教室的授课星期"))
-		} else if first, last, valid := inspection.ParseCoursePeriod(period); !valid || !scheduledCoursePeriod(course.ScheduleRanges, prefix, first, last) {
-			result.Errors = append(result.Errors, validationError(ErrorReferenceMismatch, "period", "旷课节次不在课程安排内", "填写实际排定节次内的缺课范围"))
-		}
 	}
 	clock, timeErr := time.ParseInLocation("15:04", value("absence_time"), location)
 	if value("absence_time") != "" && timeErr != nil {
@@ -295,21 +278,6 @@ func contains(values []string, candidate string) bool {
 	return false
 }
 
-func scheduledCoursePeriod(ranges []string, prefix string, first, last int) bool {
-	for _, value := range ranges {
-		parts := strings.Split(value, ":")
-		if len(parts) != 4 || parts[0]+":"+parts[1] != prefix {
-			continue
-		}
-		start, startErr := strconv.Atoi(parts[2])
-		end, endErr := strconv.Atoi(parts[3])
-		if startErr == nil && endErr == nil && start <= first && end >= last {
-			return true
-		}
-	}
-	return false
-}
-
 func attendanceLookup(scope AttendanceImportScope, rows []ParsedRow) AttendanceReferenceLookup {
 	lookup := AttendanceReferenceLookup{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID, ClassID: scope.ClassID, Grade: scope.Grade,
@@ -318,11 +286,13 @@ func attendanceLookup(scope AttendanceImportScope, rows []ParsedRow) AttendanceR
 		lookup.StudentNos = append(lookup.StudentNos, strings.TrimSpace(row.Values["student_no"]))
 		lookup.ClassNames = append(lookup.ClassNames, strings.TrimSpace(row.Values["class_name"]))
 		lookup.CourseNames = append(lookup.CourseNames, strings.TrimSpace(row.Values["course_name"]))
+		lookup.CourseIDs = append(lookup.CourseIDs, strings.TrimSpace(row.Values["course_id"]))
 		lookup.ClassroomCodes = append(lookup.ClassroomCodes, strings.TrimSpace(row.Values["classroom_code"]))
 	}
 	lookup.StudentNos = uniqueStrings(lookup.StudentNos)
 	lookup.ClassNames = uniqueStrings(lookup.ClassNames)
 	lookup.CourseNames = uniqueStrings(lookup.CourseNames)
+	lookup.CourseIDs = uniqueStrings(lookup.CourseIDs)
 	lookup.ClassroomCodes = uniqueStrings(lookup.ClassroomCodes)
 	return lookup
 }
@@ -342,10 +312,6 @@ func uniqueStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
-}
-
-func attendanceCourseKey(classID, courseName string) string {
-	return strings.TrimSpace(classID) + "\x1f" + strings.TrimSpace(courseName)
 }
 
 func validationError(code ErrorCode, field, message, suggestion string) ValidationError {

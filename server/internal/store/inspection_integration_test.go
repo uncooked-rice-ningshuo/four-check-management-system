@@ -66,9 +66,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	}
 	sql := `UPDATE students SET dormitory_id='a0000000-0000-0000-0000-000000000012';
 	 UPDATE semester_weeks SET attendance_penalty_multiplier=1 WHERE id='a0000000-0000-0000-0000-000000000004';
- INSERT INTO course_classes(course_id,class_id) VALUES('a0000000-0000-0000-0000-000000000013','a0000000-0000-0000-0000-000000000006');
- INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section) VALUES(gen_random_uuid(),'a0000000-0000-0000-0000-000000000013','a0000000-0000-0000-0000-000000000003','a0000000-0000-0000-0000-000000000009',4,1,2);
- INSERT INTO classroom_hygiene_areas(id,classroom_id,name) VALUES('a0000000-0000-0000-0000-000000000020','a0000000-0000-0000-0000-000000000009','Floor');
+	 INSERT INTO classroom_hygiene_areas(id,classroom_id,name) VALUES('a0000000-0000-0000-0000-000000000020','a0000000-0000-0000-0000-000000000009','Floor');
  INSERT INTO public_dormitory_hygiene_areas(id,dormitory_building_id,floor_unit,name) VALUES('a0000000-0000-0000-0000-000000000021','a0000000-0000-0000-0000-000000000011','1','Corridor');
  INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_review) SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true FROM inspection_types ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true;
  INSERT INTO dictionary_types(id,code,name) SELECT gen_random_uuid(),code || '_REASON',name || '原因' FROM inspection_types WHERE code LIKE '%HYGIENE';
@@ -261,29 +259,21 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 		q.InspectionTypeID = types[inspection.InspectionTypeAttendance]
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: q.InspectionTypeID, ClassID: rf("06")}}}
-		for _, kind := range []string{"courses", "classrooms"} {
-			q.Kind, q.Date = kind, "2026-09-03" // Fixture schedule is Thursday.
-			page, e = options.EntryOptions(ctx, member, q)
-			if e != nil || page.Total != 1 {
-				t.Fatal("scheduled option", kind, page, e)
-			}
-			q.Date = "2026-09-04"
-			page, e = options.EntryOptions(ctx, member, q)
-			if e != nil || page.Total != 0 {
-				t.Fatal("wrong-day schedule leaked", kind, page, e)
-			}
-		}
-		q.Kind, q.Date, q.ClassroomID = "periods", "2026-09-03", rf("09")
+		q.Kind, q.Keyword = "courses", "Fixture"
 		page, e = options.EntryOptions(ctx, member, q)
-		if e != nil || page.Total != 3 {
-			t.Fatal("partial scheduled section options", page, e)
+		if e != nil || page.Total != 1 || page.Items[0].Label != "Fixture course" {
+			t.Fatal("unassociated course should be searchable for an authorized class", page, e)
 		}
-		q.Date = "2026-09-04"
+		q.Keyword = "no match"
 		page, e = options.EntryOptions(ctx, member, q)
 		if e != nil || page.Total != 0 {
-			t.Fatal("wrong-day section option leaked", page, e)
+			t.Fatal("course fuzzy search should filter unmatched names", page, e)
 		}
-		q.Kind, q.Date = "classrooms", ""
+		q.Kind, q.Keyword, q.CourseID = "classrooms", "", rf("13")
+		page, e = options.EntryOptions(ctx, member, q)
+		if e != nil || page.Total != 1 {
+			t.Fatal("classroom option should not depend on a course schedule", page, e)
+		}
 		q.InspectionTypeID = types[inspection.InspectionTypeUnattended]
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: q.InspectionTypeID, ClassID: rf("06")}}}
 		perms.rules = append(perms.rules, permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Scope: permission.Scope{ClassID: rf("06")}})

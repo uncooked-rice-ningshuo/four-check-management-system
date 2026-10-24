@@ -14,9 +14,16 @@ async (page) => {
   const item=page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:text})
   await item.first().click()
  }
+ const selectPeriod=async(scope,label,section)=>{
+  const combobox=scope.getByRole('combobox',{name:new RegExp(label+'\\s*[:：]?$')})
+  await combobox.click()
+  await combobox.press('Home')
+  for(let index=1;index<section;index+=1)await combobox.press('ArrowDown')
+  await combobox.press('Enter')
+ }
  const row=name=>page.getByRole('row').filter({has:page.getByRole('cell',{name,exact:true})})
  const close=async(drawer)=>{await drawer.getByRole('button',{name:/取\s*消/}).click();await drawer.waitFor({state:'hidden'})}
- const edit=async(name)=>{await row(name).getByRole('button',{name:'编辑',exact:true}).click();const drawer=page.getByRole('dialog',{name:'编辑无机课堂记录'});await drawer.getByLabel('节次').waitFor();return drawer}
+ const edit=async(name)=>{await row(name).getByRole('button',{name:'编辑',exact:true}).click();const drawer=page.getByRole('dialog',{name:'编辑无机课堂记录'});await drawer.getByRole('combobox',{name:'开始节次'}).waitFor();return drawer}
  await revealInspectionMenu()
  await page.getByRole('link',{name:'无机课堂检查',exact:true}).click()
  await page.getByRole('heading',{name:'无机课堂检查',exact:true}).waitFor()
@@ -38,8 +45,8 @@ async (page) => {
   await drawer.getByLabel('检查日期').press('Enter')
   await select(drawer,'课程','E2E course')
   await select(drawer,'教室','E2E building 101')
-  await drawer.getByRole('combobox',{name:/节次$/}).fill('第 5—6 节')
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:'第 5—6 节'}).first().click()
+  await selectPeriod(drawer,'开始节次',5)
+  await selectPeriod(drawer,'结束节次',6)
   for(const [label,value] of Object.entries({'旷课学时':'2','备注':name}))await drawer.getByLabel(label).fill(value)
   await drawer.getByLabel('检查时间').fill(time)
   await drawer.getByLabel('检查时间').press('Enter')

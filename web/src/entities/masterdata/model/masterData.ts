@@ -9,7 +9,6 @@ export type MasterDataRecord = {
   facultyId?: string
   majorId?: string
   headTeacherId?: string
-  teacherId?: string
   classId?: string
   dormitoryId?: string
   classroomId?: string
@@ -20,23 +19,11 @@ export type MasterDataRecord = {
   phone?: string
   grade?: string
   gradeId?: string
-  classIds?: string[]
-  schedules?: CourseSchedule[]
   enrolledSize?: number
   campusArea?: string
   buildingNo?: string
   roomNo?: string
-  scheduleText?: string
   enrollmentStatus?: string
-}
-
-export type CourseSchedule = {
-  id?: string
-  semesterId: string
-  classroomId: string
-  weekday: number
-  startSection: number
-  endSection: number
 }
 
 export type MasterDataPage = { items: MasterDataRecord[]; total: number; page: number; pageSize: number }

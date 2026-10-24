@@ -42,7 +42,7 @@ func (h *handler) createManualAttendance(c *gin.Context) {
 		return
 	}
 	input.DepartmentID = departmentID
-	for _, id := range []string{input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID, input.ClassID} {
+	for _, id := range []string{input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID, input.ClassID, input.CourseID} {
 		if _, err := uuid.Parse(id); err != nil {
 			writeError(c, 400, "INVALID_REQUEST", "请选择有效的学期、周次、部门和班级")
 			return

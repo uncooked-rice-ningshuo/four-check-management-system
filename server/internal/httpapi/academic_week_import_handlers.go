@@ -26,6 +26,7 @@ func (h *handler) downloadAcademicWeekImportTemplate(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "ACADEMIC_WEEK_TEMPLATE_UNAVAILABLE", "周次导入模板暂时不可用")
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "周次导入模板.xlsx"}))
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content)
 }

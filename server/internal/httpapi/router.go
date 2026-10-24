@@ -597,11 +597,11 @@ func (h *handler) listMasterData(c *gin.Context) {
 	result, err := h.masterData.List(c, masterdata.Query{
 		Kind: c.Param("kind"), Keyword: c.Query("keyword"), Code: c.Query("code"), Name: c.Query("name"), Enabled: enabled,
 		FacultyID: c.Query("facultyId"), MajorID: c.Query("majorId"), HeadTeacherID: c.Query("headTeacherId"),
-		TeacherID: c.Query("teacherId"), ClassID: c.Query("classId"), DormitoryID: c.Query("dormitoryId"),
+		ClassID: c.Query("classId"), DormitoryID: c.Query("dormitoryId"),
 		ClassroomID: c.Query("classroomId"), GradeID: c.Query("gradeId"), Gender: c.Query("gender"),
 		EnrollmentStatus: c.Query("enrollmentStatus"), CampusArea: c.Query("campusArea"),
 		BuildingNo: c.Query("buildingNo"), TeachingBuildingID: c.Query("teachingBuildingId"), Page: page, PageSize: pageSize,
-		DormitoryAreaID: c.Query("dormitoryAreaId"), DormitoryBuildingID: c.Query("dormitoryBuildingId"), SemesterID: c.Query("semesterId"),
+		DormitoryAreaID: c.Query("dormitoryAreaId"), DormitoryBuildingID: c.Query("dormitoryBuildingId"),
 	})
 	writeResult(c, result, err)
 }
@@ -1552,10 +1552,6 @@ func writeResultStatus(c *gin.Context, status int, result any, err error) {
 	c.JSON(status, result)
 }
 func writeDomainError(c *gin.Context, err error) {
-	if errors.Is(err, masterdata.ErrInvalidSchedule) {
-		writeError(c, http.StatusBadRequest, "INVALID_COURSE_SCHEDULE", "请检查学期、星期和节次，排课时间不能重叠")
-		return
-	}
 	if errors.Is(err, masterdata.ErrDuplicateCode) {
 		writeError(c, http.StatusConflict, "MASTER_DATA_IDENTIFIER_EXISTS", "该学号或工号已存在")
 		return

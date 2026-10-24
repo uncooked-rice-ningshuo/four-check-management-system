@@ -31,7 +31,6 @@ var (
 	ErrInvalidKind     = errors.New("invalid master data kind")
 	ErrInvalidRecord   = errors.New("invalid master data record")
 	ErrInvalidRelation = errors.New("invalid master data relation")
-	ErrInvalidSchedule = errors.New("invalid or overlapping course schedule")
 	ErrImmutableCode   = errors.New("master data code is immutable")
 	ErrDuplicateCode   = errors.New("master data code already exists")
 	ErrDuplicateName   = errors.New("master data name already exists")
@@ -39,47 +38,32 @@ var (
 )
 
 type Record struct {
-	ID                  string           `json:"id"`
-	Kind                string           `json:"kind"`
-	Code                string           `json:"code,omitempty"`
-	Name                string           `json:"name"`
-	Enabled             bool             `json:"enabled"`
-	FacultyID           string           `json:"facultyId,omitempty"`
-	MajorID             string           `json:"majorId,omitempty"`
-	HeadTeacherID       string           `json:"headTeacherId,omitempty"`
-	TeacherID           string           `json:"teacherId,omitempty"`
-	ClassID             string           `json:"classId,omitempty"`
-	DormitoryID         string           `json:"dormitoryId,omitempty"`
-	ClassroomID         string           `json:"classroomId,omitempty"`
-	TeachingBuildingID  string           `json:"teachingBuildingId,omitempty"`
-	DormitoryAreaID     string           `json:"dormitoryAreaId,omitempty"`
-	DormitoryBuildingID string           `json:"dormitoryBuildingId,omitempty"`
-	FloorUnit           string           `json:"floorUnit,omitempty"`
-	Gender              string           `json:"gender,omitempty"`
-	Phone               string           `json:"phone,omitempty"`
-	Grade               string           `json:"grade,omitempty"`
-	GradeID             string           `json:"gradeId,omitempty"`
-	ClassIDs            []string         `json:"classIds,omitempty"`
-	Schedules           []CourseSchedule `json:"schedules,omitempty"`
-	EnrolledSize        int              `json:"enrolledSize,omitempty"`
-	CampusArea          string           `json:"campusArea,omitempty"`
-	BuildingNo          string           `json:"buildingNo,omitempty"`
-	RoomNo              string           `json:"roomNo,omitempty"`
-	ScheduleText        string           `json:"scheduleText,omitempty"`
-	EnrollmentStatus    string           `json:"enrollmentStatus,omitempty"`
-	CreatedAt           time.Time        `json:"createdAt,omitempty"`
-	UpdatedAt           time.Time        `json:"updatedAt,omitempty"`
-}
-
-// CourseSchedule is one structured weekly meeting for a course. Weekday uses
-// ISO weekday numbering (Monday=1); every section represents 45 minutes.
-type CourseSchedule struct {
-	ID           string `json:"id"`
-	SemesterID   string `json:"semesterId"`
-	ClassroomID  string `json:"classroomId"`
-	Weekday      int    `json:"weekday"`
-	StartSection int    `json:"startSection"`
-	EndSection   int    `json:"endSection"`
+	ID                  string    `json:"id"`
+	Kind                string    `json:"kind"`
+	Code                string    `json:"code,omitempty"`
+	Name                string    `json:"name"`
+	Enabled             bool      `json:"enabled"`
+	FacultyID           string    `json:"facultyId,omitempty"`
+	MajorID             string    `json:"majorId,omitempty"`
+	HeadTeacherID       string    `json:"headTeacherId,omitempty"`
+	ClassID             string    `json:"classId,omitempty"`
+	DormitoryID         string    `json:"dormitoryId,omitempty"`
+	ClassroomID         string    `json:"classroomId,omitempty"`
+	TeachingBuildingID  string    `json:"teachingBuildingId,omitempty"`
+	DormitoryAreaID     string    `json:"dormitoryAreaId,omitempty"`
+	DormitoryBuildingID string    `json:"dormitoryBuildingId,omitempty"`
+	FloorUnit           string    `json:"floorUnit,omitempty"`
+	Gender              string    `json:"gender,omitempty"`
+	Phone               string    `json:"phone,omitempty"`
+	Grade               string    `json:"grade,omitempty"`
+	GradeID             string    `json:"gradeId,omitempty"`
+	EnrolledSize        int       `json:"enrolledSize,omitempty"`
+	CampusArea          string    `json:"campusArea,omitempty"`
+	BuildingNo          string    `json:"buildingNo,omitempty"`
+	RoomNo              string    `json:"roomNo,omitempty"`
+	EnrollmentStatus    string    `json:"enrollmentStatus,omitempty"`
+	CreatedAt           time.Time `json:"createdAt,omitempty"`
+	UpdatedAt           time.Time `json:"updatedAt,omitempty"`
 }
 
 type Query struct {
@@ -91,7 +75,6 @@ type Query struct {
 	FacultyID           string
 	MajorID             string
 	HeadTeacherID       string
-	TeacherID           string
 	ClassID             string
 	DormitoryID         string
 	ClassroomID         string
@@ -104,7 +87,6 @@ type Query struct {
 	BuildingNo          string
 	DormitoryAreaID     string
 	DormitoryBuildingID string
-	SemesterID          string
 	Page                int
 	PageSize            int
 }
@@ -131,7 +113,6 @@ type Repository interface {
 	ListMasterData(context.Context, Query) (Page, error)
 	FindMasterData(context.Context, string, string) (Record, error)
 	MasterDataExists(context.Context, string, string) (bool, error)
-	AcademicSemesterExists(context.Context, string) (bool, error)
 	CreateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	UpdateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	ListMasterDataChanges(context.Context, string, string) ([]Change, error)
@@ -171,9 +152,6 @@ func (s *Service) Create(ctx context.Context, actorID string, record Record, met
 	if !validKind(record.Kind) {
 		return Record{}, ErrInvalidKind
 	}
-	if record.Kind == KindCourse && !validCourseSchedules(record.Schedules) {
-		return Record{}, ErrInvalidSchedule
-	}
 	if !validRecord(record) {
 		return Record{}, ErrInvalidRecord
 	}
@@ -196,9 +174,6 @@ func (s *Service) Update(ctx context.Context, actorID string, record Record, met
 	normalize(&record)
 	if requiresBusinessIdentifier(record.Kind) && record.Code != existing.Code {
 		return Record{}, ErrImmutableCode
-	}
-	if record.Kind == KindCourse && !validCourseSchedules(record.Schedules) {
-		return Record{}, ErrInvalidSchedule
 	}
 	if !validRecord(record) {
 		return Record{}, ErrInvalidRecord
@@ -241,6 +216,9 @@ func (s *Service) HygieneAreaInspectionScope(ctx context.Context, kind, departme
 }
 
 func (s *Service) validateRelations(ctx context.Context, record Record) error {
+	if record.Kind == KindCourse {
+		return nil
+	}
 	relations := []struct {
 		kind, id string
 		required bool
@@ -248,7 +226,6 @@ func (s *Service) validateRelations(ctx context.Context, record Record) error {
 		{KindFaculty, record.FacultyID, record.Kind == KindMajor},
 		{KindMajor, record.MajorID, false},
 		{KindStaff, record.HeadTeacherID, false},
-		{KindStaff, record.TeacherID, false},
 		{KindClass, record.ClassID, false},
 		{KindDormitory, record.DormitoryID, false},
 		{KindClassroom, record.ClassroomID, record.Kind == KindClassroomHygieneArea},
@@ -256,25 +233,6 @@ func (s *Service) validateRelations(ctx context.Context, record Record) error {
 		{KindGrade, record.GradeID, record.Kind == KindClass || record.Kind == KindStudent},
 		{KindDormitoryArea, record.DormitoryAreaID, record.Kind == KindDormitoryBuilding},
 		{KindDormitoryBuilding, record.DormitoryBuildingID, record.Kind == KindDormitory || record.Kind == KindPublicDormitoryHygieneArea},
-	}
-	for _, classID := range record.ClassIDs {
-		relations = append(relations, struct {
-			kind, id string
-			required bool
-		}{KindClass, classID, true})
-	}
-	for _, schedule := range record.Schedules {
-		relations = append(relations, struct {
-			kind, id string
-			required bool
-		}{KindClassroom, schedule.ClassroomID, true})
-		exists, err := s.repository.AcademicSemesterExists(ctx, schedule.SemesterID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return ErrInvalidRelation
-		}
 	}
 	for _, relation := range relations {
 		if relation.id == "" {
@@ -334,7 +292,7 @@ func validRecord(record Record) bool {
 	case KindStudent:
 		return record.GradeID != ""
 	case KindCourse:
-		return len(record.ClassIDs) > 0 && len(record.Schedules) > 0 && validCourseSchedules(record.Schedules)
+		return len([]rune(record.Name)) <= 128
 	default:
 		return true
 	}
@@ -343,6 +301,30 @@ func validRecord(record Record) bool {
 func normalize(record *Record) {
 	record.Name = strings.TrimSpace(record.Name)
 	record.Code = strings.ToUpper(strings.TrimSpace(record.Code))
+	if record.Kind == KindCourse {
+		// Course names are the only maintained course attribute. Keep legacy
+		// scheduling data untouched in storage, but ignore it on new writes.
+		record.Code = ""
+		record.FacultyID = ""
+		record.MajorID = ""
+		record.HeadTeacherID = ""
+		record.ClassID = ""
+		record.DormitoryID = ""
+		record.ClassroomID = ""
+		record.TeachingBuildingID = ""
+		record.DormitoryAreaID = ""
+		record.DormitoryBuildingID = ""
+		record.FloorUnit = ""
+		record.Gender = ""
+		record.Phone = ""
+		record.Grade = ""
+		record.GradeID = ""
+		record.EnrolledSize = 0
+		record.CampusArea = ""
+		record.BuildingNo = ""
+		record.RoomNo = ""
+		record.EnrollmentStatus = ""
+	}
 	if record.Kind == KindGrade {
 		year := strings.TrimSpace(strings.TrimSuffix(record.Name, "级"))
 		record.Name = year + "级"
@@ -357,28 +339,7 @@ func normalize(record *Record) {
 	record.BuildingNo = strings.TrimSpace(record.BuildingNo)
 	record.RoomNo = strings.TrimSpace(record.RoomNo)
 	record.FloorUnit = strings.TrimSpace(record.FloorUnit)
-	record.ScheduleText = strings.TrimSpace(record.ScheduleText)
 	record.EnrollmentStatus = strings.ToUpper(strings.TrimSpace(record.EnrollmentStatus))
-	classIDs := make([]string, 0, len(record.ClassIDs))
-	seenClassIDs := make(map[string]struct{}, len(record.ClassIDs))
-	for _, classID := range record.ClassIDs {
-		classID = strings.TrimSpace(classID)
-		if classID == "" {
-			continue
-		}
-		if _, exists := seenClassIDs[classID]; exists {
-			continue
-		}
-		seenClassIDs[classID] = struct{}{}
-		classIDs = append(classIDs, classID)
-	}
-	record.ClassIDs = classIDs
-	for index := range record.Schedules {
-		// Schedule IDs are technical identifiers and are never accepted from clients.
-		record.Schedules[index].ID = uuid.NewString()
-		record.Schedules[index].SemesterID = strings.TrimSpace(record.Schedules[index].SemesterID)
-		record.Schedules[index].ClassroomID = strings.TrimSpace(record.Schedules[index].ClassroomID)
-	}
 	if record.Kind == KindDormitory {
 		record.Name = record.RoomNo
 	}
@@ -408,21 +369,4 @@ func validGradeName(name string) bool {
 
 func requiresBusinessIdentifier(kind string) bool {
 	return kind == KindStaff || kind == KindStudent
-}
-
-func validCourseSchedules(schedules []CourseSchedule) bool {
-	for index, schedule := range schedules {
-		if schedule.SemesterID == "" || schedule.ClassroomID == "" || schedule.Weekday < 1 || schedule.Weekday > 7 ||
-			schedule.StartSection < 1 || schedule.StartSection > 10 || schedule.EndSection < schedule.StartSection || schedule.EndSection > 10 {
-			return false
-		}
-		for otherIndex := index + 1; otherIndex < len(schedules); otherIndex++ {
-			other := schedules[otherIndex]
-			if schedule.SemesterID == other.SemesterID && schedule.Weekday == other.Weekday &&
-				schedule.StartSection <= other.EndSection && other.StartSection <= schedule.EndSection {
-				return false
-			}
-		}
-	}
-	return true
 }

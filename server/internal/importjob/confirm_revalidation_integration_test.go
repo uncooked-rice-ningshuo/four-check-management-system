@@ -71,7 +71,6 @@ func TestImportConfirmationRevalidatesPostgres(t *testing.T) {
 		{"semester disabled", `UPDATE semesters SET enabled=false WHERE id=$1`, `UPDATE semesters SET enabled=true WHERE id=$1`, []any{fixture.semesterID}},
 		{"department mapping removed", `UPDATE department_inspection_scopes SET can_enter=false WHERE department_id=$1 AND inspection_type_id=$2`, `UPDATE department_inspection_scopes SET can_enter=true WHERE department_id=$1 AND inspection_type_id=$2`, []any{integrationDepartmentID, integrationInspectionTypeID}},
 		{"week dates moved", `UPDATE semester_weeks SET start_date=start_date+7,end_date=end_date+7 WHERE id=$1`, `UPDATE semester_weeks SET start_date=start_date-7,end_date=end_date-7 WHERE id=$1`, []any{fixture.weekID}},
-		{"course class removed", `DELETE FROM course_classes WHERE course_id=$1 AND class_id=$2`, `INSERT INTO course_classes(course_id,class_id) VALUES($1,$2)`, []any{first.CourseID, first.ClassID}},
 		{"week disabled", `UPDATE semester_weeks SET enabled=false WHERE id=$1`, `UPDATE semester_weeks SET enabled=true WHERE id=$1`, []any{fixture.weekID}},
 		{"student moved", `UPDATE students SET class_id=$2 WHERE id=$1`, `UPDATE students SET class_id=$3 WHERE id=$1 AND $2::uuid IS NOT NULL`, []any{first.StudentID, rows.Items[1].NormalizedRecord.ClassID, first.ClassID}},
 	} {
@@ -116,8 +115,10 @@ func TestImportConfirmationRevalidatesPostgres(t *testing.T) {
 	if err = recordsService.Delete(ctx, actor, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: manual.ID, Version: manual.RowVersion}}, Reason: "isolated duplicate recovery"}, audit.Metadata{}); err != nil {
 		t.Fatal(err)
 	}
+	// Legacy course-class links no longer participate in record validation.
+	exec(`DELETE FROM course_classes WHERE course_id=$1 AND class_id=$2`, first.CourseID, first.ClassID)
 	confirmed, err := imports.ConfirmBatch(ctx, input)
 	if err != nil || confirmed.ImportedRows != 2 {
-		t.Fatal("restored references did not permit retry", confirmed, err)
+		t.Fatal("a legacy course-class link blocked confirmation", confirmed, err)
 	}
 }

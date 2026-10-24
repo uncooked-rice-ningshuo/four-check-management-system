@@ -728,19 +728,6 @@ body {
   background: #f8fafc;
 }
 .master-data-import-field-rule { margin-block: 0 !important; }
-.course-schedule-list {
-  display: grid;
-  gap: 12px;
-}
-.course-schedule-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.course-schedule-list .ant-card-body {
-  padding-block-end: 4px;
-}
 .selected-table-row > td { background: #eaf4ff !important; }
 .history-entry + .history-entry { margin-block-start: 16px; }
 .admin-page .ant-table-cell { font-variant-numeric: tabular-nums; }
@@ -788,7 +775,6 @@ body {
   }
   .master-data-navigation .ant-menu { min-width: 680px; }
   .master-data-table-panel { padding-inline: 10px; }
-  .course-schedule-heading { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 900px) {
   .auth-page {

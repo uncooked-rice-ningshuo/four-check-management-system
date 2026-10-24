@@ -28,13 +28,12 @@ export const createPermissionRule = (accountId: string, input: Omit<PermissionRu
 export const updatePermissionRule = (input: PermissionRule) => apiRequest<PermissionRule>(`/admin/users/${input.accountId}/permission-rules/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const deletePermissionRule = (accountId: string, ruleId: string) => apiRequest<void>(`/admin/users/${accountId}/permission-rules/${ruleId}`, { method: 'DELETE' })
 export type MasterDataListParams = Partial<Pick<MasterDataRecord,
-  'facultyId' | 'majorId' | 'headTeacherId' | 'teacherId' | 'classId' | 'dormitoryId' | 'classroomId' |
+  'facultyId' | 'majorId' | 'headTeacherId' | 'classId' | 'dormitoryId' | 'classroomId' |
   'gradeId' | 'gender' | 'enrollmentStatus' | 'campusArea' | 'buildingNo' | 'dormitoryAreaId' | 'dormitoryBuildingId' | 'teachingBuildingId'>> & {
   keyword?: string
   code?: string
   name?: string
   enabled?: boolean
-  semesterId?: string
   page?: number
   pageSize?: number
 }

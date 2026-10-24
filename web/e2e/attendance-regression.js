@@ -6,9 +6,18 @@ async (page) => {
   const browserErrors = []
   page.on('pageerror', error => browserErrors.push(error.message))
   const check = (value, message) => { if (!value) throw new Error(message) }
-  const select = async (scope, label, option) => {
-    await scope.getByRole('combobox', { name: new RegExp(label + '$') }).click()
+  const select = async (scope, label, option, searchText) => {
+    const combobox = scope.getByRole('combobox', { name: new RegExp(label + '$') })
+    await combobox.click()
+    if (searchText) await combobox.fill(searchText)
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: option }).first().click()
+  }
+  const selectPeriod = async (scope, label, section) => {
+    const combobox = scope.getByRole('combobox', { name: new RegExp(label + '$') })
+    await combobox.click()
+    await combobox.press('Home')
+    for (let index = 1; index < section; index += 1) await combobox.press('ArrowDown')
+    await combobox.press('Enter')
   }
   const response = async (method, path, action, status) => {
     const [result] = await Promise.all([page.waitForResponse(r => r.request().method() === method && r.url().split('?')[0].split('/').slice(3).join('/').replace(/^/, '/') === path), action()])
@@ -102,10 +111,10 @@ async (page) => {
   await select(drawer, '学生', 'E2E student A')
   await drawer.getByLabel('检查日期').fill(fixture.date)
   await drawer.getByLabel('检查日期').press('Enter')
-  await select(drawer, '课程', 'E2E course')
+  await select(drawer, '课程', 'E2E course', 'E2E co')
   await select(drawer, '教室', 'E2E building 101')
-  await drawer.getByRole('combobox', { name: /节次$/ }).fill('第 1—2 节')
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '第 1—2 节' }).first().click()
+  await selectPeriod(drawer, '开始节次', 1)
+  await selectPeriod(drawer, '结束节次', 2)
   const actualHours=drawer.getByRole('spinbutton',{name:'实际旷课学时（按节次自动计算）'})
   if(await actualHours.inputValue()!=='2'||await actualHours.isEnabled())throw new Error('attendance actual hours must be calculated from the selected sections')
   await drawer.getByLabel('备注').fill('E2E manual')

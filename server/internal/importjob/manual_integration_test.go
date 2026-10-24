@@ -39,7 +39,11 @@ func TestManualAttendancePostgresIntegration(t *testing.T) {
 	if err = db.Pool.QueryRow(ctx, `SELECT id FROM classes WHERE name=$1`, row["class_name"]).Scan(&classID); err != nil {
 		t.Fatal(err)
 	}
-	input := inspection.ManualAttendanceInput{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ClassID: classID, Grade: "2026级", ClassName: row["class_name"], StudentNo: row["student_no"], StudentName: row["student_name"], CourseName: row["course_name"], Classroom: row["classroom_code"], Date: row["absence_date"], Time: row["absence_time"], Period: row["period"], AbsenceHours: 2}
+	var courseID string
+	if err = db.Pool.QueryRow(ctx, `SELECT id FROM courses WHERE name=$1`, row["course_name"]).Scan(&courseID); err != nil {
+		t.Fatal(err)
+	}
+	input := inspection.ManualAttendanceInput{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ClassID: classID, Grade: "2026级", ClassName: row["class_name"], StudentNo: row["student_no"], StudentName: row["student_name"], CourseID: courseID, Classroom: row["classroom_code"], Date: row["absence_date"], Time: row["absence_time"], Period: row["period"], AbsenceHours: 2}
 	service := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academic.NewService(db), organization.NewService(db), permission.NewService(db))
 	actor := inspection.ManualActor{ID: fixture.accountID, IsSuperAdmin: true}
 	created, err := service.Create(ctx, actor, input, audit.Metadata{RequestID: "manual-integration"})

@@ -42,7 +42,7 @@ func TestManualAttendanceHTTPContract(t *testing.T) {
 	}
 	stub := &manualHTTPStub{}
 	router := NewRouter(service, false, AdminServices{ManualAttendance: stub})
-	body := map[string]any{"semesterId": uuid.NewString(), "weekId": uuid.NewString(), "inspectionTypeId": uuid.NewString(), "departmentId": uuid.NewString(), "classId": uuid.NewString(), "grade": "2026级"}
+	body := map[string]any{"semesterId": uuid.NewString(), "weekId": uuid.NewString(), "inspectionTypeId": uuid.NewString(), "departmentId": uuid.NewString(), "classId": uuid.NewString(), "courseId": uuid.NewString(), "grade": "2026级"}
 	response := performJSON(router, http.MethodPost, "/api/v1/inspections/attendance", body, "")
 	if response.Code != 401 || stub.calls != 0 {
 		t.Fatalf("unauthenticated status=%d calls=%d", response.Code, stub.calls)

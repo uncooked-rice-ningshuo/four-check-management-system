@@ -183,35 +183,18 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 	if _, err := imports.ConfirmBatch(ctx, wrongScope); !errors.Is(err, importjob.ErrBatchScopeMismatch) {
 		t.Fatalf("wrong-scope confirmation error = %v", err)
 	}
-	// The preview is only a snapshot: a changed teaching day must be caught
-	// again by the confirmation transaction before either row is written.
+	// Legacy course schedules do not participate in attendance validation or
+	// import confirmation; records keep their own occurrence facts.
 	if _, err := database.Pool.Exec(ctx, `UPDATE course_schedules SET weekday=weekday+1 WHERE semester_id=$1`, fixture.semesterID); err != nil {
 		t.Fatal(err)
 	}
 	staleSchedule := wrongScope
 	staleSchedule.Scope.DepartmentID = integrationDepartmentID
-	staleSchedule.IdempotencyKey = "stale-schedule-" + uuid.NewString()
-	if _, err := imports.ConfirmBatch(ctx, staleSchedule); !errors.Is(err, importjob.ErrPreviewStale) {
-		t.Fatalf("changed teaching day was accepted at confirmation: %v", err)
-	}
-	if _, err := database.Pool.Exec(ctx, `UPDATE course_schedules SET weekday=weekday-1 WHERE semester_id=$1`, fixture.semesterID); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := database.Pool.Exec(ctx, `UPDATE course_schedules SET start_section=start_section+2,end_section=end_section+2 WHERE semester_id=$1`, fixture.semesterID); err != nil {
 		t.Fatal(err)
 	}
-	staleSchedule.IdempotencyKey = "stale-sections-" + uuid.NewString()
-	if _, err := imports.ConfirmBatch(ctx, staleSchedule); !errors.Is(err, importjob.ErrPreviewStale) {
-		t.Fatalf("changed teaching sections were accepted at confirmation: %v", err)
-	}
-	if _, err := database.Pool.Exec(ctx, `UPDATE course_schedules SET start_section=start_section-2,end_section=end_section-2 WHERE semester_id=$1`, fixture.semesterID); err != nil {
-		t.Fatal(err)
-	}
-	confirmed, err := imports.ConfirmBatch(ctx, importjob.ConfirmBatchInput{
-		BatchID: preview.ID, ExpectedVersion: preview.Version, IdempotencyKey: "confirm-" + uuid.NewString(),
-		Scope:         importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ActorID: fixture.accountID},
-		AuditMetadata: metadata,
-	})
+	staleSchedule.IdempotencyKey = "confirm-after-legacy-schedule-change-" + uuid.NewString()
+	confirmed, err := imports.ConfirmBatch(ctx, staleSchedule)
 	if err != nil {
 		t.Fatal(err)
 	}

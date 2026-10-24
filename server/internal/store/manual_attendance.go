@@ -64,7 +64,7 @@ func lockAttendanceReferences(ctx context.Context, tx pgx.Tx, r inspection.Atten
 	var valid bool
 	err := tx.QueryRow(ctx, fmt.Sprintf(`SELECT true FROM students s
  JOIN classes c ON c.id=s.class_id JOIN grades g ON g.id=c.grade_id
- JOIN courses co ON co.id=$4 JOIN course_classes cc ON cc.course_id=co.id AND cc.class_id=c.id
+	JOIN courses co ON co.id=$4
  JOIN classrooms cr ON cr.id=$5 JOIN teaching_buildings tb ON tb.id=cr.teaching_building_id
  JOIN semester_weeks w ON w.id=$6 AND w.semester_id=$7
  JOIN semesters sem ON sem.id=w.semester_id JOIN academic_years y ON y.id=sem.academic_year_id
@@ -77,24 +77,16 @@ func lockAttendanceReferences(ctx context.Context, tx pgx.Tx, r inspection.Atten
  AND s.student_no=$10 AND s.name=$11 AND c.name=$12
  AND co.name=$13 AND tb.name || ' ' || cr.room_no=$14
  AND ($15::timestamptz AT TIME ZONE 'Asia/Shanghai')::date BETWEEN w.start_date AND w.end_date
- FOR SHARE OF s,c,g,co,cc,cr,tb,w,sem,y,it%s`, departmentJoin, departmentMapping, departmentWhere, departmentLocks), r.StudentID, r.ClassID, r.GradeSnapshot, r.CourseID, r.ClassroomID, r.WeekID, r.SemesterID, r.DepartmentID, r.InspectionTypeID, r.StudentNoSnapshot, r.StudentNameSnapshot, r.ClassNameSnapshot, r.CourseName, r.ClassroomCode, r.OccurredAt).Scan(&valid)
+	 FOR SHARE OF s,c,g,co,cr,tb,w,sem,y,it%s`, departmentJoin, departmentMapping, departmentWhere, departmentLocks), r.StudentID, r.ClassID, r.GradeSnapshot, r.CourseID, r.ClassroomID, r.WeekID, r.SemesterID, r.DepartmentID, r.InspectionTypeID, r.StudentNoSnapshot, r.StudentNameSnapshot, r.ClassNameSnapshot, r.CourseName, r.ClassroomCode, r.OccurredAt).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return inspection.ErrInvalidAttendanceRecord
 	}
 	if err != nil {
 		return err
 	}
-	first, last, validPeriod := inspection.ParseCoursePeriod(r.PeriodText)
+	_, _, validPeriod := inspection.ParseCoursePeriod(r.PeriodText)
 	if !validPeriod {
 		return inspection.ErrInvalidAttendanceRecord
-	}
-	var scheduleID string
-	err = tx.QueryRow(ctx, `SELECT id FROM course_schedules WHERE course_id=$1 AND semester_id=$2 AND classroom_id=$3 AND weekday=EXTRACT(ISODOW FROM ($4::timestamptz AT TIME ZONE 'Asia/Shanghai')::date) AND start_section<=$5 AND end_section>=$6 LIMIT 1 FOR SHARE`, r.CourseID, r.SemesterID, r.ClassroomID, r.OccurredAt, first, last).Scan(&scheduleID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return inspection.ErrInvalidAttendanceRecord
-	}
-	if err != nil {
-		return err
 	}
 	return nil
 }

@@ -181,26 +181,8 @@ func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.Inspecti
 		}
 	}
 	if course != "" {
-		if err := check(`SELECT true FROM courses co JOIN course_classes cc ON cc.course_id=co.id WHERE co.id=$1 AND cc.class_id=$2 AND co.enabled FOR SHARE OF co,cc`, course, class); err != nil {
+		if err := check(`SELECT true FROM courses WHERE id=$1 AND enabled FOR SHARE`, course); err != nil {
 			return refs, err
-		}
-		if err := check(`SELECT true FROM course_schedules WHERE course_id=$1 AND semester_id=$2 AND classroom_id=$3 LIMIT 1 FOR SHARE`, course, r.SemesterID, classroom); err != nil {
-			return refs, err
-		}
-		if r.TypeCode == inspection.InspectionTypeAttendance {
-			// Attendance records must match the actual teaching day; a semester-level
-			// relationship alone permits a wrong-day or unscheduled-section absence.
-			details, ok := r.Details.(*inspection.AttendanceDetails)
-			if !ok {
-				return refs, inspection.ErrInvalidAttendanceRecord
-			}
-			first, last, valid := inspection.ParseCoursePeriod(details.Period)
-			if !valid {
-				return refs, inspection.ErrInvalidAttendanceRecord
-			}
-			if err := check(`SELECT true FROM course_schedules WHERE course_id=$1 AND semester_id=$2 AND classroom_id=$3 AND weekday=EXTRACT(ISODOW FROM $4::date) AND start_section<=$5 AND end_section>=$6 LIMIT 1 FOR SHARE`, course, r.SemesterID, classroom, r.Normalized.Date, first, last); err != nil {
-				return refs, err
-			}
 		}
 	}
 	lockDorm := func(id string, building string) error {

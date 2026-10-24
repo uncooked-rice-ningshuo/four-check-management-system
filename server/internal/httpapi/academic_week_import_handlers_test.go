@@ -61,6 +61,22 @@ func TestAcademicWeekImportRoutesRequireSuperAdmin(t *testing.T) {
 	if response := performJSON(router, http.MethodGet, path, nil, adminTokens.AccessToken); response.Code != http.StatusOK {
 		t.Fatalf("super admin status=%d body=%s", response.Code, response.Body.String())
 	}
+
+	templateRequest := httptest.NewRequest(http.MethodGet, "/api/v1/admin/academic/weeks/import-template", nil)
+	templateRequest.Header.Set("Authorization", "Bearer "+adminTokens.AccessToken)
+	templateResponse := httptest.NewRecorder()
+	router.ServeHTTP(templateResponse, templateRequest)
+	if templateResponse.Code != http.StatusOK || templateResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("template status=%d cache-control=%q", templateResponse.Code, templateResponse.Header().Get("Cache-Control"))
+	}
+	parser, err := academicimport.NewParser(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbook, err := parser.Parse("academic-weeks.xlsx", templateResponse.Body.Bytes())
+	if err != nil || workbook.TemplateVersion != 2 || len(workbook.Rows) != 0 {
+		t.Fatalf("downloaded workbook contract = %+v, parse error = %v", workbook, err)
+	}
 }
 
 func TestAcademicWeekImportBatchUsesCurrentActorAndIdempotencyHeader(t *testing.T) {

@@ -204,7 +204,7 @@ func TestConcurrentAcademicWeekImportsCannotCreateOverlappingWeeks(t *testing.T)
 		week := academic.Week{ID: uuid.NewString(), SemesterID: semesterID, WeekNo: weekNo, StartDate: time.Date(2097, 3, 1, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2097, 3, 7, 0, 0, 0, 0, time.UTC), Enabled: true, AttendancePenaltyMultiplier: &multiplier}
 		return academicimport.Batch{ID: uuid.NewString(), Status: academicimport.StatusPreviewReady, Version: 1, TemplateVersion: academicimport.TemplateVersion,
 			SemesterID: semesterID, SemesterName: "并发测试学期", AcademicYearName: "并发测试学年", TotalRows: 1, ValidRows: 1,
-			Rows:         []academicimport.PreviewRow{{RowNo: 5, Status: academicimport.RowValid, Errors: []academicimport.RowError{}, Week: &week}},
+			Rows:         []academicimport.PreviewRow{{RowNo: 6, Status: academicimport.RowValid, Errors: []academicimport.RowError{}, Week: &week}},
 			SourceFileID: fileID, CreatedBy: actorID, CreatedAt: time.Now().UTC()}
 	}
 	first, second := makeBatch(1), makeBatch(2)

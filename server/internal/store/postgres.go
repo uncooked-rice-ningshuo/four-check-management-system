@@ -862,19 +862,6 @@ func masterDataFilter(query masterdata.Query, codeColumn, nameColumn string) (st
 		add("gender", query.Gender)
 		add("enrollment_status", query.EnrollmentStatus)
 	case masterdata.KindCourse:
-		add("teacher_id", query.TeacherID)
-		if query.ClassID != "" {
-			args = append(args, query.ClassID)
-			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_classes cc WHERE cc.course_id=courses.id AND cc.class_id=$%d)`, len(args)))
-		}
-		if query.ClassroomID != "" {
-			args = append(args, query.ClassroomID)
-			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=courses.id AND cs.classroom_id=$%d)`, len(args)))
-		}
-		if query.SemesterID != "" {
-			args = append(args, query.SemesterID)
-			clauses = append(clauses, fmt.Sprintf(`EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=courses.id AND cs.semester_id=$%d)`, len(args)))
-		}
 	case masterdata.KindDormitory:
 		add("dormitory_building_id", query.DormitoryBuildingID)
 		if query.DormitoryAreaID != "" {
@@ -904,12 +891,6 @@ func (p *Postgres) MasterDataExists(ctx context.Context, kind, id string) (bool,
 	}
 	var exists bool
 	err := p.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id=$1 AND enabled)`, id).Scan(&exists)
-	return exists, err
-}
-
-func (p *Postgres) AcademicSemesterExists(ctx context.Context, id string) (bool, error) {
-	var exists bool
-	err := p.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM semesters WHERE id=$1 AND enabled)`, id).Scan(&exists)
 	return exists, err
 }
 
@@ -965,9 +946,6 @@ func masterDataError(err error) error {
 	var databaseError *pgconn.PgError
 	if !errors.As(err, &databaseError) {
 		return err
-	}
-	if databaseError.Code == "23P01" && databaseError.ConstraintName == "course_schedules_no_overlap" {
-		return masterdata.ErrInvalidSchedule
 	}
 	if databaseError.Code != "23505" {
 		return err
@@ -1044,9 +1022,7 @@ func serverManagedMasterRecordSelect(kind string) (string, string, string, strin
 	case masterdata.KindPublicDormitoryHygieneArea:
 		table, columns[23], columns[29] = "public_dormitory_hygiene_areas", "dormitory_building_id::text", "floor_unit"
 	case masterdata.KindCourse:
-		table, columns[7] = "courses", "COALESCE(teacher_id::text,'')"
-		columns[27] = "ARRAY(SELECT class_id::text FROM course_classes WHERE course_id=courses.id ORDER BY class_id)"
-		columns[28] = `COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'semesterId',semester_id::text,'classroomId',classroom_id::text,'weekday',weekday,'startSection',start_section,'endSection',end_section) ORDER BY weekday,start_section) FROM course_schedules WHERE course_id=courses.id),'[]'::jsonb)`
+		table = "courses"
 	case masterdata.KindStudent:
 		table, identifierColumn, columns[1] = "students", "student_no", "student_no"
 		columns[4], columns[5], columns[8], columns[9], columns[11] = "COALESCE(faculty_id::text,'')", "COALESCE(major_id::text,'')", "COALESCE(class_id::text,'')", "COALESCE(dormitory_id::text,'')", "gender"
@@ -1059,16 +1035,15 @@ func serverManagedMasterRecordSelect(kind string) (string, string, string, strin
 
 func scanMasterRecord(r row, kind string) (masterdata.Record, error) {
 	value := masterdata.Record{Kind: kind}
-	var schedulesJSON []byte
+	var ignoredTeacherID, ignoredScheduleText string
+	var ignoredClassIDs []string
+	var ignoredSchedulesJSON []byte
 	var ignoredFloor int
 	err := r.Scan(&value.ID, &value.Code, &value.Name, &value.Enabled, &value.FacultyID, &value.MajorID,
-		&value.HeadTeacherID, &value.TeacherID, &value.ClassID, &value.DormitoryID, &value.ClassroomID, &value.Gender,
+		&value.HeadTeacherID, &ignoredTeacherID, &value.ClassID, &value.DormitoryID, &value.ClassroomID, &value.Gender,
 		&value.Phone, &value.Grade, &value.EnrolledSize, &value.CampusArea, &value.TeachingBuildingID, &value.BuildingNo,
-		&value.RoomNo, &ignoredFloor, &value.ScheduleText, &value.EnrollmentStatus, &value.DormitoryAreaID,
-		&value.DormitoryBuildingID, &value.CreatedAt, &value.UpdatedAt, &value.GradeID, &value.ClassIDs, &schedulesJSON, &value.FloorUnit)
-	if err == nil && len(schedulesJSON) > 0 {
-		err = json.Unmarshal(schedulesJSON, &value.Schedules)
-	}
+		&value.RoomNo, &ignoredFloor, &ignoredScheduleText, &value.EnrollmentStatus, &value.DormitoryAreaID,
+		&value.DormitoryBuildingID, &value.CreatedAt, &value.UpdatedAt, &value.GradeID, &ignoredClassIDs, &ignoredSchedulesJSON, &value.FloorUnit)
 	return value, err
 }
 
@@ -1100,10 +1075,7 @@ func insertMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 	case masterdata.KindPublicDormitoryHygieneArea:
 		_, err = tx.Exec(ctx, `INSERT INTO public_dormitory_hygiene_areas(id,dormitory_building_id,floor_unit,name,enabled) VALUES($1,$2,$3,$4,$5)`, value.ID, value.DormitoryBuildingID, value.FloorUnit, value.Name, value.Enabled)
 	case masterdata.KindCourse:
-		_, err = tx.Exec(ctx, `INSERT INTO courses(id,name,teacher_id,enabled) VALUES($1,$2,NULLIF($3,'')::uuid,$4)`, value.ID, value.Name, value.TeacherID, value.Enabled)
-		if err == nil {
-			err = replaceCourseRelations(ctx, tx, value)
-		}
+		_, err = tx.Exec(ctx, `INSERT INTO courses(id,name,enabled) VALUES($1,$2,$3)`, value.ID, value.Name, value.Enabled)
 	case masterdata.KindStudent:
 		_, err = tx.Exec(ctx, `INSERT INTO students(id,student_no,name,gender,grade_id,faculty_id,major_id,class_id,dormitory_id,enrollment_status,enabled) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,$10,$11)`, value.ID, value.Code, value.Name, value.Gender, value.GradeID, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
 	default:
@@ -1140,37 +1112,13 @@ func updateMasterRecord(ctx context.Context, tx pgx.Tx, value masterdata.Record)
 	case masterdata.KindPublicDormitoryHygieneArea:
 		_, err = tx.Exec(ctx, `UPDATE public_dormitory_hygiene_areas SET dormitory_building_id=$2,floor_unit=$3,name=$4,enabled=$5,updated_at=now() WHERE id=$1`, value.ID, value.DormitoryBuildingID, value.FloorUnit, value.Name, value.Enabled)
 	case masterdata.KindCourse:
-		_, err = tx.Exec(ctx, `UPDATE courses SET name=$2,teacher_id=NULLIF($3,'')::uuid,enabled=$4,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.TeacherID, value.Enabled)
-		if err == nil {
-			err = replaceCourseRelations(ctx, tx, value)
-		}
+		_, err = tx.Exec(ctx, `UPDATE courses SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Enabled)
 	case masterdata.KindStudent:
 		_, err = tx.Exec(ctx, `UPDATE students SET name=$2,gender=$3,grade_id=$4,faculty_id=NULLIF($5,'')::uuid,major_id=NULLIF($6,'')::uuid,class_id=NULLIF($7,'')::uuid,dormitory_id=NULLIF($8,'')::uuid,enrollment_status=$9,enabled=$10,updated_at=now() WHERE id=$1`, value.ID, value.Name, value.Gender, value.GradeID, value.FacultyID, value.MajorID, value.ClassID, value.DormitoryID, value.EnrollmentStatus, value.Enabled)
 	default:
 		return masterdata.ErrInvalidKind
 	}
 	return err
-}
-
-func replaceCourseRelations(ctx context.Context, tx pgx.Tx, value masterdata.Record) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM course_classes WHERE course_id=$1`, value.ID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM course_schedules WHERE course_id=$1`, value.ID); err != nil {
-		return err
-	}
-	for _, classID := range value.ClassIDs {
-		if _, err := tx.Exec(ctx, `INSERT INTO course_classes(course_id,class_id) VALUES($1,$2)`, value.ID, classID); err != nil {
-			return err
-		}
-	}
-	for _, schedule := range value.Schedules {
-		if _, err := tx.Exec(ctx, `INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section)
-			VALUES($1,$2,$3,$4,$5,$6,$7)`, schedule.ID, value.ID, schedule.SemesterID, schedule.ClassroomID, schedule.Weekday, schedule.StartSection, schedule.EndSection); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func insertMasterChange(ctx context.Context, tx pgx.Tx, actorID, kind, id, action string, before, after []byte) error {
@@ -1479,7 +1427,8 @@ func attendanceOrderBy(sort string) (string, error) {
 func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjob.AttendanceReferenceLookup) (importjob.AttendanceReferences, error) {
 	result := importjob.AttendanceReferences{
 		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference),
-		CoursesByClassAndName: make(map[string]importjob.AttendanceCourseReference), ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
+		CoursesByName: make(map[string]importjob.AttendanceCourseReference), CoursesByID: make(map[string]importjob.AttendanceCourseReference),
+		ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
 	}
 	if lookup.WeekID != "" {
 		if err := p.Pool.QueryRow(ctx, `SELECT attendance_penalty_multiplier FROM semester_weeks WHERE id=$1::uuid AND semester_id=$2::uuid`, lookup.WeekID, lookup.SemesterID).Scan(&result.WeekPenaltyMultiplier); err != nil {
@@ -1527,23 +1476,19 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	}
 	classRows.Close()
 
-	courseRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,cc.class_id::text,
-		ARRAY(SELECT DISTINCT cs.classroom_id::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text),
-		ARRAY(SELECT DISTINCT cs.classroom_id::text || ':' || cs.weekday::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text || ':' || cs.weekday::text),
-		ARRAY(SELECT DISTINCT cs.classroom_id::text || ':' || cs.weekday::text || ':' || cs.start_section::text || ':' || cs.end_section::text FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid ORDER BY cs.classroom_id::text || ':' || cs.weekday::text || ':' || cs.start_section::text || ':' || cs.end_section::text)
-		FROM courses c JOIN course_classes cc ON cc.course_id=c.id
-		WHERE c.enabled AND c.name = ANY($1::text[]) AND ($2='' OR cc.class_id=NULLIF($2,'')::uuid)
-		  AND EXISTS(SELECT 1 FROM course_schedules cs WHERE cs.course_id=c.id AND cs.semester_id=$3::uuid)`, lookup.CourseNames, lookup.ClassID, lookup.SemesterID)
+	courseRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name FROM courses c
+		WHERE c.enabled AND (c.name = ANY($1::text[]) OR c.id = ANY($2::uuid[])) FOR SHARE`, lookup.CourseNames, lookup.CourseIDs)
 	if err != nil {
 		return result, err
 	}
 	for courseRows.Next() {
 		var value importjob.AttendanceCourseReference
-		if err := courseRows.Scan(&value.ID, &value.Name, &value.ClassID, &value.ClassroomIDs, &value.ScheduleKeys, &value.ScheduleRanges); err != nil {
+		if err := courseRows.Scan(&value.ID, &value.Name); err != nil {
 			courseRows.Close()
 			return result, err
 		}
-		result.CoursesByClassAndName[value.ClassID+"\x1f"+value.Name] = value
+		result.CoursesByName[value.Name] = value
+		result.CoursesByID[value.ID] = value
 	}
 	if err := courseRows.Err(); err != nil {
 		courseRows.Close()

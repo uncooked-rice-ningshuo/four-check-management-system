@@ -15,7 +15,6 @@ func TestEntryOptionsRejectInvalidScopeBeforeRepository(t *testing.T) {
 		func(q *EntryOptionQuery) { q.Page = -1 },
 		func(q *EntryOptionQuery) { q.PageSize = 201 },
 		func(q *EntryOptionQuery) { q.Kind = "students" },
-		func(q *EntryOptionQuery) { q.Kind = "classrooms"; q.ClassID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "dormitories"; q.ClassID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "dormitories"; q.StudentID = detailID },
 		func(q *EntryOptionQuery) { q.StudentID = "invalid" },
@@ -26,20 +25,31 @@ func TestEntryOptionsRejectInvalidScopeBeforeRepository(t *testing.T) {
 		func(q *EntryOptionQuery) { q.Kind = "responsible-dormitories"; q.ClassID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "public-areas"; q.AreaID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "reason-codes"; q.ClassID = detailID; q.AreaID = detailID },
-		func(q *EntryOptionQuery) { q.Kind = "courses"; q.ClassID = detailID; q.Date = "2026-02-30" },
+		func(q *EntryOptionQuery) { q.Kind = "courses"; q.PageSize = 51 },
+		func(q *EntryOptionQuery) { q.Kind = "classes"; q.Keyword = "课程" },
+		func(q *EntryOptionQuery) { q.Kind = "courses"; q.Keyword = string(make([]rune, 129)) },
 		func(q *EntryOptionQuery) {
 			q.Kind = "periods"
 			q.ClassID = detailID
 			q.CourseID = detailID
 			q.ClassroomID = detailID
 		},
-		func(q *EntryOptionQuery) { q.Date = "2026-06-17" },
 	} {
 		q := base
 		change(&q)
 		if _, err := s.EntryOptions(context.Background(), ManualActor{ID: detailID, IsSuperAdmin: true}, q); !errors.Is(err, ErrInspectionRequest) {
 			t.Fatalf("invalid query accepted: %v", err)
 		}
+	}
+}
+
+func TestCourseOptionsAcceptFuzzySearchWithoutClassAndLimitPageSize(t *testing.T) {
+	repository := &optionRepositoryStub{}
+	service := NewEntryOptionService(repository, nil)
+	query := EntryOptionQuery{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, DepartmentID: detailID, Kind: "courses", Keyword: "  数据  ", PageSize: 50}
+	page, err := service.EntryOptions(context.Background(), ManualActor{ID: detailID, IsSuperAdmin: true}, query)
+	if err != nil || page.Page != 1 || page.PageSize != 50 || repository.query.Keyword != "数据" || repository.query.ClassID != "" {
+		t.Fatalf("course search page=%+v query=%+v err=%v", page, repository.query, err)
 	}
 }
 

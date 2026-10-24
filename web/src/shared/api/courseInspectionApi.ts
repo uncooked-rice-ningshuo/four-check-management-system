@@ -9,6 +9,7 @@ export type CourseRecordDTO = Omit<CourseRecordInput, 'details'> & { details: Co
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
  currentCourseName: string; currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; importBatchId?: string; canEdit: boolean
 }
+export type InspectionOptionPage = { items: InspectionOption[]; total: number; page: number; pageSize: number }
 function record(value: unknown): CourseRecordDTO {
  if (!object(value) || !object(value.details)) throw badResponse()
  for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentCourseName','currentClassroomName','status','source','createdBy']) if (typeof value[key] !== 'string') throw badResponse()
@@ -23,6 +24,11 @@ function record(value: unknown): CourseRecordDTO {
 export const courseInspectionApi = {
  async contextOptions(query: InspectionQuery): Promise<ContextOptions> { return allOptions('/inspections/context-options',{typeCode:'UNATTENDED_CLASSROOM',...query},true) },
  async entryOptions(query: InspectionQuery): Promise<InspectionOption[]> { return (await allOptions('/inspections/entry-options',query,false)).items },
+ async courseOptions(query: InspectionQuery): Promise<InspectionOptionPage> {
+  const value=await apiRequest<unknown>(`/inspections/entry-options?${queryString({...query,kind:'courses'})}`)
+  if(!object(value)||!Array.isArray(value.items)||!value.items.every(item=>object(item)&&typeof item.id==='string'&&typeof item.label==='string')||!Number.isInteger(value.total)||typeof value.total!=='number'||!Number.isInteger(value.page)||typeof value.page!=='number'||!Number.isInteger(value.pageSize)||typeof value.pageSize!=='number')throw badResponse()
+  return {items:value.items as InspectionOption[],total:value.total,page:value.page,pageSize:value.pageSize}
+ },
  async list(query: InspectionQuery) {
   const value=await apiRequest<unknown>(`/inspections?${queryString(query)}`)
   if(!object(value)||!Array.isArray(value.items)||typeof value.total!=='number'||typeof value.page!=='number'||typeof value.pageSize!=='number')throw badResponse()

@@ -165,6 +165,25 @@ func TestMasterDataFilterUsesKindSpecificConstraints(t *testing.T) {
 	if !strings.Contains(filter, "teaching_building_id=$5") || len(args) != 5 {
 		t.Fatalf("classroom filter=%q args=%v", filter, args)
 	}
+	filter, args = masterDataFilter(masterdata.Query{Kind: masterdata.KindCourse, ClassID: "legacy-class", ClassroomID: "legacy-room"}, "", "name")
+	if strings.Contains(filter, "course_classes") || strings.Contains(filter, "course_schedules") || len(args) != 4 {
+		t.Fatalf("course list must ignore legacy relationships; filter=%q args=%v", filter, args)
+	}
+}
+
+func TestCourseMasterDataQueryReadsOnlyTheCourseCatalog(t *testing.T) {
+	query, _, _, _, ok := serverManagedMasterRecordSelect(masterdata.KindCourse)
+	if !ok {
+		t.Fatal("course master-data query is unavailable")
+	}
+	for _, legacy := range []string{"teacher_id", "course_classes", "course_schedules"} {
+		if strings.Contains(query, legacy) {
+			t.Errorf("course master-data query still reads legacy field %q: %s", legacy, query)
+		}
+	}
+	if !strings.Contains(query, "FROM courses") {
+		t.Fatalf("course query does not read the course catalog: %s", query)
+	}
 }
 
 func TestMasterDataErrorMapsKnownUniqueConstraints(t *testing.T) {
@@ -183,13 +202,6 @@ func TestMasterDataErrorMapsKnownUniqueConstraints(t *testing.T) {
 				t.Fatalf("masterDataError() = %v, want %v", err, test.want)
 			}
 		})
-	}
-}
-
-func TestMasterDataErrorMapsScheduleExclusionConstraint(t *testing.T) {
-	err := masterDataError(&pgconn.PgError{Code: "23P01", ConstraintName: "course_schedules_no_overlap"})
-	if !errors.Is(err, masterdata.ErrInvalidSchedule) {
-		t.Fatalf("masterDataError() = %v, want %v", err, masterdata.ErrInvalidSchedule)
 	}
 }
 
@@ -859,19 +871,12 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 	dormitory := createRecord(masterdata.Record{Kind: masterdata.KindDormitory, DormitoryBuildingID: dormitoryBuilding.ID, RoomNo: unique})
 	teachingBuilding := createRecord(masterdata.Record{Kind: masterdata.KindTeachingBuilding, Name: "测试教学楼" + unique})
 	classroom := createRecord(masterdata.Record{Kind: masterdata.KindClassroom, TeachingBuildingID: teachingBuilding.ID, RoomNo: unique})
-	var semesterID string
-	if err := database.Pool.QueryRow(ctx, `SELECT id::text FROM semesters WHERE enabled ORDER BY start_date DESC LIMIT 1`).Scan(&semesterID); err != nil {
-		t.Fatal(err)
-	}
-	course := createRecord(masterdata.Record{Kind: masterdata.KindCourse, Name: "测试课程" + unique, TeacherID: staff.ID, ClassIDs: []string{class.ID}, Schedules: []masterdata.CourseSchedule{{SemesterID: semesterID, ClassroomID: classroom.ID, Weekday: 1, StartSection: 1, EndSection: 2}}})
-	if len(course.ClassIDs) != 1 || course.ClassIDs[0] != class.ID || len(course.Schedules) != 1 || course.Schedules[0].EndSection != 2 {
-		t.Fatalf("persisted structured course=%+v", course)
+	course := createRecord(masterdata.Record{Kind: masterdata.KindCourse, Name: "测试课程" + unique, ClassID: class.ID, ClassroomID: classroom.ID})
+	if course.Name != "测试课程"+unique || course.ClassID != "" || course.ClassroomID != "" {
+		t.Fatalf("persisted course should only expose its name: %+v", course)
 	}
 	if _, err := database.Pool.Exec(ctx, `INSERT INTO courses(id,name) VALUES($1,$2)`, uuid.NewString(), course.Name); err == nil {
 		t.Fatal("database accepted a duplicate canonical course name")
-	}
-	if _, err := database.Pool.Exec(ctx, `INSERT INTO course_schedules(id,course_id,semester_id,classroom_id,weekday,start_section,end_section) VALUES($1,$2,$3,$4,1,2,3)`, uuid.NewString(), course.ID, semesterID, classroom.ID); err == nil {
-		t.Fatal("database accepted an overlapping course schedule")
 	}
 	createRecord(masterdata.Record{Kind: masterdata.KindStudent, Code: "S" + unique, Name: "测试学生" + unique, Gender: "MALE", GradeID: grade.ID, FacultyID: faculty.ID, MajorID: major.ID, ClassID: class.ID, DormitoryID: dormitory.ID})
 	for _, record := range createdRecords {

@@ -7,6 +7,7 @@ const save = vi.fn()
 const update = vi.fn()
 vi.mock('../hooks/useAttendanceMutations', () => ({ useUpdateAttendance: () => ({ mutateAsync: update, isPending: false }) }))
 vi.mock('../hooks/useCreateAttendance', () => ({ useCreateAttendance: () => ({ mutateAsync: save, isPending: false }) }))
+vi.mock('../../../entities/inspection/ui/CourseSelect', () => ({ CourseSelect: (props: { value?: string; onChange?: (value?: string) => void }) => <input aria-label="课程" value={props.value ?? ''} onChange={event => props.onChange?.(event.target.value)} /> }))
 const options = { inspectionType: { id: 'type', code: 'ATTENDANCE_RATE' as const, name: '到课率' }, responsibleDepartments: [{ id: 'dept', code: 'D', name: '学习部', enabled: true }], departments: [{ id: 'dept', code: 'D', name: '学习部', enabled: true }], semesters: [{ id: 'semester', academicYearId: 'year', code: 'FIRST', name: '第一学期', startDate: '', endDate: '', enabled: true }], weeks: [{ id: 'week', semesterId: 'semester', weekNo: 1, startDate: '', endDate: '', enabled: true, note: '' }], classes: [{ id: 'class', name: '测试班', grade: '2026级' }], grades: ['2026级'] }
 it('requires a complete form before creating a draft', async () => {
  render(<ManualAttendanceDrawer options={options} onClose={vi.fn()} />)
@@ -21,9 +22,16 @@ async function fillForm() {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: label }))
     fireEvent.click(screen.getByText(text, { selector: '.ant-select-item-option-content' }))
   }
-  for (const [label, value] of [['学号', 'S001'], ['姓名', '虚构同学'], ['课程名称', '数据结构'], ['上课教室', '博学楼 101'], ['节次', '1-2'], ['旷课学时', '2']]) {
+  for (const [label, value] of [['学号', 'S001'], ['姓名', '虚构同学'], ['上课教室', '博学楼 101'], ['旷课学时', '2']]) {
     fireEvent.change(screen.getByLabelText(label), { target: { value } })
   }
+  for (const [label, value] of [['开始节次', '1'], ['结束节次', '2']]) {
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: label }))
+    const options = screen.getAllByText(`第 ${value} 节`, { selector: '.ant-select-item-option-content' })
+    fireEvent.click(options[options.length - 1])
+    if (label === '开始节次') await waitFor(() => expect(screen.getByRole('combobox', { name: '结束节次' })).not.toBeDisabled())
+  }
+  fireEvent.change(screen.getByLabelText('课程'), { target: { value: 'course-1' } })
   for (const [label, value] of [['检查日期', '2026-09-06'], ['检查时间', '08:00']]) {
     const picker = screen.getByLabelText(label)
     fireEvent.change(picker, { target: { value } })
@@ -37,7 +45,8 @@ it('creates using the form target and server-owned snapshots then closes', async
   await fillForm()
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', date: '2026-09-06', time: '08:00', absenceHours: 2 }))
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', courseId: 'course-1', date: '2026-09-06', time: '08:00', period: '1-2', absenceHours: 2 }))
+  expect(save.mock.calls[0][0]).not.toHaveProperty('courseName')
   expect(save.mock.calls[0][0]).not.toHaveProperty('status')
 })
 it.each([['FORBIDDEN_SCOPE', '无权在所选部门'], ['RECORD_ALREADY_EXISTS', '相同记录已存在'], ['VALIDATION_FAILED', '姓名不一致']])('retains form values after %s', async (code, message) => {
@@ -64,6 +73,6 @@ it('preserves the opened draft version across background refresh and requires a 
  fireEvent.change(screen.getByLabelText('修改原因'), { target: { value: '核对原记录' } })
  fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
  await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
- expect(update).toHaveBeenCalledWith(expect.objectContaining({ id: 'record', version: 7, reason: '核对原记录' }))
+ expect(update).toHaveBeenCalledWith(expect.objectContaining({ id: 'record', version: 7, reason: '核对原记录', record: expect.objectContaining({ period: '1-2' }) }))
  expect(save).not.toHaveBeenCalled()
 })

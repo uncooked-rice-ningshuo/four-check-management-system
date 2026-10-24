@@ -44,7 +44,7 @@ func (f *manualFixture) ListScopes(context.Context) ([]organization.DepartmentIn
 func TestManualAttendanceCreatesAuditedDraftAndRejectsDeniedScope(t *testing.T) {
 	f := &manualFixture{record: AttendanceRecord{ID: "record", ClassID: "class", GradeSnapshot: "2024", Source: RecordSourceExcel}}
 	s := NewManualService(f, f, f, f, f)
-	input := ManualAttendanceInput{SemesterID: "semester", WeekID: "week", DepartmentID: "department", InspectionTypeID: "type", ClassID: "class", Grade: "2024"}
+	input := ManualAttendanceInput{SemesterID: "semester", WeekID: "week", DepartmentID: "department", InspectionTypeID: "type", ClassID: "class", CourseID: "course", Grade: "2024"}
 	actor := ManualActor{ID: "actor", IsSuperAdmin: true}
 	got, err := s.Create(context.Background(), actor, input, audit.Metadata{})
 	if err != nil || got.Source != RecordSourceManual || got.Status != RecordStatusDraft || got.CreatedBy != "actor" || f.saved != 1 {

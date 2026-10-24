@@ -2,11 +2,14 @@ import { ProFormDatePicker, ProFormTimePicker } from '@ant-design/pro-components
 import { Alert, Button, Col, Drawer, Form, Input, InputNumber, Row, Select, Space } from 'antd'
 import { useRef, useState } from 'react'
 import type { AttendanceFilterOptions, AttendanceRecord, ManualAttendanceInput } from '../../../entities/inspection/model/inspection'
+import { formatCoursePeriod, parseCoursePeriod } from '../../../entities/inspection/model/coursePeriod'
+import { CourseSelect } from '../../../entities/inspection/ui/CourseSelect'
+import { PeriodRangeFields } from '../../../entities/inspection/ui/PeriodRangeFields'
 import { ApiError } from '../../../shared/api/httpClient'
 import { useUpdateAttendance } from '../hooks/useAttendanceMutations'
 import { useCreateAttendance } from '../hooks/useCreateAttendance'
 
-type FormValues = Omit<ManualAttendanceInput, 'inspectionTypeId' | 'className' | 'grade'> & { reason?: string }
+type FormValues = Omit<ManualAttendanceInput, 'inspectionTypeId' | 'className' | 'grade' | 'period'> & { periodStart?: number; periodEnd?: number; reason?: string }
 type Props = { editing?: AttendanceRecord; options: AttendanceFilterOptions; initialSemesterId?: string; initialWeekId?: string; onClose: () => void }
 const required = [{ required: true, message: '请填写或选择此项' }]
 
@@ -15,6 +18,8 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
   const [editing] = useState(initialEditing)
   const [form] = Form.useForm<FormValues>()
   const semesterId = Form.useWatch('semesterId', form)
+  const weekId = Form.useWatch('weekId', form)
+  const departmentId = Form.useWatch('departmentId', form)
   const create = useCreateAttendance()
   const update = useUpdateAttendance()
   const mutation = editing ? update : create
@@ -22,6 +27,15 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
   const [error, setError] = useState('')
   const weeks = options.weeks.filter(week => week.semesterId === semesterId)
   const departments = options.responsibleDepartments.filter(item => options.departments.some(allowed => allowed.id === item.id))
+  const initialPeriod = parseCoursePeriod(editing?.period)
+  const initialValues = editing ? {
+    ...editing,
+    periodStart: initialPeriod?.start,
+    periodEnd: initialPeriod?.end,
+    classroom: editing.classroomCode,
+    date: new Date(editing.occurredAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }),
+    time: new Date(editing.occurredAt).toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }),
+  } : { semesterId: initialSemesterId, weekId: initialWeekId }
   const submit = async (values: FormValues) => {
     if (submitting.current) return
     const selectedClass = options.classes.find(item => item.id === values.classId)
@@ -29,8 +43,10 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
     submitting.current = true
     setError('')
     try {
-      const { reason, ...fields } = values
-      const record = { ...fields, inspectionTypeId: options.inspectionType.id, className: selectedClass.name, grade: selectedClass.grade }
+      const { reason, periodStart, periodEnd, ...fields } = values
+      const period = formatCoursePeriod(periodStart, periodEnd)
+      if (!period) { setError('请选择有效的开始和结束节次'); submitting.current = false; return }
+      const record = { ...fields, period, inspectionTypeId: options.inspectionType.id, className: selectedClass.name, grade: selectedClass.grade }
       if (editing) await update.mutateAsync({ id: editing.id, version: editing.rowVersion, reason: reason ?? '', record })
       else await create.mutateAsync(record)
       onClose()
@@ -46,7 +62,7 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
   return <Drawer open title={editing ? "编辑到课率记录" : "新增到课率记录"} size={720} onClose={() => { if (!submitting.current) onClose() }} closable={!mutation.isPending} maskClosable={!mutation.isPending}
     footer={<Space><Button disabled={mutation.isPending} onClick={onClose}>取消</Button><Button type="primary" loading={mutation.isPending} onClick={() => form.submit()}>{editing ? "保存修改" : "保存草稿"}</Button></Space>}>
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
-    <Form name="manual-attendance" form={form} layout="vertical" onFinish={submit} disabled={mutation.isPending} initialValues={editing ? { ...editing, classroom: editing.classroomCode, date: new Date(editing.occurredAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }), time: new Date(editing.occurredAt).toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }) } : { semesterId: initialSemesterId, weekId: initialWeekId }}>
+    <Form name="manual-attendance" form={form} layout="vertical" onFinish={submit} disabled={mutation.isPending} initialValues={initialValues}>
       <Row gutter={16}>
         <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select options={options.semesters.map(item => ({ value: item.id, label: item.name }))} onChange={() => form.setFieldValue('weekId', undefined)} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} options={weeks.map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item></Col>
@@ -54,11 +70,11 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
         <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select showSearch optionFilterProp="label" options={options.classes.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="studentNo" label="学号" rules={[...required, { whitespace: true, message: '学号不能为空' }]}><Input maxLength={64} autoComplete="off" /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="studentName" label="姓名" rules={[...required, { whitespace: true, message: '姓名不能为空' }]}><Input maxLength={100} autoComplete="off" /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="courseName" label="课程名称" rules={required}><Input maxLength={200} placeholder="填写该班级在所选学期的课程名称" /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="courseId" label="课程" rules={required}><CourseSelect scope={{ semesterId, weekId, departmentId, inspectionTypeId: options.inspectionType.id, recordId: editing?.id }} selectedLabel={editing?.courseName} disabled={!semesterId || !weekId || !departmentId} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="classroom" label="上课教室" rules={required}><Input maxLength={200} placeholder="例如：博学楼 101" /></Form.Item></Col>
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
         <Col xs={24} sm={12}><ProFormTimePicker name="time" label="检查时间" rules={required} getValueFromEvent={(_time: unknown, timeString: string) => timeString || undefined} fieldProps={{ format: 'HH:mm', style: { width: '100%' } }} /></Col>
-        <Col xs={24} sm={12}><Form.Item name="period" label="节次" rules={required}><Input maxLength={64} placeholder="例如：1-2" /></Form.Item></Col>
+        <PeriodRangeFields startName="periodStart" endName="periodEnd" />
         <Col xs={24} sm={12}><Form.Item name="absenceHours" label="旷课学时" rules={[...required, { type: 'number', min: 0.01, max: 24, message: '请输入大于 0 且不超过 24 的学时' }]}><InputNumber min={0.01} max={24} style={{ width: '100%' }} /></Form.Item></Col>
       </Row>
       {editing && <Form.Item name="reason" label="修改原因" rules={[...required, { whitespace: true, message: '请填写修改原因' }]}><Input.TextArea maxLength={255} rows={2} /></Form.Item>}

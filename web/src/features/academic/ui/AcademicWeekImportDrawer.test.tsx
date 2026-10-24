@@ -7,16 +7,16 @@ import { academicWeekImportApi } from '../../../shared/api/academicWeekImportApi
 import { AcademicWeekImportDrawer } from './AcademicWeekImportDrawer'
 
 const validPreview = {
-  batchId: 'batch-1', status: 'PREVIEW_READY' as const, version: 1, templateVersion: 1,
+  batchId: 'batch-1', status: 'PREVIEW_READY' as const, version: 1, templateVersion: 2,
   semesterId: 'semester-1', semesterName: '2026-2027 学年上学期', academicYearName: '2026-2027 学年',
   totalRows: 1, validRows: 1, invalidRows: 0, affectsToday: false,
-  rows: [{ rowNo: 5, values: { week_no: '1', start_date: '2026-09-07', end_date: '2026-09-13', attendance_penalty_multiplier: '1' }, status: 'VALID' as const, errors: [] }],
+  rows: [{ rowNo: 6, values: { week_no: '1', start_date: '2026-09-07', end_date: '2026-09-13', attendance_penalty_multiplier: '1' }, status: 'VALID' as const, errors: [] }],
   createdAt: '2026-10-24T00:00:00Z',
 }
 
 vi.mock('../../../shared/api/academicWeekImportApi', () => ({
   academicWeekImportApi: {
-    spec: vi.fn().mockResolvedValue({ templateCode: 'ACADEMIC_WEEKS', templateVersion: 1, sheetName: '周次导入', maxRows: 60, fields: [] }),
+    spec: vi.fn().mockResolvedValue({ templateCode: 'ACADEMIC_WEEKS', templateVersion: 2, sheetName: '周次导入', maxRows: 60, fields: [] }),
     template: vi.fn().mockResolvedValue({ blob: new Blob(['template']), headers: new Headers() }),
     preview: vi.fn(), batch: vi.fn(), confirm: vi.fn(),
   },

@@ -85,8 +85,8 @@ func TestMasterDataImportBatchIsAtomicAndIdempotentAgainstPostgres(t *testing.T)
 		ID: uuid.NewString(), Kind: masterdata.KindFaculty, Status: masterdataimport.StatusPreviewReady, TemplateVersion: 1,
 		SourceFileID: seedFile(), TotalRows: 2, ValidRows: 2, Version: 1, CreatedBy: actorID, CreatedAt: time.Now().UTC(),
 		Rows: []masterdataimport.PreviewRow{
-			{RowNo: 5, Values: map[string]string{"name": "atomic-first-" + unique}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: firstID, Kind: masterdata.KindFaculty, Name: "atomic-first-" + unique, Enabled: true}},
-			{RowNo: 6, Values: map[string]string{"name": duplicateName}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: secondID, Kind: masterdata.KindFaculty, Name: duplicateName, Enabled: true}},
+			{RowNo: 6, Values: map[string]string{"name": "atomic-first-" + unique}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: firstID, Kind: masterdata.KindFaculty, Name: "atomic-first-" + unique, Enabled: true}},
+			{RowNo: 7, Values: map[string]string{"name": duplicateName}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: secondID, Kind: masterdata.KindFaculty, Name: duplicateName, Enabled: true}},
 		},
 	}
 	if err := database.CreateMasterDataImportBatch(ctx, failedBatch, mutation); err != nil {
@@ -114,9 +114,9 @@ func TestMasterDataImportBatchIsAtomicAndIdempotentAgainstPostgres(t *testing.T)
 	validRecordID := uuid.NewString()
 	validName := fmt.Sprintf("imported-faculty-%s", unique)
 	validBatch := masterdataimport.Batch{
-		ID: uuid.NewString(), Kind: masterdata.KindFaculty, Status: masterdataimport.StatusPreviewReady, TemplateVersion: 1,
+		ID: uuid.NewString(), Kind: masterdata.KindFaculty, Status: masterdataimport.StatusPreviewReady, TemplateVersion: 4,
 		SourceFileID: seedFile(), TotalRows: 1, ValidRows: 1, Version: 1, CreatedBy: actorID, CreatedAt: time.Now().UTC(),
-		Rows: []masterdataimport.PreviewRow{{RowNo: 5, Values: map[string]string{"name": validName}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: validRecordID, Kind: masterdata.KindFaculty, Name: validName, Enabled: true}}},
+		Rows: []masterdataimport.PreviewRow{{RowNo: 6, Values: map[string]string{"name": validName}, Status: masterdataimport.RowValid, Errors: []masterdataimport.RowError{}, Record: &masterdata.Record{ID: validRecordID, Kind: masterdata.KindFaculty, Name: validName, Enabled: true}}},
 	}
 	if err := database.CreateMasterDataImportBatch(ctx, validBatch, mutation); err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestMasterDataImportBatchIsAtomicAndIdempotentAgainstPostgres(t *testing.T)
 		t.Fatalf("confirm result = %+v", result)
 	}
 	confirmed, err := database.FindMasterDataImportBatch(ctx, validBatch.Kind, validBatch.ID, actorID)
-	if err != nil || confirmed.ConfirmedAt == nil || confirmed.Status != masterdataimport.StatusConfirmed {
+	if err != nil || confirmed.ConfirmedAt == nil || confirmed.Status != masterdataimport.StatusConfirmed || confirmed.TemplateVersion != 4 {
 		t.Fatalf("confirmed batch timestamp = %+v, %v", confirmed, err)
 	}
 	if err := database.Pool.QueryRow(ctx, `SELECT count(*) FROM faculties WHERE id=$1`, validRecordID).Scan(&partialCount); err != nil || partialCount != 1 {

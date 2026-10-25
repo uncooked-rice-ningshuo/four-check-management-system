@@ -1090,6 +1090,13 @@ func (h *handler) downloadAttendanceTemplate(c *gin.Context) {
 		writeImportError(c, err)
 		return
 	}
+	if c.Query("example") == "1" {
+		content, err = importjob.ExampleTemplateCopy(content)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "TEMPLATE_EXAMPLE_FAILED", "模板示例生成失败，请稍后重试")
+			return
+		}
+	}
 	_ = account
 	name := strings.TrimSpace(file.OriginalName)
 	if name == "" {
@@ -1566,7 +1573,7 @@ func (h *handler) clearCookie(c *gin.Context) {
 	c.SetCookie("refresh_token", "", -1, "/api/v1/auth", "", h.secureCookie, true)
 }
 func publicAccount(a auth.Account) gin.H {
-	return gin.H{"id": a.ID, "loginName": a.LoginName, "studentNo": a.StudentNo, "name": a.Name, "status": a.Status, "accountKind": a.AccountKind, "systemRole": a.SystemRole, "isSuperAdmin": a.IsSuperAdmin, "mustChangePassword": a.MustChangePassword, "primaryDepartmentId": a.PrimaryDepartmentID, "requestedDepartmentId": a.RequestedDepartmentID, "requestedOrgRoleId": a.RequestedOrgRoleID}
+	return gin.H{"id": a.ID, "loginName": a.LoginName, "studentNo": a.StudentNo, "name": a.Name, "status": a.Status, "accountKind": a.AccountKind, "systemRole": a.SystemRole, "isSuperAdmin": a.IsSuperAdmin, "mustChangePassword": a.MustChangePassword, "primaryDepartmentId": a.PrimaryDepartmentID, "primaryDepartmentName": a.PrimaryDepartmentName, "organizationRoleName": a.OrganizationRoleName, "requestedDepartmentId": a.RequestedDepartmentID, "requestedOrgRoleId": a.RequestedOrgRoleID}
 }
 func bind(c *gin.Context, target any) bool {
 	if c.ShouldBindJSON(target) != nil {

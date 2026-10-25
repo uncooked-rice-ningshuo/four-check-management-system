@@ -41,3 +41,18 @@ it('opens a new form with one occurrence mode and no stale edit reason',()=>{
  expect(screen.queryByLabelText('不合格原因')).not.toBeInTheDocument()
  expect(screen.queryByLabelText('修改原因')).not.toBeInTheDocument()
 })
+it('requires a concrete description when the reason is other',async()=>{
+ mutate.mockClear()
+ const otherRecord={...record,currentReasonLabel:'其他',details:{...record.details,reasonCode:'OTHER',description:''}}
+ render(<StrictMode><DormitoryHygieneDrawer editing={otherRecord} inspectionTypeId="type" onClose={vi.fn()}/></StrictMode>)
+ expect(screen.getByLabelText('其他原因说明')).toHaveValue('')
+ fireEvent.change(screen.getByLabelText('修改原因'),{target:{value:'核对'}})
+ fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+ expect(await screen.findByText('请填写具体不合格原因')).toBeInTheDocument()
+ expect(mutate).not.toHaveBeenCalled()
+ fireEvent.change(screen.getByLabelText('其他原因说明'),{target:{value:'门框积灰'}})
+ mutate.mockResolvedValueOnce(otherRecord)
+ fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+ await waitFor(()=>expect(mutate).toHaveBeenCalledOnce())
+ expect(mutate.mock.calls[0][0].record.details).toMatchObject({reasonCode:'OTHER',description:'门框积灰'})
+})

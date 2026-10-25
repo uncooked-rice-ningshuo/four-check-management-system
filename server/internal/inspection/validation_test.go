@@ -103,6 +103,24 @@ func TestValidateSevenDetails(t *testing.T) {
 		})
 	}
 }
+func TestHygieneOtherReasonRequiresDescription(t *testing.T) {
+	for _, code := range []string{InspectionTypeDormitoryHygiene, InspectionTypeClassroomHygiene, InspectionTypePublicDormitoryHygiene} {
+		t.Run(code, func(t *testing.T) {
+			fields := validDetails(code)
+			fields["result"] = json.RawMessage(`"UNQUALIFIED"`)
+			fields["reasonCode"] = json.RawMessage(`"OTHER"`)
+			for _, description := range []string{`""`, `"  "`} {
+				fields["description"] = json.RawMessage(description)
+				_, issues := validateFixture(code, fields)
+				requireIssue(t, issues, "details.description", "OTHER_REASON_REQUIRED")
+			}
+			fields["description"] = json.RawMessage(`"门框积灰"`)
+			if _, issues := validateFixture(code, fields); len(issues) != 0 {
+				t.Fatalf("custom reason rejected: %+v", issues)
+			}
+		})
+	}
+}
 func requireIssue(t *testing.T, issues []DetailIssue, path, code string) {
 	t.Helper()
 	for _, i := range issues {

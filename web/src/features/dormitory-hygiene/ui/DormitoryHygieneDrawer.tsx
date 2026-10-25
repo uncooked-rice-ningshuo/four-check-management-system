@@ -27,6 +27,7 @@ export function DormitoryHygieneDrawer({editing:initialEditing,inspectionTypeId,
  const classIds=Form.useWatch('responsibleClassIds',form)??editing?.details.responsibleClassIds??[]
  const primaryClassId=classIds[0]
  const result=Form.useWatch('result',form)??editing?.details.result??'QUALIFIED'
+ const reasonCode=Form.useWatch('reasonCode',form)??editing?.details.reasonCode
  const occurrenceKind=Form.useWatch('occurrenceKind',form)??(editing?.details.round?'ROUND':'TIME')
  const mutation=useDormitoryHygieneMutation(),submitting=useRef(false)
  const [error,setError]=useState('')
@@ -44,7 +45,7 @@ export function DormitoryHygieneDrawer({editing:initialEditing,inspectionTypeId,
  const reasons=useInspectionEntryOptions({...scope,kind:'reason-codes',classId:primaryClassId},ready&&!!primaryClassId)
  const queries=[semesters,weeks,departments,classes,students,dormitories,reasons]
  const failed=queries.some(query=>query.isError)
- const clear=(names:(keyof Values)[])=>form.setFields(names.map(name=>({name,value:undefined,errors:[]})))
+ const clear=(names:(keyof Values)[])=>form.setFields(names.map(name=>({name,value:name==='reasonCode'?'':undefined,errors:[]})))
  const submit=async(values:Values)=>{
   if(submitting.current||failed)return
   submitting.current=true;setError('')
@@ -95,7 +96,8 @@ export function DormitoryHygieneDrawer({editing:initialEditing,inspectionTypeId,
     {result==='UNQUALIFIED'&&<Col xs={24} sm={12}><Form.Item name="reasonCode" label="不合格原因" rules={required}><Select disabled={!primaryClassId} loading={reasons.isFetching}
      options={choices(reasons.data,editing?.details.reasonCode?[{id:editing.details.reasonCode,label:editing.currentReasonLabel||editing.details.reasonCode}]:[])}/></Form.Item></Col>}
    </Row>
-   <Form.Item name="description" label="情况说明"><Input.TextArea maxLength={500} rows={2}/></Form.Item>
+   {result==='UNQUALIFIED'&&primaryClassId&&!reasons.isFetching&&!reasons.isError&&reasons.data?.length===0&&<Alert type="warning" showIcon title="尚未配置宿舍卫生不合格原因" description="请联系系统管理员在字典管理中配置并启用宿舍卫生不合格原因。" />}
+   <Form.Item name="description" label={result==='UNQUALIFIED'&&reasonCode==='OTHER'?'其他原因说明':'情况说明'} rules={result==='UNQUALIFIED'&&reasonCode==='OTHER'?[{required:true,whitespace:true,message:'请填写具体不合格原因'}]:undefined}><Input.TextArea maxLength={500} rows={2}/></Form.Item>
    {editing&&<Form.Item name="reason" label="修改原因" rules={[...required,{whitespace:true,message:'请填写修改原因'}]}><Input.TextArea maxLength={255}/></Form.Item>}
    <Form.Item name="remark" label="备注"><Input.TextArea maxLength={500} rows={3}/></Form.Item>
   </Form>

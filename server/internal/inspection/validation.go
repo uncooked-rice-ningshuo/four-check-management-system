@@ -78,6 +78,9 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 		if detailString(values, "result") == HygieneUnqualified && detailString(values, "reasonCode") == "" {
 			issues = append(issues, detailIssue("details.reasonCode", "REQUIRED"))
 		}
+		if detailString(values, "reasonCode") == "OTHER" && strings.TrimSpace(detailString(values, "description")) == "" {
+			issues = append(issues, detailIssue("details.description", "OTHER_REASON_REQUIRED"))
+		}
 	}
 	if len(issues) > 0 {
 		return ValidatedDetails{}, issues
@@ -330,6 +333,7 @@ func detailIssue(path, code string) DetailIssue {
 		"INVALID_TYPE": "字段数据类型不正确", "INVALID_FORMAT": "字段格式不正确", "OUT_OF_RANGE": "字段超出允许范围",
 		"INVALID_ENUM": "请选择有效的检查结果", "DUPLICATE_ITEM": "关联列表存在重复项", "INVALID_RANGE": "周日期范围无效",
 		"OUTSIDE_WEEK": "检查日期不在所选周内", "OCCURRENCE_REQUIRED": "请填写检查时间或轮次", "OCCURRENCE_CONFLICT": "检查时间和轮次只能填写一项",
+		"OTHER_REASON_REQUIRED": "选择其他原因时请填写具体原因说明",
 	}
 	return DetailIssue{Path: path, Code: code, Message: messages[code]}
 }

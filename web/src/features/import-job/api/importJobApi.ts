@@ -6,8 +6,8 @@ import { attendanceQuery } from '../../attendance/api/attendanceApi'
 import { parseImportBatch } from '../../../shared/api/parseImportBatch'
 
 export const importJobApi = {
-  async template(context: InspectionContext) {
-		const download = await apiDownload(`/imports/attendance/template?${attendanceQuery(context)}`)
+  async template(context: InspectionContext, withExample = false) {
+		const download = await apiDownload(`/imports/attendance/template?${attendanceQuery(context)}${withExample ? '&example=1' : ''}`)
 		const id = download.headers.get('X-Import-Template-ID') ?? ''
 		const version = Number(download.headers.get('X-Import-Template-Version'))
 		if (!id || !Number.isInteger(version) || version < 1) throw new ApiError(502, 'INVALID_TEMPLATE_RESPONSE', '导入模板响应无效')

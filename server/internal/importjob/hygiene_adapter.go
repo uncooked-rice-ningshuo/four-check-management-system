@@ -191,7 +191,7 @@ func validateHygieneRow(scope AttendanceImportScope, refs AttendanceReferences, 
 		return checked
 	}
 	normalized, issues := inspection.ValidateDetails(scope.TypeCode, inspection.DetailContext{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, WeekStart: scope.WeekStart.Format("2006-01-02"), WeekEnd: scope.WeekEnd.Format("2006-01-02")}, raw)
-	fields := map[string]string{"date": "inspection_date", "time": "inspection_time", "round": "inspection_round", "reasonCode": "reason_name", "responsibleClassIds": "responsible_class_names", "responsibleStudentIds": "responsible_student_nos"}
+	fields := map[string]string{"date": "inspection_date", "time": "inspection_time", "round": "inspection_round", "reasonCode": "reason_name", "description": "description", "responsibleClassIds": "responsible_class_names", "responsibleStudentIds": "responsible_student_nos"}
 	for _, problem := range issues {
 		field := strings.TrimPrefix(problem.Path, "details.")
 		if mapped, ok := fields[field]; ok {
@@ -211,6 +211,10 @@ func validateHygieneRow(scope AttendanceImportScope, refs AttendanceReferences, 
 		if field == "reason_name" {
 			message = "不合格结果必须填写原因"
 			suggestion = "填写当前检查类型已启用的原因名称"
+		}
+		if problem.Code == "OTHER_REASON_REQUIRED" {
+			message = "选择“其他”时必须填写具体原因"
+			suggestion = "在情况说明列填写具体不合格原因"
 		}
 		issue(code, field, message, suggestion)
 	}

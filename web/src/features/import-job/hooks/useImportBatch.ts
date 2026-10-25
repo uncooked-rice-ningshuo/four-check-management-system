@@ -15,7 +15,7 @@ export const importJobKeys = {
 }
 
 export function useImportTemplate(context: InspectionContext, enabled: boolean, typeCode: SupportedImportType = 'ATTENDANCE_RATE') {
-  return useQuery({ queryKey: importJobKeys.template(context), queryFn: () => ((typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN') ? inspectionImportApi : typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).template(context), enabled })
+  return useQuery({ queryKey: importJobKeys.template(context), queryFn: () => ((typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN') ? inspectionImportApi : typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).template(context, true), enabled })
 }
 
 export function useImportBatch(id?: string) {

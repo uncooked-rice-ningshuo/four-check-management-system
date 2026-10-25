@@ -236,7 +236,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
 
         {!batchId && <>
           <div className="import-template-action">
-            <div><Typography.Title level={5}>1. 使用当前标准模板</Typography.Title><Typography.Text type="secondary">模板版本由服务端校验，旧模板无法上传确认。</Typography.Text></div>
+            <div><Typography.Title level={5}>1. 使用当前标准模板</Typography.Title><Typography.Text type="secondary">第 4 行为填写示例，不参与导入；从第 5 行填写真实数据。模板版本由服务端校验。</Typography.Text></div>
             <Button icon={<DownloadOutlined />} loading={template.isLoading} disabled={!template.data || targetSelectionInvalid || targetOptionsFailed} onClick={() => template.data && saveTemplate(template.data.file, label)}>下载标准模板</Button>
           </div>
           {template.isError && <Alert type="error" showIcon title={template.error instanceof ApiError && template.error.status === 403 ? '当前范围无导入权限，请选择已授权的目标班级或年级' : '无法获取当前导入模板，请稍后重试'} />}

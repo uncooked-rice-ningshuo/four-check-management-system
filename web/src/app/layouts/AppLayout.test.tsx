@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppLayout } from './AppLayout'
 
-let currentUser = { id: 'member-1', name: '普通成员', loginName: 'member', systemRole: 'MEMBER', isSuperAdmin: false }
+let currentUser: { id: string; name: string; loginName: string; systemRole: string; isSuperAdmin: boolean; primaryDepartmentName?: string; organizationRoleName?: string } = { id: 'member-1', name: '普通成员', loginName: 'member', systemRole: 'MEMBER', isSuperAdmin: false }
 const permissionsQuery = vi.fn()
 const signOut = vi.fn()
 
@@ -40,6 +40,13 @@ describe('AppLayout', () => {
     expect(screen.getByText('工作台内容')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '工作台' })).toHaveAttribute('href', '/')
     expect(screen.queryByText('管理概览')).not.toBeInTheDocument()
+  })
+
+  it('shows the assigned department and position instead of the system member role', () => {
+    currentUser = { ...currentUser, primaryDepartmentName: '学习部', organizationRoleName: '委员' }
+    renderLayout()
+    expect(screen.getByText('学习部 · 委员')).toBeVisible()
+    expect(document.querySelector('.account-copy small')).toHaveTextContent('学习部 · 委员')
   })
 
   it('uses the shared workbench as the only overview entry for administrators', () => {

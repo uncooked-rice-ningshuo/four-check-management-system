@@ -305,7 +305,11 @@ func (p *Postgres) FindByID(ctx context.Context, id string) (auth.Account, error
 
 const accountSelect = `SELECT id,login_name,COALESCE(student_no,''),name,password_hash,status,account_kind,
 	is_super_admin,system_role,must_change_password,session_version,COALESCE(primary_department_id::text,''),
-	COALESCE(requested_department_id::text,''),COALESCE(requested_org_role_id::text,''),created_at FROM accounts`
+	COALESCE(requested_department_id::text,''),COALESCE(requested_org_role_id::text,''),created_at,
+	COALESCE((SELECT d.name FROM departments d WHERE d.id=accounts.primary_department_id AND d.enabled),''),
+	COALESCE((SELECT r.name FROM user_org_roles u JOIN organization_roles r ON r.id=u.organization_role_id
+		WHERE u.account_id=accounts.id AND u.department_id=accounts.primary_department_id AND r.enabled
+		ORDER BY r.sort_order,r.id LIMIT 1),'') FROM accounts`
 
 type row interface{ Scan(...any) error }
 
@@ -313,7 +317,7 @@ func scanAccount(r row) (auth.Account, error) {
 	var a auth.Account
 	err := r.Scan(&a.ID, &a.LoginName, &a.StudentNo, &a.Name, &a.PasswordHash, &a.Status, &a.AccountKind,
 		&a.IsSuperAdmin, &a.SystemRole, &a.MustChangePassword, &a.SessionVersion, &a.PrimaryDepartmentID, &a.RequestedDepartmentID,
-		&a.RequestedOrgRoleID, &a.CreatedAt)
+		&a.RequestedOrgRoleID, &a.CreatedAt, &a.PrimaryDepartmentName, &a.OrganizationRoleName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, auth.ErrAccountNotFound
 	}

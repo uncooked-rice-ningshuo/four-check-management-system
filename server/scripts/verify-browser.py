@@ -238,12 +238,9 @@ INSERT INTO students(id,student_no,name,grade_id,faculty_id,class_id) VALUES
 ('{ids['studentB']}','000002','E2E student B','{ids['grade']}','{ids['faculty']}','{ids['class']}');
 UPDATE students SET dormitory_id='{ids['dormA']}' WHERE id='{ids['studentA']}';
 UPDATE students SET dormitory_id='{ids['dormB']}' WHERE id='{ids['studentB']}';
-INSERT INTO dictionary_types(id,code,name) VALUES('{uuid.uuid4()}','DORMITORY_HYGIENE_REASON','宿舍卫生不合格原因');
-INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='DORMITORY_HYGIENE_REASON';
-INSERT INTO dictionary_types(id,code,name) VALUES('{uuid.uuid4()}','PUBLIC_DORMITORY_HYGIENE_REASON','公共宿舍卫生不合格原因');
-INSERT INTO dictionary_types(id,code,name) VALUES('{uuid.uuid4()}','CLASSROOM_HYGIENE_REASON','教室卫生不合格原因');
-INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='PUBLIC_DORMITORY_HYGIENE_REASON';
-INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='CLASSROOM_HYGIENE_REASON';
+INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='DORMITORY_HYGIENE_REASON' ON CONFLICT(type_id,value) DO UPDATE SET label=EXCLUDED.label;
+INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='PUBLIC_DORMITORY_HYGIENE_REASON' ON CONFLICT(type_id,value) DO UPDATE SET label=EXCLUDED.label;
+INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,'FLOOR','地面' FROM dictionary_types WHERE code='CLASSROOM_HYGIENE_REASON' ON CONFLICT(type_id,value) DO UPDATE SET label=EXCLUDED.label;
 """
         run(sql_command('-v', 'ON_ERROR_STOP=1'), input=fixture_sql.encode())
         if os.environ.get('BROWSER_SUITE') == 'classroom-hygiene-import':

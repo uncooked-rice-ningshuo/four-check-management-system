@@ -60,6 +60,8 @@ type Account struct {
 	MustChangePassword    bool
 	SessionVersion        int
 	PrimaryDepartmentID   string
+	PrimaryDepartmentName string
+	OrganizationRoleName  string
 	RequestedDepartmentID string
 	RequestedOrgRoleID    string
 	CreatedAt             time.Time

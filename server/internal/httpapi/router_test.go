@@ -23,6 +23,19 @@ type accounts struct {
 	reviewErr error
 }
 
+func TestPublicAccountIncludesDisplayAssignmentWithoutPrivateData(t *testing.T) {
+	value := publicAccount(auth.Account{
+		ID: "member-1", Name: "示例用户", SystemRole: auth.SystemRoleMember,
+		PrimaryDepartmentName: "学习部", OrganizationRoleName: "委员", PasswordHash: "private-hash",
+	})
+	if value["primaryDepartmentName"] != "学习部" || value["organizationRoleName"] != "委员" {
+		t.Fatal("missing display assignment", value)
+	}
+	if _, exposed := value["passwordHash"]; exposed {
+		t.Fatal("password hash leaked")
+	}
+}
+
 type readinessStub struct{ err error }
 
 func (s readinessStub) Ready(context.Context) error { return s.err }

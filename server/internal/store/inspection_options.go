@@ -82,7 +82,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	var columns string
 	switch q.Kind {
 	case "classes":
-		columns = "c.id,c.name || '（' || g.name || '级）' AS label"
+		columns = "c.id,c.name || '（' || CASE WHEN right(g.name, 1) = '级' THEN g.name ELSE g.name || '级' END || '）' AS label"
 	case "students":
 		base += " JOIN students s ON s.class_id=c.id "
 		where += " AND s.enabled"
@@ -118,7 +118,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		args = append(args, scope.TypeCode+"_REASON")
 		base += fmt.Sprintf(" JOIN dictionary_types dt ON dt.code=$%d JOIN dictionary_items di ON di.type_id=dt.id ", len(args))
 		where += " AND dt.enabled AND di.enabled"
-		columns = "di.value AS id,di.label AS label"
+		columns = "di.value AS id,di.label AS label,di.sort_order AS order_hint"
 	case "classroom-objects":
 		base += " CROSS JOIN classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id "
 		where += " AND cr.enabled AND b.enabled"
@@ -144,14 +144,26 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM ("+selection+") options", args...).Scan(&result.Total); err != nil {
 		return result, err
 	}
+	listQuery := selection
+	orderBy := "label,id"
+	if q.Kind == "reason-codes" {
+		listQuery = "SELECT id,label,order_hint FROM (" + selection + ") options"
+		orderBy = "order_hint,id"
+	}
 	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
-	rows, err := tx.Query(ctx, selection+fmt.Sprintf(" ORDER BY label,id LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
+	rows, err := tx.Query(ctx, listQuery+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, len(args)-1, len(args)), args...)
 	if err != nil {
 		return result, err
 	}
 	for rows.Next() {
 		var option inspection.EntryOption
-		if err = rows.Scan(&option.ID, &option.Label); err != nil {
+		if q.Kind == "reason-codes" {
+			var orderHint int
+			err = rows.Scan(&option.ID, &option.Label, &orderHint)
+		} else {
+			err = rows.Scan(&option.ID, &option.Label)
+		}
+		if err != nil {
 			rows.Close()
 			return result, err
 		}

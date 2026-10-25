@@ -68,9 +68,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	 UPDATE semester_weeks SET attendance_penalty_multiplier=1 WHERE id='a0000000-0000-0000-0000-000000000004';
 	 INSERT INTO classroom_hygiene_areas(id,classroom_id,name) VALUES('a0000000-0000-0000-0000-000000000020','a0000000-0000-0000-0000-000000000009','Floor');
  INSERT INTO public_dormitory_hygiene_areas(id,dormitory_building_id,floor_unit,name) VALUES('a0000000-0000-0000-0000-000000000021','a0000000-0000-0000-0000-000000000011','1','Corridor');
- INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_review) SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true FROM inspection_types ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true;
- INSERT INTO dictionary_types(id,code,name) SELECT gen_random_uuid(),code || '_REASON',name || '原因' FROM inspection_types WHERE code LIKE '%HYGIENE';
- INSERT INTO dictionary_items(id,type_id,value,label) SELECT gen_random_uuid(),id,'FLOOR','地面' FROM dictionary_types WHERE code LIKE '%HYGIENE_REASON';`
+ INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_review) SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true FROM inspection_types ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true;`
 	if _, err = pool.Exec(ctx, sql); err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +240,16 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			t.Fatal("second page", e)
 		}
 		q.Page = 1
+		if _, e = pool.Exec(ctx, `UPDATE grades SET name='2026级' WHERE id=$1`, rf("05")); e != nil {
+			t.Fatal(e)
+		}
+		page, e = options.EntryOptions(ctx, admin, q)
+		if _, restoreErr := pool.Exec(ctx, `UPDATE grades SET name='2026' WHERE id=$1`, rf("05")); restoreErr != nil {
+			t.Fatal(restoreErr)
+		}
+		if e != nil || len(page.Items) == 0 || strings.Contains(page.Items[0].Label, "级级") {
+			t.Fatal("grade suffix repeated in class option", page, e)
+		}
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: q.InspectionTypeID, ClassID: rf("06")}}}
 		page, e = options.EntryOptions(ctx, member, q)
 		if e != nil || page.Total != 1 || page.Items[0].ID != rf("06") {
@@ -401,7 +409,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 		q.Kind = "reason-codes"
 		page, err = options.EntryOptions(ctx, member, q)
-		if err != nil || page.Total != 1 || page.Items[0].ID != "FLOOR" || page.Items[0].Label != "地面" {
+		if err != nil || page.Total != 6 || page.Items[0].ID != "FLOOR" || page.Items[0].Label != "地面不洁" {
 			t.Fatal("configured reason", page, err)
 		}
 		q.Kind = "students"
@@ -445,7 +453,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if record.CurrentDormitoryName == "" || record.CurrentReasonLabel != "地面" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
+		if record.CurrentDormitoryName == "" || record.CurrentReasonLabel != "地面不洁" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
 			t.Fatal("hygiene display labels", record)
 		}
 		if record.ResponsibleClasses[0].ID != rf("06") || record.ResponsibleStudents[0].ID != rf("07") || record.ResponsibleClasses[0].Label == "" || record.ResponsibleStudents[0].Label == "" {
@@ -521,7 +529,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if record.CurrentAreaName == "" || record.CurrentReasonLabel != "地面" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
+			if record.CurrentAreaName == "" || record.CurrentReasonLabel != "地面不洁" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
 				t.Fatal("area display labels", code, record)
 			}
 			if code == inspection.InspectionTypePublicDormitoryHygiene && (len(record.ResponsibleDormitories) != 1 || record.ResponsibleDormitories[0].ID != rf("12") || record.ResponsibleDormitories[0].Label == "") {
@@ -984,6 +992,48 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		page, err := svc.List(ctx, member, inspection.InspectionFilter{DepartmentID: inspection.CollegeDepartmentOptionID, InspectionTypeID: input.InspectionTypeID})
 		if err != nil || page.Total != 1 || page.Items[0].ID != record.ID {
 			t.Fatalf("college-only list: %+v %v", page, err)
+		}
+	})
+	t.Run("account display assignment", func(t *testing.T) {
+		departmentID := "10000000-0000-0000-0000-000000000002"
+		if _, err := pool.Exec(ctx, `UPDATE accounts SET primary_department_id=$2 WHERE id=$1`, rf("01"), departmentID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id)
+			VALUES($1,$2,$3,'20000000-0000-0000-0000-000000000004')`, rf("31"), rf("01"), departmentID); err != nil {
+			t.Fatal(err)
+		}
+		account, err := db.FindByID(ctx, rf("01"))
+		if err != nil || account.PrimaryDepartmentName != "学习部" || account.OrganizationRoleName != "部门委员" {
+			t.Fatalf("account assignment names: %+v %v", account, err)
+		}
+	})
+	t.Run("other hygiene reason database guard", func(t *testing.T) {
+		for _, table := range []string{"dorm_hygiene_details", "classroom_hygiene_details", "public_dormitory_hygiene_details"} {
+			var recordID string
+			if err := pool.QueryRow(ctx, "SELECT record_id FROM "+table+" LIMIT 1").Scan(&recordID); err != nil {
+				t.Fatal(table, err)
+			}
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, "UPDATE "+table+" SET reason_code='OTHER',description='  ' WHERE record_id=$1", recordID); err == nil {
+				t.Fatal(table, "accepted blank other reason")
+			}
+			if err := tx.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			tx, err = pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, "UPDATE "+table+" SET reason_code='OTHER',description='门框积灰' WHERE record_id=$1", recordID); err != nil {
+				t.Fatal(table, err)
+			}
+			if err := tx.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 }

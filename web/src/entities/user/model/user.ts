@@ -10,6 +10,8 @@ export type User = {
   isSuperAdmin: boolean
   mustChangePassword: boolean
   primaryDepartmentId: string
+  primaryDepartmentName?: string
+  organizationRoleName?: string
   requestedDepartmentId: string
   requestedOrgRoleId: string
 }

@@ -55,7 +55,9 @@ export function AppLayout() {
   const { user, signOut } = useAuth()
   const effectivePermissions = useAttendancePermissions()
   const hygieneTargets = useHygieneAreaTargets(!!user && !user.mustChangePassword)
-  const accountRoleLabel = user?.isSuperAdmin ? '超级管理员' : user?.systemRole === 'ADMIN' ? '系统管理员' : '普通成员'
+  const accountRoleLabel = user?.primaryDepartmentName && user.organizationRoleName
+    ? `${user.primaryDepartmentName} · ${user.organizationRoleName}`
+    : user?.isSuperAdmin ? '超级管理员' : user?.systemRole === 'ADMIN' ? '系统管理员' : '普通成员'
   const attendanceContext = useInspectionContext({ typeCode: 'ATTENDANCE_RATE', purpose: 'view', kind: 'semesters' })
   const unattendedContext = useInspectionContext({ typeCode: 'UNATTENDED_CLASSROOM', purpose: 'view', kind: 'semesters' })
   const lateReturnContext = useInspectionContext({ typeCode: 'LATE_RETURN', purpose: 'view', kind: 'semesters' })

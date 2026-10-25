@@ -7,8 +7,8 @@ export type InspectionImportScope = { semesterId: string; weekId: string; inspec
 /** Share multipart/template contracts while retaining legacy endpoint boundaries. */
 export function createInspectionImportClient(root: '/imports/course-records' | '/imports/inspections') {
   return {
-    async template(context: InspectionImportScope) {
-      const download = await apiDownload(`${root}/template?${queryString({ ...context })}`)
+    async template(context: InspectionImportScope, withExample = false) {
+      const download = await apiDownload(`${root}/template?${queryString({ ...context })}${withExample ? '&example=1' : ''}`)
       const id = download.headers.get('X-Import-Template-ID') ?? ''
       const version = Number(download.headers.get('X-Import-Template-Version'))
       if (!id.trim() || !Number.isInteger(version) || version < 1) throw new ApiError(502, 'INVALID_TEMPLATE_RESPONSE', '导入模板响应无效')

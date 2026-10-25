@@ -94,3 +94,30 @@ func TestDormitoryHygieneAdapterRejectsAmbiguousNames(t *testing.T) {
 		})
 	}
 }
+
+func TestDormitoryHygieneImportOtherReasonNeedsDescription(t *testing.T) {
+	repo := hygieneRepository()
+	repo.objects.Reasons["其他"] = []HygieneNamedReference{{Code: "OTHER", Name: "其他"}}
+	row := hygieneRow(5)
+	row.Values["result"] = "不合格"
+	row.Values["reason_name"] = "其他"
+	adapter := NewDormitoryHygieneAdapter(repo)
+	result, err := adapter.Validate(context.Background(), hygieneScope(), []ParsedRow{row})
+	if err != nil || result.ValidCount != 0 || result.InvalidCount != 1 {
+		t.Fatal(result, err)
+	}
+	found := false
+	for _, issue := range result.Rows[0].Errors {
+		if issue.Field == "description" && issue.Message == "选择“其他”时必须填写具体原因" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing actionable description error", result.Rows[0].Errors)
+	}
+	row.Values["description"] = "门框积灰"
+	result, err = adapter.Validate(context.Background(), hygieneScope(), []ParsedRow{row})
+	if err != nil || result.ValidCount != 1 || result.InvalidCount != 0 {
+		t.Fatal(result, err)
+	}
+}

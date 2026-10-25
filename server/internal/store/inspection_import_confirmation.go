@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"four-check-management-system/server/internal/importjob"
@@ -19,14 +20,47 @@ func inspectionImportMatches(record importjob.InspectionImportRecord, input impo
 }
 
 func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.InspectionContext, row importjob.InspectionImportRecord, input importjob.ConfirmBatchInput) (inspection.InspectionRecord, error) {
-	if row.TypeCode != locked.TypeCode || (row.TypeCode != inspection.InspectionTypeMorning && row.TypeCode != inspection.InspectionTypeLateReturn && row.TypeCode != inspection.InspectionTypeDormitoryHygiene && row.TypeCode != inspection.InspectionTypeClassroomHygiene) || !inspectionImportMatches(row, input) {
+	if row.TypeCode != locked.TypeCode || (row.TypeCode != inspection.InspectionTypeEveningSelfStudy && row.TypeCode != inspection.InspectionTypeMorning && row.TypeCode != inspection.InspectionTypeLateReturn && row.TypeCode != inspection.InspectionTypeDormitoryHygiene && row.TypeCode != inspection.InspectionTypeClassroomHygiene) || !inspectionImportMatches(row, input) {
 		return inspection.InspectionRecord{}, importjob.ErrBatchScopeMismatch
 	}
-	validated, issues := inspection.ValidateDetails(locked.TypeCode, locked.DetailContext, row.Input.Details)
+	details := row.Input.Details
+	if locked.TypeCode == inspection.InspectionTypeEveningSelfStudy {
+		if locked.AttendancePenaltyMultiplier == nil {
+			return inspection.InspectionRecord{}, inspection.ErrAttendancePenaltyUnconfigured
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(details, &fields); err != nil || fields == nil {
+			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
+		}
+		if _, exists := fields["period"]; exists {
+			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
+		}
+		if _, exists := fields["absenceHours"]; exists {
+			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
+		}
+		fields["period"] = json.RawMessage(`"9-10"`)
+		fields["absenceHours"] = json.RawMessage(`2`)
+		var err error
+		details, err = json.Marshal(fields)
+		if err != nil {
+			return inspection.InspectionRecord{}, err
+		}
+	}
+	validated, issues := inspection.ValidateDetails(locked.TypeCode, locked.DetailContext, details)
 	if len(issues) > 0 {
 		return inspection.InspectionRecord{}, importjob.ErrPreviewStale
 	}
 	record := inspection.InspectionRecord{ID: row.ID, SemesterID: row.Input.SemesterID, WeekID: row.Input.WeekID, InspectionTypeID: row.Input.InspectionTypeID, DepartmentID: row.Input.DepartmentID, TypeCode: row.TypeCode, Details: validated.Details, Normalized: validated, Status: inspection.RecordStatusDraft, Source: inspection.RecordSourceExcel, RowVersion: 1, CreatedBy: row.CreatedBy, ImportBatchID: row.ImportBatchID}
+	if locked.TypeCode == inspection.InspectionTypeEveningSelfStudy {
+		evening, ok := record.Details.(*inspection.EveningSelfStudyDetails)
+		if !ok {
+			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
+		}
+		evening.PenaltyMultiplier = locked.AttendancePenaltyMultiplier
+		penaltyHours := evening.AbsenceHours * float64(*locked.AttendancePenaltyMultiplier)
+		evening.PenaltyHours = &penaltyHours
+		record.PenaltyMultiplier = locked.AttendancePenaltyMultiplier
+	}
 	// The API reauthorizes the whole batch before confirmation. Every reference
 	// must remain inside that exact scope; do not manufacture a permission grant.
 	current, err := (&inspectionTx{tx: tx}).lockReferences(ctx, record, locked, func(scope permission.Scope) bool {

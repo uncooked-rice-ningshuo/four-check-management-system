@@ -62,6 +62,7 @@ type importJobHTTPService interface {
 	ParseBatch(context.Context, importjob.ParseBatchInput) (importjob.Batch, error)
 	GetBatch(context.Context, string) (importjob.Batch, error)
 	ListRows(context.Context, string, int, int, string) (importjob.ImportRowPage, error)
+	ListSubmissionBatches(context.Context, string, importjob.SubmissionBatchQuery) (importjob.SubmissionBatchPage, error)
 	PublishedTemplate(context.Context, string) (importjob.Template, error)
 	ConfirmBatch(context.Context, importjob.ConfirmBatchInput) (importjob.ConfirmResult, error)
 	CancelBatch(context.Context, string, int, audit.Metadata) (importjob.Batch, error)
@@ -230,8 +231,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	masterDataAdmin.POST("/master-data/:kind", h.createMasterData)
 	masterDataAdmin.PUT("/master-data/:kind/:id", h.updateMasterData)
 	masterDataAdmin.GET("/master-data/:kind/:id/changes", h.listMasterDataChanges)
-	// Area maintenance accepts a department/type scoped master-data grant without
-	// exposing the general master-data endpoints to that scoped actor.
+	// Area maintenance accepts a type-scoped master-data grant without exposing
+	// the general master-data endpoints to that actor.
 	v1.GET("/admin/hygiene-areas/options", h.hygieneAreaOptions)
 	v1.GET("/admin/hygiene-areas/:kind/references", h.requireHygieneAreaManage(), h.hygieneAreaReferences)
 	v1.GET("/admin/hygiene-areas/:kind", h.requireHygieneAreaManage(), h.listMasterData)
@@ -249,6 +250,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.PUT("/work-context", h.setWorkContext)
 	v1.GET("/inspections/attendance/filter-options", h.attendanceFilterOptions)
 	v1.GET("/inspections/attendance", h.listAttendance)
+	v1.GET("/inspections/submission-candidates", h.listSubmissionCandidates)
 	v1.POST("/inspections/attendance", h.createManualAttendance)
 	v1.POST("/inspections", h.createInspection)
 	v1.GET("/inspections", h.listInspections)
@@ -283,7 +285,9 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.POST("/imports/course-records", h.uploadAttendanceImport)
 	v1.GET("/imports/inspections/template", h.downloadAttendanceTemplate)
 	v1.POST("/imports/inspections", h.uploadAttendanceImport)
+	v1.GET("/imports", h.listSubmissionImportBatches)
 	v1.GET("/imports/:id", h.getImportBatch)
+	v1.GET("/imports/:id/submission-records", h.listSubmissionBatchRecords)
 	v1.GET("/imports/:id/rows", h.listImportRows)
 	v1.POST("/imports/:id/confirm", h.confirmImportBatch)
 	v1.POST("/imports/:id/cancel", h.cancelImportBatch)
@@ -1075,6 +1079,10 @@ func (h *handler) authorizeAttendanceList(c *gin.Context) (auth.Account, permiss
 }
 
 func (h *handler) downloadAttendanceTemplate(c *gin.Context) {
+	if hasRemovedImportTarget(c.Query("classId"), c.Query("grade")) {
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "导入模板不再接受目标年级或班级参数")
+		return
+	}
 	account, scope, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionView)
 	if !ok {
 		return
@@ -1138,6 +1146,10 @@ func (h *handler) uploadAttendanceImport(c *gin.Context) {
 		} else {
 			writeError(c, http.StatusBadRequest, "INVALID_FILE", "请选择有效的 XLSX 文件")
 		}
+		return
+	}
+	if hasRemovedImportTarget(c.PostForm("classId"), c.PostForm("grade")) {
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "导入请求不再接受目标年级或班级字段")
 		return
 	}
 	scope := inspectionScopeFromForm(c)
@@ -1286,7 +1298,11 @@ func inspectionScopeFromForm(c *gin.Context) permission.Scope {
 	if departmentID == inspection.CollegeDepartmentOptionID {
 		departmentID = ""
 	}
-	return permission.Scope{SemesterID: c.PostForm("semesterId"), WeekID: c.PostForm("weekId"), InspectionTypeID: c.PostForm("inspectionTypeId"), DepartmentID: departmentID, ClassID: c.PostForm("classId"), Grade: c.PostForm("grade")}
+	return permission.Scope{SemesterID: c.PostForm("semesterId"), WeekID: c.PostForm("weekId"), InspectionTypeID: c.PostForm("inspectionTypeId"), DepartmentID: departmentID}
+}
+
+func hasRemovedImportTarget(classID, grade string) bool {
+	return strings.TrimSpace(classID) != "" || strings.TrimSpace(grade) != ""
 }
 
 func (h *handler) authorizeInspectionScope(c *gin.Context, action string, scope permission.Scope, hideExistence bool) (auth.Account, bool) {

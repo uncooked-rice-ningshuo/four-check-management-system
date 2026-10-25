@@ -43,7 +43,7 @@ func NewContextOptionService(r ContextOptionRepository, p manualPermissions) *Co
 	return &ContextOptionService{NewRecordService(nil, p), r}
 }
 func (s *ContextOptionService) ContextOptions(ctx context.Context, a ManualActor, q ContextOptionQuery) (ContextOptionPage, error) {
-	if q.TypeCode != InspectionTypeAttendance && q.TypeCode != InspectionTypeUnattended && q.TypeCode != InspectionTypeLateReturn && q.TypeCode != InspectionTypeMorning && q.TypeCode != InspectionTypeDormitoryHygiene && q.TypeCode != InspectionTypeClassroomHygiene && q.TypeCode != InspectionTypePublicDormitoryHygiene {
+	if q.TypeCode != InspectionTypeAttendance && q.TypeCode != InspectionTypeUnattended && q.TypeCode != InspectionTypeLateReturn && q.TypeCode != InspectionTypeMorning && q.TypeCode != InspectionTypeDormitoryHygiene && q.TypeCode != InspectionTypeClassroomHygiene && q.TypeCode != InspectionTypePublicDormitoryHygiene && q.TypeCode != InspectionTypeEveningSelfStudy {
 		return ContextOptionPage{}, ErrInspectionRequest
 	}
 	if q.Purpose != "view" && q.Purpose != "entry" {

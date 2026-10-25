@@ -10,7 +10,7 @@ import (
 )
 
 // ListEntryOptions filters candidate classes in SQL before joining student or course data.
-// The synthetic record scope reuses the authoritative seven-dimension ALLOW/DENY predicate.
+// The synthetic record scope reuses the authoritative permission predicate.
 func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptionQuery, a inspection.MutationAccess) (inspection.EntryOptionPage, error) {
 	result := inspection.EntryOptionPage{Items: []inspection.EntryOption{}, Page: q.Page, PageSize: q.PageSize}
 	tx, err := p.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
@@ -24,13 +24,16 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if err != nil {
 		return result, err
 	}
-	if scope.TypeCode != inspection.InspectionTypeAttendance && scope.TypeCode != inspection.InspectionTypeUnattended && scope.TypeCode != inspection.InspectionTypeLateReturn && scope.TypeCode != inspection.InspectionTypeMorning && scope.TypeCode != inspection.InspectionTypeDormitoryHygiene && scope.TypeCode != inspection.InspectionTypeClassroomHygiene && scope.TypeCode != inspection.InspectionTypePublicDormitoryHygiene {
+	if scope.TypeCode != inspection.InspectionTypeAttendance && scope.TypeCode != inspection.InspectionTypeUnattended && scope.TypeCode != inspection.InspectionTypeEveningSelfStudy && scope.TypeCode != inspection.InspectionTypeLateReturn && scope.TypeCode != inspection.InspectionTypeMorning && scope.TypeCode != inspection.InspectionTypeDormitoryHygiene && scope.TypeCode != inspection.InspectionTypeClassroomHygiene && scope.TypeCode != inspection.InspectionTypePublicDormitoryHygiene {
 		return result, inspection.ErrInspectionRequest
 	}
 	if scope.TypeCode == inspection.InspectionTypeMorning && q.Kind != "classes" && q.Kind != "students" {
 		return result, inspection.ErrInspectionRequest
 	}
 	if (scope.TypeCode == inspection.InspectionTypeAttendance || scope.TypeCode == inspection.InspectionTypeUnattended) && q.Kind != "classes" && q.Kind != "students" && q.Kind != "courses" && q.Kind != "classrooms" {
+		return result, inspection.ErrInspectionRequest
+	}
+	if scope.TypeCode == inspection.InspectionTypeEveningSelfStudy && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classrooms" {
 		return result, inspection.ErrInspectionRequest
 	}
 	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" {

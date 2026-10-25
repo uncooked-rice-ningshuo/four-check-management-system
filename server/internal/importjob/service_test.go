@@ -44,6 +44,9 @@ func (r *memoryImportRepository) ListImportRows(_ context.Context, _ string, _, 
 	r.listStatus = validationStatus
 	return ImportRowPage{Items: []ImportRow{}}, nil
 }
+func (r *memoryImportRepository) ListSubmissionBatches(_ context.Context, _ string, query SubmissionBatchQuery) (SubmissionBatchPage, error) {
+	return SubmissionBatchPage{Items: []SubmissionBatchSummary{}, Page: query.Page, PageSize: query.PageSize}, nil
+}
 
 func (r *memoryImportRepository) FindImportBatch(_ context.Context, id string) (Batch, error) {
 	if r.batch.ID != id {

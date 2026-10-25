@@ -10,7 +10,7 @@ func TestInspectionCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(definitions) != 7 {
+	if len(definitions) != 8 {
 		t.Fatalf("types=%d", len(definitions))
 	}
 	tables := map[string]bool{}
@@ -28,7 +28,7 @@ func TestInspectionCatalog(t *testing.T) {
 		}
 
 	}
-	if len(tables) != 6 {
+	if len(tables) != 7 {
 		t.Fatalf("tables=%d", len(tables))
 	}
 	l, _ := LookupInspectionDefinition("LATE_RETURN")

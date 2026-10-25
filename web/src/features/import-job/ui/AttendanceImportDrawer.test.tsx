@@ -58,29 +58,30 @@ describe('AttendanceImportDrawer', () => {
     expect(screen.getByText('导入归属部门')).toBeInTheDocument()
   })
 
-  it('blocks a member import when their department is outside the authorized target options', () => {
+  it('blocks a member import when their home department is outside the authorized destination options', () => {
     render(<MemoryRouter><AttendanceImportDrawer open context={context} memberDepartmentId="other-department" scopeOptions={scopeOptions} departments={[{id:'department-study',name:'学习部'}]} onBatchIdChange={vi.fn()} onClose={vi.fn()}/></MemoryRouter>)
-    expect(screen.getByText('当前账号所属部门无此范围的导入权限，请联系管理员。')).toBeInTheDocument()
+    expect(screen.getByText('当前账号所属部门不在可选导入归属范围，请联系管理员。')).toBeInTheDocument()
     expect(screen.getByRole('button',{name:'上传并生成预览'})).toBeDisabled()
   })
 
-  it('selects import class independently of attendance list filters', () => {
+  it('ignores list class and grade filters when preparing an import', () => {
     render(<MemoryRouter><AttendanceImportDrawer open context={{ ...context, classId: 'list-class', grade: 'list-grade' }} scopeOptions={scopeOptions} departments={[{ id: context.departmentId, name: '学习部' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
-    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: undefined, grade: undefined })
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '导入目标班级' }))
-    fireEvent.click(screen.getByText('测试班级'))
-    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: 'class-1', grade: undefined })
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('classId')
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('grade')
+    expect(screen.queryByRole('combobox', { name: '导入目标年级' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '导入目标班级' })).not.toBeInTheDocument()
   })
 
-  it('restores the original class and grade when restarting an invalid resumed batch', async () => {
+  it('does not reuse historical class and grade as targets when restarting an invalid batch', async () => {
     batchQuery.mockReturnValue({ data: batch({ classId: 'class-1', grade: '2026级', invalidRows: 1 }), isLoading: false })
     const onBatchIdChange = vi.fn()
     setup('batch-1', onBatchIdChange)
-    expect(screen.getByText('测试班级')).toBeInTheDocument()
+    expect(screen.getByText(/历史批次保留的导入范围：2026级；测试班级/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重新上传文件' }))
     fireEvent.click(await screen.findByRole('button', { name: '保留原批次并重新上传' }))
     await waitFor(() => expect(onBatchIdChange).toHaveBeenCalledWith(undefined))
-    expect(templateQuery.mock.lastCall?.[0]).toMatchObject({ classId: 'class-1', grade: '2026级' })
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('classId')
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('grade')
   })
 
   it('keeps the batch calendar when restarting from a different attendance list week', async () => {
@@ -91,21 +92,22 @@ describe('AttendanceImportDrawer', () => {
     await waitFor(() => expect(templateQuery.mock.lastCall?.[0].weekId).toBe('week-1'))
   })
 
-  it('does not present an unavailable restored class as an unrestricted target', () => {
+  it('does not carry a previous target into a new import', () => {
     render(<MemoryRouter><AttendanceImportDrawer open context={context} initialImportScope={{ ...context, classId: 'unavailable-class' }} scopeOptions={scopeOptions} departments={[{ id: context.departmentId, name: '学习部' }]} onBatchIdChange={vi.fn()} onClose={vi.fn()} /></MemoryRouter>)
-    expect(screen.getByText('原导入目标已不可用，请重新选择班级或年级后上传')).toBeInTheDocument()
-    expect(screen.getByText('原目标班级不可用，请重新选择')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '上传并生成预览' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /下载标准模板/ })).toBeDisabled()
+    expect(screen.queryByRole('combobox', { name: '导入目标年级' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '导入目标班级' })).not.toBeInTheDocument()
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('classId')
+    expect(templateQuery.mock.lastCall?.[0]).not.toHaveProperty('grade')
   })
 
-  it('blocks upload on target-option failure and exposes retry', () => {
+  it('shows a retryable lookup failure for a historical batch target', () => {
     const refetch = vi.fn()
     contextQuery.mockReturnValue({ isError: true, isLoading: false, refetch })
-    setup()
-    expect(screen.getByRole('button', { name: '上传并生成预览' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: '重试目标选项' }))
-    expect(refetch).toHaveBeenCalledTimes(2)
+    batchQuery.mockReturnValue({ data: batch({ classId: 'class-1' }), isLoading: false })
+    setup('batch-1')
+    expect(screen.getByText('历史批次班级信息加载失败，请重试')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试班级信息' }))
+    expect(refetch).toHaveBeenCalledOnce()
   })
 
   it('clears a completed batch when closing so the next import starts fresh', async () => {

@@ -120,11 +120,12 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		var version int
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
- jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),
+	jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
  'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh))
  FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id
  LEFT JOIN attendance_details ad ON ad.record_id=ir.id
+ LEFT JOIN evening_self_study_details esd ON esd.record_id=ir.id
  LEFT JOIN morning_exercise_details md ON md.record_id=ir.id
  LEFT JOIN late_return_details ld ON ld.record_id=ir.id
  LEFT JOIN dorm_hygiene_details dh ON dh.record_id=ir.id
@@ -196,7 +197,7 @@ func requireZeroReceiptCell(ctx context.Context, tx pgx.Tx, scope workflow.Scope
 
 func activeSubmissionType(code string) bool {
 	switch code {
-	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended,
+	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended, inspection.InspectionTypeEveningSelfStudy,
 		inspection.InspectionTypeMorning, inspection.InspectionTypeDormitoryHygiene,
 		inspection.InspectionTypeLateReturn:
 		return true
@@ -374,11 +375,12 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 		var version int
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
- jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),
+ jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
  'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh))
  FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id
  LEFT JOIN attendance_details ad ON ad.record_id=ir.id
+ LEFT JOIN evening_self_study_details esd ON esd.record_id=ir.id
  LEFT JOIN morning_exercise_details md ON md.record_id=ir.id
  LEFT JOIN late_return_details ld ON ld.record_id=ir.id
  LEFT JOIN dorm_hygiene_details dh ON dh.record_id=ir.id

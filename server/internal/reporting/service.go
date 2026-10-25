@@ -367,6 +367,8 @@ func reportRecordDetails(details inspection.InspectionDetails) RecordDetails {
 		return courseAbsenceRecordDetails(item.CourseAbsenceDetails)
 	case *inspection.UnattendedClassroomDetails:
 		return courseAbsenceRecordDetails(item.CourseAbsenceDetails)
+	case *inspection.EveningSelfStudyDetails:
+		return RecordDetails{Date: item.Date, Time: item.Time, Period: item.Period, AbsenceHours: &item.AbsenceHours, PenaltyHours: item.PenaltyHours, Remark: item.Remark}
 	case *inspection.MorningAttendanceDetails:
 		return RecordDetails{Date: item.Date, AbsenceCount: &item.AbsenceCount, Remark: item.Remark}
 	case *inspection.LateReturnDetails:

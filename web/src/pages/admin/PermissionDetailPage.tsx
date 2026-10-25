@@ -1,10 +1,10 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Collapse, Drawer, Empty, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
+import { App, Button, Drawer, Empty, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import type { EffectivePermission, PermissionRule } from '../../entities/permission/model/permission'
-import { createPermissionRule, deletePermissionRule, getAcademicCalendar, getCatalogs, getEffectivePermissions, getMasterData, getPermissionRules, updatePermissionRule } from '../../shared/api/adminApi'
+import { createPermissionRule, deletePermissionRule, getAcademicCalendar, getCatalogs, getEffectivePermissions, getPermissionRules, updatePermissionRule } from '../../shared/api/adminApi'
 
 const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
@@ -14,7 +14,7 @@ const actionOptions = [
 ].map(([value, label]) => ({ value, label }))
 const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value
 
-export function PermissionDetailDrawer({ accountId, userName, departmentId = '', onClose }: { accountId: string; userName: string; departmentId?: string; onClose: () => void }) {
+export function PermissionDetailDrawer({ accountId, userName, onClose }: { accountId: string; userName: string; onClose: () => void }) {
   const { message } = App.useApp()
   const [editing, setEditing] = useState<PermissionRule | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -24,22 +24,18 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
   const rules = useQuery({ queryKey: ['permission-rules', accountId], queryFn: () => getPermissionRules(accountId), enabled: Boolean(accountId) })
   const catalogs = useQuery({ queryKey: ['admin-catalogs'], queryFn: getCatalogs, enabled: Boolean(accountId) })
   const calendar = useQuery({ queryKey: ['academic-calendar'], queryFn: getAcademicCalendar, enabled: Boolean(accountId) })
-  const classes = useQuery({ queryKey: ['permission-class-options'], queryFn: async () => {
-    const items: { id: string; name: string }[] = []
-    for (let page = 1; ; page += 1) {
-      const result = await getMasterData('classes', { page, pageSize: 100 })
-      if (!result.items) throw new Error('班级选项加载失败')
-      items.push(...result.items)
-      if (items.length >= result.total || result.items.length === 0) return items
-    }
-  }, enabled: Boolean(accountId) })
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['effective-permissions', accountId] }); await client.invalidateQueries({ queryKey: ['permission-rules', accountId] }) }
-  const save = useMutation({ mutationFn: (values: PermissionRule) => editing ? updatePermissionRule({ ...editing, ...values, scope: values.scope ?? {} }) : createPermissionRule(accountId, { action: values.action, effect: values.effect, note: values.note ?? '', scope: values.scope ?? {} }), onSuccess: async () => { await refresh(); setModalOpen(false); form.resetFields(); message.success('权限规则已保存') }, onError: error => message.error(error.message) })
+  const save = useMutation({ mutationFn: (values: PermissionRule) => {
+    const scope = permissionRuleScope(values.scope)
+    return editing
+      ? updatePermissionRule({ ...editing, ...values, scope })
+      : createPermissionRule(accountId, { action: values.action, effect: values.effect, note: values.note ?? '', scope })
+  }, onSuccess: async () => { await refresh(); setModalOpen(false); form.resetFields(); message.success('权限规则已保存') }, onError: error => message.error(error.message) })
   const remove = useMutation({ mutationFn: (ruleId: string) => deletePermissionRule(accountId, ruleId), onSuccess: refresh, onError: error => message.error(error.message) })
   const openRule = (rule?: PermissionRule) => { form.resetFields(); setEditing(rule ?? null); setModalOpen(true) }
   const scopeText = (scope: PermissionRule['scope']) => scopeSummary(scope, {
     academicYears: calendar.data?.academicYears ?? [], semesters: calendar.data?.semesters ?? [], weeks: calendar.data?.weeks ?? [],
-    inspectionTypes: catalogs.data?.inspectionTypes ?? [], departments: catalogs.data?.departments ?? [], classes: classes.data ?? [],
+    inspectionTypes: catalogs.data?.inspectionTypes ?? [],
   })
   const permissionColumns: ProColumns<EffectivePermission>[] = [
     { title: '权限动作', dataIndex: 'action', renderText: actionName },
@@ -53,19 +49,14 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
     { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openRule(record)}>编辑</Button><Popconfirm title="确认删除这条权限规则？" onConfirm={() => remove.mutate(record.id)}><Button type="link" danger>删除</Button></Popconfirm></Space> },
   ]
   return <Drawer title={`${userName} · 生效权限`} open={Boolean(accountId)} onClose={onClose} size="large" destroyOnHidden>
-    <Typography.Paragraph type="secondary">最终权限按系统角色、组织角色、部门业务映射和用户单独授权/限制合并；匹配范围内的拒绝规则优先。</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">部门与检查类型映射决定可用的检查类型和操作；获得的操作按检查类型跨部门生效。新增或导入记录仍归属账号主部门。用户单独授权/限制可按学年、学期、周次和检查类型设置，匹配范围内的拒绝优先。</Typography.Paragraph>
     <ProTable<EffectivePermission> rowKey={(record, index) => `${record.action}-${record.effect}-${index}`} headerTitle="当前生效权限" loading={effective.isLoading} search={false} options={false} pagination={{ pageSize: 8 }} dataSource={effective.data?.permissions ?? []} columns={permissionColumns} locale={{ emptyText: <Empty description="当前没有生效权限" /> }} />
     <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data ?? []} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}权限规则`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} width={720} destroyOnHidden>
-      <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ?? { effect: 'ALLOW', scope: departmentId ? { departmentId } : {}, note: '' }} onValuesChange={changedValues => {
-        if (changedValues.action === 'REPORT_FORCE_GENERATE' || changedValues.action === 'REPORT_OBLIGATION_MANAGE') {
-          const scope = form.getFieldValue('scope') ?? {}
-          form.setFieldsValue({ scope: { ...scope, departmentId: undefined, classId: undefined, grade: undefined } })
-        }
-      }} onFinish={values => save.mutate(values)} preserve={false}>
+      <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ? { ...editing, scope: permissionRuleScope(editing.scope) } : { effect: 'ALLOW', scope: {}, note: '' }} onFinish={values => save.mutate(values)} preserve={false}>
         <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => {
-          if (getFieldValue('action') === 'REPORT_VIEW') return <Typography.Paragraph type="secondary">通报汇总按学年、学期、周次、检查类型和部门范围授权；班级/年级范围不能授权查看部门整组汇总。</Typography.Paragraph>
+          if (getFieldValue('action') === 'REPORT_VIEW') return <Typography.Paragraph type="secondary">用户规则可按学年、学期、周次和检查类型收窄通报查看范围；不再设置部门、班级或年级范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_FORCE_GENERATE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；一般通报权限不会自动包含此权限。此操作作用于整份周通报，只能按学年、学期、周次和检查类型收窄范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_OBLIGATION_MANAGE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；此权限允许维护各周应交部门和检查类型，与日常录入范围分开管理，可按学年、学期、周次和检查类型收窄。</Typography.Paragraph>
           return null
@@ -78,11 +69,6 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
           <Form.Item name={['scope', 'weekId']} label="周次"><Select allowClear placeholder="全部周次" style={{ width: 190 }} options={(calendar.data?.weeks ?? []).map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item>
         </Space>
         <Form.Item name={['scope', 'inspectionTypeId']} label="检查类型"><Select allowClear options={(catalogs.data?.inspectionTypes ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => ['REPORT_FORCE_GENERATE', 'REPORT_OBLIGATION_MANAGE'].includes(getFieldValue('action')) ? null : <Collapse ghost items={[{ key: 'advanced', label: '高级数据范围（部门、班级、年级）', children: <>
-          <Form.Item name={['scope', 'departmentId']} label="部门范围" extra="默认使用该用户所属部门；清空代表全部部门，跨部门授权请明确核对。"><Select allowClear placeholder="全部部门" options={(catalogs.data?.departments ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-          <Form.Item name={['scope', 'classId']} label="班级范围" help={classes.isError ? '班级选项加载失败，请重试' : undefined}><Select allowClear showSearch optionFilterProp="label" placeholder="全部班级" loading={classes.isLoading} disabled={classes.isError} options={(classes.data ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-          <Form.Item name={['scope', 'grade']} label="年级范围"><Input autoComplete="off" placeholder="全部年级" /></Form.Item>
-        </> }]} />}</Form.Item>
         <Form.Item noStyle shouldUpdate>{({ getFieldValue }) => <Typography.Paragraph type="secondary">本规则范围：{scopeText(getFieldValue('scope') ?? {})}。未选择的维度表示全部。</Typography.Paragraph>}</Form.Item>
         <Form.Item name="note" label="授权说明" rules={[{ required: true, message: '请说明设置原因' }]}><Input.TextArea rows={3} maxLength={255} showCount /></Form.Item>
       </Form>
@@ -90,16 +76,22 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
   </Drawer>
 }
 
-function scopeSummary(scope: PermissionRule['scope'], names: { academicYears: { id: string; name: string }[]; semesters: { id: string; name: string }[]; weeks: { id: string; weekNo: number }[]; inspectionTypes: { id: string; name: string }[]; departments: { id: string; name: string }[]; classes: { id: string; name: string }[] }) {
+function permissionRuleScope(scope: PermissionRule['scope'] | undefined): PermissionRule['scope'] {
+  return {
+    academicYearId: scope?.academicYearId,
+    semesterId: scope?.semesterId,
+    weekId: scope?.weekId,
+    inspectionTypeId: scope?.inspectionTypeId,
+  }
+}
+
+function scopeSummary(scope: PermissionRule['scope'], names: { academicYears: { id: string; name: string }[]; semesters: { id: string; name: string }[]; weeks: { id: string; weekNo: number }[]; inspectionTypes: { id: string; name: string }[] }) {
   const label = (items: { id: string; name: string }[], id?: string) => id ? items.find(item => item.id === id)?.name ?? '未加载或已停用' : ''
   const parts = [
-    scope?.departmentId && `部门：${label(names.departments, scope.departmentId)}`,
     scope?.inspectionTypeId && `检查类型：${label(names.inspectionTypes, scope.inspectionTypeId)}`,
     scope?.academicYearId && `学年：${label(names.academicYears, scope.academicYearId)}`,
     scope?.semesterId && `学期：${label(names.semesters, scope.semesterId)}`,
     scope?.weekId && `周次：${names.weeks.find(item => item.id === scope.weekId)?.weekNo ?? '未加载或已停用'}`,
-    scope?.classId && `班级：${label(names.classes, scope.classId)}`,
-    scope?.grade && `年级：${scope.grade}`,
   ].filter(Boolean)
   return parts.length ? parts.join('；') : '全部范围'
 }

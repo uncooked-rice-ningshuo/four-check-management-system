@@ -37,8 +37,10 @@ async (page) => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'SUBMISSION_FAILED', message: '模拟响应丢失' }) })
   }
   await page.route('**/api/v1/department-submissions', lostResponse)
-  await page.getByRole('button', { name: '提交所选草稿（1）' }).click()
-  const submit = page.getByRole('dialog', { name: '确认提交所选记录？' })
+  await page.getByRole('button', { name: '准备提交（已选 1）' }).click()
+  const cart = page.getByRole('dialog', { name: '准备提交' })
+  await cart.getByRole('button', { name: '核对并提交' }).click()
+  const submit = page.getByRole('dialog', { name: '最终确认本次提交' })
   await submit.getByRole('button', { name: '确认提交' }).click()
   await page.getByText('模拟响应丢失').waitFor()
   await page.unroute('**/api/v1/department-submissions', lostResponse)
@@ -111,8 +113,8 @@ async (page) => {
     const owner = await member('workflow-owner', sports)
     const reviewer = await member('workflow-reviewer', sports)
     const outsider = await member('workflow-outsider', study)
-    await request(admin, adminToken, '/admin/users/' + reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_REVIEW', effect: 'ALLOW', scope: { departmentId: sports.id, inspectionTypeId: scope.inspectionTypeId }, enabled: true, note: 'isolated reviewer' }, 201)
-    await request(admin, adminToken, '/admin/users/' + reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_ENTER', effect: 'DENY', scope: { departmentId: sports.id, inspectionTypeId: scope.inspectionTypeId }, enabled: true, note: 'review only' }, 201)
+    await request(admin, adminToken, '/admin/users/' + reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_REVIEW', effect: 'ALLOW', scope: { inspectionTypeId: scope.inspectionTypeId }, enabled: true, note: 'isolated reviewer' }, 201)
+    await request(admin, adminToken, '/admin/users/' + reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_ENTER', effect: 'DENY', scope: { inspectionTypeId: scope.inspectionTypeId }, enabled: true, note: 'review only' }, 201)
     for (const person of [owner, reviewer, outsider]) person.token = (await (await request(person.client, '', '/auth/login', 'POST', { loginName: person.name, password: fixture.matrixPassword })).json()).accessToken
     const input = { ...scope, details: { classId: fixture.class, studentId: fixture.studentB, date: fixture.date, remark: '成员初稿' } }
     await request(owner.client, owner.token, '/inspections', 'POST', {...input,departmentId:study.id}, 403, 'FORBIDDEN_SCOPE')
@@ -159,8 +161,8 @@ async (page) => {
     for (const type of additionalTypes) {
       const typeOptions = await (await request(admin, adminToken, '/inspections/context-options?typeCode=' + type.code + '&purpose=view&kind=semesters')).json()
       type.scope = { semesterId: scope.semesterId, weekId: scope.weekId, departmentId: type.department.id, inspectionTypeId: typeOptions.inspectionTypeId }
-      await request(admin, adminToken, '/admin/users/' + type.reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_REVIEW', effect: 'ALLOW', scope: { departmentId: type.department.id, inspectionTypeId: type.scope.inspectionTypeId }, enabled: true, note: 'isolated reviewer' }, 201)
-      await request(admin, adminToken, '/admin/users/' + type.reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_ENTER', effect: 'DENY', scope: { departmentId: type.department.id, inspectionTypeId: type.scope.inspectionTypeId }, enabled: true, note: 'review only' }, 201)
+      await request(admin, adminToken, '/admin/users/' + type.reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_REVIEW', effect: 'ALLOW', scope: { inspectionTypeId: type.scope.inspectionTypeId }, enabled: true, note: 'isolated reviewer' }, 201)
+      await request(admin, adminToken, '/admin/users/' + type.reviewer.id + '/permission-rules', 'POST', { action: 'INSPECTION_ENTER', effect: 'DENY', scope: { inspectionTypeId: type.scope.inspectionTypeId }, enabled: true, note: 'review only' }, 201)
     }
     for (const person of [studyOwner, studyReviewer, dormOwner, dormReviewer]) person.token = (await (await request(person.client, '', '/auth/login', 'POST', { loginName: person.name, password: fixture.matrixPassword })).json()).accessToken
     for (const type of additionalTypes) {
@@ -304,7 +306,7 @@ async (page) => {
     const collegeViewer = await member('workflow-college-viewer',office)
     for (const type of [additionalTypes[0],additionalTypes[1],{scope},additionalTypes[2],additionalTypes[3]]) {
       const targetScope=type.scope
-      await request(admin,adminToken,'/admin/users/'+collegeViewer.id+'/permission-rules','POST',{action:'INSPECTION_VIEW',effect:'ALLOW',scope:{departmentId:targetScope.departmentId,inspectionTypeId:targetScope.inspectionTypeId},enabled:true,note:'isolated college viewer'},201)
+      await request(admin,adminToken,'/admin/users/'+collegeViewer.id+'/permission-rules','POST',{action:'INSPECTION_VIEW',effect:'ALLOW',scope:{inspectionTypeId:targetScope.inspectionTypeId},enabled:true,note:'isolated college viewer'},201)
     }
     collegeViewer.token=(await (await request(collegeViewer.client,'','/auth/login','POST',{loginName:collegeViewer.name,password:fixture.matrixPassword})).json()).accessToken
     const viewerUI=await loginMember(collegeViewer)
@@ -318,26 +320,29 @@ async (page) => {
     }
     cases.push('学院查看者经五类明确授权可查看数据，不能录入，页面无新增入口')
     const systemAdmin = await member('workflow-system-admin',office)
-    await request(admin,adminToken,'/admin/users/'+systemAdmin.id,'PUT',{studentNo:systemAdmin.name,name:'Isolated system admin',systemRole:'ADMIN'})
+    const assignments = await (await request(admin,adminToken,'/admin/users')).json()
+    const systemAdminVersion = assignments.find(item => item.accountId === systemAdmin.id)?.version
+    check(Number.isInteger(systemAdminVersion), 'system admin account version missing')
+    await request(admin,adminToken,'/admin/users/'+systemAdmin.id,'PUT',{studentNo:systemAdmin.name,name:'Isolated system admin',systemRole:'ADMIN',version:systemAdminVersion})
     systemAdmin.token=(await (await request(systemAdmin.client,'','/auth/login','POST',{loginName:systemAdmin.name,password:fixture.matrixPassword})).json()).accessToken
     for (const { type, name } of [{type:{scope},name:'早锻炼'},...crossRolePages]) {
       const query='/inspections?inspectionTypeId='+type.scope.inspectionTypeId+'&departmentId='+type.scope.departmentId
       const superList=await (await request(admin,adminToken,query)).json()
       check(superList.total>=1,name+' super admin cannot view records')
       const adminList=await (await request(systemAdmin.client,systemAdmin.token,query)).json()
-      check(adminList.total===0,name+' system admin unexpectedly viewed inspection records')
-      await request(systemAdmin.client,systemAdmin.token,'/inspections/'+superList.items[0].id,'GET',undefined,404,'INSPECTION_NOT_FOUND')
+      check(adminList.total===superList.total,name+' office type mapping did not grant cross-department view')
+      await request(systemAdmin.client,systemAdmin.token,'/inspections/'+superList.items[0].id,'GET',undefined,200)
     }
-    cases.push('超级管理员可看五类记录；系统管理员未获检查授权时列表为空且详情隐藏')
+    cases.push('办公室主部门按类型跨部门查看五类记录；系统管理员查看权仍不授予录入权')
     const officeReviewer=await member('workflow-office-reviewer',office)
     const officeScope=additionalTypes[0].scope
-    for(const action of ['INSPECTION_VIEW','INSPECTION_REVIEW'])await request(admin,adminToken,'/admin/users/'+officeReviewer.id+'/permission-rules','POST',{action,effect:'ALLOW',scope:{departmentId:officeScope.departmentId,inspectionTypeId:officeScope.inspectionTypeId},enabled:true,note:'isolated office assigned scope'},201)
+    for(const action of ['INSPECTION_VIEW','INSPECTION_REVIEW'])await request(admin,adminToken,'/admin/users/'+officeReviewer.id+'/permission-rules','POST',{action,effect:'ALLOW',scope:{inspectionTypeId:officeScope.inspectionTypeId},enabled:true,note:'isolated office assigned scope'},201)
     officeReviewer.token=(await (await request(officeReviewer.client,'','/auth/login','POST',{loginName:officeReviewer.name,password:fixture.matrixPassword})).json()).accessToken
     const officeRecord=await (await request(studyOwner.client,studyOwner.token,'/inspections','POST',{...officeScope,departmentId:'',details:{...additionalTypes[0].details,time:'11:00',remark:'办公室授权审核'}},201)).json()
     const officeBatch=await (await request(studyOwner.client,studyOwner.token,'/department-submissions','POST',{scope:officeScope,records:[{id:officeRecord.id,version:officeRecord.rowVersion}],idempotencyKey:'office-assigned-review'},201)).json()
     const officeWorkbench=await (await request(officeReviewer.client,officeReviewer.token,'/dashboard/workbench')).json()
     check(officeWorkbench.departmentStatuses.some(item=>item.departmentId===study.id&&item.inspectionTypeId===officeScope.inspectionTypeId&&item.batchPending>=1),'assigned office reviewer cannot see authorized weekly status')
-    check(!officeWorkbench.departmentStatuses.some(item=>item.departmentId===sports.id),'office identity leaked sports department status')
+    check(!officeWorkbench.departmentStatuses.some(item=>item.departmentId===sports.id&&item.inspectionTypeId===additionalTypes[0].scope.inspectionTypeId),'workbench exposed an unmapped department/type combination')
     await request(officeReviewer.client,officeReviewer.token,'/inspections','POST',{...officeScope,details:{}},403,'FORBIDDEN_SCOPE')
     const officeUI=await loginMember(officeReviewer)
     await officeUI.goto(origin+'/inspections/attendance')
@@ -363,7 +368,7 @@ async (page) => {
     check(collegeRecord.departmentId==='','college record did not persist null department')
     const collegeList=await (await request(systemAdmin.client,systemAdmin.token,'/inspections?inspectionTypeId='+officeScope.inspectionTypeId+'&departmentId='+collegeDepartmentId)).json()
     check(collegeList.items.some(item=>item.id===collegeRecord.id),'college-scoped list omitted record')
-    await request(officeReviewer.client,officeReviewer.token,'/inspections/'+collegeRecord.id,'GET',undefined,404,'INSPECTION_NOT_FOUND')
+    await request(officeReviewer.client,officeReviewer.token,'/inspections/'+collegeRecord.id,'GET',undefined,200)
     const collegeBatch=await (await request(systemAdmin.client,systemAdmin.token,'/department-submissions','POST',{scope:collegeScope,records:[{id:collegeRecord.id,version:collegeRecord.rowVersion}],idempotencyKey:'college-independent-batch'},201)).json()
     check(collegeBatch.scope.departmentId===''&&collegeBatch.departmentName==='校级','college submission inherited a department')
     await request(systemAdmin.client,systemAdmin.token,'/department-submissions/'+collegeBatch.id+'/confirm','POST',{version:collegeBatch.rowVersion},403,'FORBIDDEN_SCOPE')
@@ -373,7 +378,7 @@ async (page) => {
     check(collegeConfirmed.status==='CONFIRMED','explicitly authorized admin could not confirm college batch')
     const collegeWorkbench=await (await request(systemAdmin.client,systemAdmin.token,'/dashboard/workbench')).json()
     check(collegeWorkbench.departmentStatuses.some(item=>item.departmentId===''&&item.inspectionTypeId===officeScope.inspectionTypeId&&item.batchConfirmed>=1),'college weekly summary omitted confirmed batch')
-    cases.push('普通管理员校级录入与审核分权；校级批次独立持久化、部门授权隔离及周汇总')
+    cases.push('普通管理员校级录入与审核分权；用户类型授权跨部门及校级生效，周汇总独立列示')
     await page.goto(origin+'/inspections/morning-attendance')
     await page.getByRole('button',{name:'新增记录',exact:true}).click()
     const collegeForm=page.getByRole('dialog',{name:'新增早锻炼/早签记录'})

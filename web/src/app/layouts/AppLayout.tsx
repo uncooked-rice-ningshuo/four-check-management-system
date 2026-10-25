@@ -62,6 +62,7 @@ export function AppLayout() {
   const unattendedContext = useInspectionContext({ typeCode: 'UNATTENDED_CLASSROOM', purpose: 'view', kind: 'semesters' })
   const lateReturnContext = useInspectionContext({ typeCode: 'LATE_RETURN', purpose: 'view', kind: 'semesters' })
   const morningContext = useInspectionContext({ typeCode: 'MORNING_ATTENDANCE', purpose: 'view', kind: 'semesters' })
+  const eveningSelfStudyContext = useInspectionContext({ typeCode: 'EVENING_SELF_STUDY', purpose: 'view', kind: 'semesters' })
   const dormitoryHygieneContext = useInspectionContext({ typeCode: 'DORMITORY_HYGIENE', purpose: 'view', kind: 'semesters' })
   const publicHygieneContext = useInspectionContext({ typeCode: 'PUBLIC_DORMITORY_HYGIENE', purpose: 'view', kind: 'semesters' })
   const classroomHygieneContext = useInspectionContext({ typeCode: 'CLASSROOM_HYGIENE', purpose: 'view', kind: 'semesters' })
@@ -81,6 +82,7 @@ export function AppLayout() {
     ...(canViewType(unattendedContext.data?.inspectionTypeId) ? [{ key: '/inspections/unattended-classroom', icon: <DesktopOutlined />, label: <Link to="/inspections/unattended-classroom">无机课堂检查</Link> }] : []),
     ...(canViewType(classroomHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/classroom-hygiene', icon: <BuildOutlined />, label: <Link to="/inspections/classroom-hygiene">教室卫生</Link> }] : []),
     ...(canViewType(morningContext.data?.inspectionTypeId) ? [{ key: '/inspections/morning-attendance', icon: <SunOutlined />, label: <Link to="/inspections/morning-attendance">早锻炼/早签</Link> }] : []),
+    ...(canViewType(eveningSelfStudyContext.data?.inspectionTypeId) ? [{ key: '/inspections/evening-self-study', icon: <MoonOutlined />, label: <Link to="/inspections/evening-self-study">晚自习</Link> }] : []),
     ...(canViewType(dormitoryHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/dormitory-hygiene', icon: <ClearOutlined />, label: <Link to="/inspections/dormitory-hygiene">宿舍卫生</Link> }] : []),
     ...(canViewType(lateReturnContext.data?.inspectionTypeId) ? [{ key: '/inspections/late-return', icon: <MoonOutlined />, label: <Link to="/inspections/late-return">晚归</Link> }] : []),
     ...(canViewType(publicHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/public-dormitory-hygiene', icon: <EnvironmentOutlined />, label: <Link to="/inspections/public-dormitory-hygiene">公共宿舍卫生</Link> }] : []),

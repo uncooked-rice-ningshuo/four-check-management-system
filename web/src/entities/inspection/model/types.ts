@@ -1,5 +1,5 @@
-// Field metadata describes the confirmed contract; planned types are not enabled UI routes.
-export type InspectionTypeCode = 'ATTENDANCE_RATE' | 'UNATTENDED_CLASSROOM' | 'CLASSROOM_HYGIENE' | 'MORNING_ATTENDANCE' | 'DORMITORY_HYGIENE' | 'LATE_RETURN' | 'PUBLIC_DORMITORY_HYGIENE'
+// Field metadata describes confirmed contracts; a catalog entry alone does not grant access.
+export type InspectionTypeCode = 'ATTENDANCE_RATE' | 'UNATTENDED_CLASSROOM' | 'CLASSROOM_HYGIENE' | 'MORNING_ATTENDANCE' | 'DORMITORY_HYGIENE' | 'LATE_RETURN' | 'PUBLIC_DORMITORY_HYGIENE' | 'EVENING_SELF_STUDY'
 export type HygieneResult = 'EXCELLENT' | 'QUALIFIED' | 'UNQUALIFIED'
 export type InspectionField = {
   key: string; label: string; kind: 'string' | 'uuid' | 'uuid[]' | 'date' | 'time' | 'number' | 'integer'; required: boolean
@@ -13,6 +13,28 @@ export type InspectionDefinition = {
 }
 // Kept in parity with the server catalog by types.test.ts. This is metadata, not form validation.
 const catalog: InspectionDefinition[] = [
+  {
+    "code": "EVENING_SELF_STUDY",
+    "name": "晚自习",
+    "extensionTable": "evening_self_study_details",
+    "granularity": "STUDENT_ABSENCE_EVENT",
+    "templateVersion": 1,
+    "templateStatus": "ACTIVE",
+    "fields": [
+      { "key": "studentId", "label": "学生", "kind": "uuid", "required": true },
+      { "key": "classId", "label": "班级", "kind": "uuid", "required": true },
+      { "key": "classroomId", "label": "教室", "kind": "uuid", "required": true },
+      { "key": "date", "label": "检查日期", "kind": "date", "required": true },
+      { "key": "time", "label": "检查时间", "kind": "time", "required": true },
+      { "key": "period", "label": "节次", "kind": "string", "required": true, "enum": ["9-10"] },
+      { "key": "absenceHours", "label": "旷课学时", "kind": "number", "required": true, "constValue": 2 },
+      { "key": "remark", "label": "备注", "kind": "string", "required": false, "maxLength": 500 }
+    ],
+    "duplicateKey": ["semesterId", "weekId", "inspectionTypeId", "studentId", "occurredAt"],
+    "plannedActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
+    "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
+    "rules": ["Only absent students are recorded.", "Period 9-10 and two absence hours are server-enforced; no course is linked."]
+  },
   {
     "code": "ATTENDANCE_RATE",
     "name": "到课率",

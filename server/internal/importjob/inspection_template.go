@@ -17,6 +17,9 @@ func InspectionTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	if typeCode == inspection.InspectionTypeMorning {
 		return CourseTemplateDefinition{TypeCode: typeCode, Code: "MORNING_ATTENDANCE_IMPORT", Name: "早锻炼/早签导入模板", Sheet: "早锻炼早签导入", Filename: "morning-attendance-v1.xlsx"}, nil
 	}
+	if typeCode == inspection.InspectionTypeEveningSelfStudy {
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "EVENING_SELF_STUDY_IMPORT", Name: "晚自习导入模板", Sheet: "晚自习导入", Filename: "evening-self-study-v1.xlsx"}, nil
+	}
 	return CourseTemplate(typeCode)
 }
 
@@ -33,6 +36,9 @@ func BuildInspectionTemplate(typeCode string) ([]byte, error) {
 	}
 	if typeCode == inspection.InspectionTypeLateReturn {
 		return BuildLateReturnTemplate()
+	}
+	if typeCode == inspection.InspectionTypeEveningSelfStudy {
+		return BuildEveningSelfStudyTemplate()
 	}
 	return BuildCourseTemplate(typeCode)
 }
@@ -56,6 +62,9 @@ func NewInspectionXLSXParser(typeCode string, maxBytes int64) (*XLSXParser, erro
 	}
 	if typeCode == inspection.InspectionTypeLateReturn {
 		config.Fields = append([]TemplateField(nil), lateReturnImportFields...)
+	}
+	if typeCode == inspection.InspectionTypeEveningSelfStudy {
+		config.Fields = append([]TemplateField(nil), eveningSelfStudyImportFields...)
 	}
 	return NewXLSXParser(config), nil
 }

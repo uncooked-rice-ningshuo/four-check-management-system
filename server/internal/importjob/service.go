@@ -22,6 +22,7 @@ type Repository interface {
 	ConfirmAttendanceImport(context.Context, ConfirmBatchInput, audit.Mutation) (ConfirmResult, error)
 	FindPublishedImportTemplate(context.Context, string) (Template, error)
 	ListImportRows(context.Context, string, int, int, string) (ImportRowPage, error)
+	ListSubmissionBatches(context.Context, string, SubmissionBatchQuery) (SubmissionBatchPage, error)
 }
 
 type VerifiedFileReader interface {
@@ -110,6 +111,14 @@ func (s *Service) ListRows(ctx context.Context, batchID string, page, pageSize i
 		return ImportRowPage{}, ErrInvalidBatch
 	}
 	return s.repository.ListImportRows(ctx, batchID, page, pageSize, validationStatus)
+}
+
+func (s *Service) ListSubmissionBatches(ctx context.Context, actorID string, query SubmissionBatchQuery) (SubmissionBatchPage, error) {
+	if strings.TrimSpace(actorID) == "" || strings.TrimSpace(query.SemesterID) == "" || strings.TrimSpace(query.WeekID) == "" ||
+		strings.TrimSpace(query.InspectionTypeID) == "" || query.Page < 1 || query.PageSize < 1 || query.PageSize > 100 {
+		return SubmissionBatchPage{}, ErrInvalidBatch
+	}
+	return s.repository.ListSubmissionBatches(ctx, actorID, query)
 }
 
 func (s *Service) PublishedTemplate(ctx context.Context, inspectionTypeID string) (Template, error) {

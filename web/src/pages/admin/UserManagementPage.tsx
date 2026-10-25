@@ -102,7 +102,7 @@ export function UserManagementPage() {
     </Modal>
     <Modal title={`重置 ${resetting?.name ?? ''} 的密码`} open={Boolean(resetting)} onCancel={() => setResetting(null)} onOk={() => resetMutation.mutate()} confirmLoading={resetMutation.isPending}><Typography.Paragraph>确认后系统会生成新初始密码，并在下一弹窗显示，供管理员复制并告知该用户。现有会话将失效；用户下次登录必须修改密码。</Typography.Paragraph></Modal>
     <Modal title={issuedPassword?.kind === 'reset' ? '密码重置成功' : '用户创建成功'} open={Boolean(issuedPassword)} onOk={closeIssuedPassword} onCancel={closeIssuedPassword} okText="我已记录并告知用户" cancelButtonProps={{ style: { display: 'none' } }} maskClosable={false} keyboard={false}><Alert type="success" showIcon title={`${issuedPassword?.name ?? ''}的初始密码如下`} description="请将账号和密码通过安全渠道告知本人。该密码仅在此处显示一次，首次登录须修改。" /><div className="issued-password-details"><Typography.Text type="secondary">登录账号</Typography.Text><Typography.Text copyable={{ text: issuedPassword?.loginName }}>{issuedPassword?.loginName}</Typography.Text><Typography.Text type="secondary">初始密码</Typography.Text><Typography.Text code copyable={{ text: issuedPassword?.password }}>{issuedPassword?.password}</Typography.Text></div></Modal>
-    {permissionUser && <PermissionDetailDrawer accountId={permissionUser.accountId} userName={permissionUser.name} departmentId={permissionUser.departmentId} onClose={() => setPermissionUser(null)} />}
+    {permissionUser && <PermissionDetailDrawer accountId={permissionUser.accountId} userName={permissionUser.name} onClose={() => setPermissionUser(null)} />}
   </section>
 }
 

@@ -55,10 +55,10 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 	if len(issues) > 0 {
 		return ValidatedDetails{}, issues
 	}
-	if code == InspectionTypeAttendance {
+	if code == InspectionTypeAttendance || code == InspectionTypeEveningSelfStudy {
 		hours, valid := AttendanceHoursForPeriod(detailString(values, "period"))
 		var submitted float64
-		if !valid || json.Unmarshal(values["absenceHours"], &submitted) != nil || submitted != hours {
+		if !valid || json.Unmarshal(values["absenceHours"], &submitted) != nil || submitted != hours || (code == InspectionTypeEveningSelfStudy && detailString(values, "period") != "9-10") {
 			return ValidatedDetails{}, []DetailIssue{detailIssue("details.absenceHours", "PERIOD_HOURS_MISMATCH")}
 		}
 	}
@@ -302,6 +302,11 @@ func detailDuplicateKey(code string, c DetailContext, v map[string]json.RawMessa
 	if code == InspectionTypeAttendance || code == InspectionTypeUnattended {
 		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
 	}
+	if code == InspectionTypeEveningSelfStudy {
+		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "studentId"), r.OccurredAt.UTC().Format(time.RFC3339Nano)}
+		digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+		return hex.EncodeToString(digest[:])
+	}
 	parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID}
 	switch code {
 	case InspectionTypeMorning:
@@ -334,6 +339,7 @@ func detailIssue(path, code string) DetailIssue {
 		"INVALID_ENUM": "请选择有效的检查结果", "DUPLICATE_ITEM": "关联列表存在重复项", "INVALID_RANGE": "周日期范围无效",
 		"OUTSIDE_WEEK": "检查日期不在所选周内", "OCCURRENCE_REQUIRED": "请填写检查时间或轮次", "OCCURRENCE_CONFLICT": "检查时间和轮次只能填写一项",
 		"OTHER_REASON_REQUIRED": "选择其他原因时请填写具体原因说明",
+		"SERVER_OWNED_FIELD":    "此字段由系统按晚自习规则生成",
 	}
 	return DetailIssue{Path: path, Code: code, Message: messages[code]}
 }

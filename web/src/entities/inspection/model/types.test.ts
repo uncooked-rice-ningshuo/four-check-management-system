@@ -3,12 +3,12 @@ import serverCatalog from '../../../../../server/internal/inspection/catalog.jso
 import { getInspectionDefinitions, getInspectionDefinition } from './types'
 
 describe('inspection field catalog', () => {
- it('matches the server catalog and preserves seven types / six tables', () => {
+ it('matches the server catalog and preserves eight types / seven tables', () => {
   const definitions=getInspectionDefinitions()
   expect(definitions).toEqual(serverCatalog)
-  expect(definitions).toHaveLength(7)
-  expect(new Set(definitions.map(d=>d.extensionTable)).size).toBe(6)
-  expect(definitions.filter(d=>d.availableActions.length>0).map(d=>d.code)).toEqual(['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'CLASSROOM_HYGIENE', 'MORNING_ATTENDANCE', 'DORMITORY_HYGIENE', 'LATE_RETURN', 'PUBLIC_DORMITORY_HYGIENE'])
+  expect(definitions).toHaveLength(8)
+  expect(new Set(definitions.map(d=>d.extensionTable)).size).toBe(7)
+  expect(definitions.filter(d=>d.availableActions.length>0).map(d=>d.code)).toEqual(['EVENING_SELF_STUDY', 'ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'CLASSROOM_HYGIENE', 'MORNING_ATTENDANCE', 'DORMITORY_HYGIENE', 'LATE_RETURN', 'PUBLIC_DORMITORY_HYGIENE'])
  })
  it('exposes verified unattended manual and import capabilities', () => {
   expect(getInspectionDefinition('UNATTENDED_CLASSROOM').availableActions).toEqual(['CREATE','LIST','EDIT','SOFT_DELETE','BATCH_DELETE','IMPORT'])

@@ -4,6 +4,6 @@ import type { SupportedImportType } from '../../../shared/api/inspectionImportAp
 
 /** Load complete, permission-filtered destinations independently of list filters. */
 export function useImportContext(query: InspectionQuery, enabled: boolean, typeCode: SupportedImportType) {
-  const root = typeCode === 'CLASSROOM_HYGIENE' ? 'classroom-hygienes' : typeCode === 'DORMITORY_HYGIENE' ? 'dormitory-hygienes' : typeCode === 'LATE_RETURN' ? 'late-returns' : typeCode === 'MORNING_ATTENDANCE' ? 'morning-attendances' : 'course-inspections'
+  const root = typeCode === 'CLASSROOM_HYGIENE' ? 'classroom-hygienes' : typeCode === 'DORMITORY_HYGIENE' ? 'dormitory-hygienes' : typeCode === 'LATE_RETURN' ? 'late-returns' : typeCode === 'MORNING_ATTENDANCE' ? 'morning-attendances' : typeCode === 'EVENING_SELF_STUDY' ? 'evening-self-studies' : 'course-inspections'
   return useQuery({ queryKey: [root, 'import-context', typeCode, query], queryFn: () => allOptions('/inspections/context-options', { ...query, typeCode }, true), enabled })
 }

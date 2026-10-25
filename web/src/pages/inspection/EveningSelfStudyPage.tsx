@@ -1,0 +1,84 @@
+import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
+import { ProTable, type ProColumns, type ProFormInstance } from '@ant-design/pro-components'
+import { Alert, Button, Empty, Space, Tag, Typography } from 'antd'
+import { useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../../app/providers/authContext'
+import type { EveningSelfStudyRecord } from '../../entities/inspection/model/eveningSelfStudyRecord'
+import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
+import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
+import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
+import { useEveningSelfStudyRecords, useInspectionContext } from '../../features/evening-self-study/model/queries'
+import { EveningSelfStudyCreatePanel } from '../../features/evening-self-study/ui/EveningSelfStudyCreatePanel'
+import { EveningSelfStudyDeleteDialog } from '../../features/evening-self-study/ui/EveningSelfStudyDeleteDialog'
+import { EveningSelfStudyDrawer } from '../../features/evening-self-study/ui/EveningSelfStudyDrawer'
+import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
+import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
+
+const statuses = { DRAFT: '草稿', PENDING_REVIEW: '待审核', RETURNED: '已退回', CONFIRMED: '已确认', LOCKED: '已锁定' }
+const sources = { MANUAL: '手工录入', EXCEL: 'Excel 导入', REPORT_CORRECTION: '通报修正', MIGRATION: '历史迁移' }
+
+export function EveningSelfStudyPage() {
+ const { user } = useAuth()
+ const permissions = useAttendancePermissions()
+ const location = useLocation()
+ const navigate = useNavigate()
+ const importBatchId = (location.state as { importBatchId?: string } | null)?.importBatchId
+ const [importing, setImporting] = useState(!!importBatchId)
+ const setImportBatchId = (id?: string) => navigate(location.pathname + location.search, { replace: true, state: { ...location.state, importBatchId: id } })
+ const form = useRef<ProFormInstance>(undefined)
+ const [creating, setCreating] = useState(false)
+ const [panel, setPanel] = useState<{ record: EveningSelfStudyRecord; readOnly: boolean }>()
+ const [deleting, setDeleting] = useState<EveningSelfStudyRecord[]>([])
+ const [selected, setSelected] = useState<React.Key[]>([])
+ const semesters = useInspectionContext({ purpose: 'view', kind: 'semesters' })
+ const scope = useInspectionListScope(semesters.data?.items)
+ const weeks = useInspectionContext({ purpose: 'view', kind: 'weeks', semesterId: scope.optionSemesterId }, !!scope.optionSemesterId)
+ const { weekId, filters, invalidSelection } = scope.resolve(weeks.data?.items)
+ const { semesterId, update: saveFilters, setDraftSemester } = scope
+ const departments = useInspectionContext({ purpose: 'view', kind: 'departments' })
+ const classes = useInspectionContext({ purpose: 'view', kind: 'classes' })
+ const inspectionTypeId = semesters.data?.inspectionTypeId
+ const records = useEveningSelfStudyRecords({ ...filters, inspectionTypeId }, !!inspectionTypeId && !!semesterId && !!weekId && !scope.currentWeek.isLoading && !scope.currentWeek.isError && !invalidSelection)
+ const canCreate = user?.isSuperAdmin || (!!inspectionTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', inspectionTypeId))
+ const selections = (records.data?.items ?? []).filter(record => selected.includes(record.id) && record.canEdit && record.status === 'DRAFT')
+ const canReview = !!user?.isSuperAdmin || (!!inspectionTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', inspectionTypeId))
+ const optionQueries = [scope.currentWeek, semesters, weeks, departments, classes]
+ const optionError = optionQueries.some(query => query.isError)
+ const columns: ProColumns<EveningSelfStudyRecord>[] = [
+  { title: '学期', dataIndex: 'semesterId', hideInTable: true, valueType: 'select', fieldProps: { options: semesters.data?.items.map(item => ({ value: item.id, label: item.label })), onChange: (value: string) => { setDraftSemester(value ?? ''); form.current?.setFieldValue('weekId', undefined) }, allowClear: true } },
+  { title: '周次', dataIndex: 'weekId', hideInTable: true, valueType: 'select', fieldProps: { options: weeks.data?.items.map(item => ({ value: item.id, label: item.label })), disabled: !scope.optionSemesterId, allowClear: true } },
+  { title: '部门', dataIndex: 'departmentId', hideInTable: true, valueType: 'select', fieldProps: { options: departments.data?.items.map(item => ({ value: item.id, label: item.label })), placeholder: '全部有权部门', allowClear: true } },
+  { title: '班级', dataIndex: 'classId', hideInTable: true, valueType: 'select', fieldProps: { options: classes.data?.items.map(item => ({ value: item.id, label: item.label })), showSearch: true, optionFilterProp: 'label', allowClear: true } },
+  { title: '数据状态', dataIndex: 'status', valueType: 'select', valueEnum: statuses, width: 110 },
+  { title: '数据来源', dataIndex: 'source', valueType: 'select', valueEnum: sources, width: 110 },
+  { title: '学号', dataIndex: 'studentNumber', search: false, width: 140 },
+  { title: '姓名', dataIndex: 'studentName', search: false, width: 120 },
+  { title: '班级', dataIndex: 'className', search: false, width: 150 },
+  { title: '年级', dataIndex: 'grade', search: false, width: 90 },
+  { title: '晚自习教室', dataIndex: 'currentClassroomName', search: false, width: 180 },
+  { title: '缺勤日期与检查时间', key: 'date', search: false, width: 190, render: (_, record) => `${record.details.date} ${record.details.time.slice(0, 5)}` },
+  { title: '节次', key: 'period', search: false, width: 100, render: () => '第 9–10 节' },
+  { title: '违纪计入学时', key: 'penaltyHours', search: false, width: 120, render: (_, record) => record.details.penaltyHours ?? '历史待核对' },
+  { title: '操作', valueType: 'option', fixed: 'right', width: 270, render: (_, record) => <Space>{record.importBatchId && record.canEdit && <Button type="link" onClick={() => { setImportBatchId(record.importBatchId); setImporting(true) }}>导入批次</Button>}<Button type="link" onClick={() => setPanel({ record, readOnly: true })}>详情</Button>{record.canEdit && <><Button type="link" onClick={() => setPanel({ record, readOnly: false })}>编辑</Button>{record.status === 'DRAFT' && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</>}</Space> },
+ ]
+ return <section className="attendance-page" aria-labelledby="inspection-page-title">
+  <div className="attendance-page-heading"><div><Typography.Title id="inspection-page-title" level={2}>晚自习检查</Typography.Title><Typography.Text type="secondary">只记录缺勤学生；节次固定为第 9–10 节、2 学时，不关联课程。</Typography.Text></div></div>
+  {scope.currentWeek.data?.week === null && <Alert type="info" title="当前无有效教学周，请手动选择学期和周次。" />}
+  {invalidSelection && <Alert type="error" title="所选学期或周次已不在授权范围内，请重置筛选条件。" action={<Button onClick={() => saveFilters({ page: 1, pageSize: 20 })}>重置筛选</Button>} />}
+  {optionError && <Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={() => optionQueries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} />}
+  <ProTable<EveningSelfStudyRecord> className="attendance-records-table" cardBordered rowKey="id" columns={columns} dataSource={records.isError ? [] : records.data?.items ?? []} loading={records.isLoading || semesters.isLoading || scope.currentWeek.isLoading}
+   headerTitle={<Space size={10}><span>晚自习缺勤记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag></Space>}
+   key={`${semesterId ?? ''}-${weekId ?? ''}`} formRef={form} form={{ initialValues: filters }} search={{ labelWidth: 'auto', defaultCollapsed: false }} options={{ reload: () => void records.refetch(), density: true, setting: true }}
+   onSubmit={values => { saveFilters({ ...values, page: 1, pageSize: filters.pageSize }); setSelected([]) }} onReset={() => { saveFilters({ page: 1, pageSize: 20 }); setSelected([]) }} scroll={{ x: 1500 }}
+   pagination={{ current: Number(filters.page), pageSize: Number(filters.pageSize), total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (page, pageSize) => { saveFilters({ ...filters, page, pageSize }); setSelected([]) } }}
+   rowSelection={{ selectedRowKeys: selected, onChange: setSelected, getCheckboxProps: record => ({ disabled: !record.canEdit || record.status !== 'DRAFT' }) }}
+   locale={{ emptyText: invalidSelection ? '所选学期或周次不可用' : records.isError ? <Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={() => void records.refetch()}>重试</Button>} /> : optionError ? '请先恢复筛选选项加载' : <Empty description="当前范围暂无晚自习缺勤记录" /> }}
+   toolBarRender={() => [<Space key="actions" wrap style={{ minWidth: 0, maxWidth: '100%' }}>{canCreate && <><Button key="create" icon={<PlusOutlined aria-hidden />} onClick={() => setCreating(true)}>新增缺勤记录</Button><Button type="primary" icon={<UploadOutlined aria-hidden />} onClick={() => setImporting(true)}>批量导入晚自习</Button></>}<DepartmentSubmissionActions inspectionTypeId={inspectionTypeId ?? ''} listScope={filters} selected={selections} canReview={canReview} onChanged={() => { setSelected([]); void records.refetch() }} onOpenRecord={(id, status) => { const record = records.data?.items.find(item => item.id === id); if (record) setPanel({ record, readOnly: status !== 'RETURNED' }) }} />{selections.length > 0 && <Button key="delete" danger onClick={() => setDeleting(selections)}>批量删除（{selections.length}）</Button>}</Space>]}
+  />
+  {importing && inspectionTypeId && <InspectionImportScopePanel memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} typeCode="EVENING_SELF_STUDY" inspectionTypeId={inspectionTypeId} batchId={importBatchId} onBatchIdChange={setImportBatchId} onClose={() => setImporting(false)} />}
+  {creating && inspectionTypeId && <EveningSelfStudyCreatePanel inspectionTypeId={inspectionTypeId} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => setCreating(false)} />}
+  {panel && inspectionTypeId && <EveningSelfStudyDrawer key={panel.record.id + String(panel.readOnly)} editing={panel.record} readOnly={panel.readOnly} inspectionTypeId={inspectionTypeId} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => setPanel(undefined)} />}
+  {deleting.length > 0 && <EveningSelfStudyDeleteDialog records={deleting} onClose={() => { setDeleting([]); setSelected([]) }} />}
+ </section>
+}

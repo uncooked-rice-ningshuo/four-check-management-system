@@ -1657,6 +1657,35 @@ func (p *Postgres) FindImportBatch(ctx context.Context, id string) (importjob.Ba
 	return scanImportBatch(p.Pool.QueryRow(ctx, importBatchSelect+` WHERE b.id=$1`, id))
 }
 
+func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q importjob.SubmissionBatchQuery) (importjob.SubmissionBatchPage, error) {
+	page := importjob.SubmissionBatchPage{Items: []importjob.SubmissionBatchSummary{}, Page: q.Page, PageSize: q.PageSize}
+	from := ` FROM import_batches b JOIN files f ON f.id=b.original_file_id LEFT JOIN inspection_records ir ON ir.import_batch_id=b.id AND ir.deleted_at IS NULL`
+	where := ` WHERE b.created_by=$1 AND b.status='CONFIRMED' AND b.semester_id=$2 AND b.week_id=$3 AND b.inspection_type_id=$4 AND COALESCE(b.department_id::text,'')=$5`
+	args := []any{actorID, q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID}
+	if err := p.Pool.QueryRow(ctx, `SELECT count(DISTINCT b.id)`+from+where, args...).Scan(&page.Total); err != nil {
+		return page, err
+	}
+	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
+	rows, err := p.Pool.Query(ctx, `SELECT b.id,b.semester_id,b.week_id,b.inspection_type_id,COALESCE(b.department_id::text,''),f.original_name,b.status,b.created_at,COALESCE(b.confirmed_at,'epoch'::timestamptz),b.imported_rows,
+		count(ir.id) FILTER (WHERE ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL),
+		count(ir.id) FILTER (WHERE ir.submission_id IS NOT NULL),
+		count(ir.id) FILTER (WHERE ir.submission_id IS NULL AND (ir.status<>'DRAFT' OR ir.locked_by_report_id IS NOT NULL))
+		`+from+where+`
+		GROUP BY b.id,f.original_name ORDER BY b.confirmed_at DESC,b.id LIMIT $6 OFFSET $7`, args...)
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item importjob.SubmissionBatchSummary
+		if err := rows.Scan(&item.ID, &item.SemesterID, &item.WeekID, &item.InspectionTypeID, &item.DepartmentID, &item.OriginalName, &item.Status, &item.CreatedAt, &item.ConfirmedAt, &item.ImportedRows, &item.SelectableRecords, &item.SubmittedRecords, &item.UnavailableRecords); err != nil {
+			return page, err
+		}
+		page.Items = append(page.Items, item)
+	}
+	return page, rows.Err()
+}
+
 // CreateImportBatch persists the initial UPLOADED state after private storage has verified the source file.
 func (p *Postgres) CreateImportBatch(ctx context.Context, batch importjob.Batch) error {
 	tx, err := p.Pool.Begin(ctx)
@@ -1929,7 +1958,7 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 	if err != nil {
 		return importjob.ConfirmResult{}, err
 	}
-	if lockedContext.TypeCode == inspection.InspectionTypeAttendance && lockedContext.AttendancePenaltyMultiplier == nil {
+	if (lockedContext.TypeCode == inspection.InspectionTypeAttendance || lockedContext.TypeCode == inspection.InspectionTypeEveningSelfStudy) && lockedContext.AttendancePenaltyMultiplier == nil {
 		return importjob.ConfirmResult{}, inspection.ErrAttendancePenaltyUnconfigured
 	}
 	for i := range confirmedRows {

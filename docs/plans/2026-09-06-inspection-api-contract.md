@@ -144,6 +144,8 @@ INSPECTION_TEST_DATABASE_URL='<一次性空库连接串>' GOTOOLCHAIN=go1.25.0 g
 
 导入批次响应含可选 `classId`、`grade`。前端新导入独立选择目标，不能把列表班级/年级默认带入；模板和上传请求必须携带选中的范围。恢复和重传沿用批次范围，服务端权限仍权威校验，不扩大限定角色权限。
 
+> **2026-10-25 范围语义调整：** 上述新导入目标行为为历史契约，已由[权限范围简化方案](2026-10-25-permission-scope-simplification.md)取代。新模板请求和导入上传不得发送 `classId`/`grade`，非空旧目标参数返回 `400/INVALID_REQUEST`。服务端从 Excel 逐行解析学生所属班级/年级并校验业务引用；一批可包含多个班级。历史 `import_batches.class_id/grade` 保留，用于查看、恢复和完成已创建批次，不再作为新批次目标字段。
+
 ### 2026-10-04 教室卫生对象导入
 
 `CLASSROOM_HYGIENE` 使用 `/api/v1/imports/inspections`，模板编码 `CLASSROOM_HYGIENE_IMPORT`、版本1、工作表“教室卫生导入”。字段顺序为 `classroom_name,area_name,inspection_date,inspection_time,inspection_round,result,responsible_class_names,responsible_student_nos,reason_name,description,remark`。完整教室名称由教学楼与教室号组成，区域按该教室解析；重复名称或非所属区域拒绝，不能使用另一教室的同名区域代替。

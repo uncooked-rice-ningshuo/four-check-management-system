@@ -17,8 +17,8 @@ type hygieneAreaTarget struct {
 	InspectionTypeName string `json:"inspectionTypeName"`
 }
 
-// The target list is derived from live mappings and effective permissions so a
-// scoped department grant never opens the general master-data catalog.
+// The target list is derived from live mappings and type-scoped permissions so
+// area maintenance does not open the general master-data catalog.
 func (h *handler) hygieneAreaOptions(c *gin.Context) {
 	a, ok := h.currentAccount(c)
 	if !ok {

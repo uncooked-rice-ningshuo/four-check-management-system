@@ -60,6 +60,7 @@ type InspectionRecord struct {
 	Status            string               `json:"status"`
 	Source            string               `json:"source"`
 	ImportBatchID     string               `json:"importBatchId,omitempty"`
+	ImportRowNo       int                  `json:"importRowNo,omitempty"`
 	RowVersion        int                  `json:"rowVersion"`
 	CreatedBy         string               `json:"createdBy"`
 	CreatedAt         time.Time            `json:"createdAt"`
@@ -96,19 +97,22 @@ type InspectionContext struct {
 
 // InspectionFilter supports bounded, structured list queries.
 type InspectionFilter struct {
-	CollegeOnly             bool   `form:"-"`
-	ConfirmedSubmissionOnly bool   `form:"-"`
-	SemesterID              string `form:"semesterId"`
-	WeekID                  string `form:"weekId"`
-	InspectionTypeID        string `form:"inspectionTypeId"`
-	DepartmentID            string `form:"departmentId"`
-	ClassID                 string `form:"classId"`
-	Grade                   string `form:"grade"`
-	Status                  string `form:"status"`
-	Source                  string `form:"source"`
-	Sort                    string `form:"sort"`
-	Page                    int    `form:"page"`
-	PageSize                int    `form:"pageSize"`
+	CollegeOnly              bool   `form:"-"`
+	ConfirmedSubmissionOnly  bool   `form:"-"`
+	SubmissionCandidatesOnly bool   `form:"-"`
+	ImportBatchID            string `form:"importBatchId"`
+	Keyword                  string `form:"keyword"`
+	SemesterID               string `form:"semesterId"`
+	WeekID                   string `form:"weekId"`
+	InspectionTypeID         string `form:"inspectionTypeId"`
+	DepartmentID             string `form:"departmentId"`
+	ClassID                  string `form:"classId"`
+	Grade                    string `form:"grade"`
+	Status                   string `form:"status"`
+	Source                   string `form:"source"`
+	Sort                     string `form:"sort"`
+	Page                     int    `form:"page"`
+	PageSize                 int    `form:"pageSize"`
 }
 type InspectionPage struct {
 	Items    []InspectionRecord `json:"items"`
@@ -185,14 +189,42 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 	if err != nil {
 		return InspectionRecord{}, err
 	}
+	if c.TypeCode == InspectionTypeEveningSelfStudy {
+		values, decodeErr := decodeDetailObject(i.Details)
+		if decodeErr != nil {
+			return InspectionRecord{}, &DetailsValidationError{[]DetailIssue{detailIssue("details", "INVALID_OBJECT")}}
+		}
+		for _, field := range []string{"period", "absenceHours"} {
+			if _, provided := values[field]; provided {
+				return InspectionRecord{}, &DetailsValidationError{[]DetailIssue{detailIssue("details."+field, "SERVER_OWNED_FIELD")}}
+			}
+		}
+		values["period"] = json.RawMessage(`"9-10"`)
+		values["absenceHours"] = json.RawMessage(`2`)
+		i.Details, err = json.Marshal(values)
+		if err != nil {
+			return InspectionRecord{}, err
+		}
+	}
 	v, issues := ValidateDetails(c.TypeCode, c.DetailContext, i.Details)
 	if len(issues) > 0 {
 		return InspectionRecord{}, &DetailsValidationError{issues}
 	}
 	multiplier := c.AttendancePenaltyMultiplier
-	if c.TypeCode == InspectionTypeAttendance && prior != nil && prior.HasSubmission {
+	if (c.TypeCode == InspectionTypeAttendance || c.TypeCode == InspectionTypeEveningSelfStudy) && prior != nil && prior.HasSubmission {
 		previous, previousOK := prior.Details.(*AttendanceDetails)
 		current, currentOK := v.Details.(*AttendanceDetails)
+		if c.TypeCode == InspectionTypeEveningSelfStudy {
+			previousEvening, eveningPreviousOK := prior.Details.(*EveningSelfStudyDetails)
+			currentEvening, eveningCurrentOK := v.Details.(*EveningSelfStudyDetails)
+			if eveningPreviousOK && eveningCurrentOK && prior.WeekID == i.WeekID && previousEvening.Date == currentEvening.Date {
+				if previousEvening.PenaltyMultiplier == nil {
+					return InspectionRecord{}, ErrAttendanceLegacyRuleUnknown
+				}
+				multiplier = previousEvening.PenaltyMultiplier
+			}
+			previous, previousOK, current, currentOK = nil, false, nil, false
+		}
 		if previousOK && currentOK && prior.WeekID == i.WeekID && previous.Date == current.Date {
 			if previous.PenaltyMultiplier == nil {
 				return InspectionRecord{}, ErrAttendanceLegacyRuleUnknown
@@ -200,8 +232,19 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 			multiplier = previous.PenaltyMultiplier
 		}
 	}
-	if c.TypeCode == InspectionTypeAttendance && multiplier == nil {
+	if (c.TypeCode == InspectionTypeAttendance || c.TypeCode == InspectionTypeEveningSelfStudy) && multiplier == nil {
 		return InspectionRecord{}, ErrAttendancePenaltyUnconfigured
+	}
+	if c.TypeCode == InspectionTypeEveningSelfStudy {
+		evening, ok := v.Details.(*EveningSelfStudyDetails)
+		if !ok {
+			return InspectionRecord{}, ErrInvalidAttendanceRecord
+		}
+		evening.PenaltyMultiplier = multiplier
+		if multiplier != nil {
+			penaltyHours := evening.AbsenceHours * float64(*multiplier)
+			evening.PenaltyHours = &penaltyHours
+		}
 	}
 	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}
 	r.PenaltyMultiplier = multiplier
@@ -259,7 +302,7 @@ func (s *RecordService) List(ctx context.Context, actor ManualActor, f Inspectio
 		f.DepartmentID = ""
 		f.CollegeOnly = true
 	}
-	for _, p := range []*string{&f.SemesterID, &f.WeekID, &f.InspectionTypeID, &f.DepartmentID, &f.ClassID} {
+	for _, p := range []*string{&f.SemesterID, &f.WeekID, &f.InspectionTypeID, &f.DepartmentID, &f.ClassID, &f.ImportBatchID} {
 		if *p != "" {
 			v, ok := canonicalDetailID(*p)
 			if !ok {
@@ -277,7 +320,8 @@ func (s *RecordService) List(ctx context.Context, actor ManualActor, f Inspectio
 	if f.Sort == "" {
 		f.Sort = SortOccurredAtDescending
 	}
-	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || (f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
+	f.Keyword = strings.TrimSpace(f.Keyword)
+	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || len(f.Keyword) > 80 || (f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
 		return InspectionPage{}, ErrInspectionRequest
 	}
 	a, err := s.access(ctx, actor)
@@ -443,6 +487,8 @@ func InspectionDetailReferences(d InspectionDetails) (student, class, course, cl
 		student, class, course, classroom = v.StudentID, v.ClassID, v.CourseID, v.ClassroomID
 	case *UnattendedClassroomDetails:
 		student, class, course, classroom = v.StudentID, v.ClassID, v.CourseID, v.ClassroomID
+	case *EveningSelfStudyDetails:
+		student, class, classroom = v.StudentID, v.ClassID, v.ClassroomID
 	case *MorningAttendanceDetails:
 		student, class = v.StudentID, v.ClassID
 	case *LateReturnDetails:

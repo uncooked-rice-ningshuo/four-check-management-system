@@ -6,8 +6,8 @@ it('removes fully denied grants but retains partially available scopes', () => {
   const allow: EffectivePermission = { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: {}, sources: [] }
   const deny: EffectivePermission = { ...allow, effect: 'DENY' }
   expect(hasNavigableInspectionAction([allow, deny], allow.action)).toBe(false)
-  expect(hasNavigableInspectionAction([allow, { ...deny, scope: { classId: 'one' } }], allow.action)).toBe(true)
-  expect(hasNavigableInspectionAction([{ ...allow, scope: { classId: 'one' } }, { ...deny, scope: { classId: 'one' } }], allow.action)).toBe(false)
+  expect(hasNavigableInspectionAction([allow, { ...deny, scope: { weekId: 'one' } }], allow.action)).toBe(true)
+  expect(hasNavigableInspectionAction([{ ...allow, scope: { weekId: 'one' } }, { ...deny, scope: { weekId: 'one' } }], allow.action)).toBe(false)
   expect(hasNavigableInspectionAction([deny], allow.action)).toBe(false)
 })
 
@@ -18,10 +18,9 @@ it('intersects navigation grants and denies with the requested inspection type',
  expect(hasNavigableInspectionAction([{...allow,scope:{}},{...allow,effect:'DENY'}],allow.action,'unattended')).toBe(true)
 })
 
-it('intersects member entry grants with the primary department before showing actions', () => {
+it('uses inspection type for navigation and does not add department scope', () => {
  const allow:EffectivePermission={action:'INSPECTION_ENTER',effect:'ALLOW',scope:{},sources:[]}
- const deny:EffectivePermission={...allow,effect:'DENY',scope:{inspectionTypeId:'attendance',departmentId:'study'}}
- expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance','study')).toBe(false)
- expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance','sports')).toBe(true)
- expect(hasNavigableInspectionAction([{...allow,scope:{departmentId:'sports'}}],allow.action,'attendance','study')).toBe(false)
+ const deny:EffectivePermission={...allow,effect:'DENY',scope:{inspectionTypeId:'attendance'}}
+ expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance')).toBe(false)
+ expect(hasNavigableInspectionAction([allow,deny],allow.action,'sports')).toBe(true)
 })

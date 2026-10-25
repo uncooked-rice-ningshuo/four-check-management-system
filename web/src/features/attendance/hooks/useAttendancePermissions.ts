@@ -3,6 +3,8 @@ import type { InspectionContext } from '../../../entities/inspection/model/inspe
 import type { EffectivePermission, PermissionScope } from '../../../entities/permission/model/permission'
 import { attendanceApi } from '../api/attendanceApi'
 
+const permissionScopeFields: (keyof PermissionScope)[] = ['academicYearId', 'semesterId', 'weekId', 'inspectionTypeId']
+
 export function useAttendancePermissions() {
   return useQuery({ queryKey: ['effective-permissions'], queryFn: attendanceApi.effectivePermissions })
 }
@@ -16,7 +18,7 @@ export function useAttendanceFilterOptions() {
 }
 
 function scopeMatches(granted: PermissionScope, requested: PermissionScope) {
-  return (Object.keys(granted) as (keyof PermissionScope)[]).every(key => !granted[key] || granted[key] === requested[key])
+	return permissionScopeFields.every(key => !granted[key] || granted[key] === requested[key])
 }
 
 export function canInspectionAction(permissions: EffectivePermission[] | undefined, action: string, context: InspectionContext) {
@@ -30,5 +32,5 @@ export function canInspectionAction(permissions: EffectivePermission[] | undefin
 }
 
 function scopesOverlap(left: PermissionScope, right: PermissionScope) {
-	return (Object.keys({ ...left, ...right }) as (keyof PermissionScope)[]).every(key => !left[key] || !right[key] || left[key] === right[key])
+	return permissionScopeFields.every(key => !left[key] || !right[key] || left[key] === right[key])
 }

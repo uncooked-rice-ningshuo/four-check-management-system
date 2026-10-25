@@ -169,17 +169,17 @@ describe('阶段一管理页面', () => {
     expect(await screen.findByText('本规则范围：全部范围。未选择的维度表示全部。')).toBeInTheDocument()
   })
 
-  it('权限详情分别展示同一动作对应的部门和检查类型', async () => {
+  it('权限详情分别展示同一动作对应的检查类型范围', async () => {
     vi.mocked(getUsers).mockResolvedValue([{ version: 1, accountId: 'user-1', loginName: '24010001', studentNo: '24010001', name: '办公室成员', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'office', organizationRoleId: 'role-1' }])
     vi.mocked(getCatalogs).mockResolvedValue({ departments: [{ id: 'office', code: 'OFFICE', name: '学生会办公室', enabled: true }], organizationRoles: [], inspectionTypes: [{ id: 'attendance', code: 'ATTENDANCE', name: '到课率', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 1 }, { id: 'hygiene', code: 'HYGIENE', name: '宿舍卫生', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 2 }] })
     vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'user-1', systemRole: 'MEMBER', permissions: [
-      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { departmentId: 'office', inspectionTypeId: 'attendance' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
-      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { departmentId: 'office', inspectionTypeId: 'hygiene' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
+      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { inspectionTypeId: 'attendance' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
+      { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: { inspectionTypeId: 'hygiene' }, sources: [{ type: 'DEPARTMENT_MAPPING', label: '部门映射' }] },
     ] })
     renderPage(<UserManagementPage />)
     fireEvent.click(await screen.findByRole('button', { name: '权限详情' }))
-    expect(await screen.findByText('部门：学生会办公室；检查类型：到课率')).toBeInTheDocument()
-    expect(screen.getByText('部门：学生会办公室；检查类型：宿舍卫生')).toBeInTheDocument()
+    expect(await screen.findByText('检查类型：到课率')).toBeInTheDocument()
+    expect(screen.getByText('检查类型：宿舍卫生')).toBeInTheDocument()
   })
 
   it('重置密码由服务端生成并只在结果弹窗显示', async () => {
@@ -820,7 +820,7 @@ describe('阶段一管理页面', () => {
 		vi.mocked(updateInspectionType).mockImplementation(async input => input)
 		renderPage(<OrganizationConfigPage />)
 
-		fireEvent.click(await screen.findByRole('tab', { name: '七类检查' }))
+		fireEvent.click(await screen.findByRole('tab', { name: '检查类型' }))
 		fireEvent.click(await screen.findByRole('switch', { name: '停用检查类型 晚归检查' }))
 		expect(updateInspectionType).not.toHaveBeenCalled()
 		const dialog = await screen.findByRole('dialog', { name: /停用“晚归检查”检查类型/ })

@@ -41,11 +41,9 @@ function saveTemplate(file: Blob, label: string) {
 }
 
 export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, context, initialImportScope, scopeOptions, departments, memberDepartmentId, batchId, onBatchIdChange, onClose }: AttendanceImportDrawerProps) {
-  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'UNATTENDED_CLASSROOM' ? '无机课堂' : '到课率'
+  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : typeCode === 'UNATTENDED_CLASSROOM' ? '无机课堂' : '到课率'
   const [targetDepartmentId, setTargetDepartmentId] = useState(memberDepartmentId ?? initialImportScope?.departmentId ?? context.departmentId ?? (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : ''))
   const [targetCalendar, setTargetCalendar] = useState({ semesterId: context.semesterId, weekId: context.weekId })
-  const [targetClassId, setTargetClassId] = useState<string | undefined>(initialImportScope?.classId)
-  const [targetGrade, setTargetGrade] = useState<string | undefined>(initialImportScope?.grade)
   const [selectedFile, setSelectedFile] = useState<File>()
   const [fileError, setFileError] = useState('')
   const [page, setPage] = useState(1)
@@ -59,7 +57,12 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   const [rollingBack, setRollingBack] = useState(false)
   const confirmingRef = useRef(false)
   const [modal, modalHolder] = Modal.useModal()
-  const targetContext = useMemo(() => ({ ...context, ...targetCalendar, departmentId: targetDepartmentId, classId: targetClassId, grade: targetGrade }), [context, targetCalendar, targetDepartmentId, targetClassId, targetGrade])
+  const targetContext = useMemo<InspectionContext>(() => ({
+    semesterId: targetCalendar.semesterId,
+    weekId: targetCalendar.weekId,
+    inspectionTypeId: context.inspectionTypeId,
+    departmentId: targetDepartmentId,
+  }), [context.inspectionTypeId, targetCalendar, targetDepartmentId])
   const targetReady = Boolean(targetContext.semesterId && targetContext.weekId && targetContext.inspectionTypeId && targetContext.departmentId)
   const template = useImportTemplate(targetContext, open && !batchId && targetReady, typeCode)
   const batch = useImportBatch(batchId)
@@ -69,23 +72,23 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   const activeBatch = batch.data
   const availableDepartments = activeBatch?.departmentId === '' && !departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID)
     ? [...departments, { id: COLLEGE_DEPARTMENT_OPTION_ID, name: '校级' }] : departments
+  const memberDepartmentUnavailable = memberDepartmentId !== undefined && !availableDepartments.some(item => item.id === memberDepartmentId)
   // A resumed batch owns its scope; current list filters may have changed.
   const displayScope = activeBatch ? { ...activeBatch, departmentId: departmentOptionId(activeBatch.departmentId) } : targetContext
   const destinationQuery = { purpose: batchId ? 'view' : 'entry', semesterId: displayScope.semesterId, weekId: displayScope.weekId, departmentId: displayScope.departmentId }
-  const optionsEnabled = open && Boolean(displayScope.semesterId && displayScope.weekId && displayScope.departmentId)
-  const grades = useImportContext({ ...destinationQuery, kind: 'grades' }, optionsEnabled, typeCode)
-  const classes = useImportContext({ ...destinationQuery, kind: 'classes', grade: displayScope.grade }, optionsEnabled, typeCode)
-  const targetOptionsFailed = grades.isError || classes.isError
-  const targetOptionsLoading = grades.isLoading || classes.isLoading
-  const classLabel = displayScope.classId ? classes.data?.items.find(item => item.id === displayScope.classId)?.label : '不限班级（按有效授权范围）'
-  const targetSelectionInvalid = !batchId && optionsEnabled && !targetOptionsLoading && Boolean((memberDepartmentId !== undefined && !availableDepartments.some(item => item.id === memberDepartmentId)) || (targetClassId && !classLabel) || (targetGrade && !grades.data?.items.some(item => item.id === targetGrade)))
-  const gradeLabel = displayScope.grade || '不限年级（按有效授权范围）'
+  const legacyClassQueryEnabled = open && Boolean(batchId && displayScope.semesterId && displayScope.weekId && displayScope.departmentId && displayScope.classId)
+  const classes = useImportContext({ ...destinationQuery, kind: 'classes', grade: displayScope.grade }, legacyClassQueryEnabled, typeCode)
+  const targetOptionsFailed = legacyClassQueryEnabled && classes.isError
+  const targetOptionsLoading = legacyClassQueryEnabled && classes.isLoading
+  const legacyClassAvailable = !displayScope.classId || Boolean(classes.data?.items.some(item => item.id === displayScope.classId))
+  const classLabel = displayScope.classId ? classes.data?.items.find(item => item.id === displayScope.classId)?.label ?? '历史班级信息不可用' : ''
+  const gradeLabel = displayScope.grade ?? ''
   const clearTargetFile = () => { setSelectedFile(undefined); setFileError(''); setConfirmError('') }
   const semester = scopeOptions.semesters.find(item => item.id === displayScope.semesterId)
   const week = scopeOptions.weeks.find(item => item.id === displayScope.weekId && item.semesterId === displayScope.semesterId)
   const department = availableDepartments.find(item => item.id === displayScope.departmentId)
   const inspectionType = scopeOptions.inspectionType.id === displayScope.inspectionTypeId ? scopeOptions.inspectionType : undefined
-  const scopeResolved = Boolean(semester && week && department && inspectionType && (!displayScope.classId || classLabel) && !targetOptionsFailed)
+  const scopeResolved = Boolean(semester && week && department && inspectionType && legacyClassAvailable && !targetOptionsFailed && !targetOptionsLoading)
   const scopeLabels = { inspectionType: inspectionType?.name ?? '检查类型信息不可用', semester: semester?.name ?? '未找到对应学期', week: week ? week.name ?? `第 ${week.weekNo} 周` : '未找到对应周次' }
   const completedRows = activeBatch?.status === 'ROLLED_BACK' ? undefined : importedRows ?? (activeBatch?.status === 'CONFIRMED' ? activeBatch.importedRows : undefined)
 
@@ -151,8 +154,6 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
       onOk: () => {
         setTargetDepartmentId(memberDepartmentId ?? (activeBatch ? departmentOptionId(activeBatch.departmentId) : context.departmentId || (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : '')))
         if (activeBatch) setTargetCalendar({ semesterId: activeBatch.semesterId, weekId: activeBatch.weekId })
-        setTargetClassId(activeBatch?.classId)
-        setTargetGrade(activeBatch?.grade)
         setSelectedFile(undefined)
         setFileError('')
         setConfirmError('')
@@ -206,7 +207,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
         <section className="import-scope-summary" aria-labelledby="import-scope-title">
           <div className="import-scope-heading">
             <Typography.Title id="import-scope-title" level={5}>本次导入范围</Typography.Title>
-            <Typography.Text type="secondary">选择目标部门及授权班级或年级，系统将按该范围校验并写入草稿。</Typography.Text>
+            <Typography.Text type="secondary">选择记录归属部门；班级和年级由 Excel 内容解析并校验。</Typography.Text>
           </div>
           <div className="import-scope-grid">
             <div className="import-scope-item"><span>检查类型</span><strong>{scopeLabels.inspectionType}</strong></div>
@@ -224,22 +225,21 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
                     placeholder="请选择本次导入归属部门"
                     showSearch
                     optionFilterProp="label"
-                    onChange={value => { setTargetDepartmentId(value); setTargetClassId(undefined); setTargetGrade(undefined); clearTargetFile() }}
+                    onChange={value => { setTargetDepartmentId(value); clearTargetFile() }}
                   />}
             </div>
-            <div className="import-scope-item"><span>目标年级</span>{batchId ? <strong>{gradeLabel}</strong> : <Select aria-label="导入目标年级" allowClear showSearch optionFilterProp="label" placeholder={targetGrade ? '原目标年级不可用，请重新选择' : '不限年级（按有效授权范围）'} value={grades.data?.items.some(item => item.id === targetGrade) ? targetGrade : undefined} disabled={!optionsEnabled} loading={grades.isLoading} options={grades.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => { setTargetGrade(value); setTargetClassId(undefined); clearTargetFile() }} />}</div>
-            <div className="import-scope-item"><span>目标班级</span>{batchId ? <strong>{classLabel ?? '班级信息不可用'}</strong> : <Select aria-label="导入目标班级" allowClear showSearch optionFilterProp="label" placeholder={targetClassId ? '原目标班级不可用，请重新选择' : '不限班级（按有效授权范围）'} value={classes.data?.items.some(item => item.id === targetClassId) ? targetClassId : undefined} disabled={!optionsEnabled} loading={classes.isLoading} options={classes.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => { setTargetClassId(value); clearTargetFile() }} />}</div>
           </div>
-          {targetSelectionInvalid && <Alert type="warning" title={memberDepartmentId !== undefined && !availableDepartments.some(item => item.id === memberDepartmentId) ? '当前账号所属部门无此范围的导入权限，请联系管理员。' : '原导入目标已不可用，请重新选择班级或年级后上传'} />}
-          {targetOptionsFailed && <Alert type="error" title="导入目标选项加载失败，请重试" action={<Button onClick={() => { void grades.refetch(); void classes.refetch() }}>重试目标选项</Button>} />}
+          {memberDepartmentUnavailable && !batchId && <Alert type="warning" title="当前账号所属部门不在可选导入归属范围，请联系管理员。" />}
+          {batchId && (displayScope.classId || displayScope.grade) && <Typography.Paragraph type="secondary">历史批次保留的导入范围：{gradeLabel || '不限年级'}{displayScope.classId ? `；${classLabel}` : '；不限班级'}</Typography.Paragraph>}
+          {targetOptionsFailed && <Alert type="error" title="历史批次班级信息加载失败，请重试" action={<Button onClick={() => { void classes.refetch() }}>重试班级信息</Button>} />}
         </section>
 
         {!batchId && <>
           <div className="import-template-action">
             <div><Typography.Title level={5}>1. 使用当前标准模板</Typography.Title><Typography.Text type="secondary">第 4 行为填写示例，不参与导入；从第 5 行填写真实数据。模板版本由服务端校验。</Typography.Text></div>
-            <Button icon={<DownloadOutlined />} loading={template.isLoading} disabled={!template.data || targetSelectionInvalid || targetOptionsFailed} onClick={() => template.data && saveTemplate(template.data.file, label)}>下载标准模板</Button>
+            <Button icon={<DownloadOutlined />} loading={template.isLoading} disabled={!template.data || memberDepartmentUnavailable} onClick={() => template.data && saveTemplate(template.data.file, label)}>下载标准模板</Button>
           </div>
-          {template.isError && <Alert type="error" showIcon title={template.error instanceof ApiError && template.error.status === 403 ? '当前范围无导入权限，请选择已授权的目标班级或年级' : '无法获取当前导入模板，请稍后重试'} />}
+          {template.isError && <Alert type="error" showIcon title={template.error instanceof ApiError && template.error.status === 403 ? '当前类型或导入归属部门无权限，请联系管理员' : '无法获取当前导入模板，请稍后重试'} />}
           <Upload.Dragger
             aria-label={`选择${label} XLSX 文件`}
             accept=".xlsx"
@@ -254,7 +254,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
           </Upload.Dragger>
           {fileError && <Alert type="warning" showIcon title={fileError} />}
           {selectedFile && <Alert type="success" showIcon title={selectedFile.name} description={`${Math.max(1, Math.ceil(selectedFile.size / 1024))} KB，等待上传解析`} />}
-          <Button aria-label={upload.isPending ? '正在上传并解析' : '上传并生成预览'} type="primary" icon={<CloudUploadOutlined />} block loading={upload.isPending} disabled={targetSelectionInvalid || targetOptionsFailed || targetOptionsLoading || !targetReady || !selectedFile || !template.data || upload.isPending} onClick={startUpload}>
+          <Button aria-label={upload.isPending ? '正在上传并解析' : '上传并生成预览'} type="primary" icon={<CloudUploadOutlined />} block loading={upload.isPending} disabled={memberDepartmentUnavailable || !targetReady || !selectedFile || !template.data || upload.isPending} onClick={startUpload}>
             {upload.isPending ? '正在上传并解析' : '上传并生成预览'}
           </Button>
         </>}
@@ -310,8 +310,10 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
         { key: 'type', label: '检查类型', children: scopeLabels.inspectionType },
         { key: 'term', label: '学期 / 周次', children: `${scopeLabels.semester} / ${scopeLabels.week}` },
         { key: 'department', label: '部门', children: department?.name ?? '部门信息不可用' },
-        { key: 'grade', label: '目标年级', children: gradeLabel },
-        { key: 'class', label: '目标班级', children: classLabel },
+        ...(activeBatch.grade || activeBatch.classId ? [
+          { key: 'legacyGrade', label: '历史目标年级', children: activeBatch.grade || '不限年级' },
+          { key: 'legacyClass', label: '历史目标班级', children: activeBatch.classId ? classLabel : '不限班级' },
+        ] : []),
         { key: 'template', label: '模板版本', children: `v${activeBatch.templateVersion}` },
         { key: 'count', label: '将写入', children: `${activeBatch.validRows} 条草稿记录` },
       ]} />}

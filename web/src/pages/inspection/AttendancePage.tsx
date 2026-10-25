@@ -99,7 +99,7 @@ export function AttendancePage() {
   const selectedDrafts = selected.flatMap(item => item.status === 'DRAFT' && item.semesterId && item.weekId && item.inspectionTypeId
     ? [{ id: item.id, rowVersion: item.rowVersion, status: item.status, semesterId: item.semesterId, weekId: item.weekId, departmentId: item.departmentId ?? '', inspectionTypeId: item.inspectionTypeId }] : [])
   const canReview = Boolean(user?.isSuperAdmin || (attendanceTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', attendanceTypeId)))
-  const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId, user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined)))
+  const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId)))
 	const error = records.error instanceof ApiError ? records.error : undefined
 	const responsibleDepartmentNames = (options?.responsibleDepartments ?? []).map(item => item.name).join('、')
 	const departmentCount = options?.departments.length ?? 0

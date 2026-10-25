@@ -24,7 +24,10 @@ it('requires template identity and version from the generic download',async()=>{
  expect(apiDownload).toHaveBeenLastCalledWith(expect.stringContaining('/imports/inspections/template?'))
 })
 
-it.each([{ classId: 4 }, { grade: [] }, { classId: 'other' }, {}])('rejects lost or invalid selected scope %#', async destination => {
- vi.mocked(apiRequest).mockResolvedValueOnce({ ...batch, ...destination })
- await expect(inspectionImportApi.upload({ ...scope, classId: 'selected' }, new File(['fixture'], 'scope.xlsx'), { id: 'template', version: 1 })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+it('does not submit legacy class or grade targets for new import batches', async () => {
+ vi.mocked(apiRequest).mockResolvedValueOnce(batch)
+ await inspectionImportApi.upload(scope, new File(['fixture'], 'scope.xlsx'), { id: 'template', version: 1 })
+ const form = vi.mocked(apiRequest).mock.calls[0][1]?.body as FormData
+ expect(form.has('classId')).toBe(false)
+ expect(form.has('grade')).toBe(false)
 })

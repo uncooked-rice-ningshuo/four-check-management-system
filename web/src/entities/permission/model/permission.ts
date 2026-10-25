@@ -3,9 +3,6 @@ export type PermissionScope = {
   semesterId?: string
   weekId?: string
   inspectionTypeId?: string
-  departmentId?: string
-  classId?: string
-  grade?: string
 }
 
 export type PermissionRule = {

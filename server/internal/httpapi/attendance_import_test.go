@@ -135,6 +135,9 @@ func (s *importHTTPStub) ListRows(_ context.Context, _ string, page, pageSize in
 	s.rowStatus = validationStatus
 	return s.rows, nil
 }
+func (s *importHTTPStub) ListSubmissionBatches(_ context.Context, _ string, query importjob.SubmissionBatchQuery) (importjob.SubmissionBatchPage, error) {
+	return importjob.SubmissionBatchPage{Items: []importjob.SubmissionBatchSummary{}, Page: query.Page, PageSize: query.PageSize}, nil
+}
 func (s *importHTTPStub) PublishedTemplate(context.Context, string) (importjob.Template, error) {
 	return s.template, nil
 }
@@ -288,31 +291,35 @@ func TestSuperAdminAttendanceListAllowsEmptyDepartmentFilter(t *testing.T) {
 	}
 }
 
-func TestAttendanceListCompilesAuthorizedDepartmentsWhenFilterIsEmpty(t *testing.T) {
+func TestAttendanceListUsesTypeWideDepartmentOptionsWhenFilterIsEmpty(t *testing.T) {
 	router, token, _, attendance := attendanceRouter(t, true)
 	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&classId=allowed-class&page=1&pageSize=20"
 
 	response := performJSON(router, http.MethodGet, path, nil, token)
 
-	if response.Code != http.StatusOK || len(attendance.scope.DepartmentIDs) != 1 || attendance.scope.DepartmentIDs[0] != "10000000-0000-0000-0000-000000000002" {
+	departments := map[string]bool{}
+	for _, id := range attendance.scope.DepartmentIDs {
+		departments[id] = true
+	}
+	if response.Code != http.StatusOK || attendance.scope.DepartmentID != "" || !departments["10000000-0000-0000-0000-000000000002"] || !departments["department-office"] || !departments["other-department"] || !departments["00000000-0000-0000-0000-000000000000"] {
 		t.Fatalf("response=%d %s scope=%#v", response.Code, response.Body.String(), attendance.scope)
 	}
 }
 
-func TestAttendanceImportRoutesRequireAuthenticationAndEffectiveScope(t *testing.T) {
-	router, token, _, _ := attendanceRouter(t, true)
+func TestAttendanceImportRoutesRequireAuthenticationAndUseTypeWideScope(t *testing.T) {
+	router, token, _, attendance := attendanceRouter(t, true)
 	path := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class&page=1&pageSize=20"
 	if response := performJSON(router, http.MethodGet, path, nil, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated = %d %s", response.Code, response.Body.String())
 	}
-	if response := performJSON(router, http.MethodGet, strings.Replace(path, "10000000-0000-0000-0000-000000000002", "other-department", 1), nil, token); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "FORBIDDEN_SCOPE") {
+	if response := performJSON(router, http.MethodGet, strings.Replace(path, "10000000-0000-0000-0000-000000000002", "other-department", 1), nil, token); response.Code != http.StatusOK || attendance.scope.DepartmentID != "other-department" {
 		t.Fatalf("cross scope = %d %s", response.Code, response.Body.String())
 	}
-	if response := performJSON(router, http.MethodGet, strings.Replace(path, "classId=allowed-class", "classId=blocked-class", 1), nil, token); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "FORBIDDEN_SCOPE") {
+	if response := performJSON(router, http.MethodGet, strings.Replace(path, "classId=allowed-class", "classId=blocked-class", 1), nil, token); response.Code != http.StatusOK || attendance.filter.ClassID != "blocked-class" {
 		t.Fatalf("cross class scope = %d %s", response.Code, response.Body.String())
 	}
 	unbounded := strings.Replace(path, "&classId=allowed-class", "", 1)
-	if response := performJSON(router, http.MethodGet, unbounded, nil, token); response.Code != http.StatusForbidden {
+	if response := performJSON(router, http.MethodGet, unbounded, nil, token); response.Code != http.StatusOK {
 		t.Fatalf("unbounded deny overlap = %d %s", response.Code, response.Body.String())
 	}
 	denied, deniedToken, _, _ := attendanceRouter(t, false)
@@ -356,7 +363,7 @@ func TestAttendanceFilterOptionsAreAuthenticatedAndBusinessScoped(t *testing.T) 
 
 func TestAttendanceTemplateDownloadAndUploadAreProtectedAndSafe(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
-	contextQuery := "semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	contextQuery := "semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	download := performJSON(router, http.MethodGet, "/api/v1/imports/attendance/template?"+contextQuery, nil, token)
 	if download.Code != http.StatusOK || download.Header().Get("Content-Disposition") == "" || download.Header().Get("X-Import-Template-ID") != "template-1" || download.Header().Get("X-Import-Template-Version") != "1" || !bytes.Equal(download.Body.Bytes(), []byte("xlsx-template")) {
 		t.Fatalf("download=%d headers=%v body=%q", download.Code, download.Header(), download.Body.Bytes())
@@ -364,7 +371,7 @@ func TestAttendanceTemplateDownloadAndUploadAreProtectedAndSafe(t *testing.T) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "classId": "allowed-class", "templateId": "template-1", "templateVersion": "1"} {
+	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "templateId": "template-1", "templateVersion": "1"} {
 		_ = writer.WriteField(key, value)
 	}
 	part, _ := writer.CreateFormFile("file", "attendance.xlsx")
@@ -385,7 +392,7 @@ func TestMemberUploadUsesTrustedDepartment(t *testing.T) {
 	upload := func(departmentID string) *httptest.ResponseRecorder {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
-		for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": departmentID, "classId": "allowed-class", "templateId": "template-1", "templateVersion": "1"} {
+		for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": departmentID, "templateId": "template-1", "templateVersion": "1"} {
 			if err := writer.WriteField(key, value); err != nil {
 				t.Fatal(err)
 			}
@@ -419,7 +426,7 @@ func TestAttendanceUploadRejectsStaleTemplateBeforePersistingSourceFile(t *testi
 	router, token, imports, _ := attendanceRouter(t, true)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "classId": "allowed-class", "templateId": "template-1", "templateVersion": "2"} {
+	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "templateId": "template-1", "templateVersion": "2"} {
 		_ = writer.WriteField(key, value)
 	}
 	part, _ := writer.CreateFormFile("file", "attendance.xlsx")
@@ -440,7 +447,7 @@ func TestAttendanceUploadDiscardsSourceWhenBatchCreationFails(t *testing.T) {
 	imports.createErr = importjob.ErrInvalidBatch
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "classId": "allowed-class", "templateId": "template-1", "templateVersion": "1"} {
+	for key, value := range map[string]string{"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance", "departmentId": "10000000-0000-0000-0000-000000000002", "templateId": "template-1", "templateVersion": "1"} {
 		_ = writer.WriteField(key, value)
 	}
 	part, _ := writer.CreateFormFile("file", "attendance.xlsx")
@@ -459,12 +466,12 @@ func TestAttendanceUploadDiscardsSourceWhenBatchCreationFails(t *testing.T) {
 func TestImportBatchByIDReauthorizesAndMapsVersionIdempotencyErrors(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
 	imports.batch.DepartmentID = "other-department"
-	if response := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1", nil, token); response.Code != http.StatusNotFound {
+	if response := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1", nil, token); response.Code != http.StatusOK {
 		t.Fatalf("idor=%d %s", response.Code, response.Body.String())
 	}
 	imports.batch.DepartmentID = "10000000-0000-0000-0000-000000000002"
 	imports.batch.ClassID = "blocked-class"
-	if response := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1", nil, token); response.Code != http.StatusNotFound {
+	if response := performJSON(router, http.MethodGet, "/api/v1/imports/batch-1", nil, token); response.Code != http.StatusOK {
 		t.Fatalf("class idor=%d %s", response.Code, response.Body.String())
 	}
 	imports.batch.ClassID = "allowed-class"
@@ -520,7 +527,7 @@ func TestAttendanceImportRejectsOversizedMultipartBody(t *testing.T) {
 }
 
 func TestCourseImportTemplateRoutesKeepTypeAndScopeBoundaries(t *testing.T) {
-	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	for _, code := range []string{"ATTENDANCE_IMPORT", "UNATTENDED_CLASSROOM_IMPORT", "UNKNOWN"} {
 		router, token, imports, _ := attendanceRouter(t, true)
 		imports.template.Code = code
@@ -541,8 +548,8 @@ func TestCourseImportTemplateRoutesKeepTypeAndScopeBoundaries(t *testing.T) {
 	if r := performJSON(router, http.MethodGet, endpoint+query, nil, ""); r.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated: %d", r.Code)
 	}
-	if r := performJSON(router, http.MethodGet, endpoint+strings.Replace(query, "classId=allowed-class", "classId=blocked-class", 1), nil, token); r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "FORBIDDEN_SCOPE") {
-		t.Fatalf("scope: %d %s", r.Code, r.Body.String())
+	if r := performJSON(router, http.MethodGet, endpoint+query+"&classId=blocked-class", nil, token); r.Code != http.StatusBadRequest || !strings.Contains(r.Body.String(), "INVALID_REQUEST") {
+		t.Fatalf("legacy class target: %d %s", r.Code, r.Body.String())
 	}
 }
 
@@ -577,7 +584,7 @@ func TestImportConfirmationDuplicateReturnsConflict(t *testing.T) {
 func TestMorningTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
 	imports.template.Code = "MORNING_ATTENDANCE_IMPORT"
-	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	for _, entry := range []string{"attendance", "course-records", "inspections"} {
 		response := performJSON(router, http.MethodGet, "/api/v1/imports/"+entry+"/template"+query, nil, token)
 		if entry == "inspections" {
@@ -596,7 +603,7 @@ func TestMorningTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 func TestLateReturnTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
 	imports.template.Code = "LATE_RETURN_IMPORT"
-	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	for _, entry := range []string{"attendance", "course-records", "inspections"} {
 		response := performJSON(router, http.MethodGet, "/api/v1/imports/"+entry+"/template"+query, nil, token)
 		if entry == "inspections" {
@@ -750,7 +757,7 @@ func TestInspectionAcademicYearLookupFailsClosed(t *testing.T) {
 func TestDormitoryHygieneTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
 	imports.template.Code = "DORMITORY_HYGIENE_IMPORT"
-	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	for _, entry := range []string{"attendance", "course-records", "inspections"} {
 		response := performJSON(router, http.MethodGet, "/api/v1/imports/"+entry+"/template"+query, nil, token)
 		if entry == "inspections" {
@@ -769,7 +776,7 @@ func TestDormitoryHygieneTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 func TestClassroomHygieneTemplateOnlyUsesGenericInspectionEntry(t *testing.T) {
 	router, token, imports, _ := attendanceRouter(t, true)
 	imports.template.Code = "CLASSROOM_HYGIENE_IMPORT"
-	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002&classId=allowed-class"
+	query := "?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&departmentId=10000000-0000-0000-0000-000000000002"
 	for _, entry := range []string{"attendance", "course-records", "inspections"} {
 		response := performJSON(router, http.MethodGet, "/api/v1/imports/"+entry+"/template"+query, nil, token)
 		if entry == "inspections" {

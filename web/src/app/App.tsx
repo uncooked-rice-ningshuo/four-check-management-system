@@ -15,6 +15,7 @@ import { RegisterPage } from '../pages/auth/RegisterPage'
 import { RegisterResultPage } from '../pages/auth/RegisterResultPage'
 import { HomePage } from '../pages/home/HomePage'
 import { LateReturnPage } from '../pages/inspection/LateReturnPage'
+import { EveningSelfStudyPage } from '../pages/inspection/EveningSelfStudyPage'
 import { MorningAttendancePage } from '../pages/inspection/MorningAttendancePage'
 import { ClassroomHygienePage } from '../pages/inspection/ClassroomHygienePage'
 import { PublicDormitoryHygienePage } from '../pages/inspection/PublicDormitoryHygienePage'
@@ -54,6 +55,7 @@ export default function App() {
 			<Route path="reports/weekly-summary" element={<EffectivePermissionRoute action="REPORT_VIEW"><WeeklyReportSummaryPage /></EffectivePermissionRoute>} />
 			<Route path="admin/hygiene-areas" element={<HygieneAreaPage />} />
 			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
+			<Route path="inspections/evening-self-study" element={<InspectionTypeRoute typeCode="EVENING_SELF_STUDY"><EveningSelfStudyPage /></InspectionTypeRoute>} />
 			<Route path="inspections/morning-attendance" element={<InspectionTypeRoute typeCode="MORNING_ATTENDANCE"><MorningAttendancePage /></InspectionTypeRoute>} />
 			<Route path="inspections/public-dormitory-hygiene" element={<InspectionTypeRoute typeCode="PUBLIC_DORMITORY_HYGIENE"><PublicDormitoryHygienePage /></InspectionTypeRoute>} />
 			<Route path="inspections/classroom-hygiene" element={<InspectionTypeRoute typeCode="CLASSROOM_HYGIENE"><ClassroomHygienePage /></InspectionTypeRoute>} />

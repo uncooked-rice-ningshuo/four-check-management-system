@@ -30,7 +30,8 @@ func TestHygieneAreaOptionsAndReferencesRespectLiveGrants(t *testing.T) {
 	const departmentID = "10000000-0000-0000-0000-000000000002"
 	const typeID = "30000000-0000-0000-0000-000000000003"
 	permissions := &permissionRepository{profile: permission.AccessProfile{SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{{Action: permission.ActionMasterDataManage, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentID, InspectionTypeID: typeID}, Enabled: true}}}}
-	organizationRepo := &attendanceOrganizationRepository{catalogs: organization.Catalogs{Departments: []organization.Department{{ID: departmentID, Name: "区域部门", Enabled: true}}, InspectionTypes: []organization.InspectionType{{ID: typeID, Code: "CLASSROOM_HYGIENE", Name: "教室卫生", Enabled: true}}}, scopes: []organization.DepartmentInspectionScope{{DepartmentID: departmentID, InspectionTypeID: typeID, Enabled: true}}}
+	otherDepartmentID := "10000000-0000-0000-0000-000000000004"
+	organizationRepo := &attendanceOrganizationRepository{catalogs: organization.Catalogs{Departments: []organization.Department{{ID: departmentID, Name: "区域部门", Enabled: true}, {ID: otherDepartmentID, Name: "其他区域部门", Enabled: true}}, InspectionTypes: []organization.InspectionType{{ID: typeID, Code: "CLASSROOM_HYGIENE", Name: "教室卫生", Enabled: true}}}, scopes: []organization.DepartmentInspectionScope{{DepartmentID: departmentID, InspectionTypeID: typeID, Enabled: true}, {DepartmentID: otherDepartmentID, InspectionTypeID: typeID, Enabled: true}}}
 	masterRepo := &masterRepository{records: map[string]masterdata.Record{"classrooms:room": {ID: "room", Kind: masterdata.KindClassroom, Name: "教学楼 101", Enabled: true}}}
 	router := NewRouter(svc, false, AdminServices{Permission: permission.NewService(permissions), Organization: organization.NewService(organizationRepo), MasterData: masterdata.NewService(masterRepo)})
 	const optionsPath = "/api/v1/admin/hygiene-areas/options"
@@ -43,7 +44,7 @@ func TestHygieneAreaOptionsAndReferencesRespectLiveGrants(t *testing.T) {
 	}
 	response := performJSON(router, http.MethodGet, optionsPath, nil, tokens.AccessToken)
 	var targets []hygieneAreaTarget
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &targets) != nil || len(targets) != 1 || targets[0].DepartmentName != "区域部门" || targets[0].Kind != masterdata.KindClassroomHygieneArea {
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &targets) != nil || len(targets) != 2 || targets[0].Kind != masterdata.KindClassroomHygieneArea || targets[1].Kind != masterdata.KindClassroomHygieneArea {
 		t.Fatalf("targets: %d %s", response.Code, response.Body.String())
 	}
 	response = performJSON(router, http.MethodGet, referencePath+"&page=2", nil, tokens.AccessToken)
@@ -55,7 +56,7 @@ func TestHygieneAreaOptionsAndReferencesRespectLiveGrants(t *testing.T) {
 	if response.Code != http.StatusBadRequest || json.Unmarshal(response.Body.Bytes(), &apiError) != nil || apiError["code"] != "INVALID_REQUEST" {
 		t.Fatalf("invalid pagination: %d %s", response.Code, response.Body.String())
 	}
-	permissions.profile.Rules = append(permissions.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{DepartmentID: departmentID}, Enabled: true})
+	permissions.profile.Rules = append(permissions.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{InspectionTypeID: typeID}, Enabled: true})
 	response = performJSON(router, http.MethodGet, optionsPath, nil, tokens.AccessToken)
 	if response.Code != http.StatusOK || response.Body.String() != "[]" {
 		t.Fatalf("DENY targets: %d %s", response.Code, response.Body.String())

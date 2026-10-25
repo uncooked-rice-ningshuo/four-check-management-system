@@ -6,13 +6,14 @@ import { useCurrentAcademicWeek } from '../../attendance/hooks/useAttendancePerm
 import { useImportContext } from '../hooks/useImportContext'
 import { useImportBatch } from '../hooks/useImportBatch'
 import { AttendanceImportDrawer } from './AttendanceImportDrawer'
+import type { SupportedImportType } from '../../../shared/api/inspectionImportApi'
 
 /** Import destination is selected independently of the surrounding list filters. */
 export function InspectionImportScopePanel({ typeCode, inspectionTypeId, memberDepartmentId, batchId, onBatchIdChange, onClose }: {
-  typeCode: 'UNATTENDED_CLASSROOM' | 'MORNING_ATTENDANCE' | 'LATE_RETURN' | 'DORMITORY_HYGIENE' | 'CLASSROOM_HYGIENE';
+  typeCode: Exclude<SupportedImportType, 'ATTENDANCE_RATE'>;
   inspectionTypeId: string; memberDepartmentId?: string; batchId?: string; onBatchIdChange: (id?: string) => void; onClose: () => void
 }) {
-  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : '无机课堂'
+  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : '无机课堂'
   const [selectedSemester, setSelectedSemester] = useState<string>()
   const [selectedWeek, setSelectedWeek] = useState<string>()
   const [chosen, setChosen] = useState<InspectionContext>()

@@ -9,6 +9,7 @@ const (
 	InspectionTypeDormitoryHygiene       = "DORMITORY_HYGIENE"
 	InspectionTypeClassroomHygiene       = "CLASSROOM_HYGIENE"
 	InspectionTypePublicDormitoryHygiene = "PUBLIC_DORMITORY_HYGIENE"
+	InspectionTypeEveningSelfStudy        = "EVENING_SELF_STUDY"
 	OccurrenceTime                       = "TIME"
 	OccurrenceDate                       = "DATE"
 	OccurrenceRound                      = "ROUND"
@@ -43,6 +44,23 @@ func (*AttendanceDetails) inspectionDetails() {}
 type UnattendedClassroomDetails struct{ CourseAbsenceDetails }
 
 func (*UnattendedClassroomDetails) inspectionDetails() {}
+
+// EveningSelfStudyDetails records only students absent during the fixed ninth and tenth periods.
+// Penalty fields are server-derived and never accepted from client payloads.
+type EveningSelfStudyDetails struct {
+	StudentID         string   `json:"studentId"`
+	ClassID           string   `json:"classId"`
+	ClassroomID       string   `json:"classroomId"`
+	Date              string   `json:"date"`
+	Time              string   `json:"time"`
+	Period            string   `json:"period"`
+	AbsenceHours      float64  `json:"absenceHours"`
+	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
+	PenaltyHours      *float64 `json:"penaltyHours,omitempty"`
+	Remark            string   `json:"remark,omitempty"`
+}
+
+func (*EveningSelfStudyDetails) inspectionDetails() {}
 
 // MorningAttendanceDetails represents one student/day without an exercise/sign-in subtype.
 type MorningAttendanceDetails struct {
@@ -146,4 +164,5 @@ var detailAdapters = map[string]DetailAdapter{
 	InspectionTypeDormitoryHygiene:       {func() InspectionDetails { return &DormitoryHygieneDetails{} }},
 	InspectionTypeClassroomHygiene:       {func() InspectionDetails { return &ClassroomHygieneDetails{} }},
 	InspectionTypePublicDormitoryHygiene: {func() InspectionDetails { return &PublicDormitoryHygieneDetails{} }},
+	InspectionTypeEveningSelfStudy:        {func() InspectionDetails { return &EveningSelfStudyDetails{} }},
 }

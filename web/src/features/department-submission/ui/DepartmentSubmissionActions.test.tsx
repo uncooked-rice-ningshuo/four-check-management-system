@@ -3,13 +3,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { DepartmentSubmissionActions } from './DepartmentSubmissionActions'
 import { departmentSubmissionApi } from '../../../shared/api/departmentSubmissionApi'
+import { submissionCartApi } from '../../../shared/api/submissionCartApi'
 
 vi.mock('../../../shared/api/departmentSubmissionApi', () => ({ departmentSubmissionApi: {
   list: vi.fn(), submit: vi.fn(), decide: vi.fn(), resubmit: vi.fn(),
 } }))
+vi.mock('../../../shared/api/submissionCartApi', () => ({ submissionCartApi: {
+  candidates: vi.fn(), batches: vi.fn(), batchRecords: vi.fn(), detail: vi.fn(),
+} }))
 const api = vi.mocked(departmentSubmissionApi)
+const cartApi = vi.mocked(submissionCartApi)
 const scope = { semesterId: 'semester', weekId: 'week', departmentId: 'department', inspectionTypeId: 'type' }
 const record = { ...scope, id: 'record', rowVersion: 1, status: 'DRAFT' }
+const cartRecord = { ...record, typeCode: 'ATTENDANCE_RATE', studentNumber: 'S001', studentName: '测试同学', className: '计科 2401', grade: '2024', source: 'MANUAL', canEdit: true, details: {} }
 const batch = { id: 'batch', scope, semesterName: '秋季学期', weekNo: 3, departmentName: '学习部', status: 'PENDING_REVIEW' as const,
   revisionNo: 1, rowVersion: 1, createdBy: 'actor', submittedBy: 'actor', createdAt: '2026-09-01T00:00:00Z',
   submittedAt: '2026-09-01T00:00:00Z', recordIds: ['record'], records: [{ id: 'record', rowVersion: 2, status: 'PENDING_REVIEW', createdBy: 'actor' }] }
@@ -19,6 +25,10 @@ beforeEach(() => {
   api.submit.mockReset()
   api.decide.mockReset()
   api.resubmit.mockReset()
+  cartApi.candidates.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 })
+  cartApi.batches.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 })
+  cartApi.batchRecords.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 })
+  cartApi.detail.mockResolvedValue(cartRecord)
   api.list.mockResolvedValue({ items: [batch], total: 1, page: 1, pageSize: 10 })
   api.submit.mockResolvedValue(batch)
 })
@@ -32,28 +42,31 @@ function show(selected = [record], canReview = true) {
 
 it('submits only a same-scope draft selection after confirmation', async () => {
   const onChanged = show()
-  fireEvent.click(screen.getByRole('button', { name: '提交所选草稿（1）' }))
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
+  fireEvent.click(screen.getByRole('button', { name: '核对并提交' }))
+  const confirmButton = await screen.findByRole('button', { name: '确认提交' })
   expect(api.submit).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: '确认提交' }))
+  fireEvent.click(confirmButton)
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(scope, [{ id: 'record', version: 1 }], expect.any(String)))
   await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
 })
 
 it('does not submit mixed scopes or returned records', async () => {
   show([record, { ...record, id: 'another', weekId: 'other' }])
-  fireEvent.click(screen.getByRole('button', { name: '提交所选草稿（2）' }))
+  expect(screen.getByRole('button', { name: '准备提交（已选 2）' })).toBeDisabled()
   expect(api.submit).not.toHaveBeenCalled()
 })
 
 it('keeps the selected record versions when the list refreshes before confirmation', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = (selected: typeof record[]) => <QueryClientProvider client={client}>
-    <DepartmentSubmissionActions inspectionTypeId="type" selected={selected} canReview onChanged={() => {}} />
+    <DepartmentSubmissionActions inspectionTypeId="type" listScope={scope} selected={selected} canReview onChanged={() => {}} />
   </QueryClientProvider>
   const { rerender } = render(view([record]))
-  fireEvent.click(screen.getByRole('button', { name: '提交所选草稿（1）' }))
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
   rerender(view([]))
-  fireEvent.click(screen.getByRole('button', { name: '确认提交' }))
+  fireEvent.click(screen.getByRole('button', { name: '核对并提交' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认提交' }))
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(scope, [{ id: 'record', version: 1 }], expect.any(String)))
 })
 

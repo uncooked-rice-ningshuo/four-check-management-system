@@ -21,7 +21,7 @@ func lockInspectionImportContext(ctx context.Context, tx pgx.Tx, scope importjob
 	if err != nil {
 		return result, err
 	}
-	if result.TypeCode != inspection.InspectionTypeAttendance && result.TypeCode != inspection.InspectionTypeUnattended && result.TypeCode != inspection.InspectionTypeMorning && result.TypeCode != inspection.InspectionTypeLateReturn && result.TypeCode != inspection.InspectionTypeDormitoryHygiene && result.TypeCode != inspection.InspectionTypeClassroomHygiene {
+	if result.TypeCode != inspection.InspectionTypeAttendance && result.TypeCode != inspection.InspectionTypeUnattended && result.TypeCode != inspection.InspectionTypeEveningSelfStudy && result.TypeCode != inspection.InspectionTypeMorning && result.TypeCode != inspection.InspectionTypeLateReturn && result.TypeCode != inspection.InspectionTypeDormitoryHygiene && result.TypeCode != inspection.InspectionTypeClassroomHygiene {
 		return result, importjob.ErrPreviewStale
 	}
 	return result, nil

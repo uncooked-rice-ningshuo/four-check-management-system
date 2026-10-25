@@ -14,10 +14,11 @@ type InspectionRowValidator interface {
 
 // NewInspectionImportService adds typed student and object adapters while keeping
 // existing course imports and their persisted preview format compatible.
-func NewInspectionImportService(repository Repository, files VerifiedFileReader, course AttendanceRowValidator, morning, lateReturn, dormitoryHygiene, classroomHygiene InspectionRowValidator, maxBytes int64) *Service {
+func NewInspectionImportService(repository Repository, files VerifiedFileReader, course AttendanceRowValidator, morning, lateReturn, dormitoryHygiene, classroomHygiene InspectionRowValidator, maxBytes int64, evening ...InspectionRowValidator) *Service {
 	service := NewCourseImportService(repository, files, course, maxBytes)
 	service.parsers[inspection.InspectionTypeMorning] = NewMorningXLSXParser(maxBytes)
 	service.parsers[inspection.InspectionTypeLateReturn] = NewLateReturnXLSXParser(maxBytes)
+	service.parsers[inspection.InspectionTypeEveningSelfStudy], _ = NewInspectionXLSXParser(inspection.InspectionTypeEveningSelfStudy, maxBytes)
 	hygieneConfig := NewAttendanceXLSXParser(maxBytes).config
 	hygieneConfig.ExpectedTemplateCode = "DORMITORY_HYGIENE_IMPORT"
 	hygieneConfig.ExpectedSheetName = "宿舍卫生导入"
@@ -29,6 +30,9 @@ func NewInspectionImportService(repository Repository, files VerifiedFileReader,
 	classroomConfig.Fields = append([]TemplateField(nil), classroomHygieneImportFields...)
 	service.parsers[inspection.InspectionTypeClassroomHygiene] = NewXLSXParser(classroomConfig)
 	service.inspectionValidators = map[string]InspectionRowValidator{inspection.InspectionTypeMorning: morning, inspection.InspectionTypeLateReturn: lateReturn, inspection.InspectionTypeDormitoryHygiene: dormitoryHygiene, inspection.InspectionTypeClassroomHygiene: classroomHygiene}
+	if len(evening) > 0 && evening[0] != nil {
+		service.inspectionValidators[inspection.InspectionTypeEveningSelfStudy] = evening[0]
+	}
 	return service
 }
 

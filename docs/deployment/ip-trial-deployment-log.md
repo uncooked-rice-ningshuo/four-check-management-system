@@ -2,19 +2,24 @@
 
 本文件记录腾讯云 IP 试运行的部署版本、迁移账本、操作结果和待解决问题。目标环境的输出由用户从服务器提供；没有服务器终端证据的状态明确标为未核验。不要在这里保存 .env、密码、Token 或个人数据。
 
+服务器部署通过技术核验后，固定执行[部署成功后的飞书同步流程](post-deployment-feishu-sync.md)：追加指定 Wiki 记录，向“日常管理系统 leader”群发送《功能更新说明》，并在本日志留下同步回执。尚未完成的业务/角色验收必须如实注明。
+
 ## 当前状态
 
-更新时间：2026-10-25。腾讯云事实仅依据用户粘贴的终端输出；本轮未连接服务器或发起生产变更。
+更新时间：2026-10-25。腾讯云事实仅依据用户粘贴的终端输出；本轮未连接服务器。下文“当前状态”覆盖相互冲突的早期结论；后面的按日操作记录保留为历史证据。
 
 已建立每周跟进，检查关联任务中的新迁移证据并同步本日志与项目状态；只做记录和状态跟进，不会自动连接或修改生产环境。状态无变化时不通知。
 
 - **服务入口**：公网 IP 的 TCP 8088，Compose 项目 `four-check-ip-trial`，目录 `/opt/four-check/ip-trial`。该更新只涉及此项目的 API/Web 与迁移；不操作 1Panel MySQL、独立 PostgreSQL、其他容器或卷。
-- **云端最近基线**：r3a 只读预检于 2026-10-25 通过，API/Web 均为 `20261025-r2`，四服务健康，迁移账本连续至 `025_academic_week_import_template_versions.sql`；历史 `OTHER` 空说明三类计数均为 0。脚本没有修改服务或数据库，`--apply` 尚未执行。
+- **云端当前状态**：用户 2026-10-25 最新回执确认 API/Web 已切至 `four-check-api/web:ip-trial-20261025-r4`；API、Web、Postgres、MinIO 均报告 `running/healthy`，`http://127.0.0.1:8088/health/ready` 返回 HTTP 200。迁移账本包含 `028_login_device_sessions.sql`、`029_simplify_permission_scope.sql`、`030_evening_self_study.sql`，末项为 030。
 - **模板问题**：到课率、无机课堂、早锻炼/早签、晚归、宿舍卫生 v1 已发布，文件元数据均为 `AVAILABLE/TEMPLATE`；用户确认页面使用已无问题。教室卫生和公共宿舍卫生模板本次暂不补。
-- **当前候选包**：[four-check-update-20261025-r3a.tar](../../output/releases/four-check-update-20261025-r3a.tar) 及 `.sha256` 已在本机生成。包基于提交 `b78a5df`，有 API/Web `linux/amd64` 镜像及迁移 022–028；应用镜像仍为 r3，并支持实际观测到的 r2/r2 起始基线。r3 首版包已经安全退出，不要复用它的解包目录；r3a 需上传到新的 `/opt/four-check/updates/20261025-r3a`。旧 r2 包只含 022–025，不能用于当前代码；`deploy/ip-trial/build-release.sh` 仍是更早的历史构建路径。
-- **迁移影响**：026 将教室卫生、公共宿舍卫生排除出通报范围；027 增加逐周应交与零记录回执；028 预置三类卫生原因，并要求新写入/修改的 `OTHER` 原因带说明。028 用 `NOT VALID` 保留旧记录，但未填写说明的旧 `OTHER` 行在编辑时需补充说明。脚本会在只读预检中报告数量；若非零，先评估接受方式，不要直接应用。
-- **资源观察**：r3a 只读预检时根分区可用 4.5 GiB、RAM 可用约 1.0 GiB、swap 已用约 725 MiB；脚本要求至少保留 3 GiB 加数据库与 MinIO 数据量的两倍空间，已报告预检通过。资源随时间变化，真正执行前仍须再次核对 `df -h /`、`free -h`，不能在云服务器构建镜像。
-- **当前部署状态**：r3 镜像已通过 `docker load` 导入；首版脚本在镜像基线校验处安全退出。r3a 外层/内层校验与镜像导入均成功，只读预检通过；`--apply` 尚未执行，生产服务和迁移账本没有因此改变。原 records 500 的用户登录态重放仍未完成，单独作为未解决问题跟进。
+- **已应用更新包**：[r4 离线更新包](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar)，校验文件为同目录 `.tar.sha256`。用户在服务器验证外层及包内 SHA256、导入 API/Web `ip-trial-20261025-r4` Linux amd64 镜像，并应用迁移 `028_login_device_sessions.sql`/029/030。该归档是已部署的历史构件；本地后续诊断修正不会改写该归档或其校验值。
+- **飞书同步回执（r4）**：2026-10-25 已在[发布更新记录 Wiki](https://acna9bso0eml.feishu.cn/docx/PlUAdsBiLobNpaxDyR8cDK1Wn0b)追加 r4 部署与功能说明，并由宁硕的飞书 CLI 应用机器人向“日常管理系统 leader”群发送《功能更新说明》（消息 ID `om_x100b62d5e0a544a0ceaca1822bcca28`）。内容明确记录服务/迁移核验结果，以及晚自习实际记录和角色权限仍待验收。
+- **当前源码迁移影响**：026 将教室卫生、公共宿舍卫生排除出通报范围；027 增加逐周应交与零记录回执；028 卫生原因迁移预置字典并要求新写入/修改的 `OTHER` 原因带说明；另一个同编号 028 建立登录设备会话；029 简化权限范围，可能转换已有 ALLOW、停用带范围 DENY，并撤销相关账号的刷新会话；030 增加并启用晚自习检查类型。云端只读统计显示：028 预计淘汰一个账号的 3 个超额有效会话；029 涉及 1 条启用的有范围 ALLOW、0 条 DENY、1 个账号和 2 个有效刷新会话。用户已确认目标为测试环境并接受必要时清理测试数据，因此这些影响作为测试部署预期行为记录，部署后验证即可。两个 `028_*.sql` 是不同文件，必须都纳入迁移账本核对。
+- **迁移器静态核对**：当前仓库的 `server/scripts/migrate.sh` 按 `migrations/*.sql` 文件名排序，且 `schema_migrations.version` 记录完整文件名；每个 SQL 文件单独包在事务中。因此 `028_hygiene_reason_dictionaries.sql` 与 `028_login_device_sessions.sql` 会分别执行和登记，不会因数字前缀相同而互相覆盖。后续更新包必须同时携带这两个文件，并按完整文件名核对账本。
+- **资源观察**：最新服务器回执根分区可用 4.4 GiB（91% 已用）、RAM 可用约 1.1 GiB、swap 已用约 707 MiB；这是当时观测值，执行升级前仍须重查。r3a 预检门槛曾通过，但不代表当前资源与新包的备份空间仍满足要求；不能在云服务器构建镜像。
+- **本地发布验证状态**：本轮工作区在 `feat-0.1-3`，以未提交工作区源码构建。`go test ./... -count=1`、`go vet ./...`、`go build ./...` 通过；API r4 镜像构建通过。Web lint、76 个 Vitest 文件/414 项及 Vite 生产构建通过；前端 Docker 构建的全量测试耗时约 447 秒。Docker Hub BuildKit 元数据请求超时，因此 Web dist 在固定 Node 24.12.0 容器中完成同样的 lint/test/build，再装入 Nginx 1.27 amd64 镜像；Nginx 配置检查与首页 HTTP 冒烟（200）通过。两个目标镜像架构均核对为 `linux/amd64`；外层包和包内 SHA256 均已复核。Vite 仍提示主 JS chunk 超 500 kB，测试输出含 CSS/Ant Design 既有警告。
+- **部署恢复记录**：升级后 Web 一度为 `Created`，`docker compose ps -q web` 因只查询运行容器返回空，旧脚本报出误导性的“web 服务不是唯一容器”。用户确认迁移账本已到 030、API 已是健康 r4，并在唯一 Web 容器上执行 `docker compose ... up -d --no-deps --pull never web`；Web 随后 `running/healthy`，ready 返回 200。r4 备份目录 `/opt/four-check/backups/before-ip-trial-20261025-r4-20261025-224857` 存在，已看到 `original-images.json` 与 `migration.log`；用户尚未提供 dump/MinIO 归档的文件清单及备份校验结果，因此备份完整性不记为已核验。晚自习真实页面/角色验收仍待完成；原 records 500 的用户登录态重放仍未完成。
 
 ## 操作记录
 
@@ -59,15 +64,103 @@
 - **包与镜像**：用户上传的 r3a 外层归档和包内文件校验均通过，API/Web r3 镜像成功导入。
 - **运行基线**：API/Web 当前为匹配的 `20261025-r2`；升级脚本检查的容器状态、健康和 Compose 项目身份均通过。迁移账本是 001–025 连续前缀，末项为 `025_academic_week_import_template_versions.sql`。
 - **数据与容量门槛**：宿舍、教室、公共宿舍三类 `OTHER` 空说明记录计数均为 0；脚本磁盘门槛通过。观测到根分区可用 4.5 GiB、RAM 可用约 1.0 GiB、swap 已用约 725 MiB，维护窗口开始前仍须复查资源。
-- **结论**：只读预检输出“只读预检通过”，没有停止容器、创建备份或写数据库。待用户确认维护窗口后才执行 `bash /opt/four-check/updates/20261025-r3a/release/upgrade.sh --apply`；执行完成后再检查迁移到 028、四服务健康、ready 200 与业务页面。
+- **当时结论**：只读预检输出“只读预检通过”，没有停止容器、创建备份或写数据库。该记录之后没有收到执行 `--apply` 的结果，因此不能据此判断当前状态。
+
+### 2026-10-25：r3 镜像与迁移账本复核
+
+- **用户提供的最新回执**：API/Web 镜像均为 `four-check-api:ip-trial-20261025-r3` / `four-check-web:ip-trial-20261025-r3`，状态 `running/healthy`；Postgres 与 MinIO 也为 `running/healthy`。
+- **迁移状态**：账本从 001 连续到 `028_hygiene_reason_dictionaries.sql`。因此线上已包含 026 周报基线、027 应交/零回执和卫生原因 028；没有 `028_login_device_sessions.sql`、029 或 030。
+- **资源快照**：根分区 50 GiB、已用 43 GiB、可用 4.4 GiB；内存可用约 1.1 GiB；1 GiB swap 已用约 707 MiB。
+- **边界**：这组输出确认目标服务与 schema 当前版本，但没有给出升级备份目录、迁移日志或新功能验收结果。尚不能据此宣称完整部署验收通过。
+
+### 2026-10-25：待应用迁移影响只读统计
+
+- **用户提供的查询回执**：`028_login_device_sessions.sql` 将有 1 个账号超过三台设备限制，预计淘汰 3 个有效会话；该迁移尚未执行。
+- **迁移 029 影响**：有范围权限规则 1 条，为启用的 ALLOW；没有 DENY 规则。将有 1 个账号的 `session_version` 递增，并撤销该账号 2 个未撤销刷新会话。迁移会移除此 ALLOW 的部门/班级/年级范围，使授权范围扩大。用户已确认这是可清理数据的测试环境，该规则变化可随测试版本一起应用并在部署后验收，不作为生产审批门槛。
+- **账号关系推断**：028 超额会话账号与 029 受影响账号不是同一账号：前者至少有 4 个未撤销有效会话，后者只有 2 个未撤销会话。这里只记录聚合推断，不读取或保存账号 ID。
+- **副作用边界**：以上 SQL 为只读。应用 028/029 会使相关用户的登录会话失效；029 还会扩大一条具体授权规则。
+
+### 2026-10-25：目标环境性质确认
+
+- 用户明确说明当前腾讯云部署仅作测试，尚非正式线上；如测试出问题可以清理测试数据。后续按测试环境更新推进，不再以生产数据保护审批作为迁移 029 的阻塞项。
+- 此确认不代表已经执行登录会话 028、029 或 030。r4 包现已在本地生成；目标服务器仍待用户上传、只读预检并执行更新。
+
+### 2026-10-25：r4 Docker 离线更新包已生成
+
+- **下载文件**：[four-check-update-20261025-r4.tar](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar)（约 67 MiB）与 [SHA256 校验文件](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar.sha256)。包内有 API/Web `four-check-*:ip-trial-20261025-r4` 的 `linux/amd64` 镜像、迁移 `028_login_device_sessions.sql`、`029_simplify_permission_scope.sql`、`030_evening_self_study.sql`、r3 完整迁移账本基线、操作说明与 `upgrade-r4.py`；不含 `.env`。
+- **源码状态**：本地 `feat-0.1-3` 工作区，HEAD `d9c5eb5516e5dcdd21566a039cbde4dc3509720a`，镜像包含未提交的当前工作区源码。包内 `source-worktree-status.txt` 留有打包时的工作区清单。
+- **验证结果**：Go `go test ./... -count=1`、`go vet ./...`、`go build ./...` 通过；Web `pnpm lint`、Vitest 76/76 文件、414/414 项、`pnpm build` 通过。API/Web 均为 amd64；Nginx 配置测试与直接请求首页 HTTP 200 通过；包内及外层 SHA256 均通过。生产构建仍有 Vite 主 JS chunk 超 500 kB 提示；测试有 CSS 解析和 Ant Design 弃用提示。
+- **构建方式说明**：BuildKit 请求 Docker Hub 基础镜像元数据时遇到超时，固定的 Node 24.12.0 镜像通过 Docker 拉取后，在一次性 Node 容器中跑完前端 lint/test/build；静态产物装入 Nginx 1.27 amd64 基础镜像并做网络别名条件下的配置/HTTP 冒烟。API 通过当前 Dockerfile 构建。`Dockerfile.web` 测试命令固定为 `pnpm test --maxWorkers=2`，这次全量测试耗时约 447 秒。
+- **更新脚本行为**：默认只读检查 API/Web 容器和 Compose r3 标签、四服务健康、Postgres/MinIO 卷身份、迁移账本精确基线、目标镜像 ID/amd64 架构及磁盘余量。`--apply` 才会停止 API/Web，备份 `.env`/配置/全部既有迁移、PostgreSQL dump 与 MinIO 数据，再添加三条迁移并更新 API/Web 镜像；迁移开始后的失败保持 API/Web 停止并保留备份。
+- **云端边界**：没有上传包、连接服务器、停止云端服务、执行云端迁移或改容器。本包应先上传至 `/opt/four-check/updates/20261025-r4/`，核验归档 SHA256、导入镜像、运行 `python3 upgrade-r4.py` 只读预检，通过后再运行 `python3 upgrade-r4.py --apply`。服务器完成后的健康状态与晚自习角色验收仍待用户回执。
+
+### 2026-10-25：r4 已应用与 Web 容器恢复
+
+- **用户上传/校验回执**：外层 r4 归档、包内 `SHA256SUMS` 均通过；API/Web r4 镜像载入成功。`mkdir release` 提示目录已存在，但随后解包与文件校验成功。
+- **应用结果证据**：用户后续查询显示 Compose 已指向 API/Web r4；迁移账本已包含 `028_login_device_sessions.sql`、029、030。API 为 `running/healthy`；Web 容器曾停在 `Created`，其日志为空；Postgres、MinIO 当时均为健康状态。r4 备份目录已创建，用户查询到了 `original-images.json` 与 `migration.log`。
+- **原因与恢复**：`docker compose ps -q web` 不包含 `Created` 容器，旧脚本将 0 个运行容器误报为“服务不是唯一容器”。用户执行 `docker compose --env-file ... up -d --no-deps --pull never web` 后容器成功启动，状态 `running/healthy`，`/health/ready` 返回 HTTP 200。没有重跑迁移或 `--apply`。
+- **备份边界**：已确认备份目录及部分文件存在；尚未确认 `database.dump`、`minio-data.tar.gz` 的大小和校验清单，因此不宣称备份已完整校验。
+- **剩余验收**：用户尚未回报浏览器登录、晚自习页面/虚构记录、三设备登录限制及权限范围专项验收。更新脚本源码已改为查询所有状态的容器并显示具体状态；已部署归档保持原始哈希，不重写历史构件。
 
 ## 待办与完成条件
 
-1. r3a 上传、完整性校验、镜像导入和只读预检已完成；本次预检基线为 r2/r2、账本到 025、旧 `OTHER` 空说明计数为 0，磁盘门槛通过。不要重跑旧 r3 解包目录。
-2. 用户确认维护窗口后，按包内说明再次确认资源并执行 `nohup ... upgrade.sh --apply`。若 SSH 断开或结果不明，不要重复运行；先查看日志和备份目录。
-3. 更新后核对 API/Web r3、迁移账本到 028、四容器健康及 `8088/health/ready=200`，再在浏览器强制刷新检查页面和已发布模板下载。不得在生产库做真实导入确认写入。
+1. **云端 r4 已部署**：不要重跑 r4 或旧版本更新脚本。API/Web 均为 r4，迁移账本到 030；用户已报告四服务健康和 ready=200。
+2. **剩余验收**：浏览器确认登录、晚自习页面，并由有权限账号完成一条虚构记录的创建/查看；验证登录设备上限和权限范围变化。部署健康不自动代表这些业务验收已完成。
+3. **备份完整性**：r4 备份目录存在，但 `database.dump`、`minio-data.tar.gz` 的存在/大小及 `SHA256SUMS` 尚未由用户回执确认；核对前不记录备份已完整校验。
+4. 原 records 500 的用户登录态重放仍是独立未解决问题。
 
-**完成标准**：云端 API/Web 均为 r3，账本连续到 028，迁移后置条件和四容器健康检查通过，ready 返回 200，页面与模板下载通过只读/非破坏性验收。迁移状态、代码加载、业务页面验收分别记录；r3 包本地构建完成不代表云端已更新。
+**完成标准**：r4 已在测试服务器应用，迁移和 API/Web 健康已确认；浏览器功能/角色验收及备份归档完整性仍待分别确认。
+
+### 当前云端状态只读核验命令（已执行，留作复核）
+
+下面只读取容器配置/健康状态、磁盘内存和迁移账本；不重启、不迁移、不修改数据。整段从任意目录粘贴执行：
+
+```bash
+set -eu
+cd /opt/four-check/ip-trial
+docker inspect --format '{{.Name}} image={{.Config.Image}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' four-check-ip-trial-api-1 four-check-ip-trial-web-1 four-check-ip-trial-postgres-1 four-check-ip-trial-minio-1
+docker compose --env-file /opt/four-check/ip-trial/.env -p four-check-ip-trial -f /opt/four-check/ip-trial/compose.yaml exec -T postgres psql -U four_check -d four_check -Atqc 'SELECT version FROM schema_migrations ORDER BY version;'
+df -h /
+free -h
+```
+
+该命令此前得到 r3 基线回执（见“r3 镜像与迁移账本复核”）；后续用户又单独提供了 r4 容器、迁移、Web ready 状态。部署后复核可重用此只读命令；不要附 `.env` 内容、密码或 Token。
+
+### 待应用迁移影响只读盘点（已执行；仅作测试变更记录）
+
+下面只统计 `028_login_device_sessions.sql` 与 `029_simplify_permission_scope.sql` 按当前数据将影响的记录数，不会修改数据。两个类别的刷新会话数可能重叠，因为 028 先淘汰超出三设备限制的会话，029 再撤销受影响账号剩余的有效刷新会话：
+
+```bash
+cd /opt/four-check/ip-trial
+docker compose --env-file /opt/four-check/ip-trial/.env -p four-check-ip-trial -f /opt/four-check/ip-trial/compose.yaml exec -T postgres psql -U four_check -d four_check -P pager=off -c "
+WITH scoped_rules AS (
+  SELECT id, account_id, effect, enabled
+  FROM user_permission_rules
+  WHERE department_id IS NOT NULL OR class_id IS NOT NULL OR grade IS NOT NULL
+), active_sessions AS (
+  SELECT id, account_id,
+         row_number() OVER (PARTITION BY account_id ORDER BY created_at DESC, id DESC) AS session_rank
+  FROM refresh_sessions
+  WHERE revoked_at IS NULL AND expires_at > now()
+), metrics AS (
+  SELECT '029 有范围权限规则' AS item, count(*)::bigint AS affected FROM scoped_rules
+  UNION ALL SELECT '029 有范围 ALLOW 规则总数', count(*) FROM scoped_rules WHERE effect='ALLOW'
+  UNION ALL SELECT '029 将放宽的启用 ALLOW 规则', count(*) FROM scoped_rules WHERE effect='ALLOW' AND enabled
+  UNION ALL SELECT '029 有范围 DENY 规则总数', count(*) FROM scoped_rules WHERE effect='DENY'
+  UNION ALL SELECT '029 将停用的启用 DENY 规则', count(*) FROM scoped_rules WHERE effect='DENY' AND enabled
+  UNION ALL SELECT '029 session_version 将递增的账号', count(DISTINCT account_id) FROM scoped_rules
+  UNION ALL SELECT '029 将撤销的有效刷新会话', count(*) FROM refresh_sessions r
+    WHERE r.revoked_at IS NULL AND r.account_id IN (SELECT account_id FROM scoped_rules)
+  UNION ALL SELECT '028 超过三台设备限制将淘汰的有效会话', count(*) FROM active_sessions WHERE session_rank > 3
+  UNION ALL SELECT '028 存在超额有效会话的账号', count(*) FROM (
+    SELECT account_id FROM active_sessions GROUP BY account_id HAVING count(*) > 3
+  ) AS over_limit_accounts
+)
+SELECT item, affected FROM metrics ORDER BY item;
+"
+```
+
+用户随后确认目标为测试环境并接受必要时清理数据，因此不再安排额外的权限影响只读查询；本统计留作应用前后对照。
 
 ### 2026-10-25：导入模板下载接口 404 诊断
 

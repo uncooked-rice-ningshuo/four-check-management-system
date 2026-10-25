@@ -208,7 +208,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		if !mapping.Enabled || mapping.DepartmentID != profile.DepartmentID {
 			continue
 		}
-		scope := Scope{DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
+		// The user's primary-department mapping grants actions for an inspection
+		// type; the action applies to that type across departments.
+		scope := Scope{InspectionTypeID: mapping.InspectionTypeID}
 		source := Source{Type: SourceDepartmentMap, Label: "部门与检查类型映射"}
 		if leadership && mapping.CanEnter {
 			result.Permissions = append(result.Permissions, allow(ActionInspectionManage, scope, Source{Type: SourceOrganizationRole, Label: "部门负责人记录管理"}))
@@ -238,6 +240,14 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		if !rule.Enabled {
 			continue
 		}
+		if rule.Effect == EffectDeny && hasRemovedScopeDimensions(rule.Scope) {
+			// A legacy scoped denial cannot safely become a global denial. The
+			// migration audits and disables it; ignore it during rollout too.
+			continue
+		}
+		rule.Scope.DepartmentID = ""
+		rule.Scope.ClassID = ""
+		rule.Scope.Grade = ""
 		if rule.Action == ActionReportForceGenerate && !isForceGenerateEligible(profile) {
 			continue
 		}
@@ -390,16 +400,7 @@ func validRule(rule Rule) bool {
 	if rule.AccountID == "" || (rule.Effect != EffectAllow && rule.Effect != EffectDeny) {
 		return false
 	}
-	// A force-generation grant applies to the entire merged weekly report, not a department subset.
-	if strings.TrimSpace(rule.Action) == ActionReportForceGenerate &&
-		(rule.Scope.DepartmentID != "" || rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
-		return false
-	}
-	if strings.TrimSpace(rule.Action) == ActionReportObligationManage &&
-		(rule.Scope.DepartmentID != "" || rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
-		return false
-	}
-	if rule.Action == ActionReportView && rule.Effect == EffectAllow && (rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
+	if hasRemovedScopeDimensions(rule.Scope) {
 		return false
 	}
 	for _, action := range allActions {
@@ -408,6 +409,10 @@ func validRule(rule Rule) bool {
 		}
 	}
 	return false
+}
+
+func hasRemovedScopeDimensions(scope Scope) bool {
+	return scope.DepartmentID != "" || scope.ClassID != "" || scope.Grade != ""
 }
 
 func scopeMatches(rule, requested Scope) bool {

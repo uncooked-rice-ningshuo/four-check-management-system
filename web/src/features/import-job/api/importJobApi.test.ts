@@ -16,9 +16,13 @@ describe('importJobApi', () => {
     expect(new Headers(init.headers).has('Content-Type')).toBe(false)
   })
 
-  it('rejects an attendance upload response that loses its selected class', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, id: 'batch-1', version: 1, templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 1, validRows: 1, invalidRows: 0, importedRows: 0 }), { status: 201, headers: { 'Content-Type': 'application/json' } })))
-    await expect(importJobApi.uploadAttendance({ ...context, classId: 'selected-class' }, new File(['xlsx'], 'attendance.xlsx'), { id: 'template-1', version: 1 })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  it('omits list class and grade filters from a new upload request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, id: 'batch-1', version: 1, templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 1, validRows: 1, invalidRows: 0, importedRows: 0 }), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await importJobApi.uploadAttendance({ ...context, classId: 'selected-class', grade: '2026级' }, new File(['xlsx'], 'attendance.xlsx'), { id: 'template-1', version: 1 })
+    const body = fetchMock.mock.calls[0][1]?.body as FormData
+    expect(body.get('classId')).toBeNull()
+    expect(body.get('grade')).toBeNull()
   })
 
   it('accepts a college-level batch returned with no department', async () => {

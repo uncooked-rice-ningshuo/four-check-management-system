@@ -290,6 +290,18 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
 	}
+	if f.ImportBatchID != "" {
+		args = append(args, f.ImportBatchID)
+		where += fmt.Sprintf(" AND ir.import_batch_id=$%d", len(args))
+	}
+	if f.Keyword != "" {
+		args = append(args, "%"+f.Keyword+"%")
+		where += fmt.Sprintf(" AND (ir.student_no_snapshot ILIKE $%d OR ir.student_name_snapshot ILIKE $%d OR ir.class_name_snapshot ILIKE $%d OR ir.remark ILIKE $%d)", len(args), len(args), len(args), len(args))
+	}
+	if f.SubmissionCandidatesOnly {
+		where += " AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL"
+		where += " AND " + inspectionAccessSQL(a, "mutate", &args)
+	}
 	if f.ConfirmedSubmissionOnly {
 		where += ` AND ir.status='CONFIRMED' AND EXISTS(
  SELECT 1 FROM department_submissions ds
@@ -320,28 +332,33 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 		direction = "ASC"
 	}
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
-	rows, err := tx.Query(ctx, `SELECT ir.id`+inspectionFrom+where+` ORDER BY COALESCE(ir.occurred_at,ir.inspection_date::timestamp AT TIME ZONE 'Asia/Shanghai') `+direction+`,ir.id `+direction+fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
+	rows, err := tx.Query(ctx, `SELECT ir.id,COALESCE((SELECT MIN(r.row_no) FROM import_rows r WHERE r.record_id=ir.id),0)`+inspectionFrom+where+` ORDER BY COALESCE(ir.occurred_at,ir.inspection_date::timestamp AT TIME ZONE 'Asia/Shanghai') `+direction+`,ir.id `+direction+fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
 	if err != nil {
 		return result, err
 	}
-	var ids []string
+	type listedRecord struct {
+		id          string
+		importRowNo int
+	}
+	var ids []listedRecord
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var item listedRecord
+		if err = rows.Scan(&item.id, &item.importRowNo); err != nil {
 			rows.Close()
 			return result, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, item)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return result, err
 	}
-	for _, id := range ids {
-		r, e := (&inspectionTx{tx}).Read(ctx, id, a, "read", false)
+	for _, item := range ids {
+		r, e := (&inspectionTx{tx}).Read(ctx, item.id, a, "read", false)
 		if e != nil {
 			return result, e
 		}
+		r.ImportRowNo = item.importRowNo
 		result.Items = append(result.Items, r)
 	}
 	return result, tx.Commit(ctx)
@@ -355,6 +372,9 @@ func (t *inspectionTx) readDetails(ctx context.Context, r inspection.InspectionR
 	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
 		table = "attendance_details"
 		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
+	case inspection.InspectionTypeEveningSelfStudy:
+		table = "evening_self_study_details"
+		extra = personal + ` || jsonb_build_object('classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
 	case inspection.InspectionTypeMorning:
 		table = "morning_exercise_details"
 		extra = personal + ` || jsonb_build_object('absenceCount',d.absence_count)`
@@ -462,6 +482,9 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.UnattendedClassroomDetails:
 		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, nil)
+	case *inspection.EveningSelfStudyDetails:
+		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,absence_hours,penalty_multiplier,penalty_hours) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=excluded.absence_hours,penalty_multiplier=excluded.penalty_multiplier,penalty_hours=excluded.penalty_hours`
+		args = []any{r.ID, v.ClassroomID, v.Period, v.AbsenceHours, v.PenaltyMultiplier, v.PenaltyHours}
 	case *inspection.MorningAttendanceDetails:
 		sql = `INSERT INTO morning_exercise_details(record_id,absence_count) VALUES($1,$2) ON CONFLICT(record_id) DO UPDATE SET absence_count=excluded.absence_count`
 		args = []any{r.ID, v.AbsenceCount}

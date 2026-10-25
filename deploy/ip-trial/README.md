@@ -6,9 +6,11 @@
 
 ## 更新已有部署
 
+每次服务器部署技术核验成功后，必须按[部署成功后的飞书同步流程](../../docs/deployment/post-deployment-feishu-sync.md)追加飞书 Wiki 部署记录，并向“日常管理系统 leader”群发送《功能更新说明》。未完成的业务/角色验收要在两处同步内容中明确标注。
+
 **本目录的已有部署升级文件是历史说明，不是当前工作区的更新指引。** [r1 升级说明](UPGRADE.md)记录 2026-10-06 的迁移 014–021；[r2 更新说明](UPDATE-R2.md)记录 2026-10-06 的 Web 会话续期补丁，数据库仍为 001–021。文件名中的 r2 不等于 2026-10-25 的 r2 候选包。
 
-当前工作区的更新包已准备为 [r3a 离线包](../../output/releases/four-check-update-20261025-r3a.tar)，包含 API/Web `linux/amd64` 镜像和迁移 022–028；逐步命令、只读门槛及故障处理见包内 [r3a 更新步骤](../../output/releases/upgrade-20261025-r3a/package/UPDATE.md)。r3a 应用镜像仍标记为 r3，并额外兼容用户最新确认的云端 `20261025-r2` API/Web 起始组合。首版 r3 的只读预检已安全退出，未备份、停服或迁移；请使用新的 `/opt/four-check/updates/20261025-r3a` 目录重新预检。旧 r2 包只含 022–025；`build-release.sh`、`update.py` 和 `upgrade.py` 仍是更早版本的历史发布路径，不用于当前目标机更新。
+**最近一次已部署更新：**[r4 离线归档](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar)及[SHA256 文件](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar.sha256)。该包以 r3 API/Web 和 `028_hygiene_reason_dictionaries.sql` 为基线，升级 API/Web 到 r4 并应用 `028_login_device_sessions.sql`、029、030；测试机已报告四服务 healthy、`8088/health/ready=200`。本次 Web `Created` 状态的恢复步骤与剩余验收见[部署记录](../../docs/deployment/ip-trial-deployment-log.md)及[操作说明](UPDATE-R4.md)。该归档保留原始校验值，不要在已更新服务器上重跑。r3a、`build-release.sh`、`update.py` 和早期 `upgrade.py` 都是历史路径。
 
 ## 2026-09-22 首次交付历史证据
 

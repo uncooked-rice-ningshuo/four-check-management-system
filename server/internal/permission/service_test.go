@@ -57,6 +57,14 @@ func TestDepartmentMemberReceivesMappedEnterAndViewOnly(t *testing.T) {
 	if !result.Allowed(ActionInspectionEnter, scope) || !result.Allowed(ActionInspectionView, scope) {
 		t.Fatalf("mapped member permissions = %+v", result.Permissions)
 	}
+	if !result.Allowed(ActionInspectionEnter, Scope{DepartmentID: "sports", InspectionTypeID: "attendance"}) || !result.Allowed(ActionInspectionView, Scope{DepartmentID: "sports", InspectionTypeID: "attendance"}) {
+		t.Fatalf("mapped inspection actions should apply across departments: %+v", result.Permissions)
+	}
+	for _, effective := range result.Permissions {
+		if effective.Scope.DepartmentID != "" || effective.Scope.ClassID != "" || effective.Scope.Grade != "" {
+			t.Fatalf("mapped permissions must not carry removed scope dimensions: %+v", effective.Scope)
+		}
+	}
 	if result.Allowed(ActionInspectionReview, scope) {
 		t.Fatal("department member must not inherit review permission")
 	}

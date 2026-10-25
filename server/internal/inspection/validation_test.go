@@ -39,6 +39,9 @@ func validDetails(code string) map[string]json.RawMessage {
 		if code == InspectionTypeAttendance && f.Key == "period" {
 			value = `"1-2"`
 		}
+		if code == InspectionTypeEveningSelfStudy && f.Key == "period" {
+			value = `"9-10"`
+		}
 		if f.Key == "round" {
 			continue
 		}
@@ -50,7 +53,7 @@ func validateFixture(code string, fields map[string]json.RawMessage) (ValidatedD
 	raw, _ := json.Marshal(fields)
 	return ValidateDetails(code, detailContext(), raw)
 }
-func TestValidateSevenDetails(t *testing.T) {
+func TestValidateInspectionDetails(t *testing.T) {
 	catalog, _ := InspectionCatalog()
 	for _, d := range catalog {
 		t.Run(d.Code, func(t *testing.T) {

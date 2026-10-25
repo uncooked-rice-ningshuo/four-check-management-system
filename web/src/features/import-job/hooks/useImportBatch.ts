@@ -15,7 +15,7 @@ export const importJobKeys = {
 }
 
 export function useImportTemplate(context: InspectionContext, enabled: boolean, typeCode: SupportedImportType = 'ATTENDANCE_RATE') {
-  return useQuery({ queryKey: importJobKeys.template(context), queryFn: () => ((typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN') ? inspectionImportApi : typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).template(context, true), enabled })
+  return useQuery({ queryKey: importJobKeys.template(context), queryFn: () => ((typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN' || typeCode === 'EVENING_SELF_STUDY') ? inspectionImportApi : typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).template(context, true), enabled })
 }
 
 export function useImportBatch(id?: string) {
@@ -38,7 +38,7 @@ export function useImportRows(id: string | undefined, page: number, pageSize: nu
 export function useUploadAttendanceImport() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: ({ context, file, template, typeCode }: { typeCode?: SupportedImportType; context: InspectionContext; file: File; template: Pick<ImportTemplate, 'id' | 'version'> }) => (typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN') ? inspectionImportApi.upload(context, file, template) : (typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).uploadAttendance(context, file, template),
+    mutationFn: ({ context, file, template, typeCode }: { typeCode?: SupportedImportType; context: InspectionContext; file: File; template: Pick<ImportTemplate, 'id' | 'version'> }) => (typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'DORMITORY_HYGIENE' || typeCode === 'MORNING_ATTENDANCE' || typeCode === 'LATE_RETURN' || typeCode === 'EVENING_SELF_STUDY') ? inspectionImportApi.upload(context, file, template) : (typeCode === 'UNATTENDED_CLASSROOM' ? courseImportApi : importJobApi).uploadAttendance(context, file, template),
     onSuccess: (batch) => client.invalidateQueries({ queryKey: importJobKeys.batch(batch.id) }),
   })
 }
@@ -60,6 +60,7 @@ export function useConfirmImport(batchId: string) {
         client.invalidateQueries({ queryKey: ['course-inspections'] }),
         client.invalidateQueries({ queryKey: ['morning-attendances'] }),
         client.invalidateQueries({ queryKey: ['late-returns'] }),
+        client.invalidateQueries({ queryKey: ['evening-self-studies'] }),
         client.invalidateQueries({ queryKey: ['dormitory-hygienes'] }),
         client.invalidateQueries({ queryKey: ['classroom-hygienes'] }),
         client.invalidateQueries({ queryKey: ['dashboard', 'workbench'] }),

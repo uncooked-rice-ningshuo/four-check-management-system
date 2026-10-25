@@ -36,7 +36,7 @@ export function MorningAttendancePage() {
  const classes=useInspectionContext({purpose:'view',kind:'classes'})
  const inspectionTypeId=semesters.data?.inspectionTypeId
  const records=useMorningAttendanceRecords({...filters,inspectionTypeId},!!inspectionTypeId&&!scope.currentWeek.isLoading&&!scope.currentWeek.isError&&!invalidSelection)
- const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&(user?.systemRole!=='MEMBER'||!!user.primaryDepartmentId)&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId,user?.systemRole==='MEMBER'?user.primaryDepartmentId:undefined))
+ const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&(user?.systemRole!=='MEMBER'||!!user.primaryDepartmentId)&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId))
  const selections=(records.data?.items??[]).filter(record=>selected.includes(record.id)&&record.canEdit&&record.status==='DRAFT')
  const canReview=!!user?.isSuperAdmin|| (!!inspectionTypeId&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_REVIEW',inspectionTypeId))
  const optionQueries=[scope.currentWeek,semesters,weeks,departments,classes]

@@ -569,7 +569,7 @@ func TestSystemAdminCanManageMasterDataButMemberCannot(t *testing.T) {
 	}
 }
 
-func TestHygieneAreaScopedMasterDataGrantDoesNotOpenGeneralCatalog(t *testing.T) {
+func TestHygieneAreaTypeScopedMasterDataGrantDoesNotOpenGeneralCatalog(t *testing.T) {
 	repository := &accounts{values: map[string]auth.Account{}}
 	svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
 	_, _ = svc.Register(context.Background(), auth.RegisterInput{StudentNo: "area-member", Name: "area-member", Password: "Password123", RequestedDepartmentID: "department-1", RequestedOrgRoleID: "role-1"})
@@ -585,13 +585,17 @@ func TestHygieneAreaScopedMasterDataGrantDoesNotOpenGeneralCatalog(t *testing.T)
 	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusOK {
 		t.Fatalf("scoped area listing status=%d body=%s", response.Code, response.Body.String())
 	}
-	for _, path := range []string{"/api/v1/admin/master-data/faculties", "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=10000000-0000-0000-0000-000000000004", "/api/v1/admin/hygiene-areas/faculties?departmentId=" + departmentID} {
+	for _, path := range []string{"/api/v1/admin/master-data/faculties", "/api/v1/admin/hygiene-areas/faculties?departmentId=" + departmentID} {
 		response := performJSON(router, http.MethodGet, path, nil, tokens.AccessToken)
 		if response.Code == http.StatusOK {
 			t.Fatalf("scope leaked to %s", path)
 		}
 	}
-	permissionRepo.profile.Rules = append(permissionRepo.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{DepartmentID: departmentID}, Enabled: true})
+	otherDepartmentAreaURL := "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=10000000-0000-0000-0000-000000000004"
+	if response := performJSON(router, http.MethodGet, otherDepartmentAreaURL, nil, tokens.AccessToken); response.Code != http.StatusOK {
+		t.Fatalf("type-wide area access status=%d body=%s", response.Code, response.Body.String())
+	}
+	permissionRepo.profile.Rules = append(permissionRepo.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{InspectionTypeID: typeID}, Enabled: true})
 	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusForbidden {
 		t.Fatalf("DENY did not override scoped grant: %d %s", response.Code, response.Body.String())
 	}

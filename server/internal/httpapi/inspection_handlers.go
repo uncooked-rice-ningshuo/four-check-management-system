@@ -7,10 +7,12 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/inspection"
+	"four-check-management-system/server/internal/permission"
 	"github.com/gin-gonic/gin"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -96,6 +98,41 @@ func (h *handler) listInspections(c *gin.Context) {
 		return
 	}
 	c.JSON(200, r)
+}
+
+func (h *handler) listSubmissionCandidates(c *gin.Context) {
+	if h.inspections == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "检查记录服务尚未就绪")
+		return
+	}
+	account, _, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionEnter)
+	if !ok {
+		return
+	}
+	if _, _, ok = h.authorizeInspectionRequest(c, permission.ActionInspectionView); !ok {
+		return
+	}
+	if strings.TrimSpace(c.Query("departmentId")) == "" {
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或校级范围")
+		return
+	}
+	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
+	var filter inspection.InspectionFilter
+	if c.ShouldBindQuery(&filter) != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "分页或筛选格式无效")
+		return
+	}
+	if account.SystemRole == auth.SystemRoleMember {
+		filter.DepartmentID = account.PrimaryDepartmentID
+	}
+	filter.SubmissionCandidatesOnly = true
+	filter.Status = inspection.RecordStatusDraft
+	page, err := h.inspections.List(c, actor, filter)
+	if err != nil {
+		writeInspectionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
 }
 func (h *handler) updateInspection(c *gin.Context) {
 	a, ok := h.inspectionActor(c)

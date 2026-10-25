@@ -72,6 +72,34 @@ type Batch struct {
 	Location              *time.Location `json:"-"`
 }
 
+type SubmissionBatchQuery struct {
+	SemesterID, WeekID, InspectionTypeID, DepartmentID string
+	Page, PageSize                                     int
+}
+
+type SubmissionBatchSummary struct {
+	ID                 string    `json:"id"`
+	SemesterID         string    `json:"semesterId"`
+	WeekID             string    `json:"weekId"`
+	InspectionTypeID   string    `json:"inspectionTypeId"`
+	DepartmentID       string    `json:"departmentId"`
+	OriginalName       string    `json:"originalName"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"createdAt"`
+	ConfirmedAt        time.Time `json:"confirmedAt"`
+	ImportedRows       int       `json:"importedRows"`
+	SelectableRecords  int       `json:"selectableRecords"`
+	SubmittedRecords   int       `json:"submittedRecords"`
+	UnavailableRecords int       `json:"unavailableRecords"`
+}
+
+type SubmissionBatchPage struct {
+	Items    []SubmissionBatchSummary `json:"items"`
+	Total    int                      `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"pageSize"`
+}
+
 type BatchFailure struct {
 	Code    string
 	Message string

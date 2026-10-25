@@ -33,7 +33,7 @@ func main() {
 func run(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("publish-attendance-template", flag.ContinueOnError)
 	flags.SetOutput(output)
-	typeCode := flags.String("type-code", "ATTENDANCE_RATE", "ATTENDANCE_RATE, UNATTENDED_CLASSROOM, MORNING_ATTENDANCE, LATE_RETURN, DORMITORY_HYGIENE, CLASSROOM_HYGIENE")
+	typeCode := flags.String("type-code", "ATTENDANCE_RATE", "ATTENDANCE_RATE, UNATTENDED_CLASSROOM, MORNING_ATTENDANCE, LATE_RETURN, DORMITORY_HYGIENE, CLASSROOM_HYGIENE, EVENING_SELF_STUDY")
 	apply := flags.Bool("apply", false, "publish to configured PostgreSQL/MinIO (default: preview only)")
 	actor := flags.String("actor-id", "", "active super administrator UUID for audit attribution")
 	reason := flags.String("reason", "", "publication reason (required with --apply)")

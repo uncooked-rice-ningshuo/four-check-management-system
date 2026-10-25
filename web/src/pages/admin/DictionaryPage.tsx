@@ -1,7 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Switch, Tag, Typography, message } from 'antd'
+import { App, Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Switch, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { DictionaryItem, DictionaryType } from '../../entities/dictionary/model/dictionary'
@@ -11,6 +11,7 @@ const newTypeValues: Partial<DictionaryType> = { code: '', name: '', description
 const newItemValues: Partial<DictionaryItem> = { value: '', label: '', description: '', sortOrder: 0, enabled: true }
 
 export function DictionaryPage() {
+	const { message } = App.useApp()
 	const [modal, modalContextHolder] = Modal.useModal()
   const [selectedTypeIdOverride, setSelectedTypeIdOverride] = useState('')
   const [typeModal, setTypeModal] = useState(false)

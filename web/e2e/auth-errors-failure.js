@@ -1,6 +1,7 @@
 async(page)=>{
- const fixture=__FIXTURE__,base=page.url().split('/').slice(0,3).join('/'),errors=[]
+ const fixture=__FIXTURE__,base=page.url().split('/').slice(0,3).join('/'),errors=[],messageContextWarnings=[]
  page.on('pageerror',e=>errors.push(e.message))
+ page.on('console',m=>{if(m.type()==='error'&&m.text().includes('Static function can not consume context'))messageContextWarnings.push(m.text())})
  const check=(ok,message)=>{if(!ok)throw new Error(message)}
  const before=(await page.context().cookies()).find(c=>c.name==='refresh_token')
  const failedLogin=await page.context().request.post(base+'/api/v1/auth/login',{data:{loginName:'browser-admin',password:fixture.authPassword}})
@@ -47,5 +48,6 @@ async(page)=>{
  const bounds=await page.getByRole('button',{name:'重试退出',exact:true}).boundingBox()
  check(!!bounds&&bounds.x>=0&&bounds.x+bounds.width<=375,'Logout retry is inaccessible on narrow screen')
  check(errors.length===0,'Unhandled browser error')
+ check(messageContextWarnings.length===0,`Ant Design static message context warnings: ${messageContextWarnings.length}`)
  return {cases:['真实会话保存故障：登录500且不清既有Cookie','真实撤销故障：改密整体失败保留输入和原Cookie','延迟409冲突：改密按钮禁用、键盘不重复提交、失败保留输入','真实退出撤销故障：显示重试提示、保留当前页面，375px按钮可达'],faultInjection:['PostgreSQL refresh_sessions INSERT/UPDATE trigger failure','HTTP 409 VERSION_CONFLICT with delayed response'],browserErrors:errors}
 }

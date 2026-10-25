@@ -26,6 +26,15 @@ var (
 	ErrInvalidDecision   = errors.New("invalid submission decision")
 )
 
+// SubmissionKind distinguishes an ordinary record batch from an explicit
+// attestation that a configured reporting cell was checked and had no rows.
+type SubmissionKind string
+
+const (
+	SubmissionKindRecords    SubmissionKind = "RECORDS"
+	SubmissionKindZeroRecord SubmissionKind = "ZERO_RECORD"
+)
+
 // Scope fixes a submission batch to one week and inspection type. An empty
 // DepartmentID denotes an independent college-level batch.
 type Scope struct {
@@ -42,8 +51,10 @@ type VersionedRecord struct {
 
 type SubmitInput struct {
 	Scope          Scope             `json:"scope"`
+	Kind           SubmissionKind    `json:"kind"`
 	Records        []VersionedRecord `json:"records"`
 	IdempotencyKey string            `json:"idempotencyKey"`
+	Explanation    string            `json:"explanation"`
 }
 
 type Submission struct {
@@ -53,6 +64,7 @@ type Submission struct {
 	WeekNo         int                `json:"weekNo,omitempty"`
 	DepartmentName string             `json:"departmentName,omitempty"`
 	Status         State              `json:"status"`
+	Kind           SubmissionKind     `json:"kind"`
 	RevisionNo     int                `json:"revisionNo"`
 	RowVersion     int                `json:"rowVersion"`
 	CreatedBy      string             `json:"createdBy"`
@@ -109,9 +121,11 @@ type SubmitCommand struct {
 	Unrestricted   bool
 	Permissions    []permission.EffectivePermission
 	Scope          Scope
+	Kind           SubmissionKind
 	Records        []VersionedRecord
 	IdempotencyKey string
 	Fingerprint    string
+	Explanation    string
 	Metadata       audit.Metadata
 }
 
@@ -124,8 +138,10 @@ type Repository interface {
 }
 
 type ResubmitInput struct {
-	Version int               `json:"version"`
-	Records []VersionedRecord `json:"records"`
+	Version     int               `json:"version"`
+	Kind        SubmissionKind    `json:"kind"`
+	Records     []VersionedRecord `json:"records"`
+	Explanation string            `json:"explanation"`
 }
 
 type ResubmitCommand struct {
@@ -134,7 +150,9 @@ type ResubmitCommand struct {
 	Permissions  []permission.EffectivePermission
 	SubmissionID string
 	Version      int
+	Kind         SubmissionKind
 	Records      []VersionedRecord
+	Explanation  string
 	Metadata     audit.Metadata
 }
 
@@ -190,8 +208,17 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 		}
 		input.Scope.DepartmentID = id.String()
 	}
+	if input.Kind == "" {
+		input.Kind = SubmissionKindRecords
+	}
+	if input.Kind != SubmissionKindRecords && input.Kind != SubmissionKindZeroRecord {
+		return Submission{}, ErrInvalidSubmit
+	}
+	input.Explanation = strings.TrimSpace(input.Explanation)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	if len(input.IdempotencyKey) == 0 || len(input.IdempotencyKey) > 128 || len(input.Records) == 0 || len(input.Records) > 100 {
+	if len(input.IdempotencyKey) == 0 || len(input.IdempotencyKey) > 128 || len(input.Explanation) > 500 ||
+		len(input.Records) > 100 || (input.Kind == SubmissionKindRecords && len(input.Records) == 0) ||
+		(input.Kind == SubmissionKindZeroRecord && len(input.Records) != 0) {
 		return Submission{}, ErrInvalidSubmit
 	}
 	records := append([]VersionedRecord(nil), input.Records...)
@@ -220,13 +247,16 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 		permissions = effective.Permissions
 	}
 	hash := sha256.New()
-	fmt.Fprintf(hash, "%s/%s/%s/%s", input.Scope.SemesterID, input.Scope.WeekID, input.Scope.DepartmentID, input.Scope.InspectionTypeID)
+	fmt.Fprintf(hash, "%s/%s/%s/%s/%s/%s", input.Kind, input.Scope.SemesterID, input.Scope.WeekID,
+		input.Scope.DepartmentID, input.Scope.InspectionTypeID, input.Explanation)
 	for _, record := range records {
 		fmt.Fprintf(hash, "/%s:%d", record.ID, record.Version)
 	}
 	metadata.ActorID = actor.ID
+	metadata.Reason = input.Explanation
 	return s.repository.SubmitDepartmentBatch(ctx, SubmitCommand{ActorID: actor.ID, Unrestricted: actor.IsSuperAdmin,
-		Permissions: permissions, Scope: input.Scope, Records: records, IdempotencyKey: input.IdempotencyKey,
+		Permissions: permissions, Scope: input.Scope, Kind: input.Kind, Records: records, IdempotencyKey: input.IdempotencyKey,
+		Explanation: input.Explanation,
 		Fingerprint: hex.EncodeToString(hash.Sum(nil)), Metadata: metadata})
 }
 
@@ -261,7 +291,14 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input ResubmitInput, metadata audit.Metadata) (Submission, error) {
 	actorID, actorErr := uuid.Parse(actor.ID)
 	submissionID, idErr := uuid.Parse(id)
-	if actorErr != nil || idErr != nil || input.Version < 1 || len(input.Records) == 0 || len(input.Records) > 100 {
+	if input.Kind == "" {
+		input.Kind = SubmissionKindRecords
+	}
+	input.Explanation = strings.TrimSpace(input.Explanation)
+	if actorErr != nil || idErr != nil || input.Version < 1 || len(input.Explanation) > 500 || len(input.Records) > 100 ||
+		(input.Kind != SubmissionKindRecords && input.Kind != SubmissionKindZeroRecord) ||
+		(input.Kind == SubmissionKindRecords && len(input.Records) == 0) ||
+		(input.Kind == SubmissionKindZeroRecord && len(input.Records) != 0) {
 		return Submission{}, ErrInvalidSubmit
 	}
 	records := append([]VersionedRecord(nil), input.Records...)
@@ -289,9 +326,10 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input Re
 		}
 		permissions = effective.Permissions
 	}
-	metadata.ActorID = actorID.String()
+	metadata.ActorID, metadata.Reason = actorID.String(), input.Explanation
 	return s.repository.ResubmitDepartmentBatch(ctx, ResubmitCommand{ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
-		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Records: records, Metadata: metadata})
+		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Kind: input.Kind,
+		Records: records, Explanation: input.Explanation, Metadata: metadata})
 }
 
 func (s *Service) viewAccess(ctx context.Context, actor Actor) (ViewAccess, error) {

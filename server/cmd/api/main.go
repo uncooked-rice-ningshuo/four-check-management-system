@@ -21,6 +21,7 @@ import (
 	"four-check-management-system/server/internal/masterdataimport"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
+	"four-check-management-system/server/internal/reporting"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/store"
 	"four-check-management-system/server/internal/workflow"
@@ -88,6 +89,7 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 		AttendanceMutations:      inspection.NewMutationService(db, manualAttendance, permissionService),
 		Dashboard:                dashboard.NewService(db, academicService, organizationService, permissionService),
 		Workflow:                 workflow.NewService(db, permissionService),
+		Reporting:                reporting.NewService(db, permissionService),
 	}
 }
 

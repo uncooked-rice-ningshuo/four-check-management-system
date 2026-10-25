@@ -4,7 +4,8 @@
 Requires PostgreSQL 16 via Docker (default) or disposable native binaries
 (BROWSER_DB_MODE=native), plus Go, Node 24, MinIO, mc and Google Chrome.
 PLAYWRIGHT_CLI_JS may select a preinstalled official CLI; otherwise npx uses the
-pinned CLI version. Only sanitized results/screenshots remain in output/playwright.
+pinned CLI version. BROWSER_SUITE=weekly-report-summary verifies the report preview.
+Only sanitized results/screenshots remain in output/playwright.
 """
 import datetime
 import base64
@@ -164,6 +165,7 @@ def cli(*args, allow_error=False):
 
 
 processes = []
+service_logs = {}
 container_created = False
 session_open = False
 container = 'four-check-browser-' + RUN_ID
@@ -250,7 +252,9 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
 
 
         def start(args, name, cwd=ROOT):
-            with (temp / (name + '.log')).open('w') as log:
+            log_path = temp / (name + '.log')
+            service_logs[name] = log_path
+            with log_path.open('w') as log:
                 process = subprocess.Popen(args, cwd=cwd, env=ENV, stdout=log, stderr=log)
             processes.append(process)
             return process
@@ -291,6 +295,10 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         # No traces or raw CLI output are retained while entering disposable secrets.
         login = temp / 'login.js'
         login.write_text('''async (page) => {
+  const messageContextWarnings = [];
+  page.on('console', message => {
+    if (message.type() === 'error' && message.text().includes('Static function can not consume context')) messageContextWarnings.push(message.text());
+  });
   await page.getByRole('textbox', {name:'账号', exact:true}).fill('browser-admin');
   await page.getByLabel('密码', {exact:true}).fill(PASSWORD);
   await page.getByRole('button', {name:/登\s*录/}).click();
@@ -300,6 +308,8 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
   await page.getByLabel('确认新密码', {exact:true}).fill(CHANGED);
   await page.getByRole('button', {name:'更新密码'}).click();
   await page.waitForURL('**/login');
+  await page.getByText('密码已更新，请重新登录').waitFor();
+  if (messageContextWarnings.length) throw new Error('Password change emitted an Ant Design static message context warning');
   await page.getByRole('textbox', {name:'账号', exact:true}).fill('browser-admin');
   await page.getByLabel('密码', {exact:true}).fill(CHANGED);
   await page.getByRole('button', {name:/登\s*录/}).click();
@@ -421,6 +431,132 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             report['browserErrors'] += payload.get('browserErrors', [])
             print('PASS: ' + name, flush=True)
             return payload
+
+        if os.environ.get('BROWSER_SUITE') == 'weekly-report-obligation-flow':
+            weekly_report_actors = {
+                'manager': ('reporting-weekly-obligation-manager', '浏览器逐周应交管理员', '10000000-0000-0000-0000-000000000001'),
+                'submitter': ('reporting-weekly-zero-submitter', '浏览器零记录提交人', '10000000-0000-0000-0000-000000000002'),
+                'reviewer': ('reporting-weekly-zero-reviewer', '浏览器零记录审核人', '10000000-0000-0000-0000-000000000002'),
+            }
+            weekly_report_user_ids = {name: str(uuid.uuid4()) for name in weekly_report_actors}
+            account_values = ',\n'.join(
+                f"('{weekly_report_user_ids[name]}'::uuid,'{login_name}','{display_name}','{department_id}'::uuid)"
+                for name, (login_name, display_name, department_id) in weekly_report_actors.items())
+            manager_id, reviewer_id = weekly_report_user_ids['manager'], weekly_report_user_ids['reviewer']
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password,primary_department_id)
+SELECT fixture.account_id,fixture.login_name,fixture.display_name,source.password_hash,'ACTIVE','SYSTEM','MEMBER',false,false,fixture.department_id
+FROM accounts source CROSS JOIN (VALUES {account_values}) AS fixture(account_id,login_name,display_name,department_id)
+WHERE source.login_name='browser-admin';
+INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) VALUES
+ ('{uuid.uuid4()}','{manager_id}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002'),
+ ('{uuid.uuid4()}','{reviewer_id}','10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002');
+INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_view,can_review)
+VALUES('10000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001',true,true,true,true)
+ON CONFLICT(department_id,inspection_type_id) DO UPDATE
+SET enabled=true,can_enter=true,can_view=true,can_review=true;
+""".encode())
+            fixture['weeklyReport'] = {
+                'manager': weekly_report_actors['manager'][0],
+                'submitter': weekly_report_actors['submitter'][0],
+                'reviewer': weekly_report_actors['reviewer'][0],
+                'semesterId': 'b0000000-0000-0000-0000-000000000002',
+                'weekId': 'b0000000-0000-0000-0000-000000000003',
+                'departmentId': '10000000-0000-0000-0000-000000000002',
+                'inspectionTypeId': '30000000-0000-0000-0000-000000000001',
+            }
+            fixture['authPassword'] = changed_password
+            browser_suite('weekly-report-obligation-flow')
+            report['status'] = 'passed'
+            raise SystemExit(0)
+
+        if os.environ.get('BROWSER_SUITE') == 'weekly-report-summary':
+            actor = run(sql_command('-tAc', "SELECT id FROM accounts WHERE login_name='browser-admin'"), text=True).stdout.strip()
+            actor = str(uuid.UUID(actor))
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO department_submissions
+ (id,semester_id,week_id,department_id,inspection_type_id,status,revision_no,created_by,submitted_by,reviewed_by,request_fingerprint,submitted_at,reviewed_at)
+VALUES
+ ('c0000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002','b0000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001','CONFIRMED',2,'{actor}','{actor}','{actor}',repeat('a',64),now(),now()),
+ ('c0000000-0000-0000-0000-000000000004','b0000000-0000-0000-0000-000000000002','b0000000-0000-0000-0000-000000000003',NULL,'30000000-0000-0000-0000-000000000001','CONFIRMED',1,'{actor}','{actor}','{actor}',repeat('b',64),now(),now());
+INSERT INTO department_submission_revisions(id,submission_id,revision_no,submitted_by,record_ids,records_snapshot)
+VALUES
+ ('c0000000-0000-0000-0000-000000000002','c0000000-0000-0000-0000-000000000001',1,'{actor}',ARRAY['c0000000-0000-0000-0000-000000000003'::uuid],'[{{"id":"c0000000-0000-0000-0000-000000000003"}}]'::jsonb),
+ ('c0000000-0000-0000-0000-000000000008','c0000000-0000-0000-0000-000000000001',2,'{actor}',ARRAY['c0000000-0000-0000-0000-000000000003'::uuid,'c0000000-0000-0000-0000-000000000009'::uuid],'[{{"id":"c0000000-0000-0000-0000-000000000003"}},{{"id":"c0000000-0000-0000-0000-000000000009"}}]'::jsonb),
+ ('c0000000-0000-0000-0000-000000000005','c0000000-0000-0000-0000-000000000004',1,'{actor}',ARRAY['c0000000-0000-0000-0000-000000000006'::uuid,'c0000000-0000-0000-0000-000000000007'::uuid],'[{{"id":"c0000000-0000-0000-0000-000000000006"}},{{"id":"c0000000-0000-0000-0000-000000000007"}}]'::jsonb);
+INSERT INTO inspection_records
+ (id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,
+  class_id,class_name_snapshot,grade_snapshot,occurred_at,source,status,submission_id,dedup_key,created_by)
+VALUES
+ ('c0000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002',
+  'b0000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000002','{ids['studentA']}','000001','E2E student A',
+  '{ids['class']}','E2E class','2026级','{fixture['weekStart']} 08:00+08','MANUAL','CONFIRMED','c0000000-0000-0000-0000-000000000001',repeat('d',64),'{actor}'),
+ ('c0000000-0000-0000-0000-000000000009','30000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002',
+  'b0000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000002','{ids['studentB']}','000002','E2E student B',
+  '{ids['class']}','E2E class','2026级','{fixture['weekStart']} 09:00+08','MANUAL','CONFIRMED','c0000000-0000-0000-0000-000000000001',repeat('e',64),'{actor}'),
+ ('c0000000-0000-0000-0000-000000000006','30000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002',
+  'b0000000-0000-0000-0000-000000000003',NULL,'{ids['studentA']}','000001','E2E student A',
+  '{ids['class']}','E2E class','2026级','{fixture['weekStart']} 10:00+08','MANUAL','CONFIRMED','c0000000-0000-0000-0000-000000000004',repeat('f',64),'{actor}'),
+ ('c0000000-0000-0000-0000-000000000007','30000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002',
+  'b0000000-0000-0000-0000-000000000003',NULL,'{ids['studentB']}','000002','E2E student B',
+  '{ids['class']}','E2E class','2026级','{fixture['weekStart']} 11:00+08','MANUAL','CONFIRMED','c0000000-0000-0000-0000-000000000004',repeat('1',64),'{actor}');
+INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier)
+VALUES
+ ('c0000000-0000-0000-0000-000000000003','{ids['course']}',1,'1','{ids['room']}',1),
+ ('c0000000-0000-0000-0000-000000000009','{ids['course']}',1,'2','{ids['room']}',1),
+ ('c0000000-0000-0000-0000-000000000006','{ids['course']}',1,'3','{ids['room']}',1),
+ ('c0000000-0000-0000-0000-000000000007','{ids['course']}',1,'4','{ids['room']}',1);
+""".encode())
+            report_record_id = 'c0000000-0000-0000-0000-000000000010'
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,department_id,occurred_at,source,dedup_key,created_by,remark)
+VALUES ('{report_record_id}','30000000-0000-0000-0000-000000000001','b0000000-0000-0000-0000-000000000002',
+ 'b0000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000002','{fixture['weekStart']} 08:00+08',
+ 'MANUAL',repeat('c',64),'{actor}','weekly report submission-to-summary browser fixture');
+INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier)
+VALUES ('{report_record_id}','{ids['course']}',1,'1','{ids['room']}',1);
+""".encode())
+            fixture['reportingSubmissionRecordId'] = report_record_id
+            reporting_role_users = {
+                'minister': ('reporting-browser-office-minister', str(uuid.uuid4())),
+                'viceMinister': ('reporting-browser-office-vice', str(uuid.uuid4())),
+                'presidium': ('reporting-browser-presidium', str(uuid.uuid4())),
+                'scopedAdmin': ('reporting-browser-scoped-admin', str(uuid.uuid4())),
+                'member': ('reporting-browser-member', str(uuid.uuid4())),
+            }
+            role_user_values = ',\n'.join(
+                f"('{user_id}'::uuid,'{login_name}','{display_name}',{department_id})"
+                for user_id, login_name, display_name, department_id in [
+                    (reporting_role_users['minister'][1], reporting_role_users['minister'][0], '浏览器办公室部长', "'10000000-0000-0000-0000-000000000001'::uuid"),
+                    (reporting_role_users['viceMinister'][1], reporting_role_users['viceMinister'][0], '浏览器办公室副部长', "'10000000-0000-0000-0000-000000000001'::uuid"),
+                    (reporting_role_users['presidium'][1], reporting_role_users['presidium'][0], '浏览器主席团成员', "'10000000-0000-0000-0000-000000000001'::uuid"),
+                    (reporting_role_users['scopedAdmin'][1], reporting_role_users['scopedAdmin'][0], '浏览器指定通报管理员', 'NULL::uuid'),
+                    (reporting_role_users['member'][1], reporting_role_users['member'][0], '浏览器普通成员', 'NULL::uuid'),
+                ]
+            )
+            role_user_ids = reporting_role_users
+            role_sql = f"""
+INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password,primary_department_id)
+SELECT fixture.account_id,fixture.login_name,fixture.display_name,source.password_hash,'ACTIVE','SYSTEM','MEMBER',false,false,fixture.department_id
+FROM accounts source
+CROSS JOIN (VALUES {role_user_values}) AS fixture(account_id,login_name,display_name,department_id)
+WHERE source.login_name='browser-admin';
+INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id)
+VALUES
+ ('{uuid.uuid4()}','{role_user_ids['minister'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002'),
+ ('{uuid.uuid4()}','{role_user_ids['viceMinister'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000003'),
+ ('{uuid.uuid4()}','{role_user_ids['presidium'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001');
+""".encode()
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=role_sql)
+            fixture['reportingRoleUsers'] = {name: login_name for name, (login_name, _) in reporting_role_users.items()}
+            fixture['authPassword'] = changed_password
+            # The calendar regression above intentionally changes week A's
+            # number to 3; restore this report fixture's current week to 1.
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=b"UPDATE semester_weeks SET week_no=1 WHERE id='b0000000-0000-0000-0000-000000000003';")
+            browser_suite('weekly-report-summary')
+            browser_suite('weekly-report-roles')
+            report['status'] = 'passed'
+            raise SystemExit(0)
 
         if os.environ.get('BROWSER_SUITE') == 'session-renewal':
             # Only the disposable signing key and synthetic account are used here.
@@ -637,6 +773,9 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         report['failureType'] = type(error).__name__
         if not isinstance(error, subprocess.CalledProcessError):
             report['failure'] = sanitize(str(error))
+        api_log = service_logs.get('api')
+        if os.environ.get('BROWSER_SUITE') == 'weekly-report-summary' and api_log and api_log.exists():
+            (OUTPUT / 'api-diagnostics.log').write_text(sanitize(api_log.read_text(errors='replace')))
         if session_open and report['cases']:
             try:
                 cli('screenshot')

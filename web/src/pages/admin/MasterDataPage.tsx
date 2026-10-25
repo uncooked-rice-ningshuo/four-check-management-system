@@ -1,7 +1,7 @@
 import { DownloadOutlined, FileExcelOutlined, HistoryOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography, message } from 'antd'
+import { App, Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography } from 'antd'
 import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { MasterDataChange, MasterDataImportBatch, MasterDataImportPreviewRow, MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
@@ -51,6 +51,7 @@ async function getAllEnabledMasterData(referenceKind: MasterDataKind) {
 }
 
 export function MasterDataPage() {
+  const { message } = App.useApp()
   const [kind, setKind] = useState<MasterDataKind>('students')
   const [filters, setFilters] = useState<MasterDataListParams>({})
   const [page, setPage] = useState(1)

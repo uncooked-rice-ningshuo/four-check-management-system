@@ -4,7 +4,7 @@ import { apiRequest } from './httpClient'
 
 vi.mock('./httpClient', async original => ({ ...await original<typeof import('./httpClient')>(), apiRequest: vi.fn() }))
 const request = vi.mocked(apiRequest)
-const user = { accountId: 'user', loginName: '001', studentNo: '001', name: '示例用户', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '' }
+const user = { accountId: 'user', loginName: '001', studentNo: '001', name: '示例用户', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: '', organizationRoleId: '', version: 1 }
 const department = { id: 'department', code: 'TEST', name: '示例部门', enabled: true }
 const role = { id: 'role', code: 'MEMBER', name: '委员', enabled: true, sortOrder: 1 }
 const inspection = { id: 'inspection', code: 'ATTENDANCE', name: '到课率', extensionKind: 'ATTENDANCE', enabled: true, participatesInReport: true, sortOrder: 1 }
@@ -21,7 +21,7 @@ describe('admin read response contracts', () => {
     expect(await getCatalogs()).toEqual({ departments: [], organizationRoles: [], inspectionTypes: [] })
   })
 
-  it.each([null, {}, [null], [{ ...user, name: undefined }], [{ ...user, isSuperAdmin: 'false' }], [{ ...user, systemRole: 'UNKNOWN' }], [{ ...user, accountId: '' }], [user, user]])('rejects malformed users instead of creating an empty or misleading list: %j', async value => {
+  it.each([null, {}, [null], [{ ...user, name: undefined }], [{ ...user, isSuperAdmin: 'false' }], [{ ...user, systemRole: 'UNKNOWN' }], [{ ...user, accountId: '' }], [{ ...user, version: 0 }], [{ ...user, version: undefined }], [user, user]])('rejects malformed users instead of creating an empty or misleading list: %j', async value => {
     request.mockResolvedValue(value)
     await expect(getUsers()).rejects.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' })
   })

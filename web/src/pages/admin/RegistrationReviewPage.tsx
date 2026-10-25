@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
-import { Button, Empty, Input, Modal, Space, Tag, Typography, message } from 'antd'
+import { App, Button, Empty, Input, Modal, Space, Tag, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 import type { User } from '../../entities/user/model/user'
 import { getCatalogs, getPendingRegistrations, reviewRegistration } from '../../shared/api/adminApi'
@@ -12,6 +12,7 @@ type RegistrationFilters = {
 }
 
 export function RegistrationReviewPage() {
+  const { message } = App.useApp()
   const [rejecting, setRejecting] = useState<User | null>(null)
   const [reason, setReason] = useState('')
   const [filters, setFilters] = useState<RegistrationFilters>({})

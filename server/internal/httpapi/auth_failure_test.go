@@ -144,7 +144,7 @@ func TestPasswordVersionConflictIsExplicitForSelfAndAdmin(t *testing.T) {
 	repo.stage = "password-conflict"
 	router := NewRouter(svc, false)
 	for _, path := range []string{"/api/v1/auth/change-password", "/api/v1/admin/users/" + user.ID + "/reset-password"} {
-		response := performJSON(router, http.MethodPost, path, map[string]string{"currentPassword": "InitialPassword123", "newPassword": "ChangedPassword456"}, tokens.AccessToken)
+		response := performJSON(router, http.MethodPost, path, map[string]any{"currentPassword": "InitialPassword123", "newPassword": "ChangedPassword456", "version": 1}, tokens.AccessToken)
 		if response.Code != 409 || !strings.Contains(response.Body.String(), "VERSION_CONFLICT") || response.Header().Get("Set-Cookie") != "" || strings.Contains(response.Body.String(), "temporaryPassword") {
 			t.Fatalf("conflict status=%d body=%s", response.Code, response.Body.String())
 		}
@@ -152,10 +152,10 @@ func TestPasswordVersionConflictIsExplicitForSelfAndAdmin(t *testing.T) {
 
 	for _, operation := range []struct {
 		stage, path string
-		body        map[string]string
+		body        map[string]any
 	}{
-		{"account-conflict", "/api/v1/admin/users/" + user.ID, map[string]string{"studentNo": user.StudentNo, "name": "Updated name", "systemRole": auth.SystemRoleMember}},
-		{"status-conflict", "/api/v1/admin/users/" + user.ID + "/status", map[string]string{"status": auth.StatusDisabled}},
+		{"account-conflict", "/api/v1/admin/users/" + user.ID, map[string]any{"studentNo": user.StudentNo, "name": "Updated name", "systemRole": auth.SystemRoleMember, "version": 1}},
+		{"status-conflict", "/api/v1/admin/users/" + user.ID + "/status", map[string]any{"status": auth.StatusDisabled, "version": 1}},
 	} {
 		repo.stage = operation.stage
 		response := performJSON(router, http.MethodPut, operation.path, operation.body, tokens.AccessToken)
@@ -209,7 +209,7 @@ func TestOrganizationAssignmentMissingConflictAndAuthorization(t *testing.T) {
 	}
 	organizationRepo := &assignmentHTTPRepository{users: []organization.UserAssignment{{AccountID: user.ID, Name: user.Name, Status: user.Status, SystemRole: user.SystemRole}}, writeErr: auth.ErrVersionConflict}
 	router := NewRouter(svc, false, AdminServices{Organization: organization.NewService(organizationRepo)})
-	body := map[string]string{"departmentId": "department", "organizationRoleId": "role"}
+	body := map[string]any{"departmentId": "department", "organizationRoleId": "role", "version": 1}
 	for _, test := range []struct {
 		id, token, code string
 		status          int

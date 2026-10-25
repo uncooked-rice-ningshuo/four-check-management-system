@@ -1,6 +1,7 @@
 async(page)=>{
- const fixture=__FIXTURE__,base=page.url().split('/').slice(0,3).join('/'),errors=[]
+ const fixture=__FIXTURE__,base=page.url().split('/').slice(0,3).join('/'),errors=[],messageContextWarnings=[]
  page.on('pageerror',e=>errors.push(e.message))
+ page.on('console',m=>{if(m.type()==='error'&&m.text().includes('Static function can not consume context'))messageContextWarnings.push(m.text())})
  const check=(ok,message)=>{if(!ok)throw new Error(message)}
  await page.getByRole('button',{name:'重试退出',exact:true}).click()
  await page.getByRole('heading',{name:'欢迎回来',exact:true}).waitFor()
@@ -27,5 +28,6 @@ async(page)=>{
  const rejected=await page.context().request.post(base+'/api/v1/auth/login',{data:{loginName:'browser-admin',password:fixture.authPassword}})
  check(rejected.status()===401&&(await rejected.json()).code==='INVALID_CREDENTIALS','Old password remains usable')
  check(errors.length===0,'Unhandled browser error')
+ check(messageContextWarnings.length===0,`Ant Design static message context warnings: ${messageContextWarnings.length}`)
  return {cases:['故障解除后重试退出成功，原密码仍可登录证明失败改密已回滚','再次改密成功仅一次副作用请求，Cookie清除，新密码登录成功、旧密码401'],browserErrors:errors}
 }

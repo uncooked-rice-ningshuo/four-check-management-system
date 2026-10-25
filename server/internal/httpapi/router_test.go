@@ -351,15 +351,35 @@ func TestSuperAdminCanCreateUpdateDisableAndResetUser(t *testing.T) {
 	if _, err := svc.Login(context.Background(), "24010001", created.TemporaryPassword); err != nil {
 		t.Fatalf("generated credential cannot log in: %v", err)
 	}
-	updated := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID, map[string]any{"studentNo": "24010001", "name": "已修改", "systemRole": "ADMIN"}, tokens.AccessToken)
+	updated := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID, map[string]any{"studentNo": "24010001", "name": "已修改", "systemRole": "ADMIN", "version": 1}, tokens.AccessToken)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
 	}
-	disabled := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID+"/status", map[string]string{"status": "DISABLED"}, tokens.AccessToken)
+	var updatedResult struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &updatedResult); err != nil || updatedResult.Version != 2 {
+		t.Fatalf("update version=%d, error=%v", updatedResult.Version, err)
+	}
+	staleStatus := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID+"/status", map[string]any{"status": "DISABLED", "version": 1}, tokens.AccessToken)
+	if staleStatus.Code != http.StatusConflict || !strings.Contains(staleStatus.Body.String(), "VERSION_CONFLICT") {
+		t.Fatalf("stale status change status=%d body=%s", staleStatus.Code, staleStatus.Body.String())
+	}
+	staleReset := performJSON(router, http.MethodPost, "/api/v1/admin/users/"+created.ID+"/reset-password", map[string]int{"version": 1}, tokens.AccessToken)
+	if staleReset.Code != http.StatusConflict || !strings.Contains(staleReset.Body.String(), "VERSION_CONFLICT") {
+		t.Fatalf("stale password reset status=%d body=%s", staleReset.Code, staleReset.Body.String())
+	}
+	disabled := performJSON(router, http.MethodPut, "/api/v1/admin/users/"+created.ID+"/status", map[string]any{"status": "DISABLED", "version": 2}, tokens.AccessToken)
 	if disabled.Code != http.StatusOK {
 		t.Fatalf("disable status=%d body=%s", disabled.Code, disabled.Body.String())
 	}
-	reset := performJSON(router, http.MethodPost, "/api/v1/admin/users/"+created.ID+"/reset-password", map[string]string{}, tokens.AccessToken)
+	var disabledResult struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(disabled.Body.Bytes(), &disabledResult); err != nil || disabledResult.Version != 3 {
+		t.Fatalf("disabled version=%d, error=%v", disabledResult.Version, err)
+	}
+	reset := performJSON(router, http.MethodPost, "/api/v1/admin/users/"+created.ID+"/reset-password", map[string]int{"version": 3}, tokens.AccessToken)
 	if reset.Code != http.StatusOK {
 		t.Fatalf("reset status=%d body=%s", reset.Code, reset.Body.String())
 	}

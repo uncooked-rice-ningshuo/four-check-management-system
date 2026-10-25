@@ -1,7 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Collapse, Drawer, Empty, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography, message } from 'antd'
+import { App, Button, Collapse, Drawer, Empty, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import type { EffectivePermission, PermissionRule } from '../../entities/permission/model/permission'
 import { createPermissionRule, deletePermissionRule, getAcademicCalendar, getCatalogs, getEffectivePermissions, getMasterData, getPermissionRules, updatePermissionRule } from '../../shared/api/adminApi'
@@ -10,11 +10,12 @@ const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
   ['CONFIGURATION_VIEW', '系统配置查看'],
   ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
-  ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '历史归档查看'],
+  ['REPORT_VIEW', '查看通报汇总'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '历史归档查看'],
 ].map(([value, label]) => ({ value, label }))
 const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value
 
 export function PermissionDetailDrawer({ accountId, userName, departmentId = '', onClose }: { accountId: string; userName: string; departmentId?: string; onClose: () => void }) {
+  const { message } = App.useApp()
   const [editing, setEditing] = useState<PermissionRule | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [form] = Form.useForm<PermissionRule>()
@@ -56,8 +57,19 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
     <ProTable<EffectivePermission> rowKey={(record, index) => `${record.action}-${record.effect}-${index}`} headerTitle="当前生效权限" loading={effective.isLoading} search={false} options={false} pagination={{ pageSize: 8 }} dataSource={effective.data?.permissions ?? []} columns={permissionColumns} locale={{ emptyText: <Empty description="当前没有生效权限" /> }} />
     <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data ?? []} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}权限规则`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} width={720} destroyOnHidden>
-      <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ?? { effect: 'ALLOW', scope: departmentId ? { departmentId } : {}, note: '' }} onFinish={values => save.mutate(values)} preserve={false}>
+      <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ?? { effect: 'ALLOW', scope: departmentId ? { departmentId } : {}, note: '' }} onValuesChange={changedValues => {
+        if (changedValues.action === 'REPORT_FORCE_GENERATE' || changedValues.action === 'REPORT_OBLIGATION_MANAGE') {
+          const scope = form.getFieldValue('scope') ?? {}
+          form.setFieldsValue({ scope: { ...scope, departmentId: undefined, classId: undefined, grade: undefined } })
+        }
+      }} onFinish={values => save.mutate(values)} preserve={false}>
         <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions} /></Form.Item>
+        <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => {
+          if (getFieldValue('action') === 'REPORT_VIEW') return <Typography.Paragraph type="secondary">通报汇总按学年、学期、周次、检查类型和部门范围授权；班级/年级范围不能授权查看部门整组汇总。</Typography.Paragraph>
+          if (getFieldValue('action') === 'REPORT_FORCE_GENERATE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；一般通报权限不会自动包含此权限。此操作作用于整份周通报，只能按学年、学期、周次和检查类型收窄范围。</Typography.Paragraph>
+          if (getFieldValue('action') === 'REPORT_OBLIGATION_MANAGE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；此权限允许维护各周应交部门和检查类型，与日常录入范围分开管理，可按学年、学期、周次和检查类型收窄。</Typography.Paragraph>
+          return null
+        }}</Form.Item>
         <Form.Item name="effect" label="规则效果" rules={[{ required: true }]}><Select options={[{ value: 'ALLOW', label: '允许（补充授权）' }, { value: 'DENY', label: '拒绝（单独限制）' }]} /></Form.Item>
         <Typography.Text strong>适用时间</Typography.Text>
         <Space wrap align="start" style={{ display: 'flex', marginTop: 8 }}>
@@ -66,11 +78,11 @@ export function PermissionDetailDrawer({ accountId, userName, departmentId = '',
           <Form.Item name={['scope', 'weekId']} label="周次"><Select allowClear placeholder="全部周次" style={{ width: 190 }} options={(calendar.data?.weeks ?? []).map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item>
         </Space>
         <Form.Item name={['scope', 'inspectionTypeId']} label="检查类型"><Select allowClear options={(catalogs.data?.inspectionTypes ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Collapse ghost items={[{ key: 'advanced', label: '高级数据范围（部门、班级、年级）', children: <>
+        <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => ['REPORT_FORCE_GENERATE', 'REPORT_OBLIGATION_MANAGE'].includes(getFieldValue('action')) ? null : <Collapse ghost items={[{ key: 'advanced', label: '高级数据范围（部门、班级、年级）', children: <>
           <Form.Item name={['scope', 'departmentId']} label="部门范围" extra="默认使用该用户所属部门；清空代表全部部门，跨部门授权请明确核对。"><Select allowClear placeholder="全部部门" options={(catalogs.data?.departments ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['scope', 'classId']} label="班级范围" help={classes.isError ? '班级选项加载失败，请重试' : undefined}><Select allowClear showSearch optionFilterProp="label" placeholder="全部班级" loading={classes.isLoading} disabled={classes.isError} options={(classes.data ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['scope', 'grade']} label="年级范围"><Input autoComplete="off" placeholder="全部年级" /></Form.Item>
-        </> }]} />
+        </> }]} />}</Form.Item>
         <Form.Item noStyle shouldUpdate>{({ getFieldValue }) => <Typography.Paragraph type="secondary">本规则范围：{scopeText(getFieldValue('scope') ?? {})}。未选择的维度表示全部。</Typography.Paragraph>}</Form.Item>
         <Form.Item name="note" label="授权说明" rules={[{ required: true, message: '请说明设置原因' }]}><Input.TextArea rows={3} maxLength={255} showCount /></Form.Item>
       </Form>

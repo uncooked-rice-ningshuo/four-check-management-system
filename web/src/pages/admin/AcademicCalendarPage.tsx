@@ -24,6 +24,7 @@ export function AcademicCalendarPage() {
   const [weekPage, setWeekPage] = useState(1)
   const [importOpen, setImportOpen] = useState(false)
   const [form] = Form.useForm()
+  const [messageApi, messageContextHolder] = message.useMessage()
   const client = useQueryClient()
   const calendar = useQuery({ queryKey: ['academic-calendar'], queryFn: getAcademicCalendar })
   const save = useMutation({ mutationFn: async (values: CalendarFormValues) => {
@@ -35,8 +36,8 @@ export function AcademicCalendarPage() {
       ['academic-calendar'], ['work-context'], ['academic', 'current-week'], ['course-inspections','context'],
       ['academic', 'calendar', 'override'], ['dashboard', 'workbench'], ['attendance', 'filter-options'],
     ].map(queryKey => client.invalidateQueries({ queryKey })))
-    setModal(null); setEditing(null); form.resetFields(); message.success('配置已保存')
-  }, onError: error => { void message.error(error.message) } })
+    setModal(null); setEditing(null); form.resetFields(); void messageApi.success('配置已保存')
+  }, onError: error => { void messageApi.error(error.message) } })
   const data = calendar.data ?? { academicYears: [], semesters: [], weeks: [] }
   const weekRows = data.weeks.filter(week => {
     const semester = data.semesters.find(item => item.id === week.semesterId)
@@ -53,7 +54,6 @@ export function AcademicCalendarPage() {
   }
   const openCreate = (kind: Exclude<ModalKind, null>) => {
     setEditing(null)
-    form.resetFields()
     setModal(kind)
   }
   const initializeCreateForm = (kind: Exclude<ModalKind, null>) => {
@@ -74,7 +74,6 @@ export function AcademicCalendarPage() {
     setModal(kind)
   }
   const initializeEditForm = (kind: Exclude<ModalKind, null>, record: AcademicYear | Semester | SemesterWeek) => {
-    form.resetFields()
     form.setFieldsValue({ ...record, ...calendarFormDates(record), startYear: kind === 'year' ? Number(displayDate(record.startDate).slice(0, 4)) : undefined, semesterCode: kind === 'semester' ? (record as Semester).code : undefined, startDate: displayDate(record.startDate), endDate: displayDate(record.endDate) })
   }
   const onFormValuesChange = (changed: Record<string, unknown>) => {
@@ -90,7 +89,7 @@ export function AcademicCalendarPage() {
     }
   }
 
-  return <section className="admin-page">
+  return <section className="admin-page">{messageContextHolder}
     <div className="page-heading"><div><Typography.Title level={2}>学期与周次</Typography.Title><Typography.Paragraph>系统初始允许为空；配置后按日期自动识别当前工作周。</Typography.Paragraph></div><Space><Button icon={<CloudUploadOutlined />} onClick={() => setImportOpen(true)} disabled={!data.semesters.length}>导入周次</Button><Button onClick={() => openCreate('week')} disabled={!data.semesters.length}>新增周次</Button><Button onClick={() => openCreate('semester')} disabled={!data.academicYears.length}>新增学期</Button><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Space></div>
     {!calendar.isLoading && data.academicYears.length === 0 && <Card><Empty description="尚未配置学年和学期"><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Empty></Card>}
     {calendar.isError && <Alert type="error" showIcon title="学期周次加载失败" />}

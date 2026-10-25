@@ -24,6 +24,7 @@ import (
 	"four-check-management-system/server/internal/masterdataimport"
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
+	"four-check-management-system/server/internal/reporting"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,7 @@ type AdminServices struct {
 	AttendanceMutations      attendanceMutationHTTPService
 	Dashboard                dashboardHTTPService
 	Workflow                 workflowHTTPService
+	Reporting                reportingHTTPService
 	ImportFiles              importFileHTTPService
 	ImportMaxUploadBytes     int64
 }
@@ -81,6 +83,19 @@ type workflowHTTPService interface {
 	Detail(context.Context, workflow.Actor, string) (workflow.Submission, error)
 }
 
+type reportingHTTPService interface {
+	Periods(context.Context, string) ([]reporting.PeriodOption, error)
+	Summary(context.Context, string, string, string) (reporting.Summary, error)
+	Records(context.Context, string, reporting.RecordsQuery) (reporting.RecordPage, error)
+}
+
+type reportingObligationHTTPService interface {
+	ReportObligationOptions(context.Context, string, reporting.ObligationPeriodQuery) (reporting.ReportObligationOptions, error)
+	ReportObligations(context.Context, string, reporting.ObligationPeriodQuery) ([]reporting.ReportObligation, error)
+	CreateReportObligation(context.Context, string, reporting.CreateReportObligationInput, audit.Metadata) (reporting.ReportObligation, error)
+	RemoveReportObligation(context.Context, string, string, int, audit.Metadata) error
+}
+
 type importFileHTTPService interface {
 	Store(context.Context, storage.StoreInput, audit.Metadata) (storage.File, error)
 	ReadVerified(context.Context, string, audit.Metadata) (storage.File, []byte, error)
@@ -104,38 +119,40 @@ type readinessChecker interface {
 }
 
 type handler struct {
-	auth                     *auth.Service
-	organization             *organization.Service
-	academic                 *academic.Service
-	academicWeekImports      academicWeekImportHTTPService
-	permission               *permission.Service
-	masterData               *masterdata.Service
-	masterDataImports        masterDataImportHTTPService
-	dictionary               *dictionary.Service
-	storage                  *storage.Service
-	postgresReady            readinessChecker
-	objectStorageReady       readinessChecker
-	importJobs               importJobHTTPService
-	importRollback           importRollbackHTTPService
-	attendance               attendanceHTTPService
-	manualAttendance         manualAttendanceHTTPService
-	inspections              inspectionHTTPService
-	inspectionOptions        inspectionOptionHTTPService
-	inspectionContextOptions inspectionContextOptionHTTPService
-	workContext              *academic.WorkContextService
-	attendanceMutations      attendanceMutationHTTPService
-	dashboard                dashboardHTTPService
-	workflow                 workflowHTTPService
-	importFiles              importFileHTTPService
-	importMaxUploadBytes     int64
-	secureCookie             bool
+	auth                       *auth.Service
+	organization               *organization.Service
+	academic                   *academic.Service
+	academicWeekImports        academicWeekImportHTTPService
+	permission                 *permission.Service
+	masterData                 *masterdata.Service
+	masterDataImports          masterDataImportHTTPService
+	dictionary                 *dictionary.Service
+	storage                    *storage.Service
+	postgresReady              readinessChecker
+	objectStorageReady         readinessChecker
+	importJobs                 importJobHTTPService
+	importRollback             importRollbackHTTPService
+	attendance                 attendanceHTTPService
+	manualAttendance           manualAttendanceHTTPService
+	inspections                inspectionHTTPService
+	inspectionOptions          inspectionOptionHTTPService
+	inspectionContextOptions   inspectionContextOptionHTTPService
+	workContext                *academic.WorkContextService
+	attendanceMutations        attendanceMutationHTTPService
+	dashboard                  dashboardHTTPService
+	workflow                   workflowHTTPService
+	reporting                  reportingHTTPService
+	reportingObligationService reportingObligationHTTPService
+	importFiles                importFileHTTPService
+	importMaxUploadBytes       int64
+	secureCookie               bool
 }
 
 func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...AdminServices) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	_ = r.SetTrustedProxies(nil)
-	r.Use(requestMetadataMiddleware(), gin.Recovery())
+	r.Use(requestMetadataMiddleware(), requestLogMiddleware(), gin.Recovery())
 	h := &handler{auth: authService, secureCookie: secureCookie}
 	if len(dependencies) > 0 {
 		h.organization, h.academic, h.permission = dependencies[0].Organization, dependencies[0].Academic, dependencies[0].Permission
@@ -148,6 +165,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.importRollback = dependencies[0].ImportRollback
 		h.dashboard = dependencies[0].Dashboard
 		h.workflow = dependencies[0].Workflow
+		h.reporting = dependencies[0].Reporting
+		h.reportingObligationService, _ = dependencies[0].Reporting.(reportingObligationHTTPService)
 		h.manualAttendance = dependencies[0].ManualAttendance
 		h.inspections = dependencies[0].Inspections
 		h.inspectionOptions = dependencies[0].InspectionOptions
@@ -245,6 +264,13 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.POST("/department-submissions/:id/return", h.returnDepartmentBatch)
 	v1.POST("/department-submissions/:id/confirm", h.confirmDepartmentBatch)
 	v1.POST("/department-submissions/:id/resubmit", h.resubmitDepartmentBatch)
+	v1.GET("/reports/periods", h.reportPeriods)
+	v1.GET("/reports/summary", h.reportSummary)
+	v1.GET("/reports/records", h.reportRecords)
+	v1.GET("/reports/obligation-options", h.reportObligationOptions)
+	v1.GET("/reports/obligations", h.reportObligations)
+	v1.POST("/reports/obligations", h.createReportObligation)
+	v1.DELETE("/reports/obligations/:id", h.removeReportObligation)
 	v1.GET("/inspections/attendance/:id", h.attendanceDetail)
 	v1.PATCH("/inspections/attendance/:id", h.updateAttendance)
 	v1.DELETE("/inspections/attendance/:id", h.deleteAttendance)
@@ -511,25 +537,36 @@ func (h *handler) updateUser(c *gin.Context) {
 	var in auth.AdminUpdateUserInput
 	if bind(c, &in) {
 		result, err := h.auth.AdminUpdateUser(c, c.MustGet("account").(auth.Account), c.Param("id"), in, requestMetadata(c, ""))
-		writeResult(c, publicAccount(result), err)
+		response := publicAccount(result)
+		response["version"] = result.SessionVersion + 1
+		writeResult(c, response, err)
 	}
 }
 func (h *handler) updateUserStatus(c *gin.Context) {
 	var in struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		Version int    `json:"version"`
 	}
 	if bind(c, &in) {
-		result, err := h.auth.AdminSetUserStatus(c, c.MustGet("account").(auth.Account), c.Param("id"), in.Status, requestMetadata(c, ""))
-		writeResult(c, publicAccount(result), err)
+		result, err := h.auth.AdminSetUserStatus(c, c.MustGet("account").(auth.Account), c.Param("id"), in.Status, in.Version, requestMetadata(c, ""))
+		response := publicAccount(result)
+		response["version"] = result.SessionVersion + 1
+		writeResult(c, response, err)
 	}
 }
 func (h *handler) resetUserPassword(c *gin.Context) {
+	var in struct {
+		Version int `json:"version"`
+	}
+	if !bind(c, &in) {
+		return
+	}
 	password, err := auth.NewTemporaryPassword()
 	if err != nil {
 		writeResult(c, nil, err)
 		return
 	}
-	if err := h.auth.AdminResetPassword(c, c.MustGet("account").(auth.Account), c.Param("id"), password, requestMetadata(c, "")); err != nil {
+	if err := h.auth.AdminResetPassword(c, c.MustGet("account").(auth.Account), c.Param("id"), password, in.Version, requestMetadata(c, "")); err != nil {
 		writeResult(c, nil, err)
 		return
 	}
@@ -1500,19 +1537,23 @@ func (h *handler) requireHygieneAreaManage() gin.HandlerFunc {
 func (h *handler) currentAccount(c *gin.Context) (auth.Account, bool) {
 	header := c.GetHeader("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
+		logRequestStage(c, "authentication", "missing_token")
 		writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "请先登录")
 		return auth.Account{}, false
 	}
 	a, err := h.auth.AuthenticateAccessToken(c, strings.TrimPrefix(header, "Bearer "))
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidAccessToken) {
+			logRequestStage(c, "authentication", "invalid_token")
 			writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "登录状态已失效")
 		} else {
+			logRequestStage(c, "authentication", "service_error")
 			writeAuthServiceError(c, err)
 		}
 		return auth.Account{}, false
 	}
 	c.Set("account", a)
+	logRequestStage(c, "authentication", "succeeded")
 	return a, true
 }
 
@@ -1570,6 +1611,14 @@ func writeDomainError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, auth.ErrVersionConflict) {
 		writeError(c, http.StatusConflict, "VERSION_CONFLICT", "账号状态已变化，请刷新后重试")
+		return
+	}
+	if errors.Is(err, permission.ErrForceGenerateRoleRequired) {
+		writeError(c, http.StatusBadRequest, "REPORT_FORCE_GENERATE_ROLE_REQUIRED", "该权限仅可单独授予学生会办公室部长或副部长")
+		return
+	}
+	if errors.Is(err, permission.ErrReportObligationRoleRequired) {
+		writeError(c, http.StatusBadRequest, "REPORT_OBLIGATION_MANAGER_ROLE_REQUIRED", "逐周应交范围管理权限仅可单独授予学生会办公室部长或副部长")
 		return
 	}
 	switch {

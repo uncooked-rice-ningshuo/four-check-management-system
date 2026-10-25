@@ -56,10 +56,15 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.public_dormitory_hygiene_details') IS NOT NULL
 		AND to_regclass('public.department_submissions') IS NOT NULL
 		AND to_regclass('public.department_submission_revisions') IS NOT NULL
+		AND to_regclass('public.weekly_report_obligations') IS NOT NULL
 		AND to_regclass('public.master_data_import_batches') IS NOT NULL
 		AND to_regclass('public.academic_week_import_batches') IS NOT NULL
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')
 			AND tgname='department_submission_revisions_append_only' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submissions')
+			AND tgname='department_submissions_submission_kind_immutable' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submissions' AND column_name='submission_kind')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submission_revisions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='files' AND column_name='object_removed_at')`).Scan(&ready)
 	if err != nil {
@@ -678,7 +683,8 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 	err := p.Pool.QueryRow(ctx, `SELECT a.id,a.system_role,COALESCE(a.primary_department_id::text,''),
 		COALESCE(d.code,''),COALESCE(r.code,'') FROM accounts a
 		LEFT JOIN departments d ON d.id=a.primary_department_id
-		LEFT JOIN user_org_roles ur ON ur.account_id=a.id AND (ur.start_at IS NULL OR ur.start_at<=CURRENT_DATE) AND (ur.end_at IS NULL OR ur.end_at>=CURRENT_DATE)
+		LEFT JOIN user_org_roles ur ON ur.account_id=a.id AND ur.department_id=a.primary_department_id
+			AND (ur.start_at IS NULL OR ur.start_at<=CURRENT_DATE) AND (ur.end_at IS NULL OR ur.end_at>=CURRENT_DATE)
 		LEFT JOIN organization_roles r ON r.id=ur.organization_role_id
 		WHERE a.id=$1`, accountID).Scan(&profile.AccountID, &profile.SystemRole, &profile.DepartmentID, &profile.DepartmentCode, &profile.OrganizationRoleCode)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -687,20 +693,26 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 	if err != nil {
 		return profile, err
 	}
-	rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_review,can_export,can_summarize,enabled
-		FROM department_inspection_scopes WHERE department_id=$1`, profile.DepartmentID)
-	if err != nil {
-		return profile, err
-	}
-	for rows.Next() {
-		var value permission.DepartmentScope
-		if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanReview, &value.CanExport, &value.CanSummarize, &value.Enabled); err != nil {
+	if profile.DepartmentID != "" {
+		rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_review,can_export,can_summarize,enabled
+			FROM department_inspection_scopes WHERE department_id=$1::uuid`, profile.DepartmentID)
+		if err != nil {
+			return profile, err
+		}
+		for rows.Next() {
+			var value permission.DepartmentScope
+			if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanReview, &value.CanExport, &value.CanSummarize, &value.Enabled); err != nil {
+				rows.Close()
+				return profile, err
+			}
+			profile.DepartmentScopes = append(profile.DepartmentScopes, value)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
 			return profile, err
 		}
-		profile.DepartmentScopes = append(profile.DepartmentScopes, value)
+		rows.Close()
 	}
-	rows.Close()
 	profile.Rules, err = p.ListRules(ctx, accountID)
 	return profile, err
 }

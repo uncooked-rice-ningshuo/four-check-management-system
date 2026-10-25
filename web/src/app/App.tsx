@@ -22,9 +22,11 @@ import { DormitoryHygienePage } from '../pages/inspection/DormitoryHygienePage'
 import { UnattendedClassroomPage } from '../pages/inspection/UnattendedClassroomPage'
 import { InspectionTypeRoute } from './router/InspectionTypeRoute'
 import { AttendancePage } from '../pages/inspection/AttendancePage'
+import { WeeklyReportSummaryPage } from '../pages/report/WeeklyReportSummaryPage'
 import { AppLayout } from './layouts/AppLayout'
 import { ProtectedRoute } from './router/ProtectedRoute'
 import { SuperAdminOnly, SuperAdminRoute } from './router/SuperAdminRoute'
+import { EffectivePermissionRoute } from './router/EffectivePermissionRoute'
 
 const protectedPage = (page: ReactNode) => <ProtectedRoute>{page}</ProtectedRoute>
 const superAdminOnly = (page: ReactNode) => <SuperAdminOnly>{page}</SuperAdminOnly>
@@ -49,6 +51,7 @@ export default function App() {
 				<Route path="security" element={<AccountSecurityPage />} />
 			</Route>
 			<Route path="inspections/attendance" element={<InspectionTypeRoute typeCode="ATTENDANCE_RATE"><AttendancePage /></InspectionTypeRoute>} />
+			<Route path="reports/weekly-summary" element={<EffectivePermissionRoute action="REPORT_VIEW"><WeeklyReportSummaryPage /></EffectivePermissionRoute>} />
 			<Route path="admin/hygiene-areas" element={<HygieneAreaPage />} />
 			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
 			<Route path="inspections/morning-attendance" element={<InspectionTypeRoute typeCode="MORNING_ATTENDANCE"><MorningAttendancePage /></InspectionTypeRoute>} />

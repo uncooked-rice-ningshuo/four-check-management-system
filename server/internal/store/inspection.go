@@ -74,6 +74,9 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 		return "((" + owner + " AND " + action(permission.ActionInspectionEnter) + ") OR " + action(permission.ActionInspectionManage) + ")"
 	}
 	personal := one("ir.class_id", "ir.grade_snapshot")
+	if mode == "read" && a.ReportScopeValidated {
+		return personal
+	}
 	responsible := one("rc.class_id", "rc.grade_snapshot")
 	return "((ir.class_id IS NOT NULL AND " + personal + ") OR (ir.class_id IS NULL AND EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id) AND NOT EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND NOT (" + responsible + "))))"
 }
@@ -286,6 +289,12 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 			args = append(args, filter.value)
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
+	}
+	if f.ConfirmedSubmissionOnly {
+		where += ` AND ir.status='CONFIRMED' AND EXISTS(
+ SELECT 1 FROM department_submissions ds
+ JOIN department_submission_revisions rev ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
+ WHERE ds.id=ir.submission_id AND ds.status='CONFIRMED' AND ir.id=ANY(rev.record_ids))`
 	}
 	if f.CollegeOnly {
 		where += " AND ir.department_id IS NULL"

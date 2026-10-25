@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { App as AntDesignApp } from 'antd'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -20,10 +21,10 @@ it.each(['initial','security'])('keeps %s password inputs on failure and ends th
  })
  vi.stubGlobal('fetch',fetchMock)
  const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
- render(<QueryClientProvider client={client}><AuthProvider><MemoryRouter initialEntries={['/change']}><Routes>
+ render(<AntDesignApp><QueryClientProvider client={client}><AuthProvider><MemoryRouter initialEntries={['/change']}><Routes>
   <Route path="/change" element={<ProtectedRoute>{kind==='initial'?<ChangePasswordPage/>:<AccountSecurityPage/>}</ProtectedRoute>}/>
   <Route path="/login" element={<div>重新登录</div>}/>
- </Routes></MemoryRouter></AuthProvider></QueryClientProvider>)
+ </Routes></MemoryRouter></AuthProvider></QueryClientProvider></AntDesignApp>)
  await screen.findByLabelText('当前密码')
  client.setQueryData(['private-fixture'],{name:'cached sensitive data'})
  for(const [label,value] of [['当前密码','InitialPassword123'],['新密码','ChangedPassword456'],['确认新密码','ChangedPassword456']])fireEvent.change(screen.getByLabelText(label),{target:{value}})
@@ -34,6 +35,7 @@ it.each(['initial','security'])('keeps %s password inputs on failure and ends th
  fail=false
  fireEvent.click(screen.getByRole('button',{name:kind==='initial'?/更新密码$/:/更新密码并重新登录$/}))
  await screen.findByText('重新登录')
+ if(kind==='initial')await screen.findByText('密码已更新，请重新登录')
  expect(client.getQueryData(['private-fixture'])).toBeUndefined()
  await waitFor(()=>expect(fetchMock.mock.calls.filter(([input])=>String(input).endsWith('/auth/logout'))).toHaveLength(0))
 })
@@ -48,7 +50,7 @@ it.each(['initial','security'])('blocks duplicate %s password submissions while 
   throw new Error('Unexpected path')
  })
  vi.stubGlobal('fetch',fetchMock)
- render(<QueryClientProvider client={new QueryClient()}><AuthProvider><MemoryRouter>{kind==='initial'?<ChangePasswordPage/>:<AccountSecurityPage/>}</MemoryRouter></AuthProvider></QueryClientProvider>)
+ render(<AntDesignApp><QueryClientProvider client={new QueryClient()}><AuthProvider><MemoryRouter>{kind==='initial'?<ChangePasswordPage/>:<AccountSecurityPage/>}</MemoryRouter></AuthProvider></QueryClientProvider></AntDesignApp>)
  await waitFor(()=>expect(fetchMock.mock.calls.some(([input])=>String(input).endsWith('/auth/me'))).toBe(true))
  for(const [label,value] of [['当前密码','InitialPassword123'],['新密码','ChangedPassword456'],['确认新密码','ChangedPassword456']])fireEvent.change(screen.getByLabelText(label),{target:{value}})
  const form=screen.getByLabelText('当前密码').closest('form');if(!form)throw new Error('Password form missing')

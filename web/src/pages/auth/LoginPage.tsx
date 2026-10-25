@@ -1,5 +1,5 @@
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
-import { Alert, Button, Form, Input, Typography, message } from 'antd'
+import { App, Alert, Button, Form, Input, Typography } from 'antd'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import type { User } from '../../entities/user/model/user'
@@ -7,6 +7,7 @@ import { useAuth } from '../../app/providers/authContext'
 import { AuthLayout } from '../../shared/layouts/AuthLayout'
 
 export function LoginPage() {
+  const { message } = App.useApp()
   const { signIn, loading, recoveryError, recoverSession } = useAuth(); const navigate = useNavigate(); const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
   const finishLogin = (user: User) => {

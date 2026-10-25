@@ -97,7 +97,10 @@ func TestImportRollbackPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	unchanged()
-	exec(`UPDATE inspection_records SET row_version=1,submission_id=$2 WHERE id=$1`, id, uuid.NewString())
+	submissionID := uuid.NewString()
+	exec(`INSERT INTO department_submissions(id,semester_id,week_id,department_id,inspection_type_id,created_by,request_fingerprint)
+			VALUES($1,$2,$3,$4,$5,$6,repeat('a',64))`, submissionID, fixture.semesterID, fixture.weekID, integrationDepartmentID, integrationInspectionTypeID, fixture.accountID)
+	exec(`UPDATE inspection_records SET row_version=1,submission_id=$2 WHERE id=$1`, id, submissionID)
 	if _, err = service.Rollback(ctx, actor, input, audit.Metadata{}); !errors.Is(err, importjob.ErrRollbackUnsafe) {
 		t.Fatal(err)
 	}

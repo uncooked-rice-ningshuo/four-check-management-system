@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"four-check-management-system/server/internal/audit"
+	"four-check-management-system/server/internal/auth"
 	"github.com/google/uuid"
 )
 
@@ -50,8 +51,9 @@ type DepartmentInspectionScope struct {
 }
 
 type UserAssignment struct {
-	// SessionVersion is loaded internally for atomic assignment writes, never accepted from JSON.
+	// SessionVersion is the internal authentication epoch; Version is its one-based client concurrency token.
 	SessionVersion     int    `json:"-"`
+	Version            int    `json:"version"`
 	AccountID          string `json:"accountId"`
 	LoginName          string `json:"loginName"`
 	StudentNo          string `json:"studentNo"`
@@ -186,6 +188,9 @@ func (s *Service) ListUsers(ctx context.Context) ([]UserAssignment, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range users {
+		users[i].Version = users[i].SessionVersion + 1
+	}
 	return nonNil(users), nil
 }
 
@@ -207,10 +212,18 @@ func (s *Service) AssignUserRole(ctx context.Context, assignment UserAssignment,
 	if before == nil {
 		return ErrUserNotFound
 	}
+	if assignment.Version <= 0 {
+		return ErrInvalidInput
+	}
+	if assignment.Version != before.SessionVersion+1 {
+		return auth.ErrVersionConflict
+	}
 	// Only department and organization role are writable here; audit account fields
 	// must describe the stored account rather than untrusted client display values.
+	before.Version = before.SessionVersion + 1
 	after := *before
 	after.DepartmentID, after.OrganizationRoleID = assignment.DepartmentID, assignment.OrganizationRoleID
+	after.Version++
 	return s.repository.AssignUserRole(ctx, after, organizationMutation(metadata, "userAssignment", after.AccountID, *before, after))
 }
 

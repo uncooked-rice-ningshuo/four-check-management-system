@@ -20,6 +20,7 @@ function inspection(value: unknown): value is InspectionType {
 function user(value: unknown): value is UserAssignment {
   return object(value) && strings(value, ['accountId', 'loginName', 'studentNo', 'name', 'status', 'departmentId', 'organizationRoleId'])
     && typeof value.accountId === 'string' && value.accountId.trim() !== ''
+    && typeof value.version === 'number' && Number.isSafeInteger(value.version) && value.version > 0
     && (value.systemRole === 'SUPER_ADMIN' || value.systemRole === 'ADMIN' || value.systemRole === 'MEMBER')
     && typeof value.isSuperAdmin === 'boolean' && typeof value.mustChangePassword === 'boolean'
 }

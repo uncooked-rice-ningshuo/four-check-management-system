@@ -1,5 +1,7 @@
+import { StrictMode } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ConfigProvider } from 'antd'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { WorkContextBar } from './WorkContextBar'
 import { getWorkContext, setWorkContext } from '../../shared/api/workContextClient'
@@ -14,6 +16,22 @@ it('shows loading and an empty teaching week without a management button', async
   expect(screen.getByRole('status')).toBeInTheDocument()
   expect(await screen.findByText('当前无有效教学周，请选择工作范围')).toBeInTheDocument()
   expect(screen.queryByText('设置临时工作周')).not.toBeInTheDocument()
+})
+it('keeps the manager form connected when opening the temporary-week editor', async () => {
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    vi.mocked(getWorkContext).mockResolvedValue({ week: null, source: 'NONE', version: 1 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(<StrictMode><ConfigProvider theme={{ token: { colorPrimary: '#0b5cad' } }}><QueryClientProvider client={client}><WorkContextBar canManage /></QueryClientProvider></ConfigProvider></StrictMode>)
+    fireEvent.click(await screen.findByRole('button', { name: '设置临时工作周' }))
+    expect(await screen.findByRole('combobox', { name: '目标周次' })).toBeInTheDocument()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const formWarnings = consoleError.mock.calls.map(call => call.map(String).join(' '))
+      .filter(text => text.includes('Instance created by `useForm` is not connected'))
+    expect(formWarnings).toEqual([])
+  } finally {
+    consoleError.mockRestore()
+  }
 })
 it('shows an actionable read failure', async () => {
   vi.mocked(getWorkContext).mockRejectedValue(new Error('failure'))

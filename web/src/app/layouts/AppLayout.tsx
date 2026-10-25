@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   EnvironmentOutlined,
+  FileTextOutlined,
   BuildOutlined,
   AppstoreOutlined,
   BookOutlined,
@@ -82,7 +83,10 @@ export function AppLayout() {
     ...(canViewType(lateReturnContext.data?.inspectionTypeId) ? [{ key: '/inspections/late-return', icon: <MoonOutlined />, label: <Link to="/inspections/late-return">晚归</Link> }] : []),
     ...(canViewType(publicHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/public-dormitory-hygiene', icon: <EnvironmentOutlined />, label: <Link to="/inspections/public-dormitory-hygiene">公共宿舍卫生</Link> }] : []),
   ]
-  const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems]
+  const reportItems = user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'REPORT_VIEW')
+    ? [{ key: '/reports/weekly-summary', icon: <FileTextOutlined />, label: <Link to="/reports/weekly-summary">数据汇总与统计</Link> }]
+    : []
+  const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems]
   const menuItems: NonNullable<MenuProps['items']> = [workbenchItem]
   if (basicItems.length === 1) menuItems.push(basicItems[0])
   if (basicItems.length > 1) menuItems.push({ key: 'basic', icon: <AppstoreOutlined />, label: '基础功能', children: basicItems })
@@ -90,12 +94,14 @@ export function AppLayout() {
   if (configurationItems.length > 1) menuItems.push({ key: 'configuration', icon: <SettingOutlined />, label: '系统配置', children: configurationItems })
   if (visibleInspectionItems.length === 1) menuItems.push(visibleInspectionItems[0])
   if (visibleInspectionItems.length > 1) menuItems.push({ key: 'inspections', icon: <CheckSquareOutlined />, label: '日常检查', children: visibleInspectionItems })
+  if (reportItems.length) menuItems.push({ key: 'reports', icon: <FileTextOutlined />, label: '通报管理', children: reportItems })
   const selectedKey = location.pathname === '/'
     ? '/'
     : navItems.find(item => item.key !== '/' && location.pathname.startsWith(item.key))?.key
   const selectedParent = basicItems.length > 1 && basicItems.some(item => item.key === selectedKey) ? 'basic'
     : configurationItems.length > 1 && configurationItems.some(item => item.key === selectedKey) ? 'configuration'
-      : visibleInspectionItems.length > 1 && visibleInspectionItems.some(item => item.key === selectedKey) ? 'inspections' : undefined
+      : visibleInspectionItems.length > 1 && visibleInspectionItems.some(item => item.key === selectedKey) ? 'inspections'
+        : reportItems.some(item => item.key === selectedKey) ? 'reports' : undefined
   const menuSignature = `${selectedKey ?? ''}:${selectedParent ?? ''}`
   const openKeys = openMenuState.signature === menuSignature ? openMenuState.keys : selectedParent ? [selectedParent] : []
   const accountItems = [

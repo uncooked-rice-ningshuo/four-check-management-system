@@ -26,7 +26,7 @@ func (h *handler) submitDepartmentBatch(c *gin.Context) {
 	if !bindInspection(c, &input) {
 		return
 	}
-	result, err := h.workflow.Submit(c, workflow.Actor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}, input, requestMetadata(c, ""))
+	result, err := h.workflow.Submit(c, workflow.Actor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}, input, requestMetadata(c, input.Explanation))
 	switch {
 	case err == nil:
 		c.JSON(http.StatusCreated, result)
@@ -169,7 +169,7 @@ func (h *handler) resubmitDepartmentBatch(c *gin.Context) {
 	if !bindInspection(c, &input) {
 		return
 	}
-	result, err := h.workflow.Resubmit(c, workflow.Actor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}, c.Param("id"), input, requestMetadata(c, ""))
+	result, err := h.workflow.Resubmit(c, workflow.Actor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}, c.Param("id"), input, requestMetadata(c, input.Explanation))
 	switch {
 	case err == nil:
 		c.JSON(http.StatusOK, result)

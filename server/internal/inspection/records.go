@@ -96,18 +96,19 @@ type InspectionContext struct {
 
 // InspectionFilter supports bounded, structured list queries.
 type InspectionFilter struct {
-	CollegeOnly      bool   `form:"-"`
-	SemesterID       string `form:"semesterId"`
-	WeekID           string `form:"weekId"`
-	InspectionTypeID string `form:"inspectionTypeId"`
-	DepartmentID     string `form:"departmentId"`
-	ClassID          string `form:"classId"`
-	Grade            string `form:"grade"`
-	Status           string `form:"status"`
-	Source           string `form:"source"`
-	Sort             string `form:"sort"`
-	Page             int    `form:"page"`
-	PageSize         int    `form:"pageSize"`
+	CollegeOnly             bool   `form:"-"`
+	ConfirmedSubmissionOnly bool   `form:"-"`
+	SemesterID              string `form:"semesterId"`
+	WeekID                  string `form:"weekId"`
+	InspectionTypeID        string `form:"inspectionTypeId"`
+	DepartmentID            string `form:"departmentId"`
+	ClassID                 string `form:"classId"`
+	Grade                   string `form:"grade"`
+	Status                  string `form:"status"`
+	Source                  string `form:"source"`
+	Sort                    string `form:"sort"`
+	Page                    int    `form:"page"`
+	PageSize                int    `form:"pageSize"`
 }
 type InspectionPage struct {
 	Items    []InspectionRecord `json:"items"`

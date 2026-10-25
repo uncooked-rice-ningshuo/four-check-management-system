@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"four-check-management-system/server/internal/audit"
@@ -20,6 +21,7 @@ func (m *memoryRepository) ListRules(context.Context, string) ([]Rule, error) {
 }
 func (m *memoryRepository) CreateRule(_ context.Context, rule Rule, mutation audit.Mutation) (Rule, error) {
 	m.mutations = append(m.mutations, mutation)
+	m.profile.Rules = append(m.profile.Rules, rule)
 	return rule, nil
 }
 func (m *memoryRepository) UpdateRule(_ context.Context, rule Rule, mutation audit.Mutation) (Rule, error) {
@@ -31,7 +33,7 @@ func (m *memoryRepository) DeleteRule(_ context.Context, _, _ string, mutation a
 	return nil
 }
 
-func TestSuperAdminReceivesEveryActionWithSystemSource(t *testing.T) {
+func TestSuperAdminReceivesGeneralActionsWithSystemSource(t *testing.T) {
 	svc := NewService(&memoryRepository{profile: AccessProfile{AccountID: "admin", SystemRole: SystemRoleSuperAdmin}})
 	result, err := svc.Effective(context.Background(), "admin")
 	if err != nil {
@@ -75,6 +77,136 @@ func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
 		if !result.Allowed(action, Scope{}) {
 			t.Errorf("missing %s in %+v", action, result.Permissions)
 		}
+	}
+}
+
+func TestOfficeLeadershipCanReceiveSeparatelyConfiguredForceGeneratePermission(t *testing.T) {
+	profile := AccessProfile{AccountID: "office-deputy", SystemRole: SystemRoleMember,
+		DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}
+	repository := &memoryRepository{profile: profile}
+	service := NewService(repository)
+	defaultPermissions, err := service.Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultPermissions.Allowed("REPORT_FORCE_GENERATE", Scope{}) {
+		t.Fatal("office leadership must not inherit force generation without a separate rule")
+	}
+
+	created, err := service.CreateRule(context.Background(), "admin", Rule{
+		AccountID: profile.AccountID, Action: "REPORT_FORCE_GENERATE", Effect: EffectAllow,
+		Note: "值班负责人单独授权",
+	})
+	if err != nil {
+		t.Fatalf("create separately configured force permission: %v", err)
+	}
+	if created.Action != "REPORT_FORCE_GENERATE" || created.Effect != EffectAllow {
+		t.Fatalf("created rule = %+v", created)
+	}
+	effectivePermissions, err := service.Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !effectivePermissions.Allowed(ActionReportForceGenerate, Scope{}) {
+		t.Fatalf("separately configured force permission was not effective: %+v", effectivePermissions.Permissions)
+	}
+	if len(repository.mutations) != 1 || repository.mutations[0].Entry.Action != audit.ActionPermissionRuleChanged {
+		t.Fatalf("permission audit mutations = %+v", repository.mutations)
+	}
+}
+
+func TestForceGeneratePermissionRejectsAccountsOutsideOfficeLeadership(t *testing.T) {
+	for _, profile := range []AccessProfile{
+		{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER"},
+		{AccountID: "other-minister", SystemRole: SystemRoleMember, DepartmentCode: "STUDY", OrganizationRoleCode: "MINISTER"},
+		{AccountID: "superadmin", SystemRole: SystemRoleSuperAdmin},
+	} {
+		_, err := NewService(&memoryRepository{profile: profile}).CreateRule(context.Background(), "admin", Rule{
+			AccountID: profile.AccountID, Action: "REPORT_FORCE_GENERATE", Effect: EffectAllow,
+		})
+		if err == nil || errors.Is(err, ErrInvalidRule) {
+			t.Fatalf("force permission for %s should fail with an eligibility error, got %v", profile.AccountID, err)
+		}
+	}
+}
+
+func TestUpdateRuleCannotGrantForcePermissionToIneligibleAccount(t *testing.T) {
+	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember,
+		DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER",
+		Rules: []Rule{{ID: "existing-rule", AccountID: "member", Action: ActionReportView, Effect: EffectAllow, Enabled: true}}}
+	_, err := NewService(&memoryRepository{profile: profile}).UpdateRule(context.Background(), Rule{
+		ID: "existing-rule", AccountID: profile.AccountID,
+		Action: "REPORT_FORCE_GENERATE", Effect: EffectAllow,
+	})
+	if err == nil || errors.Is(err, ErrInvalidRule) {
+		t.Fatalf("ineligible target update should fail with an eligibility error, got %v", err)
+	}
+}
+
+func TestForceGeneratePermissionCannotBeLimitedToDepartmentOrClass(t *testing.T) {
+	profile := AccessProfile{AccountID: "office-vice", SystemRole: SystemRoleMember,
+		DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}
+	for _, scope := range []Scope{
+		{DepartmentID: "office"},
+		{ClassID: "class-1"},
+		{Grade: "2026"},
+	} {
+		_, err := NewService(&memoryRepository{profile: profile}).CreateRule(context.Background(), "admin", Rule{
+			AccountID: profile.AccountID, Action: "REPORT_FORCE_GENERATE", Effect: EffectAllow, Scope: scope,
+		})
+		if !errors.Is(err, ErrInvalidRule) {
+			t.Fatalf("force permission with unsupported scope %+v should be invalid, got %v", scope, err)
+		}
+	}
+}
+
+func TestForceGeneratePermissionIsNotImplicitForSuperAdmin(t *testing.T) {
+	result, err := NewService(&memoryRepository{profile: AccessProfile{
+		AccountID: "superadmin", SystemRole: SystemRoleSuperAdmin,
+	}}).Effective(context.Background(), "superadmin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed("REPORT_FORCE_GENERATE", Scope{}) {
+		t.Fatal("force generation must remain separately configured even for the super admin")
+	}
+}
+
+func TestForceGenerateGrantStopsWorkingWhenOfficeLeadershipChanges(t *testing.T) {
+	for _, testCase := range []struct {
+		name             string
+		departmentCode   string
+		organizationRole string
+	}{
+		{name: "loses office leadership", departmentCode: "OFFICE", organizationRole: "MEMBER"},
+		{name: "moves to another department", departmentCode: "STUDY", organizationRole: "MINISTER"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repository := &memoryRepository{profile: AccessProfile{
+				AccountID: "office-deputy", SystemRole: SystemRoleMember,
+				DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER",
+				Rules: []Rule{{AccountID: "office-deputy", Action: ActionReportForceGenerate, Effect: EffectAllow, Enabled: true}},
+			}}
+			service := NewService(repository)
+
+			beforeChange, err := service.Effective(context.Background(), repository.profile.AccountID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !beforeChange.Allowed(ActionReportForceGenerate, Scope{}) {
+				t.Fatal("eligible office leadership should retain the separately configured grant")
+			}
+
+			repository.profile.DepartmentCode = testCase.departmentCode
+			repository.profile.OrganizationRoleCode = testCase.organizationRole
+			afterChange, err := service.Effective(context.Background(), repository.profile.AccountID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if afterChange.Allowed(ActionReportForceGenerate, Scope{}) {
+				t.Fatal("stored grant must stop being effective after office leadership eligibility changes")
+			}
+		})
 	}
 }
 

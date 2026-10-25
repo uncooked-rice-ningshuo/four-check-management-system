@@ -1,10 +1,11 @@
 import { PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { App, Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 import type { UserAssignment } from '../../entities/organization/model/organization'
 import { assignUserRole, createUser, getCatalogs, getUsers, resetUserPassword, updateUser, updateUserStatus } from '../../shared/api/adminApi'
+import { ApiError } from '../../shared/api/httpClient'
 import { PermissionDetailDrawer } from './PermissionDetailPage'
 
 type UserFormValues = { studentNo: string; name: string; systemRole: 'ADMIN' | 'MEMBER'; departmentId?: string; organizationRoleId?: string }
@@ -17,8 +18,10 @@ type UserFilterValues = {
 }
 
 export function UserManagementPage() {
+  const { message } = App.useApp()
   const [filters, setFilters] = useState<UserFilterValues>({})
   const [editing, setEditing] = useState<UserAssignment | null>(null)
+  const [editVersionConflict, setEditVersionConflict] = useState(false)
   const [userModal, setUserModal] = useState(false)
   const [resetting, setResetting] = useState<UserAssignment | null>(null)
   const [permissionUser, setPermissionUser] = useState<UserAssignment | null>(null)
@@ -36,19 +39,23 @@ export function UserManagementPage() {
       if (!values.departmentId || !values.organizationRoleId) throw new Error('部门和组织角色须同时选择')
       assignment = { ...editing, ...values, departmentId: values.departmentId, organizationRoleId: values.organizationRoleId }
     }
-    await updateUser(editing.accountId, values)
+    const updated = await updateUser(editing.accountId, { ...values, version: editing.version })
     if (assignment) {
-      try { await assignUserRole(assignment) } catch (error) {
+      setEditing(current => current?.accountId === editing.accountId ? { ...current, version: updated.version } : current)
+      try { await assignUserRole({ ...assignment, version: updated.version }) } catch (error) {
+        if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+          throw new ApiError(error.status, error.code, '基本信息已保存，但部门和组织角色已被其他操作更新。请关闭弹窗并重新打开最新记录。')
+        }
         throw new Error(`基本信息已保存，但部门和组织角色更新失败：${error instanceof Error ? error.message : '请重试'}`, { cause: error })
       }
     }
     return null
-  }, onSuccess: async result => { await refresh(); setUserModal(false); setEditing(null); userForm.resetFields(); if (result?.temporaryPassword) setIssuedPassword({ kind: 'created', name: result.name, loginName: result.loginName, password: result.temporaryPassword }); else message.success('用户信息已保存') }, onError: async error => { await refresh(); message.error(error.message) } })
-  const statusMutation = useMutation({ mutationFn: (record: UserAssignment) => updateUserStatus(record.accountId, record.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'), onSuccess: async () => { await refresh(); message.success('账号状态已更新，既有会话已失效') }, onError: error => message.error(error.message) })
-  const resetMutation = useMutation({ mutationFn: () => resetUserPassword(resetting!.accountId), onSuccess: result => { setIssuedPassword({ kind: 'reset', name: resetting!.name, loginName: resetting!.loginName, password: result.temporaryPassword }); setResetting(null) }, onError: error => message.error(error.message) })
+  }, onSuccess: async result => { await refresh(); setUserModal(false); setEditing(null); setEditVersionConflict(false); userForm.resetFields(); if (result?.temporaryPassword) setIssuedPassword({ kind: 'created', name: result.name, loginName: result.loginName, password: result.temporaryPassword }); else message.success('用户信息已保存') }, onError: async error => { await refresh(); if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') setEditVersionConflict(true); message.error(error.message) } })
+  const statusMutation = useMutation({ mutationFn: (record: UserAssignment) => updateUserStatus(record.accountId, record.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE', record.version), onSuccess: async () => { await refresh(); message.success('账号状态已更新，既有会话已失效') }, onError: async error => { await refresh(); message.error(error instanceof ApiError && error.code === 'VERSION_CONFLICT' ? '账号信息已变化，未执行状态切换；请基于刷新后的状态重新操作。' : error.message) } })
+  const resetMutation = useMutation({ mutationFn: () => resetUserPassword(resetting!.accountId, resetting!.version), onSuccess: result => { setIssuedPassword({ kind: 'reset', name: resetting!.name, loginName: resetting!.loginName, password: result.temporaryPassword }); setResetting(null) }, onError: async error => { await refresh(); if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') { setResetting(null); message.error('账号信息已变化，未重置密码；请重新打开记录并确认。'); return }; message.error(error.message) } })
   const closeIssuedPassword = () => { setIssuedPassword(null); saveUser.reset(); resetMutation.reset() }
-  const openCreate = () => { userForm.resetFields(); setEditing(null); setUserModal(true) }
-  const openEdit = (record: UserAssignment) => { userForm.resetFields(); setEditing(record); setUserModal(true) }
+  const openCreate = () => { userForm.resetFields(); setEditing(null); setEditVersionConflict(false); setUserModal(true) }
+  const openEdit = (record: UserAssignment) => { userForm.resetFields(); setEditing(record); setEditVersionConflict(false); setUserModal(true) }
   const departmentOptions = catalogs.data?.departments.filter(item => item.enabled).map(item => ({ value: item.id, label: item.name })) ?? []
   const organizationRoleOptions = catalogs.data?.organizationRoles.filter(item => item.enabled).map(item => ({ value: item.id, label: item.name })) ?? []
   const columns: ProColumns<UserAssignment>[] = [
@@ -88,7 +95,8 @@ export function UserManagementPage() {
       scroll={{ x: 1320 }}
       locale={{ emptyText: users.isError ? '用户列表暂不可用' : users.isPending ? '正在加载用户…' : filters.keyword || filters.systemRole || filters.status || filters.departmentId || filters.organizationRoleId ? '没有符合当前筛选条件的用户' : '暂无用户' }}
     />
-    <Modal title={`${editing ? '编辑' : '新增'}用户`} open={userModal} onCancel={() => setUserModal(false)} onOk={() => userForm.submit()} confirmLoading={saveUser.isPending} okButtonProps={{ disabled: Boolean(editing) && (catalogs.isError || catalogs.isPending) }} destroyOnHidden>
+    <Modal title={`${editing ? '编辑' : '新增'}用户`} open={userModal} onCancel={() => setUserModal(false)} onOk={() => userForm.submit()} confirmLoading={saveUser.isPending} okButtonProps={{ disabled: Boolean(editing) && (catalogs.isError || catalogs.isPending || editVersionConflict) }} destroyOnHidden>
+      {editVersionConflict && <Alert type="warning" showIcon title="账号数据已变化，当前输入已保留" description="请关闭弹窗并重新打开最新记录后继续编辑。若提示基本信息已保存，则只需重新打开记录并更新尚未保存的部门或组织角色。" />}
       {editing && catalogs.isError && <Alert type="error" showIcon title="组织目录加载失败，请重试后保存" action={<Button loading={catalogs.isFetching} onClick={() => void catalogs.refetch()}>重试组织目录</Button>} />}
       <Form name="admin-user-editor" key={editing?.accountId ?? 'create'} form={userForm} layout="vertical" initialValues={editing ? { studentNo: editing.studentNo, name: editing.name, systemRole: editing.systemRole, departmentId: editing.departmentId || undefined, organizationRoleId: editing.organizationRoleId || undefined } : { systemRole: 'MEMBER' }} onFinish={values => saveUser.mutate(values)} preserve={false}><Form.Item name="studentNo" label="学号/登录账号" rules={[{ required: true, message: '请输入学号' }]}><Input autoComplete="off" spellCheck={false} /></Form.Item><Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}><Input autoComplete="off" /></Form.Item><Form.Item name="systemRole" label="系统角色" rules={[{ required: true }]}><Select options={[{ value: 'MEMBER', label: '成员/普通用户' }, { value: 'ADMIN', label: '管理员' }]} /></Form.Item>{editing && <><Form.Item name="departmentId" label="所属部门"><Select disabled={catalogs.isError || catalogs.isPending} options={departmentOptions} showSearch optionFilterProp="label" placeholder="选择部门" /></Form.Item><Form.Item name="organizationRoleId" label="组织角色"><Select disabled={catalogs.isError || catalogs.isPending} options={organizationRoleOptions} showSearch optionFilterProp="label" placeholder="选择组织角色" /></Form.Item></>}<Typography.Paragraph type="secondary">{editing ? '修改部门或组织角色会更新该用户的权限。' : '系统将生成一次性初始密码，首次登录必须修改。'}</Typography.Paragraph></Form>
     </Modal>

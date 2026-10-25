@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -196,7 +197,7 @@ func TestAdminUserMutationsProvideSafeAuditEntries(t *testing.T) {
 		t.Fatalf("audit entry contains password material: %s", serialized)
 	}
 
-	if err := service.AdminResetPassword(context.Background(), admin, created.ID, "ReplacementPassword123", audit.Metadata{RequestID: "request-reset"}); err != nil {
+	if err := service.AdminResetPassword(context.Background(), admin, created.ID, "ReplacementPassword123", created.SessionVersion+1, audit.Metadata{RequestID: "request-reset"}); err != nil {
 		t.Fatal(err)
 	}
 	reset := repository.mutations[1]
@@ -433,12 +434,38 @@ func TestAdminUpdatesUserProfileAndSystemRole(t *testing.T) {
 	s := NewService(repo, newMemorySessions(), []byte("01234567890123456789012345678901"), 15*time.Minute, 7*24*time.Hour)
 	admin, _ := s.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
 	user, _ := s.AdminCreateUser(context.Background(), admin, AdminCreateUserInput{StudentNo: "23010002", Name: "原姓名", TemporaryPassword: "TemporaryPassword123", SystemRole: SystemRoleMember})
-	updated, err := s.AdminUpdateUser(context.Background(), admin, user.ID, AdminUpdateUserInput{Name: "新姓名", StudentNo: "23010002", SystemRole: SystemRoleAdmin})
+	updated, err := s.AdminUpdateUser(context.Background(), admin, user.ID, AdminUpdateUserInput{Name: "新姓名", StudentNo: "23010002", SystemRole: SystemRoleAdmin, Version: user.SessionVersion + 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Name != "新姓名" || updated.SystemRole != SystemRoleAdmin {
 		t.Fatalf("updated = %+v", updated)
+	}
+}
+
+func TestAdminUpdateUserRejectsVersionFromStaleEditor(t *testing.T) {
+	repo := newMemoryAccounts()
+	s := NewService(repo, newMemorySessions(), []byte("01234567890123456789012345678901"), 15*time.Minute, 7*24*time.Hour)
+	admin, _ := s.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
+	user, _ := s.AdminCreateUser(context.Background(), admin, AdminCreateUserInput{StudentNo: "23010020", Name: "原姓名", TemporaryPassword: "TemporaryPassword123", SystemRole: SystemRoleMember})
+
+	var staleInput AdminUpdateUserInput
+	if err := json.Unmarshal([]byte(`{"studentNo":"23010020","name":"旧表单姓名","systemRole":"MEMBER","version":1}`), &staleInput); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdminSetUserStatus(context.Background(), admin, user.ID, StatusDisabled, user.SessionVersion+1); err != nil {
+		t.Fatal(err)
+	}
+	mutationsBefore := len(repo.mutations)
+	if _, err := s.AdminUpdateUser(context.Background(), admin, user.ID, staleInput); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale editor update error = %v, want version conflict", err)
+	}
+	current, err := repo.FindByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Name != "原姓名" || current.Status != StatusDisabled || len(repo.mutations) != mutationsBefore {
+		t.Fatal("stale editor changed the account or appended an audit mutation")
 	}
 }
 
@@ -449,7 +476,7 @@ func TestAdminDisablesUserAndInvalidatesSessions(t *testing.T) {
 	admin, _ := s.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
 	user, _ := s.AdminCreateUser(context.Background(), admin, AdminCreateUserInput{StudentNo: "23010003", Name: "用户", TemporaryPassword: "TemporaryPassword123", SystemRole: SystemRoleMember})
 	tokens, _ := s.Login(context.Background(), user.LoginName, "TemporaryPassword123")
-	if _, err := s.AdminSetUserStatus(context.Background(), admin, user.ID, StatusDisabled); err != nil {
+	if _, err := s.AdminSetUserStatus(context.Background(), admin, user.ID, StatusDisabled, user.SessionVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Refresh(context.Background(), tokens.RefreshToken); !errors.Is(err, ErrInvalidRefreshToken) {
@@ -462,7 +489,7 @@ func TestAdminResetPasswordRequiresFirstLoginChange(t *testing.T) {
 	s := NewService(repo, newMemorySessions(), []byte("01234567890123456789012345678901"), 15*time.Minute, 7*24*time.Hour)
 	admin, _ := s.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
 	user, _ := s.AdminCreateUser(context.Background(), admin, AdminCreateUserInput{StudentNo: "23010004", Name: "用户", TemporaryPassword: "TemporaryPassword123", SystemRole: SystemRoleMember})
-	if err := s.AdminResetPassword(context.Background(), admin, user.ID, "ReplacementPassword123"); err != nil {
+	if err := s.AdminResetPassword(context.Background(), admin, user.ID, "ReplacementPassword123", user.SessionVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	updated, _ := repo.FindByID(context.Background(), user.ID)
@@ -475,7 +502,7 @@ func TestAdminCannotDisableSuperAdmin(t *testing.T) {
 	repo := newMemoryAccounts()
 	s := NewService(repo, newMemorySessions(), []byte("01234567890123456789012345678901"), 15*time.Minute, 7*24*time.Hour)
 	admin, _ := s.BootstrapAdmin(context.Background(), "admin", "系统管理员", "InitialPassword123")
-	if _, err := s.AdminSetUserStatus(context.Background(), admin, admin.ID, StatusDisabled); !errors.Is(err, ErrForbidden) {
+	if _, err := s.AdminSetUserStatus(context.Background(), admin, admin.ID, StatusDisabled, admin.SessionVersion+1); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("error = %v", err)
 	}
 }

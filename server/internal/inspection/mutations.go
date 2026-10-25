@@ -17,9 +17,12 @@ var (
 
 // MutationAccess is compiled from server-side permissions, never request JSON.
 type MutationAccess struct {
-	ActorID      string
-	Unrestricted bool
-	Permissions  []permission.EffectivePermission
+	ActorID string
+	// ReportScopeValidated allows classless rows after the reporting service
+	// has authorized the exact report cell and the repository applies its dimensions.
+	ReportScopeValidated bool
+	Unrestricted         bool
+	Permissions          []permission.EffectivePermission
 }
 
 // VersionedRecord identifies one optimistic mutation target.

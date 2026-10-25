@@ -1,12 +1,13 @@
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Checkbox, Form, Input, Select, Typography, message } from "antd";
+import { App, Alert, Button, Checkbox, Form, Input, Select, Typography } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { registerAccount } from "../../shared/api/authApi";
 import { getRegistrationOptions } from "../../shared/api/adminApi";
 import { AuthLayout } from "../../shared/layouts/AuthLayout";
 
 export function RegisterPage() {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const options = useQuery({ queryKey: ["registration-options"], queryFn: getRegistrationOptions });
   const submit = async (values: {

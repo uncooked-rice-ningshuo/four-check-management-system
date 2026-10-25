@@ -112,7 +112,10 @@ type AdminCreateUserInput struct {
 }
 
 type AdminUpdateUserInput struct {
-	StudentNo, Name, SystemRole string
+	StudentNo  string `json:"studentNo"`
+	Name       string `json:"name"`
+	SystemRole string `json:"systemRole"`
+	Version    int    `json:"version"`
 }
 
 // NewTemporaryPassword creates a unique credential for a single account operation.
@@ -231,6 +234,14 @@ func (s *Service) AdminUpdateUser(ctx context.Context, actor Account, accountID 
 	if target.IsSuperAdmin || target.AccountKind == AccountKindSystem {
 		return Account{}, ErrForbidden
 	}
+	if in.Version <= 0 {
+		return Account{}, ErrInvalidInput
+	}
+	// The public version token starts at one; session_version remains an internal
+	// authentication epoch that starts at zero.
+	if in.Version != target.SessionVersion+1 {
+		return Account{}, ErrVersionConflict
+	}
 	in.StudentNo, in.Name, in.SystemRole = strings.TrimSpace(in.StudentNo), strings.TrimSpace(in.Name), strings.TrimSpace(in.SystemRole)
 	if in.StudentNo == "" || in.Name == "" || !validManagedSystemRole(in.SystemRole) {
 		return Account{}, ErrInvalidInput
@@ -245,7 +256,7 @@ func (s *Service) AdminUpdateUser(ctx context.Context, actor Account, accountID 
 	return updated, nil
 }
 
-func (s *Service) AdminSetUserStatus(ctx context.Context, actor Account, accountID, status string, metadata ...audit.Metadata) (Account, error) {
+func (s *Service) AdminSetUserStatus(ctx context.Context, actor Account, accountID, status string, version int, metadata ...audit.Metadata) (Account, error) {
 	if !actor.IsSuperAdmin {
 		return Account{}, ErrForbidden
 	}
@@ -256,6 +267,12 @@ func (s *Service) AdminSetUserStatus(ctx context.Context, actor Account, account
 	if target.IsSuperAdmin || (status != StatusActive && status != StatusDisabled) {
 		return Account{}, ErrForbidden
 	}
+	if version <= 0 {
+		return Account{}, ErrInvalidInput
+	}
+	if version != target.SessionVersion+1 {
+		return Account{}, ErrVersionConflict
+	}
 	mutation := accountMutation(metadata, actor.ID, audit.ActionAccountStatusChanged, target.ID,
 		map[string]any{"status": target.Status}, map[string]any{"status": status}, "")
 	updated, err := s.accounts.SetStatus(ctx, accountID, status, target.SessionVersion, mutation)
@@ -265,7 +282,7 @@ func (s *Service) AdminSetUserStatus(ctx context.Context, actor Account, account
 	return updated, nil
 }
 
-func (s *Service) AdminResetPassword(ctx context.Context, actor Account, accountID, temporaryPassword string, metadata ...audit.Metadata) error {
+func (s *Service) AdminResetPassword(ctx context.Context, actor Account, accountID, temporaryPassword string, version int, metadata ...audit.Metadata) error {
 	if !actor.IsSuperAdmin {
 		return ErrForbidden
 	}
@@ -275,6 +292,12 @@ func (s *Service) AdminResetPassword(ctx context.Context, actor Account, account
 	}
 	if target.IsSuperAdmin || len(temporaryPassword) < 12 {
 		return ErrForbidden
+	}
+	if version <= 0 {
+		return ErrInvalidInput
+	}
+	if version != target.SessionVersion+1 {
+		return ErrVersionConflict
 	}
 	hash, err := hashPassword(temporaryPassword)
 	if err != nil {

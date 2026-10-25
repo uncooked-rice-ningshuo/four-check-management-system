@@ -1,8 +1,12 @@
 async(page)=>{
- let stage='setup',routeCalls=0
+ let stage='setup',routeCalls=0,adminAuthorization=''
  try {
  const base=page.url().split('/').slice(0,3).join('/')
  const check=(ok,message)=>{if(!ok)throw new Error(message)}
+ page.on('request',request=>{
+  const authorization=request.headers().authorization
+  if(request.url().includes('/api/v1/admin/users')&&authorization)adminAuthorization=authorization
+ })
  await page.goto(base+'/admin/users')
  await page.getByRole('button',{name:'新增用户',exact:true}).click()
  let editor=page.locator('.ant-modal:visible').filter({hasText:'新增用户'})
@@ -37,7 +41,14 @@ async(page)=>{
  check(rejected.status()===409,'Edit conflict not injected')
  await page.getByText('账号状态已变化，请刷新后重试',{exact:true}).waitFor()
  check(await editor.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict retained','Conflict lost editor input')
+ check(await editor.getByRole('button',{name:/确\s*定/}).isDisabled(),'Stale editor allowed retry with an old version')
  await page.unroute(path,conflict)
+ await editor.getByRole('button',{name:/取\s*消/}).click()
+ row=page.getByRole('row').filter({hasText:'E2E conflict user'})
+ await row.getByRole('button',{name:'编辑',exact:true}).click()
+ editor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ check(await editor.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict user','Reopened editor did not load the current server value')
+ await editor.getByLabel('姓名',{exact:true}).fill('E2E conflict retained')
  stage='edit retry response'
  const [retried]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id)&&r.request().method()==='PUT'),editor.getByRole('button',{name:/确\s*定/}).click()])
  check(retried.status()===200,'Real edit retry failed')
@@ -61,18 +72,51 @@ async(page)=>{
  reopened=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
  check(await reopened.getByLabel('姓名',{exact:true}).inputValue()==='E2E conflict retained','Record A leaked record B')
  await reopened.getByRole('button',{name:/取\s*消/}).click()
- const statusPath=path+'/status'
- await page.route(statusPath,conflict)
+ stage='status stale version conflict after concurrent profile update'
+ const statusUserResponse=await page.context().request.get(base+'/api/v1/admin/users',{headers:{Authorization:adminAuthorization}})
+ check(statusUserResponse.status()===200,'Could not read current status version for concurrent update')
+ const statusUsers=await statusUserResponse.json()
+ const statusUser=statusUsers.find(user=>user.accountId===id)
+ check(Number.isSafeInteger(statusUser?.version)&&statusUser.version>0,'Current status version missing')
  await row.getByRole('button',{name:/禁\s*用/}).click()
- await page.locator('.ant-popconfirm').getByRole('button',{name:/确\s*定|确认/}).click()
- await page.getByText('账号状态已变化，请刷新后重试',{exact:true}).waitFor()
+ const statusConfirmation=page.locator('.ant-popconfirm')
+ const concurrentStatusProfile=await page.context().request.put(base+'/api/v1/admin/users/'+id,{headers:{Authorization:adminAuthorization},data:{studentNo:statusUser.studentNo,name:'E2E status profile updated concurrently',systemRole:statusUser.systemRole,version:statusUser.version}})
+ check(concurrentStatusProfile.status()===200,'Concurrent profile update before status change failed')
+ const [statusConflict]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id+'/status')&&r.request().method()==='PUT'),statusConfirmation.getByRole('button',{name:/确\s*定|确认/}).click()])
+ check(statusConflict.status()===409,'Stale status request was not rejected by the API')
+ check((await statusConflict.json()).code==='VERSION_CONFLICT','Stale status response code mismatch')
+ await page.getByText('账号信息已变化，未执行状态切换；请基于刷新后的状态重新操作。',{exact:true}).waitFor()
+ row=page.getByRole('row').filter({hasText:'E2E status profile updated concurrently'})
+ await row.getByText('正常',{exact:true}).waitFor()
  check(await row.getByRole('button',{name:/禁\s*用/}).count()===1,'Failed status update changed displayed status')
- await page.unroute(statusPath,conflict)
  await row.getByRole('button',{name:/禁\s*用/}).click()
  stage='status retry response'
  const [statusRetry]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id+'/status')&&r.request().method()==='PUT'),page.locator('.ant-popconfirm').getByRole('button',{name:/确\s*定|确认/}).click()])
  check(statusRetry.status()===200,'Real status retry failed')
  await row.getByText('已禁用',{exact:true}).waitFor()
+ stage='reset stale version conflict after concurrent profile update'
+ const resetUserResponse=await page.context().request.get(base+'/api/v1/admin/users',{headers:{Authorization:adminAuthorization}})
+ check(resetUserResponse.status()===200,'Could not read current user version for concurrent update')
+ const resetUsers=await resetUserResponse.json()
+ const resetUser=resetUsers.find(user=>user.accountId===id)
+ check(Number.isSafeInteger(resetUser?.version)&&resetUser.version>0,'Current user version missing')
+ await row.getByRole('button',{name:'重置密码',exact:true}).click()
+ let resetDialog=page.locator('.ant-modal:visible').filter({hasText:'重置 E2E status profile updated concurrently 的密码'})
+ const concurrentProfile=await page.context().request.put(base+'/api/v1/admin/users/'+id,{headers:{Authorization:adminAuthorization},data:{studentNo:resetUser.studentNo,name:'E2E profile updated concurrently',systemRole:resetUser.systemRole,version:resetUser.version}})
+ check(concurrentProfile.status()===200,'Concurrent profile update failed')
+ const [resetConflict]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id+'/reset-password')&&r.request().method()==='POST'),resetDialog.getByRole('button',{name:/确\s*定|确认/}).click()])
+ check(resetConflict.status()===409,'Stale reset-password request was not rejected by the API')
+ await page.getByText('账号信息已变化，未重置密码；请重新打开记录并确认。',{exact:true}).waitFor()
+ await resetDialog.waitFor({state:'hidden'})
+ check(await page.locator('.ant-modal:visible').filter({hasText:'密码重置成功'}).count()===0,'Stale reset displayed a generated password')
+ row=page.getByRole('row').filter({hasText:'E2E profile updated concurrently'})
+ await row.getByRole('button',{name:'重置密码',exact:true}).click()
+ resetDialog=page.locator('.ant-modal:visible').filter({hasText:'重置 E2E profile updated concurrently 的密码'})
+ const [resetSuccess]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/users/'+id+'/reset-password')&&r.request().method()==='POST'),resetDialog.getByRole('button',{name:/确\s*定|确认/}).click()])
+ check(resetSuccess.status()===200,'Reset-password retry with the refreshed version failed')
+ const issuedPassword=page.locator('.ant-modal:visible').filter({hasText:'密码重置成功'})
+ await issuedPassword.waitFor()
+ await issuedPassword.getByRole('button',{name:'我已记录并告知用户'}).click()
  stage='assignment conflict and retry'
  const secondRow=page.getByRole('row').filter({hasText:'E2E second user'})
  await secondRow.getByRole('button',{name:'编辑',exact:true}).click()
@@ -85,11 +129,19 @@ async(page)=>{
  await page.route(assignmentPath,conflict)
  const [assignmentRejected]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/assignment')&&r.request().method()==='PUT'),assignmentEditor.getByRole('button',{name:/确\s*定/}).click()])
  check(assignmentRejected.status()===409,'Assignment conflict not injected')
- await page.getByText(/^基本信息已保存，但部门和组织角色更新失败/).waitFor()
+ await page.getByText('基本信息已保存，但部门和组织角色已被其他操作更新。请关闭弹窗并重新打开最新记录。',{exact:true}).waitFor()
  await assignmentEditor.getByText('学习部',{exact:true}).waitFor()
  await assignmentEditor.getByText('部门委员',{exact:true}).waitFor()
+ check(await assignmentEditor.getByRole('button',{name:/确\s*定/}).isDisabled(),'Stale assignment editor allowed retry with an old version')
  await page.unroute(assignmentPath,conflict)
- const [assignmentRetried]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/assignment')&&r.request().method()==='PUT'),assignmentEditor.getByRole('button',{name:/确\s*定/}).click()])
+ await assignmentEditor.getByRole('button',{name:/取\s*消/}).click()
+ await secondRow.getByRole('button',{name:'编辑',exact:true}).click()
+ const currentAssignmentEditor=page.locator('.ant-modal:visible').filter({hasText:'编辑用户'})
+ for(const [label,value] of [['所属部门','学习部'],['组织角色','部门委员']]){
+  await currentAssignmentEditor.getByRole('combobox',{name:label,exact:true}).click()
+  await page.locator('.ant-select-dropdown:visible').getByText(value,{exact:true}).click()
+ }
+ const [assignmentRetried]=await Promise.all([page.waitForResponse(r=>r.url().endsWith('/assignment')&&r.request().method()==='PUT'),currentAssignmentEditor.getByRole('button',{name:/确\s*定/}).click()])
  check(assignmentRetried.status()===204,'Real assignment retry failed')
  await assignmentEditor.waitFor({state:'hidden'})
  await secondRow.getByText('学习部',{exact:true}).waitFor()
@@ -131,7 +183,7 @@ async(page)=>{
  check(await retainedEditor.getByLabel('姓名',{exact:true}).inputValue()==='E2E unsaved retained','Catalog retry reset editor')
  check(await retainedEditor.getByRole('button',{name:/确\s*定/}).isEnabled(),'Save did not recover')
  await retainedEditor.getByRole('button',{name:/取\s*消/}).click()
- return {cases:['用户列表500失败区分空态并原位重试','目录500不误报停用，编辑中刷新失败保留输入且恢复前禁止保存','归属409明确提示基本信息已保存，保留部门/角色并真实API重试成功','StrictMode首次编辑、新增取消后编辑、保存关闭重开、A/B切换不串值','账号编辑409保留输入，原弹窗真实API重试成功','启停409保留当前显示，二次确认后真实API重试成功'],faultInjection:['HTTP500用户/目录读取失败，向现有刷新控件派发click触发编辑中目录刷新','浏览器注入409响应；实际后端交错写入由独立PostgreSQL/race用例验证']}
+ return {cases:['用户列表500失败区分空态并原位重试','目录500不误报停用，编辑中刷新失败保留输入且恢复前禁止保存','归属409提示基本信息已保存并保留选择；关闭旧弹窗、重开最新记录后真实API提交成功','StrictMode首次编辑、新增取消后编辑、保存关闭重开、A/B切换不串值','账号编辑409保留输入并禁用旧版本；重开最新记录后真实API重试成功','真实并发资料更新使旧状态确认返回409，列表刷新后基于最新版本重新确认成功','真实并发资料更新使重置确认返回409；关闭过期确认框、不展示密码，刷新后重新打开并成功重试'],faultInjection:['HTTP500用户/目录读取失败，向现有刷新控件派发click触发编辑中目录刷新','浏览器注入编辑409；状态/重置409由第二次真实管理 API 修改制造，真实 PostgreSQL 账号版本与审计断言另由集成测试验证']}
  } catch(error) {const forms=await page.locator('.ant-modal:visible form').evaluateAll(nodes=>nodes.map(form=>({name:form.getAttribute('name'),fields:[...form.querySelectorAll('input')].map(input=>({id:input.id,invalid:input.getAttribute('aria-invalid')}))})))
  throw new Error(stage+'; routeCalls='+routeCalls+'; forms='+JSON.stringify(forms)+'; '+error.message)}
 }

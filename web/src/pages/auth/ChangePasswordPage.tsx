@@ -1,9 +1,10 @@
-import { Button, Card, Form, Input, Typography, message } from 'antd'
+import { App, Button, Card, Form, Input, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { useRef, useState } from 'react'
 import { useAuth } from '../../app/providers/authContext'
 
 export function ChangePasswordPage() {
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const { changePassword } = useAuth()
   const pending = useRef(false)

@@ -38,6 +38,7 @@ const (
 	ActionDepartmentReturned      Action = "DEPARTMENT_RETURNED"
 	ActionDepartmentConfirmed     Action = "DEPARTMENT_CONFIRMED"
 	ActionDepartmentResubmitted   Action = "DEPARTMENT_RESUBMITTED"
+	ActionReportObligationChanged Action = "REPORT_OBLIGATION_CHANGED"
 )
 
 var (

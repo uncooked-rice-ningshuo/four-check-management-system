@@ -22,30 +22,35 @@ const (
 	SourceDepartmentMap    = "DEPARTMENT_MAPPING"
 	SourceUserRule         = "USER_RULE"
 
-	ActionUserManage        = "USER_MANAGE"
-	ActionPermissionManage  = "PERMISSION_MANAGE"
-	ActionMasterDataManage  = "MASTER_DATA_MANAGE"
-	ActionDictionaryManage  = "DICTIONARY_MANAGE"
-	ActionConfigurationView = "CONFIGURATION_VIEW"
-	ActionInspectionManage  = "INSPECTION_MANAGE"
-	ActionInspectionEnter   = "INSPECTION_ENTER"
-	ActionInspectionView    = "INSPECTION_VIEW"
-	ActionInspectionReview  = "INSPECTION_REVIEW"
-	ActionInspectionExport  = "INSPECTION_EXPORT"
-	ActionInspectionSummary = "INSPECTION_SUMMARIZE"
-	ActionReportReview      = "REPORT_REVIEW"
-	ActionReportReturn      = "REPORT_RETURN"
-	ActionReportFinalize    = "REPORT_FINALIZE"
-	ActionReportPublish     = "REPORT_PUBLISH"
-	ActionArchiveView       = "ARCHIVE_VIEW"
+	ActionUserManage             = "USER_MANAGE"
+	ActionPermissionManage       = "PERMISSION_MANAGE"
+	ActionMasterDataManage       = "MASTER_DATA_MANAGE"
+	ActionDictionaryManage       = "DICTIONARY_MANAGE"
+	ActionConfigurationView      = "CONFIGURATION_VIEW"
+	ActionInspectionManage       = "INSPECTION_MANAGE"
+	ActionInspectionEnter        = "INSPECTION_ENTER"
+	ActionInspectionView         = "INSPECTION_VIEW"
+	ActionInspectionReview       = "INSPECTION_REVIEW"
+	ActionInspectionExport       = "INSPECTION_EXPORT"
+	ActionInspectionSummary      = "INSPECTION_SUMMARIZE"
+	ActionReportView             = "REPORT_VIEW"
+	ActionReportForceGenerate    = "REPORT_FORCE_GENERATE"
+	ActionReportObligationManage = "REPORT_OBLIGATION_MANAGE"
+	ActionReportReview           = "REPORT_REVIEW"
+	ActionReportReturn           = "REPORT_RETURN"
+	ActionReportFinalize         = "REPORT_FINALIZE"
+	ActionReportPublish          = "REPORT_PUBLISH"
+	ActionArchiveView            = "ARCHIVE_VIEW"
 )
 
 var ErrInvalidRule = errors.New("invalid permission rule")
+var ErrForceGenerateRoleRequired = errors.New("force generation permission requires student union office leadership")
+var ErrReportObligationRoleRequired = errors.New("weekly obligation permission requires student union office leadership")
 
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
 	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary,
-	ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
+	ActionReportView, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
 type Scope struct {
@@ -125,6 +130,25 @@ func (r EffectiveResult) Allowed(action string, requested Scope) bool {
 	return allowed
 }
 
+// AllowsWholeScope reports whether an action covers an entire resource scope.
+// A class- or grade-limited allow cannot attest a department/type cell, while
+// any overlapping deny continues to veto that cell as it does individual rows.
+func AllowsWholeScope(permissions []EffectivePermission, action string, requested Scope) bool {
+	allowed := false
+	for _, rule := range permissions {
+		if rule.Action != action {
+			continue
+		}
+		if rule.Effect == EffectDeny && scopesOverlap(rule.Scope, requested) {
+			return false
+		}
+		if rule.Effect == EffectAllow && rule.Scope.ClassID == "" && rule.Scope.Grade == "" && scopeMatches(rule.Scope, requested) {
+			allowed = true
+		}
+	}
+	return allowed
+}
+
 func scopesOverlap(left, right Scope) bool {
 	return overlaps(left.AcademicYearID, right.AcademicYearID) && overlaps(left.SemesterID, right.SemesterID) &&
 		overlaps(left.WeekID, right.WeekID) && overlaps(left.InspectionTypeID, right.InspectionTypeID) &&
@@ -153,7 +177,24 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	result := EffectiveResult{AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
 	if profile.SystemRole == SystemRoleSuperAdmin {
 		for _, action := range allActions {
+			if action == ActionReportForceGenerate || action == ActionReportObligationManage {
+				continue
+			}
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceSystemRole, Label: "超级管理员"}))
+		}
+		if isForceGenerateEligible(profile) {
+			for _, rule := range profile.Rules {
+				if rule.Enabled && rule.Action == ActionReportForceGenerate {
+					result.Permissions = append(result.Permissions, userRulePermission(rule))
+				}
+			}
+		}
+		if isReportObligationManagerEligible(profile) {
+			for _, rule := range profile.Rules {
+				if rule.Enabled && rule.Action == ActionReportObligationManage {
+					result.Permissions = append(result.Permissions, userRulePermission(rule))
+				}
+			}
 		}
 		return result, nil
 	}
@@ -189,7 +230,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 	}
 	if profile.DepartmentCode == "OFFICE" && leadership {
-		for _, action := range []string{ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
+		for _, action := range []string{ActionReportView, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceOrganizationRole, Label: "学生会办公室部长/副部长"}))
 		}
 	}
@@ -197,11 +238,13 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		if !rule.Enabled {
 			continue
 		}
-		label := "用户补充授权"
-		if rule.Effect == EffectDeny {
-			label = "用户单独限制"
+		if rule.Action == ActionReportForceGenerate && !isForceGenerateEligible(profile) {
+			continue
 		}
-		result.Permissions = append(result.Permissions, EffectivePermission{Action: rule.Action, Effect: rule.Effect, Scope: rule.Scope, Sources: []Source{{Type: SourceUserRule, Label: label}}})
+		if rule.Action == ActionReportObligationManage && !isReportObligationManagerEligible(profile) {
+			continue
+		}
+		result.Permissions = append(result.Permissions, userRulePermission(rule))
 	}
 	return result, nil
 }
@@ -218,11 +261,17 @@ func (s *Service) ListRules(ctx context.Context, accountID string) ([]Rule, erro
 }
 
 func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, metadata ...audit.Metadata) (Rule, error) {
+	rule.Action = strings.TrimSpace(rule.Action)
 	if !validRule(rule) {
 		return Rule{}, ErrInvalidRule
 	}
+	if err := s.validateForceGenerateTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
+	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
 	rule.ID = uuid.NewString()
-	rule.Action = strings.TrimSpace(rule.Action)
 	rule.Note = strings.TrimSpace(rule.Note)
 	rule.SourceType = SourceUserRule
 	rule.CreatedBy = actorID
@@ -231,8 +280,15 @@ func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, met
 }
 
 func (s *Service) UpdateRule(ctx context.Context, rule Rule, metadata ...audit.Metadata) (Rule, error) {
+	rule.Action = strings.TrimSpace(rule.Action)
 	if rule.ID == "" || !validRule(rule) {
 		return Rule{}, ErrInvalidRule
+	}
+	if err := s.validateForceGenerateTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
+	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
+		return Rule{}, err
 	}
 	rule.Note = strings.TrimSpace(rule.Note)
 	rules, err := s.repository.ListRules(ctx, rule.AccountID)
@@ -280,12 +336,70 @@ func permissionMutation(metadata []audit.Metadata, actorID, resourceID string, b
 	}}
 }
 
+func (s *Service) validateForceGenerateTarget(ctx context.Context, rule Rule) error {
+	if rule.Action != ActionReportForceGenerate || rule.Effect != EffectAllow {
+		return nil
+	}
+	profile, err := s.repository.LoadAccessProfile(ctx, rule.AccountID)
+	if err != nil {
+		return err
+	}
+	if !isForceGenerateEligible(profile) {
+		return ErrForceGenerateRoleRequired
+	}
+	return nil
+}
+
+func (s *Service) validateReportObligationTarget(ctx context.Context, rule Rule) error {
+	if rule.Action != ActionReportObligationManage || rule.Effect != EffectAllow {
+		return nil
+	}
+	profile, err := s.repository.LoadAccessProfile(ctx, rule.AccountID)
+	if err != nil {
+		return err
+	}
+	if !isReportObligationManagerEligible(profile) {
+		return ErrReportObligationRoleRequired
+	}
+	return nil
+}
+
+func isForceGenerateEligible(profile AccessProfile) bool {
+	return profile.DepartmentCode == "OFFICE" &&
+		(profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER")
+}
+
+func isReportObligationManagerEligible(profile AccessProfile) bool {
+	return profile.DepartmentCode == "OFFICE" &&
+		(profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER")
+}
+
+func userRulePermission(rule Rule) EffectivePermission {
+	label := "用户补充授权"
+	if rule.Effect == EffectDeny {
+		label = "用户单独限制"
+	}
+	return EffectivePermission{Action: rule.Action, Effect: rule.Effect, Scope: rule.Scope, Sources: []Source{{Type: SourceUserRule, Label: label}}}
+}
+
 func allow(action string, scope Scope, source Source) EffectivePermission {
 	return EffectivePermission{Action: action, Effect: EffectAllow, Scope: scope, Sources: []Source{source}}
 }
 
 func validRule(rule Rule) bool {
 	if rule.AccountID == "" || (rule.Effect != EffectAllow && rule.Effect != EffectDeny) {
+		return false
+	}
+	// A force-generation grant applies to the entire merged weekly report, not a department subset.
+	if strings.TrimSpace(rule.Action) == ActionReportForceGenerate &&
+		(rule.Scope.DepartmentID != "" || rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
+		return false
+	}
+	if strings.TrimSpace(rule.Action) == ActionReportObligationManage &&
+		(rule.Scope.DepartmentID != "" || rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
+		return false
+	}
+	if rule.Action == ActionReportView && rule.Effect == EffectAllow && (rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
 		return false
 	}
 	for _, action := range allActions {

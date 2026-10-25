@@ -1,5 +1,5 @@
 import { DownloadOutlined, FileExcelOutlined, UploadOutlined } from '@ant-design/icons'
-import { Alert, Button, Descriptions, Drawer, Modal, Select, Space, Table, Tag, Typography, Upload, message } from 'antd'
+import { App, Alert, Button, Descriptions, Drawer, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useRef, useState } from 'react'
 import type { AcademicCalendar } from '../../../entities/academic/model/academic'
@@ -30,6 +30,7 @@ function requestError(error: unknown) {
 }
 
 export function AcademicWeekImportDrawer({ open, calendar, onClose }: AcademicWeekImportDrawerProps) {
+  const { message } = App.useApp()
   const [semesterId, setSemesterId] = useState('')
   const [selectedFile, setSelectedFile] = useState<File>()
   const [batch, setBatch] = useState<AcademicWeekImportBatch>()

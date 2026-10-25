@@ -250,7 +250,12 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		for _, kind := range []string{"students", "courses", "classrooms"} {
 			q.Kind, q.ClassID, q.CourseID = kind, rf("06"), rf("13")
 			page, e = options.EntryOptions(ctx, member, q)
-			if e != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].Label == "" {
+			wantTotal := 1
+			if kind == "classrooms" {
+				// Classrooms are selected independently from course scheduling.
+				wantTotal = 2
+			}
+			if e != nil || page.Total != wantTotal || len(page.Items) != 1 || page.Items[0].Label == "" {
 				t.Fatal(kind, page, e)
 			}
 			if kind == "students" && page.Items[0].Label != "Synthetic student（S-FIXTURE，Fixture class）" {
@@ -271,7 +276,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 		q.Kind, q.Keyword, q.CourseID = "classrooms", "", rf("13")
 		page, e = options.EntryOptions(ctx, member, q)
-		if e != nil || page.Total != 1 {
+		if e != nil || page.Total != 2 {
 			t.Fatal("classroom option should not depend on a course schedule", page, e)
 		}
 		q.InspectionTypeID = types[inspection.InspectionTypeUnattended]
@@ -306,8 +311,8 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 		q.RecordID = record.ID
 		page, e = options.EntryOptions(ctx, member, q)
-		if e != nil || page.Total != 1 {
-			t.Fatal("manage edit options", e)
+		if e != nil || page.Total != 2 {
+			t.Fatal("manage edit options", page, e)
 		}
 		perms.rules = nil
 		if _, e = options.EntryOptions(ctx, member, q); !errors.Is(e, inspection.ErrRecordNotFound) {
@@ -594,8 +599,18 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	})
 	catalog, _ := inspection.InspectionCatalog()
 	for _, invalid := range []inspection.InspectionInput{
-		makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-04"}),
-		makeInput(inspection.InspectionTypeAttendance, map[string]any{"period": "3-4"}),
+		makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-08"}),
+		makeInput(inspection.InspectionTypeAttendance, map[string]any{"period": "3-4", "absenceHours": 1}),
+	} {
+		if _, e := svc.Create(ctx, admin, invalid, audit.Metadata{}); e == nil {
+			t.Fatal("invalid attendance details accepted")
+		} else {
+			if _, ok := e.(*inspection.DetailsValidationError); !ok {
+				t.Fatalf("invalid attendance details returned %T: %v", e, e)
+			}
+		}
+	}
+	for _, invalid := range []inspection.InspectionInput{
 		makeInput(inspection.InspectionTypeMorning, map[string]any{"studentId": rf("16")}),
 		makeInput(inspection.InspectionTypeMorning, map[string]any{"classId": rf("16")}),
 		makeInput(inspection.InspectionTypeClassroomHygiene, map[string]any{"classroomId": rf("19")}),

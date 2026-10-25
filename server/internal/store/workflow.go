@@ -8,6 +8,7 @@ import (
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/inspection"
+	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,16 +23,16 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	}
 	defer tx.Rollback(ctx)
 
-	var typeCode string
+	var typeCode, academicYearID string
 	if command.Scope.DepartmentID == "" {
-		err = tx.QueryRow(ctx, `SELECT it.code FROM semester_weeks w
+		err = tx.QueryRow(ctx, `SELECT it.code,y.id FROM semester_weeks w
  JOIN semesters sem ON sem.id=w.semester_id
  JOIN academic_years y ON y.id=sem.academic_year_id
  JOIN inspection_types it ON it.id=$3
  WHERE sem.id=$1 AND w.id=$2 AND sem.enabled AND w.enabled AND y.enabled AND it.enabled
- FOR SHARE OF w,sem,y,it`, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.InspectionTypeID).Scan(&typeCode)
+		FOR SHARE OF w,sem,y,it`, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.InspectionTypeID).Scan(&typeCode, &academicYearID)
 	} else {
-		err = tx.QueryRow(ctx, `SELECT it.code FROM semester_weeks w
+		err = tx.QueryRow(ctx, `SELECT it.code,y.id FROM semester_weeks w
  JOIN semesters sem ON sem.id=w.semester_id
  JOIN academic_years y ON y.id=sem.academic_year_id
  JOIN departments d ON d.id=$3
@@ -39,7 +40,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
  JOIN department_inspection_scopes ds ON ds.department_id=d.id AND ds.inspection_type_id=it.id
  WHERE sem.id=$1 AND w.id=$2 AND sem.enabled AND w.enabled AND y.enabled AND d.enabled AND it.enabled
    AND ds.enabled AND ds.can_enter FOR SHARE OF w,sem,y,d,it,ds`, command.Scope.SemesterID, command.Scope.WeekID,
-			command.Scope.DepartmentID, command.Scope.InspectionTypeID).Scan(&typeCode)
+			command.Scope.DepartmentID, command.Scope.InspectionTypeID).Scan(&typeCode, &academicYearID)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workflow.Submission{}, workflow.ErrSubmissionScope
@@ -50,25 +51,31 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	if !activeSubmissionType(typeCode) {
 		return workflow.Submission{}, workflow.ErrSubmissionScope
 	}
+	access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
+	if command.Kind == workflow.SubmissionKindZeroRecord {
+		if err := requireZeroReceiptCell(ctx, tx, command.Scope, academicYearID, access, permission.ActionInspectionEnter); err != nil {
+			return workflow.Submission{}, err
+		}
+	}
 
 	id := uuid.NewString()
 	result := workflow.Submission{ID: id, Scope: command.Scope, Status: workflow.PendingReview,
-		RevisionNo: 1, RowVersion: 1, CreatedBy: command.ActorID, SubmittedBy: command.ActorID}
+		Kind: command.Kind, RevisionNo: 1, RowVersion: 1, CreatedBy: command.ActorID, SubmittedBy: command.ActorID}
 	err = tx.QueryRow(ctx, `INSERT INTO department_submissions(
- id,semester_id,week_id,department_id,inspection_type_id,status,revision_no,row_version,
+ id,semester_id,week_id,department_id,inspection_type_id,submission_kind,status,revision_no,row_version,
  created_by,submitted_by,idempotency_key,request_fingerprint,submitted_at)
- VALUES($1,$2,$3,NULLIF($4,'')::uuid,$5,'PENDING_REVIEW',1,1,$6,$6,$7,$8,now())
+ VALUES($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,'PENDING_REVIEW',1,1,$7,$7,$8,$9,now())
  ON CONFLICT (created_by,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
  RETURNING created_at,submitted_at`, id, command.Scope.SemesterID, command.Scope.WeekID,
-		command.Scope.DepartmentID, command.Scope.InspectionTypeID, command.ActorID,
+		command.Scope.DepartmentID, command.Scope.InspectionTypeID, command.Kind, command.ActorID,
 		command.IdempotencyKey, command.Fingerprint).Scan(&result.CreatedAt, &result.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var fingerprint string
-		err = tx.QueryRow(ctx, `SELECT id,semester_id,week_id,COALESCE(department_id::text,''),inspection_type_id,status,
+		err = tx.QueryRow(ctx, `SELECT id,semester_id,week_id,COALESCE(department_id::text,''),inspection_type_id,submission_kind,status,
  revision_no,row_version,created_by,submitted_by,created_at,submitted_at,request_fingerprint
  FROM department_submissions WHERE created_by=$1 AND idempotency_key=$2`, command.ActorID, command.IdempotencyKey).
 			Scan(&result.ID, &result.Scope.SemesterID, &result.Scope.WeekID, &result.Scope.DepartmentID,
-				&result.Scope.InspectionTypeID, &result.Status, &result.RevisionNo, &result.RowVersion,
+				&result.Scope.InspectionTypeID, &result.Kind, &result.Status, &result.RevisionNo, &result.RowVersion,
 				&result.CreatedBy, &result.SubmittedBy, &result.CreatedAt, &result.SubmittedAt, &fingerprint)
 		if err != nil {
 			return workflow.Submission{}, err
@@ -76,9 +83,16 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		if fingerprint != command.Fingerprint {
 			return workflow.Submission{}, workflow.ErrIdempotencyReuse
 		}
+		if result.Kind != command.Kind {
+			return workflow.Submission{}, workflow.ErrIdempotencyReuse
+		}
+		if command.Kind == workflow.SubmissionKindZeroRecord {
+			if err := requireZeroReceiptCell(ctx, tx, command.Scope, academicYearID, access, permission.ActionInspectionEnter); err != nil {
+				return workflow.Submission{}, err
+			}
+		}
 		// A replay must still satisfy current per-record permissions. Otherwise a
 		// revoked member could use an old key to read a batch's current state.
-		access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
 		for _, requested := range command.Records {
 			args := []any{requested.ID, result.ID}
 			guard := inspectionAccessSQL(access, "mutate", &args)
@@ -98,7 +112,6 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		return workflow.Submission{}, err
 	}
 
-	access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
 	recordIDs := make([]string, 0, len(command.Records))
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
@@ -147,18 +160,38 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		return workflow.Submission{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO department_submission_revisions(
- id,submission_id,revision_no,submitted_by,record_ids,records_snapshot)
- VALUES($1,$2,1,$3,$4,$5)`, uuid.NewString(), id, command.ActorID, recordIDs, encodedSnapshots)
+	 id,submission_id,revision_no,submitted_by,submission_kind,record_ids,records_snapshot)
+	VALUES($1,$2,1,$3,$4,$5,$6)`, uuid.NewString(), id, command.ActorID, command.Kind, recordIDs, encodedSnapshots)
 	if err != nil {
 		return workflow.Submission{}, err
 	}
 	if err = insertAuditTx(ctx, tx, command.Metadata, audit.Entry{Action: audit.ActionDepartmentSubmitted,
 		ResourceType: "departmentSubmission", ResourceID: id, After: map[string]any{
-			"scope": command.Scope, "revisionNo": 1, "recordIds": recordIDs,
+			"scope": command.Scope, "submissionKind": command.Kind, "revisionNo": 1, "recordIds": recordIDs,
+			"explanation": command.Explanation,
 		}, CreatedAt: time.Now().UTC()}); err != nil {
 		return workflow.Submission{}, err
 	}
 	return commitDepartmentBatch(ctx, tx, result.ID)
+}
+
+func requireZeroReceiptCell(ctx context.Context, tx pgx.Tx, scope workflow.Scope, academicYearID string,
+	access inspection.MutationAccess, action string) error {
+	if !access.Unrestricted && !permission.AllowsWholeScope(access.Permissions, action, permission.Scope{
+		AcademicYearID: academicYearID, SemesterID: scope.SemesterID, WeekID: scope.WeekID,
+		InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID,
+	}) {
+		return workflow.ErrSubmissionScope
+	}
+	var obligationID string
+	err := tx.QueryRow(ctx, `SELECT id FROM weekly_report_obligations
+ WHERE semester_id=$1 AND week_id=$2 AND department_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+   AND inspection_type_id=$4 AND removed_at IS NULL FOR SHARE`, scope.SemesterID, scope.WeekID,
+		scope.DepartmentID, scope.InspectionTypeID).Scan(&obligationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return workflow.ErrSubmissionScope
+	}
+	return err
 }
 
 func activeSubmissionType(code string) bool {
@@ -181,12 +214,14 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 	}
 	defer tx.Rollback(ctx)
 	result := workflow.Submission{}
-	err = tx.QueryRow(ctx, `SELECT id,semester_id,week_id,COALESCE(department_id::text,''),inspection_type_id,status,
- revision_no,row_version,created_by,submitted_by,created_at,submitted_at
- FROM department_submissions WHERE id=$1 FOR UPDATE`, command.SubmissionID).
+	var academicYearID string
+	err = tx.QueryRow(ctx, `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.department_id::text,''),ds.inspection_type_id,
+	 ds.submission_kind,ds.status,ds.revision_no,ds.row_version,ds.created_by,ds.submitted_by,ds.created_at,ds.submitted_at,sem.academic_year_id
+	 FROM department_submissions ds JOIN semesters sem ON sem.id=ds.semester_id
+	 WHERE ds.id=$1 FOR UPDATE OF ds`, command.SubmissionID).
 		Scan(&result.ID, &result.Scope.SemesterID, &result.Scope.WeekID, &result.Scope.DepartmentID,
-			&result.Scope.InspectionTypeID, &result.Status, &result.RevisionNo, &result.RowVersion,
-			&result.CreatedBy, &result.SubmittedBy, &result.CreatedAt, &result.SubmittedAt)
+			&result.Scope.InspectionTypeID, &result.Kind, &result.Status, &result.RevisionNo, &result.RowVersion,
+			&result.CreatedBy, &result.SubmittedBy, &result.CreatedAt, &result.SubmittedAt, &academicYearID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workflow.Submission{}, workflow.ErrSubmissionMissing
 	}
@@ -194,35 +229,48 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 		return workflow.Submission{}, err
 	}
 	var expected int
-	if err = tx.QueryRow(ctx, `SELECT cardinality(record_ids) FROM department_submission_revisions
- WHERE submission_id=$1 AND revision_no=$2`, result.ID, result.RevisionNo).Scan(&expected); err != nil {
+	var revisionKind workflow.SubmissionKind
+	if err = tx.QueryRow(ctx, `SELECT submission_kind,cardinality(record_ids) FROM department_submission_revisions
+	 WHERE submission_id=$1 AND revision_no=$2`, result.ID, result.RevisionNo).Scan(&revisionKind, &expected); err != nil {
 		return workflow.Submission{}, err
 	}
+	if revisionKind != result.Kind {
+		return workflow.Submission{}, workflow.ErrSubmissionScope
+	}
 	access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
-	args := []any{result.ID, string(result.Status)}
-	guard := inspectionAccessSQL(access, "review", &args)
-	rows, err := tx.Query(ctx, `SELECT ir.id FROM inspection_records ir
+	IDs := make([]string, 0, expected)
+	if result.Kind == workflow.SubmissionKindZeroRecord {
+		if expected != 0 || (!access.Unrestricted && !permission.AllowsWholeScope(access.Permissions, permission.ActionInspectionReview, permission.Scope{
+			AcademicYearID: academicYearID, SemesterID: result.Scope.SemesterID, WeekID: result.Scope.WeekID,
+			InspectionTypeID: result.Scope.InspectionTypeID, DepartmentID: result.Scope.DepartmentID,
+		})) {
+			return workflow.Submission{}, workflow.ErrSubmissionScope
+		}
+	} else if expected > 0 {
+		args := []any{result.ID, string(result.Status)}
+		guard := inspectionAccessSQL(access, "review", &args)
+		rows, err := tx.Query(ctx, `SELECT ir.id FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id
  WHERE ir.submission_id=$1 AND ir.status=$2 AND ir.deleted_at IS NULL
  AND ir.locked_by_report_id IS NULL AND `+guard+` ORDER BY ir.id FOR UPDATE OF ir`, args...)
-	if err != nil {
-		return workflow.Submission{}, err
-	}
-	IDs := make([]string, 0, expected)
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
+		if err != nil {
 			return workflow.Submission{}, err
 		}
-		IDs = append(IDs, id)
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return workflow.Submission{}, err
+			}
+			IDs = append(IDs, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return workflow.Submission{}, err
+		}
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return workflow.Submission{}, err
-	}
-	if expected == 0 || len(IDs) != expected {
+	if (result.Kind == workflow.SubmissionKindRecords && expected == 0) || len(IDs) != expected {
 		return workflow.Submission{}, workflow.ErrSubmissionScope
 	}
 	if result.RowVersion != command.Version {
@@ -232,14 +280,16 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 	if err != nil {
 		return workflow.Submission{}, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE inspection_records SET status=$1,row_version=row_version+1,updated_at=now()
+	if result.Kind == workflow.SubmissionKindRecords {
+		tag, err := tx.Exec(ctx, `UPDATE inspection_records SET status=$1,row_version=row_version+1,updated_at=now()
  WHERE id=ANY($2::uuid[]) AND submission_id=$3 AND status='PENDING_REVIEW' AND deleted_at IS NULL
  AND locked_by_report_id IS NULL`, string(next), IDs, result.ID)
-	if err != nil {
-		return workflow.Submission{}, err
-	}
-	if int(tag.RowsAffected()) != expected {
-		return workflow.Submission{}, workflow.ErrVersionConflict
+		if err != nil {
+			return workflow.Submission{}, err
+		}
+		if int(tag.RowsAffected()) != expected {
+			return workflow.Submission{}, workflow.ErrVersionConflict
+		}
 	}
 	err = tx.QueryRow(ctx, `UPDATE department_submissions SET status=$2,row_version=row_version+1,
  reviewed_by=$3,reviewed_at=now(),return_reason=$4,updated_at=now()
@@ -260,7 +310,7 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 	if err = insertAuditTx(ctx, tx, command.Metadata, audit.Entry{Action: action,
 		ResourceType: "departmentSubmission", ResourceID: result.ID,
 		Before: map[string]any{"status": workflow.PendingReview, "version": command.Version},
-		After:  map[string]any{"status": next, "version": result.RowVersion, "recordIds": IDs},
+		After:  map[string]any{"status": next, "version": result.RowVersion, "submissionKind": result.Kind, "recordIds": IDs},
 	}); err != nil {
 		return workflow.Submission{}, err
 	}
@@ -276,23 +326,32 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 	}
 	defer tx.Rollback(ctx)
 	result := workflow.Submission{}
-	err = tx.QueryRow(ctx, `SELECT id,semester_id,week_id,COALESCE(department_id::text,''),inspection_type_id,status,
- revision_no,row_version,created_by,submitted_by,created_at,submitted_at
- FROM department_submissions WHERE id=$1 FOR UPDATE`, command.SubmissionID).
+	var academicYearID string
+	err = tx.QueryRow(ctx, `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.department_id::text,''),ds.inspection_type_id,
+	 ds.submission_kind,ds.status,ds.revision_no,ds.row_version,ds.created_by,ds.submitted_by,ds.created_at,ds.submitted_at,sem.academic_year_id
+	 FROM department_submissions ds JOIN semesters sem ON sem.id=ds.semester_id
+	 WHERE ds.id=$1 FOR UPDATE OF ds`, command.SubmissionID).
 		Scan(&result.ID, &result.Scope.SemesterID, &result.Scope.WeekID, &result.Scope.DepartmentID,
-			&result.Scope.InspectionTypeID, &result.Status, &result.RevisionNo, &result.RowVersion,
-			&result.CreatedBy, &result.SubmittedBy, &result.CreatedAt, &result.SubmittedAt)
+			&result.Scope.InspectionTypeID, &result.Kind, &result.Status, &result.RevisionNo, &result.RowVersion,
+			&result.CreatedBy, &result.SubmittedBy, &result.CreatedAt, &result.SubmittedAt, &academicYearID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workflow.Submission{}, workflow.ErrSubmissionMissing
 	}
 	if err != nil {
 		return workflow.Submission{}, err
 	}
+	if result.Kind != command.Kind {
+		return workflow.Submission{}, workflow.ErrInvalidSubmit
+	}
 	var priorRecordIDs []string
-	err = tx.QueryRow(ctx, `SELECT record_ids FROM department_submission_revisions
- WHERE submission_id=$1 AND revision_no=$2`, result.ID, result.RevisionNo).Scan(&priorRecordIDs)
+	var revisionKind workflow.SubmissionKind
+	err = tx.QueryRow(ctx, `SELECT submission_kind,record_ids FROM department_submission_revisions
+	 WHERE submission_id=$1 AND revision_no=$2`, result.ID, result.RevisionNo).Scan(&revisionKind, &priorRecordIDs)
 	if err != nil {
 		return workflow.Submission{}, err
+	}
+	if revisionKind != result.Kind {
+		return workflow.Submission{}, workflow.ErrSubmissionScope
 	}
 	if len(priorRecordIDs) != len(command.Records) {
 		return workflow.Submission{}, workflow.ErrInvalidSubmit
@@ -303,6 +362,11 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 		}
 	}
 	access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
+	if result.Kind == workflow.SubmissionKindZeroRecord {
+		if err := requireZeroReceiptCell(ctx, tx, result.Scope, academicYearID, access, permission.ActionInspectionEnter); err != nil {
+			return workflow.Submission{}, err
+		}
+	}
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
 		args := []any{requested.ID, result.ID, string(result.Status)}
@@ -364,17 +428,17 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 		return workflow.Submission{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO department_submission_revisions(
- id,submission_id,revision_no,submitted_by,record_ids,records_snapshot)
- VALUES($1,$2,$3,$4,$5,$6)`, uuid.NewString(), result.ID, result.RevisionNo,
-		command.ActorID, priorRecordIDs, encodedSnapshots)
+	 id,submission_id,revision_no,submitted_by,submission_kind,record_ids,records_snapshot)
+	 VALUES($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), result.ID, result.RevisionNo,
+		command.ActorID, result.Kind, priorRecordIDs, encodedSnapshots)
 	if err != nil {
 		return workflow.Submission{}, err
 	}
 	result.Status, result.SubmittedBy = workflow.PendingReview, command.ActorID
 	if err = insertAuditTx(ctx, tx, command.Metadata, audit.Entry{Action: audit.ActionDepartmentResubmitted,
 		ResourceType: "departmentSubmission", ResourceID: result.ID,
-		Before: map[string]any{"status": workflow.Returned, "revisionNo": result.RevisionNo - 1},
-		After:  map[string]any{"status": workflow.PendingReview, "revisionNo": result.RevisionNo, "recordIds": priorRecordIDs},
+		Before: map[string]any{"status": workflow.Returned, "revisionNo": result.RevisionNo - 1, "submissionKind": result.Kind},
+		After:  map[string]any{"status": workflow.PendingReview, "revisionNo": result.RevisionNo, "submissionKind": result.Kind, "recordIds": priorRecordIDs, "explanation": command.Explanation},
 	}); err != nil {
 		return workflow.Submission{}, err
 	}

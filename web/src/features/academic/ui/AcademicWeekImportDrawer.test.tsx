@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { App as AntDesignApp } from 'antd'
 import { StrictMode } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AcademicCalendar } from '../../../entities/academic/model/academic'
@@ -32,7 +33,7 @@ beforeEach(() => vi.clearAllMocks())
 
 it('requires an explicit target semester and warns when its parent year is disabled', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><StrictMode><AcademicWeekImportDrawer open calendar={calendar} onClose={vi.fn()} /></StrictMode></QueryClientProvider>)
+  render(<AntDesignApp><QueryClientProvider client={client}><StrictMode><AcademicWeekImportDrawer open calendar={calendar} onClose={vi.fn()} /></StrictMode></QueryClientProvider></AntDesignApp>)
 
   const target = await screen.findByRole('combobox', { name: '导入目标学期' })
   expect(target).toHaveValue('')
@@ -44,7 +45,7 @@ it('requires an explicit target semester and warns when its parent year is disab
 it('clears an explicit semester selection when the drawer closes and reopens', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onClose = vi.fn()
-  const view = render(<QueryClientProvider client={client}><AcademicWeekImportDrawer open calendar={calendar} onClose={onClose} /></QueryClientProvider>)
+  const view = render(<AntDesignApp><QueryClientProvider client={client}><AcademicWeekImportDrawer open calendar={calendar} onClose={onClose} /></QueryClientProvider></AntDesignApp>)
   const target = await screen.findByRole('combobox', { name: '导入目标学期' })
   fireEvent.mouseDown(target)
   fireEvent.click(await screen.findByText(/2026-2027 学年上学期（停用）/))
@@ -52,15 +53,15 @@ it('clears an explicit semester selection when the drawer closes and reopens', a
 
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(onClose).toHaveBeenCalledOnce()
-  view.rerender(<QueryClientProvider client={client}><AcademicWeekImportDrawer open={false} calendar={calendar} onClose={onClose} /></QueryClientProvider>)
-  view.rerender(<QueryClientProvider client={client}><AcademicWeekImportDrawer open={true} calendar={calendar} onClose={onClose} /></QueryClientProvider>)
+  view.rerender(<AntDesignApp><QueryClientProvider client={client}><AcademicWeekImportDrawer open={false} calendar={calendar} onClose={onClose} /></QueryClientProvider></AntDesignApp>)
+  view.rerender(<AntDesignApp><QueryClientProvider client={client}><AcademicWeekImportDrawer open={true} calendar={calendar} onClose={onClose} /></QueryClientProvider></AntDesignApp>)
   expect(await screen.findByRole('combobox', { name: '导入目标学期' })).toHaveValue('')
 })
 
 it('clears the previous workbook when replacing a preview', async () => {
   vi.mocked(academicWeekImportApi.preview).mockResolvedValue(validPreview)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><AcademicWeekImportDrawer open calendar={calendar} onClose={vi.fn()} /></QueryClientProvider>)
+  render(<AntDesignApp><QueryClientProvider client={client}><AcademicWeekImportDrawer open calendar={calendar} onClose={vi.fn()} /></QueryClientProvider></AntDesignApp>)
 
   const target = await screen.findByRole('combobox', { name: '导入目标学期' })
   fireEvent.mouseDown(target)

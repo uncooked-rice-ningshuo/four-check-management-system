@@ -67,12 +67,12 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 				case "change-password":
 					return svc.ChangePassword(ctx, user, "TemporaryPassword123", "ChangedPassword456")
 				case "reset-password":
-					return svc.AdminResetPassword(ctx, admin, user.ID, "ChangedPassword456")
+					return svc.AdminResetPassword(ctx, admin, user.ID, "ChangedPassword456", before.SessionVersion+1)
 				case "disable":
-					_, e := svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+					_, e := svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, before.SessionVersion+1)
 					return e
 				default:
-					_, e := svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Updated user", SystemRole: auth.SystemRoleAdmin})
+					_, e := svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Updated user", SystemRole: auth.SystemRoleAdmin, Version: user.SessionVersion + 1})
 					return e
 				}
 			}
@@ -138,11 +138,11 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			}
 			switch kind {
 			case "password":
-				e = svc.AdminResetPassword(ctx, admin, user.ID, "ChangedPassword456")
+				e = svc.AdminResetPassword(ctx, admin, user.ID, "ChangedPassword456", user.SessionVersion+1)
 			case "status":
-				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, user.SessionVersion+1)
 			case "role":
-				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: user.Name, SystemRole: auth.SystemRoleAdmin})
+				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: user.Name, SystemRole: auth.SystemRoleAdmin, Version: user.SessionVersion + 1})
 			}
 			close(repository.resume)
 			if e != nil {
@@ -168,7 +168,7 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			result := make(chan error, 1)
 			go func() {
 				if kind == "admin-reset" {
-					result <- staleService.AdminResetPassword(ctx, admin, user.ID, "StalePassword789")
+					result <- staleService.AdminResetPassword(ctx, admin, user.ID, "StalePassword789", user.SessionVersion+1)
 				} else {
 					result <- staleService.ChangePassword(ctx, user, "TemporaryPassword123", "StalePassword789")
 				}
@@ -179,7 +179,7 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 				t.Fatal("password write did not reach repository")
 			}
 			if kind == "disable" {
-				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, user.SessionVersion+1)
 			} else {
 				e = svc.ChangePassword(ctx, user, "TemporaryPassword123", "WinningPassword456")
 			}
@@ -221,9 +221,9 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 				t.Fatal(e)
 			}
 			if kind == "disabled" {
-				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, user.SessionVersion+1)
 			} else {
-				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: user.Name, SystemRole: auth.SystemRoleAdmin})
+				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: user.Name, SystemRole: auth.SystemRoleAdmin, Version: user.SessionVersion + 1})
 			}
 			if e != nil {
 				t.Fatal(e)
@@ -240,7 +240,7 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 				t.Fatal("old actor changed password", e)
 			}
 			if kind == "disabled" {
-				if e = svc.AdminResetPassword(ctx, admin, user.ID, "AdminResetPassword456"); e != nil {
+				if e = svc.AdminResetPassword(ctx, admin, user.ID, "AdminResetPassword456", before.SessionVersion+1); e != nil {
 					t.Fatal("administrator cannot reset disabled target", e)
 				}
 			}
@@ -258,9 +258,9 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			go func() {
 				var writeErr error
 				if scenario.operation == "update" {
-					_, writeErr = staleService.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Stale name", SystemRole: auth.SystemRoleMember})
+					_, writeErr = staleService.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Stale name", SystemRole: auth.SystemRoleMember, Version: user.SessionVersion + 1})
 				} else {
-					_, writeErr = staleService.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusActive)
+					_, writeErr = staleService.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusActive, user.SessionVersion+1)
 				}
 				result <- writeErr
 			}()
@@ -272,12 +272,12 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			password := "TemporaryPassword123"
 			switch scenario.winner {
 			case "role":
-				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Winning name", SystemRole: auth.SystemRoleAdmin})
+				_, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Winning name", SystemRole: auth.SystemRoleAdmin, Version: user.SessionVersion + 1})
 			case "password":
 				password = "WinningPassword456"
-				e = svc.AdminResetPassword(ctx, admin, user.ID, password)
+				e = svc.AdminResetPassword(ctx, admin, user.ID, password, user.SessionVersion+1)
 			case "disable":
-				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, user.SessionVersion+1)
 			}
 			if e != nil {
 				close(repository.resume)
@@ -325,6 +325,49 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 		})
 	}
 
+	for i, operation := range []string{"status", "reset-password"} {
+		t.Run("stale client version rejects "+operation+" after profile update", func(t *testing.T) {
+			user, e := svc.AdminCreateUser(ctx, admin, auth.AdminCreateUserInput{StudentNo: fmt.Sprintf("stale-client-version-%d", i), Name: "Original name", TemporaryPassword: "TemporaryPassword123", SystemRole: auth.SystemRoleMember})
+			if e != nil {
+				t.Fatal(e)
+			}
+			staleVersion := user.SessionVersion + 1
+			if _, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Updated name", SystemRole: user.SystemRole, Version: staleVersion}); e != nil {
+				t.Fatal("profile update failed", e)
+			}
+			winner, e := db.FindByID(ctx, user.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			var auditsBefore int
+			if e = db.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs`).Scan(&auditsBefore); e != nil {
+				t.Fatal(e)
+			}
+
+			switch operation {
+			case "status":
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, staleVersion)
+			case "reset-password":
+				e = svc.AdminResetPassword(ctx, admin, user.ID, "StaleResetPassword456", staleVersion)
+			}
+			if !errors.Is(e, auth.ErrVersionConflict) {
+				t.Fatalf("stale %s accepted, want version conflict: %v", operation, e)
+			}
+
+			after, e := db.FindByID(ctx, user.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if after.SessionVersion != winner.SessionVersion || after.Status != winner.Status || after.Name != winner.Name || after.PasswordHash != winner.PasswordHash {
+				t.Fatalf("stale %s changed committed account", operation)
+			}
+			var auditsAfter int
+			if e = db.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs`).Scan(&auditsAfter); e != nil || auditsAfter != auditsBefore {
+				t.Fatalf("stale %s committed an audit: before=%d after=%d err=%v", operation, auditsBefore, auditsAfter, e)
+			}
+		})
+	}
+
 	for i, winnerKind := range []string{"assignment", "disable"} {
 		t.Run("stale organization assignment after "+winnerKind, func(t *testing.T) {
 			var firstDepartment, secondDepartment, role string
@@ -345,7 +388,7 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			staleService := organization.NewService(repository)
 			result := make(chan error, 1)
 			go func() {
-				result <- staleService.AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, Name: "Forged name", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: firstDepartment, OrganizationRoleID: role}, audit.Metadata{ActorID: admin.ID})
+				result <- staleService.AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, Name: "Forged name", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: firstDepartment, OrganizationRoleID: role, Version: user.SessionVersion + 1}, audit.Metadata{ActorID: admin.ID})
 			}()
 			select {
 			case <-repository.reached:
@@ -353,9 +396,9 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 				t.Fatal("assignment did not reach repository")
 			}
 			if winnerKind == "assignment" {
-				e = organization.NewService(db).AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, Name: "Forged winner", DepartmentID: secondDepartment, OrganizationRoleID: role}, audit.Metadata{ActorID: admin.ID})
+				e = organization.NewService(db).AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, Name: "Forged winner", DepartmentID: secondDepartment, OrganizationRoleID: role, Version: user.SessionVersion + 1}, audit.Metadata{ActorID: admin.ID})
 			} else {
-				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled)
+				_, e = svc.AdminSetUserStatus(ctx, admin, user.ID, auth.StatusDisabled, user.SessionVersion+1)
 			}
 			if e != nil {
 				close(repository.resume)
@@ -428,7 +471,7 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			repository := &pausedAssignmentWrite{Postgres: db, reached: make(chan struct{}), resume: make(chan struct{})}
 			result := make(chan error, 1)
 			go func() {
-				result <- organization.NewService(repository).AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, DepartmentID: department, OrganizationRoleID: role}, audit.Metadata{ActorID: admin.ID})
+				result <- organization.NewService(repository).AssignUserRole(ctx, organization.UserAssignment{AccountID: user.ID, DepartmentID: department, OrganizationRoleID: role, Version: user.SessionVersion + 1}, audit.Metadata{ActorID: admin.ID})
 			}()
 			select {
 			case <-repository.reached:
@@ -471,6 +514,46 @@ func TestAccountMutationAtomicPostgres(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("stale user editor version after committed profile update", func(t *testing.T) {
+		user, e := svc.AdminCreateUser(ctx, admin, auth.AdminCreateUserInput{StudentNo: "account-editor-version", Name: "Original name", TemporaryPassword: "TemporaryPassword123", SystemRole: auth.SystemRoleMember})
+		if e != nil {
+			t.Fatal(e)
+		}
+		listed, e := organization.NewService(db).ListUsers(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var listedVersion int
+		for _, value := range listed {
+			if value.AccountID == user.ID {
+				listedVersion = value.Version
+				break
+			}
+		}
+		if listedVersion != user.SessionVersion+1 {
+			t.Fatalf("listed version = %d, want %d", listedVersion, user.SessionVersion+1)
+		}
+		winner, e := svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Committed name", SystemRole: auth.SystemRoleAdmin, Version: listedVersion})
+		if e != nil {
+			t.Fatal(e)
+		}
+		var audits int
+		if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs`).Scan(&audits); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = svc.AdminUpdateUser(ctx, admin, user.ID, auth.AdminUpdateUserInput{StudentNo: user.StudentNo, Name: "Stale editor name", SystemRole: auth.SystemRoleMember, Version: listedVersion}); !errors.Is(e, auth.ErrVersionConflict) {
+			t.Fatalf("stale editor update error = %v, want version conflict", e)
+		}
+		current, e := db.FindByID(ctx, user.ID)
+		if e != nil || current.Name != "Committed name" || current.SystemRole != auth.SystemRoleAdmin || current.SessionVersion != winner.SessionVersion {
+			t.Fatalf("stale editor changed the committed account: account=%+v error=%v", current, e)
+		}
+		var finalAudits int
+		if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs`).Scan(&finalAudits); e != nil || finalAudits != audits {
+			t.Fatalf("stale editor appended an audit: before=%d after=%d error=%v", audits, finalAudits, e)
+		}
+	})
 
 }
 

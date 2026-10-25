@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"four-check-management-system/server/internal/audit"
+	"four-check-management-system/server/internal/auth"
 )
 
 type memoryRepository struct {
@@ -104,12 +105,13 @@ func TestAssignmentAuditUsesStoredAccountFieldsAndRejectsMissingTarget(t *testin
 	current := UserAssignment{SessionVersion: 12, AccountID: "user", LoginName: "real-login", StudentNo: "real-student", Name: "Real name", Status: "ACTIVE", SystemRole: "MEMBER"}
 	repo := &memoryRepository{users: []UserAssignment{current}}
 	svc := NewService(repo)
-	requested := UserAssignment{SessionVersion: 999, AccountID: "user", LoginName: "forged", Name: "Forged", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: "new-department", OrganizationRoleID: "new-role"}
+	requested := UserAssignment{SessionVersion: 999, Version: 13, AccountID: "user", LoginName: "forged", Name: "Forged", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: "new-department", OrganizationRoleID: "new-role"}
 	if err := svc.AssignUserRole(context.Background(), requested); err != nil {
 		t.Fatal(err)
 	}
-	after, ok := repo.mutations[0].Entry.After.(UserAssignment)
-	if !ok || after.SessionVersion != current.SessionVersion || after.Name != current.Name || after.LoginName != current.LoginName || after.SystemRole != current.SystemRole || after.Status != current.Status || after.IsSuperAdmin || after.DepartmentID != "new-department" || after.OrganizationRoleID != "new-role" {
+	before, beforeOK := repo.mutations[0].Entry.Before.(UserAssignment)
+	after, afterOK := repo.mutations[0].Entry.After.(UserAssignment)
+	if !beforeOK || !afterOK || before.Version != 13 || after.Version != 14 || after.SessionVersion != current.SessionVersion || after.Name != current.Name || after.LoginName != current.LoginName || after.SystemRole != current.SystemRole || after.Status != current.Status || after.IsSuperAdmin || after.DepartmentID != "new-department" || after.OrganizationRoleID != "new-role" {
 		t.Fatal("client forged authoritative audit fields")
 	}
 	requested.AccountID = "missing"
@@ -120,15 +122,37 @@ func TestAssignmentAuditUsesStoredAccountFieldsAndRejectsMissingTarget(t *testin
 
 func TestAssignmentVersionCannotBeProvidedOrExposedAsJSON(t *testing.T) {
 	var assignment UserAssignment
-	if err := json.Unmarshal([]byte(`{"accountId":"user","SessionVersion":999,"sessionVersion":999}`), &assignment); err != nil {
+	if err := json.Unmarshal([]byte(`{"accountId":"user","SessionVersion":999,"sessionVersion":999,"version":12}`), &assignment); err != nil {
 		t.Fatal(err)
 	}
-	if assignment.SessionVersion != 0 {
+	if assignment.SessionVersion != 0 || assignment.Version != 12 {
 		t.Fatal("client injected internal version")
 	}
 	assignment.SessionVersion = 12
 	encoded, err := json.Marshal(assignment)
-	if err != nil || strings.Contains(strings.ToLower(string(encoded)), "sessionversion") {
+	if err != nil || strings.Contains(strings.ToLower(string(encoded)), "sessionversion") || !strings.Contains(string(encoded), `"version":12`) {
 		t.Fatal("internal version exposed", err)
+	}
+}
+
+func TestAdminUserListMapsInternalVersionToClientToken(t *testing.T) {
+	users, err := NewService(&memoryRepository{users: []UserAssignment{{AccountID: "user", SessionVersion: 7}}}).ListUsers(context.Background())
+	if err != nil || len(users) != 1 || users[0].Version != 8 {
+		t.Fatalf("users = %+v, error = %v", users, err)
+	}
+}
+
+func TestAssignmentRejectsVersionFromStaleEditor(t *testing.T) {
+	current := UserAssignment{SessionVersion: 12, AccountID: "user", Name: "Current name", DepartmentID: "old-department", OrganizationRoleID: "old-role"}
+	repo := &memoryRepository{users: []UserAssignment{current}}
+	var stale UserAssignment
+	if err := json.Unmarshal([]byte(`{"accountId":"user","departmentId":"new-department","organizationRoleId":"new-role","version":11}`), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewService(repo).AssignUserRole(context.Background(), stale); err != auth.ErrVersionConflict {
+		t.Fatalf("stale assignment error = %v, want version conflict", err)
+	}
+	if len(repo.mutations) != 0 {
+		t.Fatal("stale assignment appended an audit mutation")
 	}
 }

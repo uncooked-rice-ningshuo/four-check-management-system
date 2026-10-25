@@ -35,6 +35,7 @@ func TestDomainErrorsSeparateInvalidInputFromInternalFailure(t *testing.T) {
 		{"dictionary input", dictionary.ErrInvalidDictionary, 400, "INVALID_REQUEST"},
 		{"organization input", organization.ErrInvalidInput, 400, "INVALID_REQUEST"},
 		{"permission input", permission.ErrInvalidRule, 400, "INVALID_REQUEST"},
+		{"force generation role", permission.ErrForceGenerateRoleRequired, 400, "REPORT_FORCE_GENERATE_ROLE_REQUIRED"},
 		{"account input", auth.ErrInvalidInput, 400, "INVALID_REQUEST"},
 		{"not found", masterdata.ErrNotFound, 404, "RESOURCE_NOT_FOUND"},
 		{"dictionary missing", dictionary.ErrNotFound, 404, "RESOURCE_NOT_FOUND"},

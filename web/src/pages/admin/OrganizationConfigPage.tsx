@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ProTable } from '@ant-design/pro-components'
-import { Button, Card, Form, Input, Modal, Switch, Tabs, Typography, message } from 'antd'
+import { App, Button, Card, Form, Input, Modal, Switch, Tabs, Typography } from 'antd'
 import { useState } from 'react'
 import type { Department, DepartmentInspectionScope, InspectionType } from '../../entities/organization/model/organization'
 import { createDepartment, getCatalogs, getDepartmentInspectionScopes, updateDepartment, updateDepartmentInspectionScope, updateInspectionType } from '../../shared/api/adminApi'
 
 export function OrganizationConfigPage() {
+	const { message } = App.useApp()
 	const [modal, modalContextHolder] = Modal.useModal()
   const [departmentModal, setDepartmentModal] = useState(false)
   const [form] = Form.useForm()

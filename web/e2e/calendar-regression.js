@@ -6,12 +6,14 @@ async (page) => {
   const errors = []
   const knownWarnings = []
   const unexpectedConsoleErrors = []
+  let lifecycleStage = 'setup'
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => {
     if (message.type() !== 'error' && message.type() !== 'warning') return
     const text = message.text()
     if (text.includes('Static function can not consume context') || text.includes('useForm` is not connected')) {
-      knownWarnings.push(text)
+      const location = message.location()
+      knownWarnings.push(`${text} (${location.url}:${location.lineNumber}, stage=${lifecycleStage})`)
       return
     }
     const url = message.location().url
@@ -39,6 +41,7 @@ async (page) => {
     return dialog
   }
   const submit = async (dialog, path, expectedStatus) => {
+    lifecycleStage = `save ${path} ${expectedStatus}`
     const [response] = await Promise.all([
       page.waitForResponse(r => r.url().includes(path) && r.request().method() === 'PUT'),
       dialog.getByRole('button', { name: /确\s*定/ }).click(),
@@ -54,12 +57,14 @@ async (page) => {
     }
     await dialog.getByText('备注', { exact: true }).click()
   }
+  lifecycleStage = 'initial calendar page render'
   await page.goto(page.url().split('/').slice(0, 3).join('/') + '/admin/academic')
   await page.getByRole('heading', { name: '学期与周次', exact: true }).waitFor()
   await page.getByText(/当前工作周：第 1 周/).waitFor()
 
   // Real browser lifecycle: create -> close -> first edit -> close -> reopen.
   for (const kind of ['学年', '学期', '周次']) {
+    lifecycleStage = `create-close-edit ${kind}`
     await page.getByRole('button', { name: `新增${kind}`, exact: true }).click()
     await close(page.getByRole('dialog', { name: `新增${kind}`, exact: true }))
     await page.getByRole('tab', { name: kind, exact: true }).click()
@@ -73,6 +78,7 @@ async (page) => {
     }
   }
   for (const [note, start] of [['浏览器回归 B', fixture.otherStart], ['浏览器回归 A', fixture.weekStart]]) {
+    lifecycleStage = `reopen and edit ${note}`
     const dialog = await openWeek(note)
     await waitValue(dialog.getByPlaceholder('开始日期'), start)
     await waitValue(dialog.getByLabel('备注'), note)
@@ -106,6 +112,7 @@ async (page) => {
   await dialog.waitFor({ state: 'hidden' })
   await page.getByText(/当前工作周：第 3 周/).waitFor({ timeout: 5000 })
   await page.getByRole('row').filter({ hasText: '浏览器回归 A' }).getByText('2 倍').waitFor()
+  lifecycleStage = 'open global work context editor'
   await page.getByRole('button', { name: '设置临时工作周', exact: true }).click()
   await page.getByRole('combobox', { name: '目标周次' }).click()
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '第 3 周' }).waitFor({ timeout: 5000 })
@@ -145,6 +152,7 @@ async (page) => {
   await waitValue(dialog.getByLabel('备注'), '浏览器回归 A')
   await close(dialog)
   await page.getByRole('cell', { name: '浏览器回归 B 已修正', exact: true }).waitFor()
+  check(knownWarnings.length === 0, `Unexpected Ant Design warnings: ${[...new Set(knownWarnings)].join('; ')}`)
   check(unexpectedConsoleErrors.length === 0, `Unexpected console errors: ${unexpectedConsoleErrors.join('; ')}`)
   check(errors.length === 0, `Uncaught browser errors: ${errors.join('; ')}`)
   await page.screenshot({ path: `${output}/calendar-passed.png`, fullPage: true })

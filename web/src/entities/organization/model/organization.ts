@@ -17,7 +17,8 @@ export type OrganizationCatalogs = {
   inspectionTypes: InspectionType[]
 }
 export type UserAssignment = {
-  accountId: string
+  version: number
+	accountId: string
   loginName: string
   studentNo: string
   name: string

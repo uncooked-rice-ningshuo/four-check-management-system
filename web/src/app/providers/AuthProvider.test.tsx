@@ -21,9 +21,9 @@ const user = {
 }
 
 function SessionState() {
-  const { user: currentUser, loading } = useAuth()
+  const { user: currentUser, loading, recoveryError } = useAuth()
   if (loading) return <span>正在恢复会话</span>
-  return <span>{currentUser?.name ?? '未登录'}</span>
+  return <><span>{currentUser?.name ?? '未登录'}</span>{recoveryError && <span>{recoveryError}</span>}</>
 }
 
 afterEach(() => {
@@ -31,6 +31,12 @@ afterEach(() => {
 })
 
 describe('AuthProvider', () => {
+  it('shows the eviction reason when startup refresh finds a displaced device', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'SESSION_EVICTED' }), { status: 401 })))
+    render(<QueryClientProvider client={new QueryClient()}><AuthProvider><SessionState /></AuthProvider></QueryClientProvider>)
+    await screen.findByText('账号已在其他设备登录，当前设备已退出。')
+    expect(screen.getByText('未登录')).toBeInTheDocument()
+  })
   it('StrictMode 重复执行 Effect 时只恢复一次会话', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

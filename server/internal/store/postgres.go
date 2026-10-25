@@ -459,7 +459,37 @@ func (p *Postgres) Save(ctx context.Context, s auth.RefreshSession, expectedVers
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,expires_at) VALUES($1,$2,$3,$4)`, s.ID, accountID, s.TokenHash, s.ExpiresAt); err != nil {
+	var active int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM login_sessions s WHERE s.account_id=$1 AND s.revoked_at IS NULL AND s.expires_at>now()
+		AND EXISTS (SELECT 1 FROM refresh_sessions r WHERE r.login_session_id=s.id AND r.revoked_at IS NULL AND r.expires_at>now())`, accountID).Scan(&active); err != nil {
+		return err
+	}
+	for active >= 3 {
+		var evictedID string
+		err = tx.QueryRow(ctx, `SELECT s.id FROM login_sessions s WHERE s.account_id=$1 AND s.revoked_at IS NULL AND s.expires_at>now()
+			AND EXISTS (SELECT 1 FROM refresh_sessions r WHERE r.login_session_id=s.id AND r.revoked_at IS NULL AND r.expires_at>now())
+			ORDER BY s.last_seen_at,s.created_at,s.id LIMIT 1 FOR UPDATE`, accountID).Scan(&evictedID)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE login_sessions SET revoked_at=now(),revoked_reason='EVICTED' WHERE id=$1`, evictedID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=now() WHERE login_session_id=$1 AND revoked_at IS NULL`, evictedID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,actor_id,action,resource_type,resource_id,after_json) VALUES(gen_random_uuid(),$1,'SESSION_EVICTED','login_session',$2,'{"reason":"device_limit"}'::jsonb)`, accountID, evictedID); err != nil {
+			return err
+		}
+		active--
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO login_sessions(id,account_id,expires_at) VALUES($1,$2,$3)`, s.LoginSessionID, accountID, s.ExpiresAt); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,login_session_id,expires_at) VALUES($1,$2,$3,$4,$5)`, s.ID, accountID, s.TokenHash, s.LoginSessionID, s.ExpiresAt); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit_logs(id,actor_id,action,resource_type,resource_id) VALUES(gen_random_uuid(),$1,'SESSION_LOGIN','login_session',$2)`, accountID, s.LoginSessionID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -469,7 +499,12 @@ func (p *Postgres) Save(ctx context.Context, s auth.RefreshSession, expectedVers
 // again under a lock; this read alone never authorizes credential issuance.
 func (p *Postgres) FindRefreshSession(ctx context.Context, hash string, now time.Time) (auth.RefreshSession, error) {
 	var s auth.RefreshSession
-	err := p.Pool.QueryRow(ctx, `SELECT id,account_id,token_hash,expires_at,revoked_at FROM refresh_sessions WHERE token_hash=$1`, hash).Scan(&s.ID, &s.AccountID, &s.TokenHash, &s.ExpiresAt, &s.RevokedAt)
+	var reason *string
+	err := p.Pool.QueryRow(ctx, `SELECT r.id,r.account_id,r.token_hash,r.login_session_id,r.expires_at,r.revoked_at,l.revoked_reason
+		FROM refresh_sessions r JOIN login_sessions l ON l.id=r.login_session_id WHERE r.token_hash=$1`, hash).Scan(&s.ID, &s.AccountID, &s.TokenHash, &s.LoginSessionID, &s.ExpiresAt, &s.RevokedAt, &reason)
+	if err == nil && reason != nil && *reason == "EVICTED" {
+		return auth.RefreshSession{}, auth.ErrSessionEvicted
+	}
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (s.RevokedAt != nil || !s.ExpiresAt.After(now))) {
 		return auth.RefreshSession{}, auth.ErrInvalidRefreshToken
 	}
@@ -493,6 +528,18 @@ func (p *Postgres) Rotate(ctx context.Context, hash string, now time.Time, repla
 	if err != nil {
 		return err
 	}
+	var parentRevokedAt *time.Time
+	var reason *string
+	err = tx.QueryRow(ctx, `SELECT revoked_at,revoked_reason FROM login_sessions WHERE id=$1 AND account_id=$2 AND expires_at>$3 FOR UPDATE`, replacement.LoginSessionID, accountID, now).Scan(&parentRevokedAt, &reason)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && parentRevokedAt != nil) {
+		if reason != nil && *reason == "EVICTED" {
+			return auth.ErrSessionEvicted
+		}
+		return auth.ErrInvalidRefreshToken
+	}
+	if err != nil {
+		return err
+	}
 	consumed, err := tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=$2 WHERE token_hash=$1 AND account_id=$3 AND revoked_at IS NULL AND expires_at>$2`, hash, now, accountID)
 	if err != nil {
 		return err
@@ -500,7 +547,10 @@ func (p *Postgres) Rotate(ctx context.Context, hash string, now time.Time, repla
 	if consumed.RowsAffected() != 1 {
 		return auth.ErrInvalidRefreshToken
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,expires_at) VALUES($1,$2,$3,$4)`, replacement.ID, accountID, replacement.TokenHash, replacement.ExpiresAt); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO refresh_sessions(id,account_id,token_hash,login_session_id,expires_at) VALUES($1,$2,$3,$4,$5)`, replacement.ID, accountID, replacement.TokenHash, replacement.LoginSessionID, replacement.ExpiresAt); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE login_sessions SET expires_at=$2,last_seen_at=$3 WHERE id=$1`, replacement.LoginSessionID, replacement.ExpiresAt, now); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -508,13 +558,56 @@ func (p *Postgres) Rotate(ctx context.Context, hash string, now time.Time, repla
 
 // Revoke 在退出登录时幂等地作废刷新会话。
 func (p *Postgres) Revoke(ctx context.Context, hash string, now time.Time) error {
-	_, err := p.Pool.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,$2) WHERE token_hash=$1`, hash, now)
-	return err
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var sessionID string
+	err = tx.QueryRow(ctx, `SELECT login_session_id FROM refresh_sessions WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>$2`, hash, now).Scan(&sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE login_sessions SET revoked_at=COALESCE(revoked_at,$2),revoked_reason=COALESCE(revoked_reason,'LOGOUT') WHERE id=$1`, sessionID, now); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,$2) WHERE login_session_id=$1 AND revoked_at IS NULL`, sessionID, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // RevokeAll 在改密、禁用和权限敏感变更后作废账号全部有效刷新会话。
 func (p *Postgres) RevokeAll(ctx context.Context, accountID string, now time.Time) error {
 	_, err := p.Pool.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,$2) WHERE account_id=$1 AND revoked_at IS NULL`, accountID, now)
+	return err
+}
+
+// CheckAccessSession makes individual device revocation effective on the next API request.
+func (p *Postgres) CheckAccessSession(ctx context.Context, accountID, sessionID string, now time.Time) error {
+	var lastSeen time.Time
+	err := p.Pool.QueryRow(ctx, `SELECT s.last_seen_at FROM login_sessions s
+		WHERE s.id=$1 AND s.account_id=$2 AND s.revoked_at IS NULL AND s.expires_at>$3
+		AND EXISTS (SELECT 1 FROM refresh_sessions r WHERE r.login_session_id=s.id AND r.revoked_at IS NULL AND r.expires_at>$3)`, sessionID, accountID, now).Scan(&lastSeen)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var reason *string
+		if e := p.Pool.QueryRow(ctx, `SELECT revoked_reason FROM login_sessions WHERE id=$1 AND account_id=$2`, sessionID, accountID).Scan(&reason); e == nil && reason != nil && *reason == "EVICTED" {
+			return auth.ErrSessionEvicted
+		} else if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+			return e
+		}
+		return auth.ErrInvalidAccessToken
+	}
+	if err != nil {
+		return err
+	}
+	if now.Sub(lastSeen) < 5*time.Minute {
+		return nil
+	}
+	_, err = p.Pool.Exec(ctx, `UPDATE login_sessions SET last_seen_at=$3 WHERE id=$1 AND account_id=$2 AND revoked_at IS NULL AND last_seen_at<($3::timestamptz - interval '5 minutes')`, sessionID, accountID, now)
 	return err
 }
 

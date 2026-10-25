@@ -40,6 +40,7 @@ var (
 	ErrInvalidCredentials  = errors.New("invalid credentials")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrInvalidAccessToken  = errors.New("invalid access token")
+	ErrSessionEvicted      = errors.New("session evicted")
 	ErrInvalidInput        = errors.New("invalid input")
 	ErrForbidden           = errors.New("forbidden")
 	ErrInvalidTransition   = errors.New("invalid account status transition")
@@ -68,13 +69,14 @@ type Account struct {
 }
 
 type RefreshSession struct {
-	ID, AccountID, TokenHash string
-	ExpiresAt                time.Time
-	RevokedAt                *time.Time
+	ID, AccountID, TokenHash, LoginSessionID string
+	ExpiresAt                                time.Time
+	RevokedAt                                *time.Time
 }
 
 type accessClaims struct {
-	SessionVersion int `json:"ver"`
+	SessionVersion int    `json:"ver"`
+	LoginSessionID string `json:"sid"`
 	jwt.RegisteredClaims
 }
 
@@ -102,6 +104,7 @@ type SessionRepository interface {
 	Rotate(context.Context, string, time.Time, RefreshSession, int) error
 	Revoke(context.Context, string, time.Time) error
 	RevokeAll(context.Context, string, time.Time) error
+	CheckAccessSession(context.Context, string, string, time.Time) error
 }
 
 type RegisterInput struct {
@@ -427,7 +430,7 @@ func (s *Service) Refresh(ctx context.Context, token string) (Tokens, error) {
 	if err != nil {
 		return Tokens{}, err
 	}
-	tokens, replacement, err := s.prepareTokens(a, now)
+	tokens, replacement, err := s.prepareTokens(a, session.LoginSessionID, now)
 	if err != nil {
 		return Tokens{}, err
 	}
@@ -469,11 +472,17 @@ func (s *Service) AuthenticateAccessToken(ctx context.Context, raw string) (Acco
 	if a.Status != StatusActive || claims.SessionVersion != a.SessionVersion {
 		return Account{}, ErrInvalidAccessToken
 	}
+	if claims.LoginSessionID == "" {
+		return Account{}, ErrInvalidAccessToken
+	}
+	if err := s.sessions.CheckAccessSession(ctx, a.ID, claims.LoginSessionID, s.now().UTC()); err != nil {
+		return Account{}, err
+	}
 	return a, nil
 }
 
 func (s *Service) issueTokens(ctx context.Context, a Account) (Tokens, error) {
-	tokens, session, err := s.prepareTokens(a, s.now().UTC())
+	tokens, session, err := s.prepareTokens(a, uuid.NewString(), s.now().UTC())
 	if err != nil {
 		return Tokens{}, err
 	}
@@ -485,10 +494,11 @@ func (s *Service) issueTokens(ctx context.Context, a Account) (Tokens, error) {
 
 // prepareTokens has no persistence side effects, so rotation can commit both
 // session changes together only after all credential generation succeeds.
-func (s *Service) prepareTokens(a Account, now time.Time) (Tokens, RefreshSession, error) {
+func (s *Service) prepareTokens(a Account, loginSessionID string, now time.Time) (Tokens, RefreshSession, error) {
 	accessExp, refreshExp := now.Add(s.accessTTL), now.Add(s.refreshTTL)
 	claims := accessClaims{
 		SessionVersion: a.SessionVersion,
+		LoginSessionID: loginSessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject: a.ID, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(accessExp), Issuer: "four-check-management-system",
 		},
@@ -502,7 +512,7 @@ func (s *Service) prepareTokens(a Account, now time.Time) (Tokens, RefreshSessio
 		return Tokens{}, RefreshSession{}, err
 	}
 	refresh := base64.RawURLEncoding.EncodeToString(refreshBytes)
-	return Tokens{AccessToken: access, RefreshToken: refresh, AccessExpiresAt: accessExp, RefreshExpiresAt: refreshExp}, RefreshSession{ID: uuid.NewString(), AccountID: a.ID, TokenHash: tokenHash(refresh), ExpiresAt: refreshExp}, nil
+	return Tokens{AccessToken: access, RefreshToken: refresh, AccessExpiresAt: accessExp, RefreshExpiresAt: refreshExp}, RefreshSession{ID: uuid.NewString(), AccountID: a.ID, TokenHash: tokenHash(refresh), LoginSessionID: loginSessionID, ExpiresAt: refreshExp}, nil
 }
 
 func hashPassword(password string) (string, error) {

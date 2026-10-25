@@ -555,6 +555,12 @@ VALUES
             report['status'] = 'passed'
             raise SystemExit(0)
 
+        if os.environ.get('BROWSER_SUITE') == 'device-session-limit':
+            fixture['authPassword'] = changed_password
+            browser_suite('device-session-limit')
+            report['status'] = 'passed'
+            raise SystemExit(0)
+
         if os.environ.get('BROWSER_SUITE') == 'session-renewal':
             # Only the disposable signing key and synthetic account are used here.
             # Force real JWT expiry without waiting 15 minutes or weakening the running API.

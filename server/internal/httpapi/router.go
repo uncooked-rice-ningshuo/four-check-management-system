@@ -377,6 +377,9 @@ func (h *handler) refresh(c *gin.Context) {
 		if errors.Is(err, auth.ErrInvalidRefreshToken) {
 			h.clearCookie(c)
 			writeError(c, http.StatusUnauthorized, "INVALID_SESSION", "登录状态已失效")
+		} else if errors.Is(err, auth.ErrSessionEvicted) {
+			h.clearCookie(c)
+			writeError(c, http.StatusUnauthorized, "SESSION_EVICTED", "账号已在其他设备登录，当前设备已退出")
 		} else {
 			writeAuthServiceError(c, err)
 		}
@@ -1550,7 +1553,10 @@ func (h *handler) currentAccount(c *gin.Context) (auth.Account, bool) {
 	}
 	a, err := h.auth.AuthenticateAccessToken(c, strings.TrimPrefix(header, "Bearer "))
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidAccessToken) {
+		if errors.Is(err, auth.ErrSessionEvicted) {
+			logRequestStage(c, "authentication", "session_evicted")
+			writeError(c, http.StatusUnauthorized, "SESSION_EVICTED", "账号已在其他设备登录，当前设备已退出")
+		} else if errors.Is(err, auth.ErrInvalidAccessToken) {
 			logRequestStage(c, "authentication", "invalid_token")
 			writeError(c, http.StatusUnauthorized, "UNAUTHORIZED", "登录状态已失效")
 		} else {

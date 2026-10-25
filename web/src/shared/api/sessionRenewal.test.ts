@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiDownload, apiRequest, refreshAccessToken, setAccessToken } from './httpClient'
+import { apiDownload, apiRequest, refreshAccessToken, setAccessToken, subscribeSessionExpired } from './httpClient'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const unauthorized = () => json({ code: 'UNAUTHORIZED', message: '登录状态已失效' }, 401)
@@ -11,6 +11,17 @@ function deferred<T>() {
 afterEach(() => { setAccessToken(null); vi.unstubAllGlobals() })
 
 describe('long-lived session renewal', () => {
+  it('clears an evicted device without attempting token rotation', async () => {
+    setAccessToken('evicted-device')
+    const reasons: string[] = []
+    const unsubscribe = subscribeSessionExpired(reason => { reasons.push(reason) })
+    const fetchMock = vi.fn(async () => json({ code: 'SESSION_EVICTED', message: '当前设备已退出' }, 401))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(apiRequest('/work-context')).rejects.toMatchObject({ code: 'SESSION_EVICTED', status: 401 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(reasons).toEqual(['evicted'])
+    unsubscribe()
+  })
   it('renews once and retries the work week without a page reload', async () => {
     setAccessToken('expired')
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {

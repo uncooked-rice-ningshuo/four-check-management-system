@@ -280,6 +280,15 @@ func (r *sessions) RevokeAll(_ context.Context, accountID string, now time.Time)
 	return nil
 }
 
+func (r *sessions) CheckAccessSession(_ context.Context, accountID, sessionID string, now time.Time) error {
+	for _, session := range r.values {
+		if session.AccountID == accountID && session.LoginSessionID == sessionID && session.RevokedAt == nil && session.ExpiresAt.After(now) {
+			return nil
+		}
+	}
+	return auth.ErrInvalidAccessToken
+}
+
 func TestRegisterLoginAndMe(t *testing.T) {
 	repository := &accounts{values: map[string]auth.Account{}}
 	svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)

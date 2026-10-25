@@ -172,6 +172,15 @@ func (m *memorySessions) RevokeAll(_ context.Context, accountID string, now time
 	return nil
 }
 
+func (m *memorySessions) CheckAccessSession(_ context.Context, accountID, sessionID string, now time.Time) error {
+	for _, session := range m.values {
+		if session.AccountID == accountID && session.LoginSessionID == sessionID && session.RevokedAt == nil && session.ExpiresAt.After(now) {
+			return nil
+		}
+	}
+	return ErrInvalidAccessToken
+}
+
 func testService() *Service {
 	return NewService(newMemoryAccounts(), newMemorySessions(), []byte("01234567890123456789012345678901"), 15*time.Minute, 7*24*time.Hour)
 }

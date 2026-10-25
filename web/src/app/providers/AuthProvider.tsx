@@ -28,7 +28,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }).catch((error: unknown) => {
       setUser(null)
       const retryable = !(error instanceof ApiError) || error.status >= 500 || error.status === 408 || error.status === 429
-      setRecoveryError(retryable ? '暂时无法恢复登录状态，请重试或使用账号密码登录。' : null)
+      setRecoveryError(error instanceof ApiError && error.code === 'SESSION_EVICTED'
+        ? '账号已在其他设备登录，当前设备已退出。'
+        : retryable ? '暂时无法恢复登录状态，请重试或使用账号密码登录。' : null)
       return null
     }).finally(() => {
       recoveryInFlight.current = null
@@ -37,12 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return recoveryInFlight.current
   }, [queryClient])
 
-  useEffect(() => subscribeSessionExpired(() => {
+  useEffect(() => subscribeSessionExpired(reason => {
     // Cancel before clearing so late results cannot repopulate private caches.
     void queryClient.cancelQueries()
     queryClient.clear()
     setUser(null)
-    setRecoveryError('登录状态已失效，请重新登录。')
+    setRecoveryError(reason === 'evicted' ? '账号已在其他设备登录，当前设备已退出。' : '登录状态已失效，请重新登录。')
   }), [queryClient])
 
   useEffect(() => {

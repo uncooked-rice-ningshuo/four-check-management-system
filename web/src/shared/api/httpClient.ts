@@ -3,7 +3,7 @@ let accessToken: string | null = null
 // A session boundary prevents an old request from being replayed as a different account.
 let sessionGeneration = 0
 let refreshInFlight: { generation: number; promise: Promise<void> } | null = null
-const sessionExpiredListeners = new Set<() => void>()
+const sessionExpiredListeners = new Set<(reason: 'expired' | 'evicted') => void>()
 
 // ApiErrorBody 对应 Go API 返回的稳定错误结构。
 export type ApiErrorDetail = { path: string; code: string; message: string }
@@ -40,7 +40,7 @@ export function setAccessToken(token: string | null) {
 }
 
 // subscribeSessionExpired keeps React state and private query caches in sync with authentication.
-export function subscribeSessionExpired(listener: () => void) {
+export function subscribeSessionExpired(listener: (reason: 'expired' | 'evicted') => void) {
   sessionExpiredListeners.add(listener)
   return () => { sessionExpiredListeners.delete(listener) }
 }
@@ -49,10 +49,10 @@ function assertSameSession(generation: number) {
   if (generation !== sessionGeneration) throw new ApiError(401, 'SESSION_CHANGED', '登录状态已变化，请重试')
 }
 
-function expireSession(generation: number) {
+function expireSession(generation: number, reason: 'expired' | 'evicted' = 'expired') {
   if (generation !== sessionGeneration) return
   setAccessToken(null)
-  for (const listener of sessionExpiredListeners) listener()
+  for (const listener of sessionExpiredListeners) listener(reason)
 }
 
 // apiRequest 是前端唯一的 HTTP 传输入口，负责附加内存令牌，
@@ -93,7 +93,7 @@ export function refreshAccessToken(): Promise<void> {
       accessToken = data.accessToken
     } catch (error) {
       assertSameSession(generation)
-      if (error instanceof ApiError && error.status === 401) expireSession(generation)
+      if (error instanceof ApiError && error.status === 401) expireSession(generation, error.code === 'SESSION_EVICTED' ? 'evicted' : 'expired')
       throw error
     } finally {
       if (refreshInFlight?.generation === generation) refreshInFlight = null
@@ -114,6 +114,10 @@ async function request(path: string, init: RequestInit) {
     return response
   } catch (error) {
     assertSameSession(generation)
+	if (error instanceof ApiError && error.code === 'SESSION_EVICTED') {
+		expireSession(generation, 'evicted')
+		throw error
+	}
     if (!(error instanceof ApiError) || error.status !== 401 || !token || sessionEndpoints.has(path)) throw error
     init.signal?.throwIfAborted()
     // A delayed 401 may belong to the credential that another request already renewed.
@@ -126,7 +130,7 @@ async function request(path: string, init: RequestInit) {
       return response
     } catch (retryError) {
       assertSameSession(generation)
-      if (retryError instanceof ApiError && retryError.status === 401) expireSession(generation)
+      if (retryError instanceof ApiError && retryError.status === 401) expireSession(generation, retryError.code === 'SESSION_EVICTED' ? 'evicted' : 'expired')
       throw retryError
     }
   }

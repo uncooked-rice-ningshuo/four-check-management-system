@@ -8,7 +8,7 @@
 
 **本目录的已有部署升级文件是历史说明，不是当前工作区的更新指引。** [r1 升级说明](UPGRADE.md)记录 2026-10-06 的迁移 014–021；[r2 更新说明](UPDATE-R2.md)记录 2026-10-06 的 Web 会话续期补丁，数据库仍为 001–021。文件名中的 r2 不等于 2026-10-25 的 r2 候选包。
 
-当前工作区已包含周通报迁移 026 和 API/页面；本地 2026-10-25 r2 包仅含迁移 022–025，不能交付当前工作区。`build-release.sh`、`update.py` 和 `upgrade.py` 仍是更早版本的发布路径，尚未更新为可复现当前工作区的包。请先核对[部署记录](../../docs/deployment/ip-trial-deployment-log.md)，不要把本目录的历史脚本用于当前目标机更新。
+当前工作区的更新包已准备为 [r3a 离线包](../../output/releases/four-check-update-20261025-r3a.tar)，包含 API/Web `linux/amd64` 镜像和迁移 022–028；逐步命令、只读门槛及故障处理见包内 [r3a 更新步骤](../../output/releases/upgrade-20261025-r3a/package/UPDATE.md)。r3a 应用镜像仍标记为 r3，并额外兼容用户最新确认的云端 `20261025-r2` API/Web 起始组合。首版 r3 的只读预检已安全退出，未备份、停服或迁移；请使用新的 `/opt/four-check/updates/20261025-r3a` 目录重新预检。旧 r2 包只含 022–025；`build-release.sh`、`update.py` 和 `upgrade.py` 仍是更早版本的历史发布路径，不用于当前目标机更新。
 
 ## 2026-09-22 首次交付历史证据
 

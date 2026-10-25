@@ -1,5 +1,11 @@
 # Phase Two Completion Implementation Plan
 
+> **2026-10-04 最新范围决定（优先于下文旧计划和历史记录）：** 当前后续开发及本批验收仅包含到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类。教室卫生、公共宿舍卫生列为待需求方确认，暂停后续开发；保留已有功能、数据及未来汇总通报接入能力。完整七类规划保留，当前五类验收与两类延期分开记录。见[范围决定](2026-10-04-five-inspection-active-scope.md)。用户已确认成员按批次提交、部门按周汇总，同范围允许多个批次，退回在原批次重提且允许原样重提；下文 Task 8 的唯一范围键为旧方案，不再执行。
+
+> 2026-10-04 已确认决定：退回重提沿用同一提交、递增版本并保留每次修订。导入回滚整批执行，仅允许全部记录仍为未提交、未锁定 DRAFT，保留原文件、批次及审计。后续实施以此为准。
+
+> 2026-10-04 范围与粒度更新：当前只推进到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类；教室卫生和公共宿舍卫生保留既有能力，后续业务规则待需求方确认。部门按成员记录批次提交、按周汇总，同一部门/周次/类型可有多个提交批次；下文“每周部门类型唯一提交”及“七类总门禁”是旧计划口径，分别改按多批次和五类范围执行。见[最新范围决定](2026-10-04-five-inspection-active-scope.md)。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 在工作流 A 的通用导入底座与到课率第一增量之上，完整交付阶段 2 的统一应用外壳、角色化工作台、七类检查、手工与 Excel 录入、部门提交审核状态机、状态看板及跨角色验收闭环。
@@ -10,7 +16,9 @@
 
 ---
 
-> **2026-09-06 执行状态：** Task 6 已实现统一外壳；Task 11–12 已提前实现当前周记录聚合及统一工作台第一增量，未完成部门流程联动和全角色验收。Task 7 仍需补临时工作周覆盖；Task 1–5、8–10、13–19 不得标记整体完成。最新交接见[交接记录](./2026-09-06-project-handover.md)。下文 RED/Verify 是执行要求，并非已运行证据。
+> **2026-09-20 当前状态：** Task 1–4、6–7 已实现；Task 5 完成七类未提交草稿范围，RETURNED 待部门流程；Task 11–12 为工作台第一增量。Task 8–10、13–15 未交付完整能力，Task 0、16–19 门禁 OPEN。补充 Task 10A/10B 明确原七类交付范围中遗漏的配置与前端任务，不重编号原 Task。实际运行问题、证据及后续顺序见[项目状态](../project-status.md)和[复盘](../reviews/2026-09-20-project-review.md)。下文 RED/Verify 是执行要求，不是已运行证据；已实现文件不因旧 Create 清单而重建。
+
+> **浏览器验证增量：** 已补 `pnpm test:browser`（真实隔离服务上的登录/校历回归），见[记录](../reviews/2026-09-20-playwright-regression.md)。不关闭 Task 18/19，也不把注入的 500 响应当作真实数据库故障验收。
 
 ## 1. 计划地位、范围与执行规则
 
@@ -20,7 +28,7 @@
 
 - 统一应用外壳、有效权限导航和角色化工作台。
 - 当前学年、学期、周次、临时周覆盖、我的待办、本部门业务状态和有效权限快捷入口。
-- 统一检查主表和到课率、无机课堂、教室卫生、早操早签、寝室卫生、晚归、公共寝室卫生七张扩展表。
+- 统一检查主表、七个明确领域模型及六张业务扩展表：到课率/无机课堂共用 attendance_details，其余五张独立。
 - 七类检查的手工录入、查询、编辑、软删除、批量操作、乐观锁、审计和权限范围。
 - 七类检查的模板、预览、确认；工作流 A 已实现到课率，其余六类复用通用导入框架。
 - 部门提交、审核、退回、确认状态机和实时状态看板。
@@ -30,7 +38,7 @@
 
 执行规则：
 
-- 严格按 Task 0 → Task 19 的依赖顺序执行；每批结束先反馈实际改动和验证结果。
+- 保留原任务编号，按依赖和当前缺口续做；已提前实现的任务不重做，总门禁未通过不宣称阶段完成。先处理 Task 0 的环境/模板基线及现有缺陷，再推进配置/页面、部门流程、导入回滚和总验收。每批反馈实际改动和验证结果。
 - 每个 Task 先写测试并观察指定 RED，再写最小 GREEN；未观察 RED 不进入实现。
 - 后端运行时代码改动后至少 `gofmt`、`go vet ./...`、`go test ./...`；前端运行时代码改动后至少 `pnpm lint`、`pnpm test`、`pnpm build`。
 - 迁移只追加；不得重写已存在的 `001`—`005`。
@@ -43,37 +51,38 @@
 Task 0 工作流 A 总门禁
   └─ Batch B：Task 1–5 七类模型与手工检查
       ├─ Batch C：Task 6–7 普通用户外壳与工作上下文
+      ├─ 页面补项：Task 10A 配置/选项 → Task 10B 六类页面
       ├─ Batch D：Task 8–10 部门状态机与审核视图
       │   └─ Batch E：Task 11–12 状态看板与角色工作台
       └─ Batch F：Task 13–15 其余六类导入与安全回滚
           └─ Batch G：Task 16–19 集成、跨角色和总完成门禁
 ```
 
-并行限制：同一工作树内不并行修改迁移、路由、共享类型或同一测试文件。Task 6–7 与 Task 8 的纯领域部分可在不同隔离工作树并行，但合并后必须先执行 Task 16 的契约矩阵。
+工作区限制：遵循 AGENTS.md，在用户指定分支的现有工作区执行，不因本计划自行创建分支或 worktree。同一工作区不并行修改迁移、路由、共享类型或相同测试文件。
 
 ## 3. 固定领域契约
 
 ### 3.1 七类检查代码与扩展表
 
-| `typeCode` | 中文名 | 扩展表 | 工作流 A 状态 |
+| `typeCode` | 中文名 | 扩展表 | 当前结构状态 |
 |---|---|---|---|
-| `ATTENDANCE` | 到课率 | `attendance_details` | 已由工作流 A 创建 |
-| `INORGANIC_CLASSROOM` | 无机课堂 | `inorganic_classroom_details` | 本计划新增 |
-| `CLASSROOM_HYGIENE` | 教室卫生 | `classroom_hygiene_details` | 本计划新增 |
-| `MORNING_EXERCISE` | 早操早签 | `morning_exercise_details` | 本计划新增 |
-| `DORM_HYGIENE` | 宿舍卫生 | `dorm_hygiene_details` | 本计划新增 |
-| `LATE_RETURN` | 晚归 | `late_return_details` | 本计划新增 |
-| `PUBLIC_DORM_HYGIENE` | 公共宿舍卫生 | `public_dorm_hygiene_details` | 本计划新增 |
+| `ATTENDANCE_RATE` | 到课率 | `attendance_details` | 已由工作流 A 创建 |
+| `UNATTENDED_CLASSROOM` | 无机课堂 | `attendance_details` | 共用已存在表 |
+| `CLASSROOM_HYGIENE` | 教室卫生 | `classroom_hygiene_details` | 012 已创建 |
+| `MORNING_ATTENDANCE` | 早锻炼/早签 | `morning_exercise_details` | 012 已创建 |
+| `DORMITORY_HYGIENE` | 宿舍卫生 | `dorm_hygiene_details` | 012 已创建 |
+| `LATE_RETURN` | 晚归 | `late_return_details` | 012 已创建 |
+| `PUBLIC_DORMITORY_HYGIENE` | 公共宿舍卫生 | `public_dormitory_hygiene_details` | 012 已创建 |
 
-不得为了减少表数把两个检查类型静默合并到同一扩展表。公共字段进入 `inspection_records`；类型特有字段、唯一键和校验进入相应扩展模型。最终字段清单必须在 Task 1 的业务字典门禁确认后固化。
+上表按 catalog.json、前端镜像与 012 迁移同步。两个课程类共享物理表是已确认 D1，不合并其检查类型；卫生责任信息使用独立关联表。D1–D4 已确认，字段及重复键见[字段契约](./2026-09-06-seven-inspection-field-review.md)，不再使用早期候选 typeCode。
 
 ### 3.2 状态与稳定错误码
 
 - 检查记录：`DRAFT`、`PENDING_REVIEW`、`RETURNED`、`CONFIRMED`、`LOCKED`。
 - 部门汇总：`NOT_ENTERED`、`ENTERING`、`PENDING_REVIEW`、`RETURNED`、`COMPLETED`。
 - 允许转换：`DRAFT/RETURNED → PENDING_REVIEW`，`PENDING_REVIEW → RETURNED/CONFIRMED`；`CONFIRMED → LOCKED` 属于后续通报锁定调用，不开放普通编辑接口。
-- 关键错误码：`VALIDATION_FAILED`、`FORBIDDEN_SCOPE`、`VERSION_CONFLICT`、`INVALID_STATE_TRANSITION`、`DUPLICATE_RECORD`、`BATCH_HAS_ERRORS`、`BATCH_NOT_ROLLBACKABLE`、`RECORD_LOCKED`、`NOT_FOUND`。
-- HTTP 映射：输入错误 400、未认证 401、无动作或范围 403、不存在 404、版本/状态/重复冲突 409、文件类型过大 413/415；响应不得暴露 SQL、对象 key、内部路径或敏感原文。
+- 已实现记录 API 的稳定错误码以[API 契约](./2026-09-06-inspection-api-contract.md)为准，包括 `VALIDATION_FAILED`、`FORBIDDEN_SCOPE`、`VERSION_CONFLICT`、`RECORD_ALREADY_EXISTS`、`RECORD_NOT_EDITABLE`、`INSPECTION_NOT_FOUND`。部门状态机/回滚错误码尚待 Task 9/15 固化，不能把候选名称当成现有响应。09-20 已修复字段校验 422 的错误封装并兼容旧嵌套响应；Task 16 仍需七类完整浏览器/角色矩阵，不能以到课率回归替代。
+- HTTP 映射：语法/结构输入错误 400、未认证 401、无动作或范围 403、不存在 404、版本/状态/重复冲突 409、文件大小/类型 413/415、领域校验 422、内部错误 5xx。响应不得暴露 SQL、对象 key、内部路径或敏感原文。
 
 ### 3.3 数据范围硬约束
 
@@ -104,7 +113,7 @@ Task 0 工作流 A 总门禁
 - Verify: `server/internal/importjob/**`
 - Verify: `server/internal/inspection/**`
 - Verify: `server/migrations/005_phase_two_attendance_import.sql`
-- Verify: `web/src/features/attendance-import/**`
+- Verify: `web/src/features/import-job/**`、`web/src/features/attendance/**`
 
 **RED:** 按工作流 A 尚未完成的 Task 继续 TDD；不得把已有文件视作自动通过。至少保留伪装 ZIP/OOXML、压缩炸弹、重复键、权限范围、幂等和版本冲突失败测试。
 
@@ -120,11 +129,12 @@ Task 0 工作流 A 总门禁
 
 ### Task 1: 固化七类字段字典、重复键与状态契约
 
-> 2026-09-06：材料核对完成，见[七类字段核对稿](./2026-09-06-seven-inspection-field-review.md)。D1–D4 已获确认（早锻炼/早签不分类型），七类字段目录与镜像测试已实现。目录不启用未实现的六类能力；新扩展表为五张，加既有共享 attendance_details 共六张。责任关联和日期/轮次仍需下一迁移落实。
+> 2026-09-06：材料核对完成，见[七类字段核对稿](./2026-09-06-seven-inspection-field-review.md)。D1–D4 已获确认（早锻炼/早签不分类型），七类字段目录与镜像测试已实现。目录不启用未实现的六类能力；新扩展表为五张，加既有共享 attendance_details 共六张。责任关联和日期/轮次已由 012 迁移落实；其余六类页面/导入未开放。
 
 **Depends on:** Task 0。
 
 **Files:**
+- Verify: `server/internal/inspection/catalog.json`
 - Create: `server/internal/inspection/catalog.go`
 - Create: `server/internal/inspection/catalog_test.go`
 - Create: `web/src/entities/inspection/model/types.ts`
@@ -133,7 +143,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 表驱动测试遍历七个 `typeCode`，断言中文名、扩展表、字段顺序、必填项、最大长度、重复键、支持动作和模板版本均存在；测试未知类型必须返回 `VALIDATION_FAILED`。前端镜像测试断言 API 代码到表单 schema 的映射完整且无阶段 3 类型。
 
-**Run:** `cd server && go test ./internal/inspection -run 'TestInspectionCatalog|TestUnknownInspectionType'`；`cd web && pnpm test -- src/entities/inspection/model/types.test.ts`。
+**Run:** `cd server && go test ./internal/inspection -run 'TestInspectionCatalog|TestUnknownInspectionType'`；`cd web && pnpm exec vitest run src/entities/inspection/model/types.test.ts`。
 
 **Expected RED:** FAIL，提示目录或七类定义缺失。
 
@@ -149,7 +159,8 @@ Task 0 工作流 A 总门禁
 
 **Files:**
 - Create: `server/migrations/012_phase_two_inspection_extensions.sql`
-- Modify: `server/internal/store/postgres_test.go`
+- Verify: `server/internal/store/phase_two_extensions_test.go`
+- Verify: `server/internal/store/testdata/phase_two_extension_seed.sql`
 - Create: `server/internal/store/testdata/phase_two_extension_constraints.sql`
 
 **RED:** 迁移契约测试断言五张新增业务扩展表、到 `inspection_records(id)` 的级联受限外键、字段 CHECK、有效记录 partial unique index、查询索引及无个人信息注释；临时 PostgreSQL 测试断言重复有效记录失败、软删除后可重建、孤儿扩展失败。
@@ -158,7 +169,7 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** FAIL，提示 新增扩展迁移不存在或缺少表/约束。
 
-**GREEN:** 暂排新增 `012`（执行时核对最新序号），不改写已有 `001`—`011`。公共学期、周次、类型、部门、班级、来源、状态、版本、创建人和软删除继续只存主表；扩展表只存类型字段。
+**GREEN（已落地）:** 已追加 `012`，不重写已有迁移。公共上下文、状态、版本、来源、创建人和软删除在主表；个人检查的班级在主表，卫生多责任班级/学生/寝室使用独立关联表；业务扩展表存类型字段。
 
 **Verify:** 聚焦测试 PASS；在空临时库顺序执行 `001` 至新增扩展迁移 PASS；向下不提供破坏性回滚脚本。
 
@@ -166,7 +177,7 @@ Task 0 工作流 A 总门禁
 
 ### Task 3: 实现七类领域模型与校验适配器
 
-**当前状态（2026-09-06）：领域层已完成。** `details.go` 定义七类明确模型，`validation.go` 按目录校验并生成兼容重复键；数据库引用、权限与事务接入在 Task 4 实施，不代表新增 API 已开放。
+**当前状态（2026-09-06）：领域层已完成。** `details.go` 定义七类明确模型，`validation.go` 按目录校验并生成兼容重复键；数据库引用、权限与事务接入已由 Task 4 完成；领域层单独通过不代表全部业务可用。
 
 **Depends on:** Task 2。
 
@@ -190,26 +201,25 @@ Task 0 工作流 A 总门禁
 
 ### Task 4: 实现手工录入、列表和详情 API
 
-**2026-09-06 更新：已完成七类统一创建、列表与详情 API。** 真实数据库验证范围谓词、关联有效性和审计事务，详情/列表使用 INSPECTION_VIEW。后续历史说明中的“其余六类仍未完成”由本条更新；页面与 Excel 适配器仍待后续任务。见 [API 契约](./2026-09-06-inspection-api-contract.md)。
+**2026-09-06 更新：已完成七类统一创建、列表与详情 API。** 真实数据库验证范围谓词、关联有效性和审计事务，详情/列表使用 INSPECTION_VIEW。页面、卫生区域管理与 Excel 适配器仍待后续任务。见 [API 契约](./2026-09-06-inspection-api-contract.md)。
 
-> 2026-09-06 增量：到课率手工新增 `POST /api/v1/inspections/attendance` 与页面内新增抽屉已实现，复用导入基础数据和去重校验，MANUAL 草稿与审计同事务持久化。到课率编辑详情、草稿编辑/软删除已由下一增量补齐；其余六类仍未完成，不关闭 Task 4 总门禁。
 
 **Depends on:** Task 3。
 
 **Files:**
 - Create: `server/internal/store/inspection.go`
 - Create: `server/internal/store/inspection_test.go`
-- Modify: `server/internal/inspection/service.go`
-- Modify: `server/internal/inspection/service_test.go`
+- Modify: `server/internal/inspection/records.go`
+- Modify: `server/internal/inspection/records_test.go`
 - Create: `server/internal/httpapi/inspection_handlers.go`
 - Create: `server/internal/httpapi/inspection_handlers_test.go`
 - Modify: `server/internal/httpapi/router.go`
 
 **RED:** API 测试覆盖 `POST /api/v1/inspections`、`GET /api/v1/inspections`、`GET /api/v1/inspections/:id` 的 200/201、400、401、403、404、409；Repository 测试用查询捕获或测试库证明范围谓词进入 SQL。分页响应固定为 `items,total,page,pageSize`。
 
-**Run:** `cd server && go test ./internal/httpapi ./internal/inspection ./internal/store -run 'Test(Create|List|Get)Inspection|TestInspectionScopeQuery'`。
+**Run:** `cd server && go test ./internal/httpapi ./internal/inspection ./internal/store -run 'TestInspectionHTTPContracts|TestInspectionScopeQuery|TestInspectionPostgresCRUD'`。
 
-**Expected RED:** FAIL，端点 404 或 Repository 缺失。
+**Expected RED:** FAIL，端点 404 或 Repository 缺失。复验真实数据库用例须设置 INSPECTION_TEST_DATABASE_URL 指向一次性空库，SKIP 不计通过。
 
 **GREEN:** Handler 只转换输入输出；Service 校验动作、上下文、目录和状态；Repository 在一个事务写主表、对应扩展表和审计。创建幂等键或唯一约束阻止重复。
 
@@ -221,25 +231,24 @@ Task 0 工作流 A 总门禁
 
 **2026-09-06 更新：** 七类未提交草稿编辑、软删除、批量删除已通过统一 API 交付，Task 4 的七类创建/列表/详情同时完成。适用范围与原有到课率决策一致；RETURNED 修正继续等待部门流程，不关闭其门禁。详见 [API 契约与验证边界](./2026-09-06-inspection-api-contract.md)。
 
-> 2026-09-06 到课率增量已实现：独立 `INSPECTION_MANAGE`（用户已确认），录入权处理本人草稿、管理权处理范围内他人草稿；仅限未提交且无锁定关联的 DRAFT。编辑校验原/目标范围，版本冲突拒绝；软删除及最多 100 条批量删除与审计同事务。RETURNED 修正依赖部门流程，其余六类仍未交付，不关闭 Task 5 总门禁。详见[实施决策](./2026-09-06-attendance-mutations-design.md)。
 
 **Depends on:** Task 4。
 
 **Files:**
 - Modify: `server/internal/store/inspection.go`
 - Modify: `server/internal/store/inspection_test.go`
-- Modify: `server/internal/inspection/service.go`
-- Modify: `server/internal/inspection/service_test.go`
+- Modify: `server/internal/inspection/records.go`
+- Modify: `server/internal/inspection/records_test.go`
 - Modify: `server/internal/httpapi/inspection_handlers.go`
 - Modify: `server/internal/httpapi/inspection_handlers_test.go`
 
 **RED:** 覆盖 `PATCH /api/v1/inspections/:id`、`DELETE /api/v1/inspections/:id`、`POST /api/v1/inspections/batch`；断言 `version` 必填，过期版本 409，已确认/锁定拒绝，批量混入一个越权或锁定 ID 时整批回滚，审计记录前值/后值/原因/人员/时间且敏感字段脱敏。
 
-**Run:** `cd server && go test ./internal/httpapi ./internal/inspection ./internal/store -run 'Test(Update|Delete|Batch).*Inspection|TestInspectionAudit'`。
+**Run:** `cd server && go test ./internal/httpapi ./internal/inspection ./internal/store -run 'TestInspectionHTTPContracts|TestInspectionInvalidMutations|TestInspectionAudit|TestInspectionPostgresCRUD'`。
 
 **Expected RED:** FAIL，端点或版本条件缺失。
 
-**GREEN:** SQL 更新使用 `WHERE id=$1 AND version=$2 AND <scope> AND deleted_at IS NULL` 并原子递增版本；软删除不物理删除；批量操作单事务、全有或全无。
+**GREEN:** SQL 更新使用 `WHERE id=$1 AND row_version=$2 AND <scope> AND deleted_at IS NULL` 并原子递增版本；软删除不物理删除；批量操作单事务、全有或全无。
 
 **Verify:** 聚焦测试及 `go vet ./... && go test ./...` PASS。
 
@@ -258,9 +267,9 @@ Task 0 工作流 A 总门禁
 - Create: `web/src/app/router/EffectivePermissionRoute.test.tsx`
 - Modify: `web/src/app/App.tsx`
 
-**RED:** 路由测试断言普通成员能进入 `/workbench` 和授权的 `/inspections/:typeCode`，不能进入受管理员守卫的 `/admin`；菜单按有效动作与范围显示，单独 `DENY` 隐藏入口；直接 URL 越权显示 403，不重定向成空白页。断言无“导入”“审核”“统计”一级导航。
+**RED:** 路由测试断言普通成员能进入 `/` 和已实现且授权的 `/inspections/attendance`，不能进入受管理员守卫的 `/admin`；菜单按有效动作与范围显示，单独 `DENY` 隐藏入口；直接 URL 越权显示 403，不重定向成空白页。断言无“导入”“审核”“统计”一级导航。
 
-**Run:** `cd web && pnpm test -- src/app/layouts/AppLayout.test.tsx src/app/router/EffectivePermissionRoute.test.tsx`。
+**Run:** `cd web && pnpm exec vitest run src/app/layouts/AppLayout.test.tsx src/app/router/EffectivePermissionRoute.test.tsx`。
 
 **Expected RED:** FAIL，统一权限菜单或有效权限路由守卫尚未完成。
 
@@ -281,18 +290,18 @@ Task 0 工作流 A 总门禁
 - Create: `server/internal/academic/work_context_test.go`
 - Create: `server/internal/httpapi/work_context_handlers.go`
 - Modify: `server/internal/httpapi/router.go`
-- Create: `web/src/entities/work-context/api/workContextClient.ts`
-- Create: `web/src/entities/work-context/model/useWorkContext.ts`
-- Create: `web/src/entities/work-context/ui/WorkContextBar.tsx`
-- Create: `web/src/entities/work-context/ui/WorkContextBar.test.tsx`
+- Create: `web/src/shared/api/workContextClient.ts`
+- Create: `web/src/features/work-context/useWorkContext.ts`
+- Create: `web/src/features/work-context/WorkContextBar.tsx`
+- Create: `web/src/features/work-context/WorkContextBar.test.tsx`
 
 **RED:** 后端测试覆盖教学周命中、非教学日、临时覆盖优先、覆盖过期、无活动学期和无权修改；前端覆盖加载、失败、无上下文、覆盖提示及键盘可达。修改覆盖必须有权限、版本与审计。
 
-**Run:** `cd server && go test ./internal/academic ./internal/httpapi -run 'Test.*WorkContext|Test.*WeekOverride'`；`cd web && pnpm test -- src/entities/work-context/ui/WorkContextBar.test.tsx`。
+**Run:** `cd server && go test ./internal/academic ./internal/httpapi -run 'Test.*WorkContext|Test.*WeekOverride'`；`cd web && pnpm exec vitest run src/features/work-context/WorkContextBar.test.tsx`。
 
 **Expected RED:** FAIL，上下文 API/UI 不存在。
 
-**GREEN:** 提供 `GET /api/v1/work-context`；如 PRD 已授权临时覆盖，提供受控更新端点并复用既有校历数据。前端只显示服务端计算结果，不在浏览器自行推导周次。
+**GREEN:** 提供 `GET /api/v1/work-context`；临时覆盖已确认并实现 PUT 更新端点，复用既有校历数据。前端只显示服务端计算结果，不在浏览器自行推导周次。
 
 **Verify:** 聚焦测试与两端完整检查 PASS。
 
@@ -300,10 +309,12 @@ Task 0 工作流 A 总门禁
 
 ### Task 8: 追加部门提交模型并实现显式状态机
 
-**Depends on:** Task 5。
+**2026-10-04 实际状态：** 已使用 `016_department_submissions.sql` 实现多批次模型与修订，`017_department_submission_revision_immutability.sql` 固化历史修订；状态机及真实 PostgreSQL 迁移回归通过。下文预设的范围唯一键已由用户确认的多批次规则取代。
+
+**Depends on:** Task 5 的未提交 DRAFT 变更能力。RETURNED 修正反向依赖 Task 9，在该增量一并收口，不把它作为启动 Task 8 的前置条件。
 
 **Files:**
-- Create: `server/migrations/014_phase_two_department_workflow.sql`
+- Create: `server/migrations/016_phase_two_department_workflow.sql`
 - Create: `server/internal/workflow/model.go`
 - Create: `server/internal/workflow/state_machine.go`
 - Create: `server/internal/workflow/state_machine_test.go`
@@ -315,13 +326,15 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** FAIL，迁移/状态机不存在。
 
-**GREEN:** 暂排 `014` 只追加（013 已用于工作上下文配置）（执行时核对最新序号）；提交聚合唯一范围为学年、学期、周次、部门、检查类型和活动修订号。状态机是唯一转换入口，Repository 不接受任意状态字符串。
+**GREEN:** 暂排 `016` 只追加（014用于导入回滚、015用于文件清理进度）（执行时核对最新序号）；提交聚合唯一范围为学年、学期、周次、部门、检查类型和活动修订号。状态机是唯一转换入口，Repository 不接受任意状态字符串。
 
 **Verify:** 聚焦测试 PASS；空临时库执行 `001` 至新增部门工作流迁移 PASS。
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: add department submission state machine`。
 
 ### Task 9: 实现提交、审核、退回和确认 API
+
+**2026-10-04 实际状态：** 五类提交、分页列表/详情、退回、确认和原批次重提 API 已接入；事务、范围/版本、审计及返回更正通过一次性 PostgreSQL 回归。目标环境尚未迁移或加载，阶段验收未完成。
 
 **Depends on:** Task 8。
 
@@ -348,7 +361,9 @@ Task 0 工作流 A 总门禁
 
 ### Task 10: 在检查详情内实现部门审核视图
 
-**Depends on:** Task 9、Task 6。
+**2026-10-04 实际状态：** 五类检查列表中已接入共用批次抽屉与操作入口，并可从退回批次打开记录更正；前端 69 文件/348 项、lint/build 通过。早签批次完整闭环及三种角色范围已在真实 Chrome/一次性 PostgreSQL 和 MinIO 中通过（`output/playwright/9ae4c3ddaa/summary.json`）；五类导入草稿的页面提交、退回、实际更正、原批次重提与确认均已在真实浏览器通过；完整逐类角色分权和目标环境验收待完成。
+
+**Depends on:** Task 9、Task 6、Task 10B 的业务页面承载。
 
 **Files:**
 - Create: `web/src/features/department-workflow/api/workflowClient.ts`
@@ -360,7 +375,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 测试覆盖审核列表加载/空/失败、只读视图、退回原因校验、确认二次确认与影响范围、403、409 后刷新、无动作权限时不显示按钮。断言路由中不存在 `/review` 一级页面。
 
-**Run:** `cd web && pnpm test -- src/features/department-workflow/ui/DepartmentReviewPanel.test.tsx`。
+**Run:** `cd web && pnpm exec vitest run src/features/department-workflow/ui/DepartmentReviewPanel.test.tsx`。
 
 **Expected RED:** FAIL，组件/接口不存在。
 
@@ -370,7 +385,29 @@ Task 0 工作流 A 总门禁
 
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: embed department review in inspection detail`。
 
+### Task 10A（补项）: 补齐卫生区域配置与业务关联选项
+
+**当前状态：10-04 区域维护代码与隔离增量已验收，目标环境待加载。** 两类区域维护、授权配置入口、关联选项、变更历史及审计已接通，见[验收记录](../reviews/2026-10-04-hygiene-area-maintenance.md)。七类检查页面与完整角色总门禁仍未完成。
+
+**Depends on:** Task 2/4；区域管理归属/权限确认。无需等待部门状态机，可以先准备七类页面所需数据。
+
+**范围：** 复用现有基础数据/配置结构维护教室卫生区域、公共宿舍卫生区域；为有权录入人员提供范围内学生、班级、课程、教室、寝室、区域及原因选项。区域管理与选项读取分别鉴权，依赖停用、跨班级责任、关联不存在需明确失败。
+
+**验收：** 管理员从页面建立对象，录入人员通过名称选择；选项覆盖分页、数据范围下推 SQL，不暴露无权学生，不要求手输 UUID。无配置、无权限、停用、跨范围关联及重复均有测试；实际数据库与浏览器验证通过。任何迁移仅追加。
+
+### Task 10B（补项）: 交付其余六类检查页面与表单
+
+**当前状态：部分实现（10-04）。** 到课率、无机课堂、晚归、早锻炼/早签、宿舍卫生与公共宿舍卫生、教室卫生七类页面已实现并分别完成隔离增量验证；教室卫生见[隔离验收](../reviews/2026-10-04-classroom-hygiene-page.md)。公共宿舍卫生最新验证见[记录](../reviews/2026-10-04-public-dormitory-hygiene-page.md)。目标环境未加载；七类 API 不等于页面与流程全部完成。保留 app → pages → features → entities → shared 的依赖方向。
+
+**Depends on:** Task 3/4、Task 5 草稿能力、Task 6/7、Task 10A；接入前修复 API 422 与 httpClient 错误封装不一致。
+
+**范围：** 每类可见导航、列表筛选、只读详情、手工新增、未提交草稿编辑/单删/批删、名称化关联选项、403/409/422 和加载/空/失败状态。统一详情可以按 typeCode 编排，但业务入口仍清晰，不开放未交付动作。
+
+**验收：** 六类逐类覆盖完整手工链路；卫生多责任范围、早签单次计数、晚归宿舍关系、课程两类共享结构均遵循目录。真实浏览器检查首次回显、新增关闭后编辑、切换记录、失败保留输入、窄屏/键盘及整块按钮点击。仅有 API 测试不能关闭本任务。Task 10 审核面板在此页面承载上接入。
+
 ### Task 11: 实现部门实时状态聚合 API
+
+**2026-10-04 实际状态：** 当前周按部门和检查类型分别聚合记录数与多批次数，真实 PostgreSQL 聚焦回归和早签两批次工作台浏览器断言通过；目标服务未加载，完整角色验收待完成。
 
 **Depends on:** Task 9。
 
@@ -397,6 +434,8 @@ Task 0 工作流 A 总门禁
 
 ### Task 12: 实现跨角色阶段 2 工作台
 
+**2026-10-04 实际状态：** 五类快捷入口与当前周记录/批次计数已接入，缺必需字段时前端显示失败态；早签工作台浏览器增量通过，完整跨角色总验收和目标环境加载待完成。
+
 **Depends on:** Task 7、Task 10、Task 11。
 
 **Files:**
@@ -412,7 +451,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 后端按五类角色矩阵返回当前上下文、我的待办、本部门/授权范围状态和有效快捷入口；前端逐角色覆盖加载、空、失败、403、过期授权和无快捷入口。负向断言页面没有待生成通报、待通报审核、待定稿、全院通报进度及其 API 请求。
 
-**Run:** `cd server && go test ./internal/dashboard -run 'TestWorkbenchFor.*Role|TestWorkbenchExcludesPhaseThree'`；`cd web && pnpm test -- src/features/phase-two-dashboard/ui/PhaseTwoDashboard.test.tsx`。
+**Run:** `cd server && go test ./internal/dashboard -run 'TestWorkbenchFor.*Role|TestWorkbenchExcludesPhaseThree'`；`cd web && pnpm exec vitest run src/features/phase-two-dashboard/ui/PhaseTwoDashboard.test.tsx`。
 
 **Expected RED:** FAIL，工作台聚合/UI 不存在。
 
@@ -423,6 +462,8 @@ Task 0 工作流 A 总门禁
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: add role-aware phase two workbench`。
 
 ### Task 13: 为其余六类实现模板与 XLSX 适配器
+
+**10-04 增量：** 无机课堂、早签及晚归独立模板与导入链路已隔离验收，三类卫生仍待实现。共用 XLSX 解析已拒绝公式、隐藏业务表和额外数据列。
 
 **Depends on:** Task 3、Task 0。
 
@@ -451,7 +492,9 @@ Task 0 工作流 A 总门禁
 
 ### Task 14: 泛化七类模板、预览、确认 API 与前端
 
-**Depends on:** Task 13、Task 5。
+**10-04 增量：** 到课率、无机课堂、早签及晚归导入/回滚闭环已隔离验收，模板发布只发生在临时环境。确认事务重校验增量见[记录](../reviews/2026-10-04-import-confirmation-revalidation.md)。
+
+**Depends on:** Task 13、Task 5 的草稿能力、Task 10A/10B。
 
 **Files:**
 - Modify: `server/internal/importjob/service.go`
@@ -466,7 +509,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 后端表驱动覆盖七类模板/预览/确认、类型与模板版本不匹配、任一行错误禁止确认、幂等确认、旧版本 409、范围 403、确认事务回滚；前端覆盖每类动态列、错误下载、二次确认、加载/失败/403/409。断言无导入一级导航。
 
-**Run:** `cd server && go test ./internal/importjob ./internal/httpapi -run 'Test.*InspectionImport'`；`cd web && pnpm test -- src/features/inspection-import/ui/InspectionImportDrawer.test.tsx`。
+**Run:** `cd server && go test ./internal/importjob ./internal/httpapi -run 'Test.*InspectionImport'`；`cd web && pnpm exec vitest run src/features/inspection-import/ui/InspectionImportDrawer.test.tsx`。
 
 **Expected RED:** FAIL，通用端点只支持到课率或 UI 不存在。
 
@@ -477,6 +520,8 @@ Task 0 工作流 A 总门禁
 **Checkpoint:** 提交前请求用户许可；建议消息 `feat: generalize two-phase imports for seven checks`。
 
 ### Task 15: 实现遵守状态不变量的导入回滚
+
+**2026-10-04 状态：到课率整批回滚代码与隔离增量已验，见[记录](../reviews/2026-10-04-import-rollback.md)。** 014 迁移、通用事务后端、到课率入口已交付；无机课堂、早签及晚归亦已接入并完成回归；三类卫生接入后仍需逐类回归，目标环境未加载。
 
 **Depends on:** Task 14、Task 9。
 
@@ -491,7 +536,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 覆盖只有同一批次所有关联记录仍为未提交 `DRAFT`、未审核、未锁定且版本匹配时才能整批回滚；任一记录为 `PENDING_REVIEW/RETURNED/CONFIRMED/LOCKED`、已被其他编辑、越权或批次部分缺失时返回 409/403 且零改动。回滚写审计但不删除原文件与解析追踪。
 
-**Run:** `cd server && go test ./internal/importjob ./internal/httpapi -run 'Test.*Rollback'`；`cd web && pnpm test -- src/features/inspection-import/ui/ImportRollbackButton.test.tsx`。
+**Run:** `cd server && go test ./internal/importjob ./internal/httpapi -run 'Test.*Rollback'`；`cd web && pnpm exec vitest run src/features/inspection-import/ui/ImportRollbackButton.test.tsx`。
 
 **Expected RED:** FAIL，回滚能力不存在。
 
@@ -514,7 +559,7 @@ Task 0 工作流 A 总门禁
 
 **RED:** 对本计划所有端点逐一断言状态码、稳定错误码、camelCase 结构、禁用账号、五类角色、单独 DENY、过期授权、跨范围 ID、批量混入越权项和 409；前端断言错误码转成明确中文操作建议，不解析原始消息。
 
-**Run:** `cd server && go test ./internal/httpapi -run 'TestPhaseTwo(Contract|RoleMatrix)'`；`cd web && pnpm test -- src/shared/api/phaseTwoErrors.test.ts`。
+**Run:** `cd server && go test ./internal/httpapi -run 'TestPhaseTwo(Contract|RoleMatrix)'`；`cd web && pnpm exec vitest run src/shared/api/phaseTwoErrors.test.ts`。
 
 **Expected RED:** FAIL，至少暴露一个不一致错误或范围缺口。
 
@@ -526,6 +571,8 @@ Task 0 工作流 A 总门禁
 
 ### Task 17: 增加 PostgreSQL、MinIO 与失败恢复集成测试
 
+> **2026-10-05 五类范围执行记录：** 既有真实 PostgreSQL/MinIO 测试分布在 `server/internal/store`、`importjob` 与 `storage`，不为满足旧文件清单重复建立 `internal/integration` 包。`TestAttendanceImportIntegrationAgainstPostgresAndMinIO`、`TestManualAttendancePostgresIntegration`、`TestAttendanceMutationsPostgresIntegration`、`TestOrphanSourceCompensationPostgresAndMinIO` 已在一次性本机 PostgreSQL/独立 MinIO Bucket 重跑通过；五类导入/回滚的隔离 Chrome 报告和对象完整性故障证据见[五类验收矩阵](../reviews/2026-10-05-five-type-acceptance-matrix.md)。下文七类文件清单与示例命令是原计划，不表示该命名的包已存在或七类专项均已纳入本批。
+
 **Depends on:** Task 16。
 
 **Files:**
@@ -534,7 +581,7 @@ Task 0 工作流 A 总门禁
 - Create: `server/internal/integration/phase_two_recovery_test.go`
 - Modify: `README.md`
 
-**RED:** 在隔离测试库/Bucket 运行迁移、七类创建与导入、部门状态转换、回滚与对象下载鉴权；故障注入覆盖数据库提交失败、对象缺失、校验和不符和重试。无 MinIO/数据库时测试必须明确 skip 原因，不得假 PASS。
+**RED（当前五类门禁）：** 在隔离测试库/Bucket 运行迁移、五类创建与导入、部门状态转换、回滚与对象下载鉴权；故障注入覆盖数据库提交失败、对象缺失、校验和不符和重试。两类待定卫生专项另列，不作为本批五类失败；无 MinIO/数据库时测试必须明确 skip 原因，不得假 PASS。
 
 **Run:** `cd server && go test ./internal/integration -run TestPhaseTwo -count=1`（按 README 设置测试专用 PostgreSQL/MinIO 环境变量）。
 
@@ -547,6 +594,8 @@ Task 0 工作流 A 总门禁
 **Checkpoint:** 提交前请求用户许可；建议消息 `test: verify phase two storage integration`。
 
 ### Task 18: 执行 Playwright 跨角色与阶段边界验收
+
+> **2026-10-05 五类范围执行记录：** 已沿用仓库 `server/scripts/verify-browser.py`、`web/e2e/` 和一次性 PostgreSQL/MinIO 完成五类导入/回滚、部门批次、成员/审核/办公室指定授权/学院查看者/系统管理员/超级管理员、403/409、弹窗焦点及阶段三页面/网络负向边界的隔离浏览器回归。报告见[五类验收矩阵](../reviews/2026-10-05-five-type-acceptance-matrix.md)。未新增 `@playwright/test` 依赖；下文 `.spec.ts` 是历史候选文件名，不代表现有实现路径。
 
 **Depends on:** Task 17。
 
@@ -565,7 +614,7 @@ Task 0 工作流 A 总门禁
 
 **Expected RED:** 新场景首次因未实现行为失败；不得通过跳过关键断言获得 GREEN。
 
-**GREEN:** 验证七类手工录入、至少一类六增量导入的每类代表路径、部门提交/退回/确认、实时状态联动和所有禁止动作。边界 spec 明确断言阶段 2 页面/网络均无通报生成、审核、定稿、发布和全院通报进度。
+**GREEN（当前五类门禁）：** 验证五类手工录入和导入的逐类代表路径、部门提交/退回/确认、实时状态联动和所有禁止动作。边界套件明确断言阶段 2 页面/网络均无通报生成、审核、定稿、发布和全院通报进度；两类待定卫生专项保留既有能力但不据此声明业务规则验收。
 
 **Verify:** Playwright 场景实际 PASS；截图、录像、fixture 无真实个人信息；失败产物不进入提交。
 
@@ -573,7 +622,11 @@ Task 0 工作流 A 总门禁
 
 ### Task 19: 执行阶段 2 总完成门禁并同步文档
 
-**Depends on:** Task 0–18 全部实际完成。
+> **2026-10-05 执行结论：** 五类范围的 Task 17/18 隔离 PostgreSQL、MinIO、Chrome 和前后端完整命令已补验；用户确认的未标记周默认 1 倍与独立校级批次已实现。本机业务库备份后应用 020–021，8080 重载并通过 `live/ready`，旧无机课堂列表路径未登录返回 401。Task 19 检查已执行，但目标业务账号下的登录态写入和用户自主验收未完成，总门禁仍为 OPEN；这不等于五类代码未交付，也不等于阶段二整体验收通过。当前证据以[项目状态](../project-status.md)和[总门禁核对](../reviews/2026-10-05-phase-two-five-type-gate.md)为准。
+
+> **2026-10-25 最新本地验收结论（覆盖本计划此前的 OPEN 状态）：** 用户确认发布版本已是最新，并要求基于本地运行关闭五类门禁。本轮针对当前工作区完成 Go/前端全量检查、PostgreSQL 16.13/MinIO 无跳过集成、默认 84 场景、部门角色矩阵 24 场景及四个非到课率逐类导入套件；所有浏览器错误/清理错误为 0。五类阶段二本地门禁 **PASS/CLOSED**。报告：[2026-10-25 五类阶段二门禁本地验收](../reviews/2026-10-25-phase-two-five-type-gate.md)。目标端未被本轮直接探测；两类暂停卫生专项仍不在本次范围内。
+
+**Depends on:** 当前五类范围的 Task 0–18 及补充 Task 10A/10B 实际完成；两类待定卫生专项独立记录，不阻塞五类门禁。
 
 **Files:**
 - Modify: `README.md`
@@ -597,7 +650,7 @@ git diff --check
 
 **GREEN:** 更新 README 的开发/测试命令、角色入口、七类导入限制和阶段边界；只记录已经批准且实际发生的技术偏差。逐行复核第 4 节角色矩阵、数据库范围下推证据和阶段 3 负向断言。
 
-**Verify:** 所有命令实际 PASS，`git diff --check` 无输出；内部链接可解析；Task 0–19 依赖无环且编号连续；无调试日志、真实个人信息或未解释 TODO。
+**Verify:** 所有命令实际 PASS，`git diff --check` 无输出；内部链接可解析；Task 0–19 原编号连续、补项 10A/10B 均纳入验收且依赖无环；无调试日志、真实个人信息或未解释 TODO。
 
 **Checkpoint:** 只有此门禁全部通过才可宣称“阶段 2 完成”。任何提交、推送或 PR 仍须用户明确许可；建议最终消息 `docs: record completed phase two acceptance`。
 
@@ -605,9 +658,9 @@ git diff --check
 
 阶段 2 只有同时满足以下条件才能完成：
 
-- 工作流 A Task 1–12 与本计划 Task 0–19 均按 TDD 实际执行，RED/GREEN 证据可追溯。
+- 工作流 A Task 1–12 与本计划 Task 0–19（含补项 10A/10B）均按 TDD 实际执行，RED/GREEN 证据可追溯。
 - 所有角色复用统一应用外壳和单一权限侧边栏；`/admin` 仍由管理路由守卫保护，不向无权用户开放。
-- 七类主/扩展模型、手工录入、导入、编辑、软删除、批量、版本、审计和范围控制全部可用。
+- 七类主/扩展模型和已有能力保持兼容；本批五类的手工录入、导入、编辑、软删除、批量、版本、审计和范围控制全部可用。教室卫生、公共宿舍卫生专项规则待确认，不纳入本批五类结论。
 - 已审核或锁定数据不能直接回滚；确认/锁定数据不能被普通编辑、删除或批量覆盖。
 - 部门状态机、事务、版本冲突、退回原因和实时五状态看板通过成功与失败路径验证。
 - 第 4 节五类角色的允许与禁止路径均通过 API 和 Playwright；所有敏感查询在数据库层下推范围。
@@ -615,19 +668,15 @@ git diff --check
 - 后端完整检查、前端完整检查、PostgreSQL、MinIO 和 Playwright 均实际通过；任何 SKIP/未运行都使完成门禁保持打开。
 - 文档、迁移、API、共享类型和错误码一致，无真实个人信息、密钥、调试代码或未经批准的依赖。
 
-## 7. 实施前仍需业务确认的门禁
+## 7. 决策门禁（2026-10-04 更新）
 
-这些问题不阻止本计划文档定稿，但会阻止对应生产 Task 进入 GREEN；执行时应在最早依赖 Task 的反馈检查点集中确认：
+已确认：D1–D4、七类型/六张物理业务扩展表、早锻炼/早签合并为一个类型、卫生对象级记录与责任关系、重复报错及复查粒度；独立 INSPECTION_MANAGE；系统管理员不自动取得敏感检查范围，超级管理员沿用全院权限。Task 1–4、6–7 已有实现，不重复提问或重建。
 
-1. 七类检查各自的最终字段、必填规则、单位、合法区间、Excel 列顺序和“有效记录重复键”，尤其是无机课堂、早操早签、晚归与公共寝室卫生的历史口径。
-2. 部门提交修订语义：退回后是在同一提交上递增版本再次提交，还是生成新修订；确认后如发现错误，阶段 2 是否只允许走后续更正流程而不重开原提交。
-3. 导入回滚产品粒度：本计划采用更安全的“整批、全记录仍为未提交 DRAFT 才允许”基线；若需要选行回滚或提交后撤销，必须另行设计权限、审计与补偿流程。
-4. 系统管理员与超级管理员的检查数据默认范围：本计划遵循最小权限，系统管理员不因配置权限自动获得敏感检查明细；超级管理员按已确认的超级权限访问全院范围，无需绑定部门；此默认范围问题已确认，不再作为待确认项。
-5. 若仓库没有 Playwright 依赖，是否批准新增锁定版本的开发依赖与配置；未批准时可用既有 Playwright skill 验收，但不能把仓库内 E2E 装配写成已完成。
-6. 扩展表物理拆分：现有技术方案允许到课率与无机课堂共用 `attendance_details`，本计划为满足“七类扩展模型/迁移”采用七个显式模型和七张扩展表。Task 2 执行前需确认是保留该显式拆分，还是采用“七个领域模型、六张物理表”的既有方案；不得静默偏离技术方案。
+后续决策与授权边界：
 
-## 2026-09-06 Task 2 执行更新（覆盖上文历史待定项）
+1. Task 8/9：用户已确认退回后沿用同一提交、递增版本并保留每次修订。确认后不直接重开原数据，更正边界与阶段三衔接。
+2. Task 15：用户已确认整批回滚，全部记录须仍为未提交、未锁定 DRAFT，保留原文件、批次和审计。选行回滚或提交后撤销不在本次授权范围。
+3. Task 10A：已确认基础数据管理员及对应检查部门的可配置授权管理员可维护；使用配置菜单中的卫生区域入口。录入选项读取不因此得到管理权限。
+4. Task 18：若需新增 @playwright/test 依赖及配置，核对用户授权；现有外部浏览器工具可用于验收，但不等于仓库 E2E 套件已建立。
 
-Task 2 已完成：012 迁移、phase_two_extensions_test.go 及 testdata 下两份 SQL 验证文件已落地，真实临时库迁移与现有到课率录入回归通过。下一步执行 Task 3。
-
-第 7 节第 6 项已获确认：七类领域模型、六张业务扩展表，无机课堂共用 attendance_details；不再等待物理拆分确认。卫生班级责任使用独立关联表与快照，上文“班级只存主表”仅适用于个人检查。具体结构、验证及边界见 2026-09-06-project-handover.md 的“012 检查扩展迁移”记录。
+上述编号说明是 2026-10-04 的历史执行记录。当前源码和本机业务库迁移账本均已到 019；其他部署环境需单独核对。完整后续顺序与当前环境阻塞见[项目状态](../project-status.md)。

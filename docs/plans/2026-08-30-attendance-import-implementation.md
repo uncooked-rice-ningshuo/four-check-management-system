@@ -1,5 +1,7 @@
 # 阶段 2 工作流 A：通用导入框架 + 到课率第一增量实施计划
 
+> 2026-09-21 门禁：原 MinIO 已恢复，API ready=200；新增可重复模板生成/发布命令并通过隔离集成验证。业务库仍未发布模板，旧 API 未加载当前代码，业务浏览器闭环待验收。工作流 A 总门禁仍 OPEN，见[项目状态](../project-status.md)及[模板交付记录](../reviews/2026-09-21-attendance-template-publication.md)。
+
 > **范围说明：** 本计划是[完整阶段 2 实施主计划](./2026-08-30-phase-two-completion-implementation.md)的工作流 A，只交付通用导入底座与“到课率”第一增量。即使 Task 1–12 全部完成，也只能宣称“工作流 A 完成”，绝不能宣称“阶段 2 完成”。完整阶段 2 还必须通过角色化工作台、统一应用外壳、七类检查、其余六类导入、部门工作流、状态看板及跨角色验收门禁。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -424,7 +426,7 @@ git commit -m "test: verify attendance import integration"
 ### Task 12: 浏览器验收、文档同步与全量检查
 
 **Files:**
-- Create: `web/e2e/attendance-import.spec.ts`（若仓库尚无 E2E 目录，先按现有 Playwright skill 建立最小测试装配）
+- 已采用 Playwright CLI：`web/e2e/attendance-regression.js`，由 `server/scripts/verify-browser.py` 启动隔离服务；新增场景沿用该入口，不重复引入另一套测试装配。完整范围见 [09-21 E2E 记录](../reviews/2026-09-21-expanded-e2e.md)。
 - Modify: `README.md`（如存在）
 - Modify: `docs/plans/2026-08-30-attendance-import-design.md`
 

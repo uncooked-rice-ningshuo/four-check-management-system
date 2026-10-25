@@ -1,28 +1,34 @@
 # 计算机学院日常管理系统技术方案
 
-> 版本：v1.0  
-> 日期：2026-07-11  
+> **2026-10-04 最新范围决定（优先于下文旧计划和历史记录）：** 当前后续开发及本批验收仅包含到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类。教室卫生、公共宿舍卫生列为待需求方确认，暂停后续开发；保留已有功能、数据及未来汇总通报接入能力，不删除、不据此隐藏入口。具体方案经用户确认并同步文档后再实施。完整七类规划保留，当前五类验收与两类延期分开记录。见[范围决定](2026-10-04-five-inspection-active-scope.md)。部门提交分组建议尚未批准。
+
+> **2026-10-25 课程简化决定（优先于下文课程排课设计）：** 课程业务模型只维护课程名和启用状态；不维护教师、班级或排课。检查记录单独保存学生/班级、发生时间、教室和节次，课程只用于标识记录。课程模糊搜索分页，不再按日期/班级/教室/节次匹配。旧数据库列和关系表暂保留历史数据，但应用不再读取/写入其关系校验；物理删除需另行确认。见[课程简化实施记录](./2026-10-25-course-master-simplification.md)。
+
+> 版本：v1.1（实现事实同步，未新增架构决策）
+> 初稿：2026-07-11；核对：2026-09-20
 > 依据：《PRD-计算机学院日常管理系统》  
 > 目标部署：Linux 云服务器或校内服务器
 
+> 当前交付、运行状态和后续任务见[项目状态](../project-status.md)。本文仍包含阶段三/四的目标设计；出现实体/API 设计不代表代码已实现。以下技术栈按当前 package.json/go.mod/配置核对，未引入新依赖。
+
 ## 1. 方案结论
 
-### 1.1 推荐技术栈
+### 1.1 当前技术栈与后续目标
 
 | 层次 | 技术选型 | 说明 |
 | --- | --- | --- |
-| Web 前端 | React 19、TypeScript、Vite、Ant Design 5 | 管理后台生态成熟，适合复杂表格、表单和权限页面 |
-| 前端状态 | TanStack Query、Zustand、React Router | 服务端状态、少量全局状态和路由职责分离 |
-| 后端 | Go 1.25+、Gin、GORM 或 sqlc | 推荐 Gin + GORM 快速交付；复杂统计 SQL 可直接编写 |
-| API | RESTful API、OpenAPI 3.1 | 易开发、易联调、便于生成 TS 类型和接口文档 |
+| Web 前端 | React 19、TypeScript、Vite 7、Ant Design 6、ProComponents | 当前复杂列表沿用 ProTable 原生查询/工具栏 |
+| 前端状态 | TanStack Query、React Context、React Router 7 | Query 管服务端状态，现有 AuthProvider 管登录上下文；未引入 Zustand |
+| 后端 | Go 1.25+、Gin、pgx/v5 | 当前仓储使用参数化 SQL，无 GORM/sqlc 依赖 |
+| API | /api/v1 RESTful API、手写 TypeScript Client | OpenAPI 生成式契约为后续目标，当前未交付；错误结构尚需统一 |
 | 数据库 | PostgreSQL 16+ | 事务、约束、JSONB、窗口函数和复杂统计能力较强 |
 | 缓存/任务 | MVP 可不部署 Redis；异步任务先用数据库任务表 | 降低运维复杂度；任务量增加后再引入 Redis/Asynq |
-| 文件存储 | MinIO（推荐）或服务器本地目录 | 对象存储接口统一；校内单机也可部署 MinIO |
+| 文件存储 | 私有 MinIO | 所有环境统一使用，不提供本地目录分支 |
 | Excel | excelize | Go 原生、适合模板、导入校验和导出 |
-| Word | docx 模板占位符 + OOXML 处理 | MVP 使用固定版式模板；必要时封装文档生成模块 |
+| Word（阶段三规划） | docx 模板占位符 + OOXML 处理 | 尚未交付生成/定稿链路 |
 | 认证 | 内部账号密码、JWT 短令牌 + HttpOnly Refresh Cookie | 支持禁用、续期和会话撤销 |
 | 部署 | Docker Compose、Nginx、HTTPS | 单机可完整部署，未来可迁移到 Kubernetes |
-| 可观测性 | slog/zap、Prometheus 指标、健康检查 | 日志使用 JSON，关键操作另写审计表 |
+| 可观测性 | 当前有日志、审计与 live/ready | 统一结构化日志及 Prometheus 属于后续完善项，不代表已装配 |
 
 ### 1.2 架构选择
 
@@ -42,7 +48,7 @@ flowchart LR
     N --> FE["React 静态资源"]
     N --> API["Go API 服务"]
     API --> PG["PostgreSQL"]
-    API --> FS["MinIO / 本地文件存储"]
+    API --> FS["私有 MinIO"]
     API --> W["数据库任务 Worker"]
     W --> PG
     W --> FS
@@ -108,6 +114,14 @@ stateDiagram-v2
 
 通报状态：`NOT_GENERATED → DRAFT → PENDING_REVIEW → REJECTED → DRAFT → FINALIZED → PUBLISHED → ARCHIVED`。`FINALIZED` 后不可退回或原位修改；修正时创建关联原通报的 `CORRECTION` 新版本。
 
+同一学期的每个周次对应一份逻辑上的合并周通报，包含该周获准纳入的检查类型，不按检查类型拆成多份通报。源数据变化后，引用该数据的未定稿版本显示待重新生成提示（不另增通报生命周期状态）；数据应先按平台权限和修正流程在系统内修改，已锁定数据走通报内修正流程。默认由有权人员手动点击重新生成。系统可配置“手动”或“自动”触发，自动触发也必须创建新的通报版本，并据该版本重新生成关联的 Word/Excel 产物，不得静默覆盖旧版本；若存在未完成数据，自动模式仍须阻断，强制生成只能由有权用户手动填写理由后执行。定稿后的源数据更正走更正版本或补充记录。
+
+**完整性门禁口径（2026-10-25 已确认）：** 每周应交单元通过受控配置按学期/周次、部门或校级范围、检查类型单独维护，不从 `department_inspection_scopes.can_enter` 推导。该配置由学生会办公室部长或指定负责通报的副部长管理，使用独立授权动作并审计。系统支持显式零记录回执以区分“已检查且确认零条”与“未提交”；回执沿用现有检查录入权限提交、部门审核权限确认，说明可选。未完成应交项默认阻止生成。
+
+**周期选择默认值（2026-10-25 已确认）：** 通报汇总页周期下拉应默认选择系统工作上下文中的当前周（包含有效临时覆盖），并且该周必须在当前用户可查看的周期选项中。没有当前工作周或当前周不可查看时不预选任何选项，不得把下拉列表第一项当作当前周；用户仍可手动选择其他有权周期。
+
+若已确认零记录回执后发现实际记录，新增实际记录提交批次；保留零回执及确认修订作为不可变历史，不覆盖、删除或转换原批次。完整性视图应分别呈现两条提交历史及其状态。
+
 所有状态迁移必须由领域服务校验“当前状态 + 动作权限 + 数据范围”，禁止 Controller 直接更新状态字段。
 
 ## 4. 数据库设计
@@ -166,14 +180,13 @@ stateDiagram-v2
 - `dormitory_areas(id, name)`、`dormitory_buildings(id, dormitory_area_id, name)`、`dormitories(id, dormitory_building_id, room_no, enabled)`；宿舍唯一键为 `(dormitory_building_id, room_no)`
 - `students(id, student_no, name, id_card_ciphertext, id_card_hash, gender, phone_ciphertext, grade_id, faculty_id, major_id, class_id, dormitory_id, status)`
 - `class_enrollments(id, student_id, class_id, start_date, end_date)`，保留转班历史。
-- `courses(id, name, teacher_id, enabled)`、`course_classes(course_id, class_id)`；课程名称全局唯一，一门课程可关联多个共同授课班级。
-- `course_schedules(id, course_id, semester_id, classroom_id, weekday, start_section, end_section)`；星期取 1–7，节次取 1–10，结束节次不得早于开始节次，同一课程的排课时段由应用校验与 PostgreSQL 排斥约束共同保证不重叠，每节课按 45 分钟展示。
+- 当前课程业务模型为 `courses(id, name, enabled)`，课程名称全局唯一。历史物理结构中的 `teacher_id`、`course_classes` 和 `course_schedules` 保留但不再由应用维护或用于校验。
 - `teaching_buildings(id, name, enabled)`、`classrooms(id, teaching_building_id, room_no, enabled)`；教室唯一键为 `(teaching_building_id, room_no)`，不维护楼层字段。
 - `dictionary_types`、`dictionary_items` 只承载可配置展示项；部门、角色、检查类型等有业务关系的数据不得仅作为字典项。
 
 以上基础数据的 `id` 均由后端生成并持久化，前端不得要求管理员填写技术标识或院系/专业/班级/课程等人工编码。`student_no`、`employee_no`、`room_no` 和教室的楼宇/房间信息是现实业务标识，不属于技术主键。下拉选择统一提交 UUID、展示完整名称；检查记录继续保存名称和年级快照，避免基础数据变化影响历史结果。
 
-基础数据列表应解析并展示必要的业务关系名称，而非只显示本表名称或关联 ID。专业展示院系，班级展示年级/院系/专业/班主任，学生展示年级/院系/专业/班级/宿舍，课程展示教师/班级/排课。宿舍层级的展示名称在查询结果关联层完成拼接：宿舍楼为“宿舍区 + 宿舍楼”，宿舍为“宿舍区 + 宿舍楼 + 宿舍号”；教学楼独立维护，教室展示为“教学楼名称 + 教室号”。持久化分别保存外键与房间号，不冗余保存拼接文本。
+基础数据列表应解析并展示必要的业务关系名称，而非只显示本表名称或关联 ID。专业展示院系，班级展示年级/院系/专业/班主任，学生展示年级/院系/专业/班级/宿舍；课程只展示课程名、状态和操作。宿舍层级的展示名称在查询结果关联层完成拼接：宿舍楼为“宿舍区 + 宿舍楼”，宿舍为“宿舍区 + 宿舍楼 + 宿舍号”；教学楼独立维护，教室展示为“教学楼名称 + 教室号”。持久化分别保存外键与房间号，不冗余保存拼接文本。
 
 ### 4.4 检查业务表
 
@@ -196,26 +209,27 @@ PRD 的“统一主表 + 类型扩展表”适合本系统。主表保存所有�
 | remark | text | 备注 |
 | source | varchar(24) | MANUAL/EXCEL/REPORT_CORRECTION/MIGRATION |
 | status | varchar(32) | 检查记录状态 |
-| submission_id | uuid | FK department_submissions |
+| submission_id | uuid | 当前预留字段，department_submissions 表及外键待部门流程实现 |
 | import_batch_id | uuid | 可空 |
 | locked_by_report_id | uuid | 草稿引用后锁定 |
 | row_version | int | 乐观锁 |
 
-扩展表均以 `record_id` 为 PK/FK：
+当前七类对应六张业务扩展表，均以 `record_id` 为 PK/FK（字段以 005/012 迁移为准）：
 
-- `attendance_details(record_id, course_id, absence_hours, teaching_class_id, classroom_id)`
-- `morning_exercise_details(record_id, absence_count)`
-- `dorm_hygiene_details(record_id, dormitory_id, reason_code, responsible_person, is_excellent, is_unqualified, building_scope, floor_unit)`
-- `late_return_details(record_id, dormitory_id, late_at)`；多人晚归拆为多条学生记录，便于统计。
-- `classroom_hygiene_details(record_id, classroom_id, responsible_area, responsible_person, reason_code, violation_description)`
+- `attendance_details(record_id, course_id, absence_hours, period_text, classroom_id)`：到课率 `ATTENDANCE_RATE` 与无机课堂 `UNATTENDED_CLASSROOM` 共用。
+- `morning_exercise_details(record_id, absence_count)`：早锻炼/早签 `MORNING_ATTENDANCE`，一次记录固定 1。
+- `dorm_hygiene_details(record_id, dormitory_id, result, reason_code, description)`。
+- `late_return_details(record_id, dormitory_id)`：发生时间在主表，多人晚归拆为学生记录。
+- `classroom_hygiene_details(record_id, classroom_id, area_id, result, reason_code, description)`。
+- `public_dormitory_hygiene_details(record_id, area_id, result, reason_code, description)`。
 
-到课率和无机课堂可共用 `attendance_details`，但保留不同 `inspection_type_id`。统计结果（累计旷课、到课率等）不写回明细。
+卫生结果为 EXCELLENT/QUALIFIED/UNQUALIFIED 互斥枚举，责任班级/学生/寝室在独立关联表保存。主表 occurrence_kind 为 TIME/DATE/ROUND，配合 occurred_at、inspection_date、inspection_round；卫生不把多班级塞进单 class_id。区域表及管理 API/UI 已完成隔离增量验收，目标环境未加载。累计与到课率等统计不写回明细。
 
-#### 部门提交与审核
+#### 部门提交与审核（五类已实现，目标环境待加载）
 
-- `department_submissions(id, semester_id, week_id, department_id, inspection_type_id, status, record_count, submitted_by, submitted_at, reviewed_by, reviewed_at, review_comment, version)`
-- 唯一键 `(week_id, department_id, inspection_type_id, revision_no)`；退回修改可保留同一提交并记录状态历史，重大重提可递增 revision。
-- `workflow_events(id, aggregate_type, aggregate_id, from_status, to_status, action, comment, actor_id, occurred_at)`
+- `016_department_submissions.sql` 建立按成员记录批次的 `department_submissions`，保存学期、周次、部门、检查类型、状态、修订号、乐观版本、提交/审核身份与时间、退回原因及幂等指纹。同一部门、周次、类型允许多个批次，不设置该组合的唯一约束。
+- `department_submission_revisions` 保存每次提交的记录 ID 集合和结构化快照；退回后沿用原批次重提并递增修订号，允许原样重提，`017` 禁止改删历史修订。检查记录通过复合外键约束绑定同范围批次，状态变更与审计在事务内完成。
+- 当前只允许到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类进入部门流程。教室卫生和公共宿舍卫生已有基础模型保持不变，后续规则待需求方确定。
 
 部门汇总状态不重复手工维护，优先由提交状态映射；如为性能缓存，应由事务内统一更新并可重建。
 
@@ -237,7 +251,7 @@ PRD 的“统一主表 + 类型扩展表”适合本系统。主表保存所有�
 - `report_reviews(id, report_id, report_version_id, action, comment, actor_id, created_at)`
 - `report_files(id, report_id, report_version_id, file_id, purpose, format, is_final)`
 
-`metrics_json` 适合存不同检查类型差异较大的指标，但公共检索维度必须独立成列。定稿事务应：校验状态和权限 → 冻结当前版本 → 生成/固化统计快照 → 创建文件生成任务 → 将通报置为 `FINALIZING`；所有文件成功且校验通过后才变为 `FINALIZED`。失败则保留可重试状态，不能出现“已定稿但文件缺失”。
+同一学期的每个周次仅对应一份逻辑上的合并周通报；源数据变化产生 `report_versions` 新版本，历史版本及其文件保留。更正通报通过 `parent_report_id` 关联原通报，不覆盖原定稿。`metrics_json` 可承载不同检查类型的差异指标，但只存入已确认统计规则定义的指标；展示指标族、具体字段和公式待业务规则确认，公共检索维度必须独立成列。定稿事务应：校验状态和权限 → 冻结当前版本 → 生成/固化统计快照 → 创建文件生成任务 → 将通报置为 `FINALIZING`；所有文件成功且校验通过后才变为 `FINALIZED`。失败则保留可重试状态，不能出现“已定稿但文件缺失”。
 
 ### 4.7 文件、模板、规则和审计
 
@@ -254,6 +268,7 @@ PRD 的“统一主表 + 类型扩展表”适合本系统。主表保存所有�
 - `inspection_records(class_id, week_id, inspection_type_id)`
 - `department_submissions(week_id, department_id, inspection_type_id, status)`
 - `reports(semester_id, week_id, status)`
+- 主周通报需对 `(semester_id, week_id, report_kind)` 的逻辑范围施加唯一约束；更正通报作为关联原通报的子记录，不占用主周通报唯一范围。
 - `report_stat_snapshots(report_id, inspection_type_id, object_type)`
 - `audit_logs(resource_type, resource_id, created_at DESC)`
 - `import_rows(batch_id, validation_status)`
@@ -284,6 +299,10 @@ PRD 的“统一主表 + 类型扩展表”适合本系统。主表保存所有�
 4. Repository 将数据范围编译为 SQL 条件，禁止先查全量再在内存过滤。
 5. 文件下载根据文件关联的通报/导入批次重新鉴权，禁止公开 object key。
 
+通报导出的 Word/Excel 是某个结构化通报版本的只读数据产物，不提供从下载文件回写业务数据的入口。数据错误须按平台权限和修正流程在平台内修正（已锁定数据走通报内修正），再生成新版本及其文件；下载副本可在平台外调整格式或样式，但不得增删改数据内容，也不取代平台保存的版本文件。平台生成的源文件按通报版本留存并可校验内容一致性。
+
+强制生成权限应使用独立 permission code，与一般通报汇总、审核或导出权限分开配置。授权对象限定为学生会办公室部长或其指定负责周通报的副部长（学生会办公室通报管理员），权限可按用户单独授予或撤销；其他业务部门的部长身份不自动获得该权限。该动作作用于整份合并周通报，当前权限实现仅允许按学年、学期、周次和检查类型收窄，不允许部门、班级或年级子范围；这一粒度根据合并通报规则推导，仍待业务方确认，并应在生成写接口验收前冻结。未完成项默认阻断生成；强制执行必须由有权用户在系统内手动操作并填写理由，服务端记录未完成项、理由、操作者、时间和通报范围。仅填写理由或拥有页面入口不能替代服务端授权。
+
 提供 `GET /api/v1/users/{id}/effective-permissions`，返回权限、范围和每项来源；管理员页面可解释“为什么此用户拥有该权限”。权限变更后递增用户 `permission_version`，令牌携带的旧版本失效或触发重新加载。
 
 ## 6. 后端设计
@@ -305,7 +324,7 @@ PRD 的“统一主表 + 类型扩展表”适合本系统。主表保存所有�
 - 错误统一：`code,message,details,requestId`，字段错误在 `details.fields`。
 - 创建返回 201；异步任务返回 202 和 `jobId`；乐观锁冲突返回 409；无权限返回 403。
 - 写操作支持 `Idempotency-Key`，尤其是导入确认、定稿和文件生成。
-- OpenAPI 作为接口契约，前端通过生成器生成类型与 API Client。
+- 当前接口契约由 HTTP 测试、DTO 与手写 TypeScript Client 维护。OpenAPI 与类型生成尚未交付；不得假定已自动同步调用方。
 
 关键 API 分组：
 
@@ -339,7 +358,7 @@ GET    /jobs/{id}
 ### 6.3 校验策略
 
 - 请求结构校验：必填、格式、长度、枚举。
-- 引用校验：学生、班级、宿舍、课程等存在且启用。
+- 引用校验：学生、班级、宿舍、课程等分别存在且启用；课程只校验自身可用，不要求与班级、日期、教室或节次存在关系。
 - 一致性校验：学号与姓名匹配、学生与班级/宿舍匹配、日期属于所选周次。
 - 业务校验：对应部门有该检查类型录入权、记录可编辑、阈值合法。
 - 重复校验：按检查类型配置业务唯一键。例如晚归可用“学生 + 晚归时间”，旷课可用“学生 + 课程 + 日期 + 节次”。
@@ -360,7 +379,7 @@ GET    /jobs/{id}
 - React + TypeScript + Vite。
 - Ant Design 的 `Form/Table/Upload/Steps/Result/Descriptions`；复杂查询表格可用 Ant Design ProComponents 的 `ProTable`。
 - TanStack Query 管理请求缓存、分页、失效和异步任务轮询。
-- Zustand 仅保存当前用户、布局偏好等少量客户端状态。
+- 当前登录上下文使用 AuthProvider/React Context，局部状态留在组件；没有 Zustand，不为文档旧方案补装依赖。
 - React Router 负责路由；权限路由由后端返回的有效权限生成。
 - React Hook Form 可不引入，优先统一 Ant Design Form，避免两套表单状态。
 - dayjs 处理日期；decimal.js 仅在前端需要精确展示计算时使用，最终统计以后端为准。
@@ -405,7 +424,7 @@ web/src/
 
 #### 7.2.1 一级导航
 
-左侧固定导航严格使用以下 7 项，并由有效权限控制可见性和子菜单：
+完整产品导航规划如下，由有效权限与已实现页面共同控制入口。阶段二只开放当前实现的业务与配置，不提前展示通报或归档占位：
 
 1. 工作台
 2. 日常检查业务
@@ -489,7 +508,15 @@ stateDiagram-v2
     ACTIVE --> [*]: 允许登录管理端
 ```
 
-前端对 401、403 和账号状态错误统一处理：Access Token 过期时只尝试一次静默刷新；刷新失败回到登录页；账号被禁用或权限版本变化时清空本地会话并给出明确提示。
+前端对认证和权限错误分类处理：受保护请求携带 Access Token 返回 401 时，只尝试一次静默续期并重发原请求；同一页面并发请求与启动恢复共享一次 Cookie 轮换，迟到的旧凭证 401 使用已更新凭证重试。续期明确返回 401 或新凭证重试仍返回 401 时清空本地会话和私有缓存，回到登录页并提示；续期网络故障或 5xx 保留页面状态，报告失败并允许稍后重试。403 不触发续期、不扩大权限。登录、退出、注册、续期端点不递归续期，退出或账号切换后的旧请求不得作为新账号重发。后端仍采用 15 分钟 Access Token 与 7 天 Refresh 会话，不延长短凭证来掩盖前端缺失。
+
+2026-10-04 刷新持久化约束：旧会话消费与新会话保存同事务，按账号→会话顺序锁定并复核 ACTIVE 与会话版本；生成凭据失败或事务回滚不能消费旧令牌。`/auth/refresh` 仅在明确失效时返回401 `INVALID_SESSION`并清Cookie；内部故障返回500 `AUTH_SERVICE_UNAVAILABLE`且保留Cookie。成功提交后响应丢失的透明恢复仍待设计，不允许旧令牌重放。见[增量验收](../reviews/2026-10-04-refresh-atomic-rotation.md)。
+
+同日补充：登录、访问令牌账号读取、改密和退出的内部故障同样返回500 `AUTH_SERVICE_UNAVAILABLE`，不伪造凭据无效或退出成功。改密、重置密码、禁用、账号/角色修改与刷新会话撤销、审计同事务；失败整体回滚。前端退出失败保留当前页面并允许重试；两处改密成功后仅清本地会话，不再追加退出请求。见[原子性与错误验收](../reviews/2026-10-04-auth-errors-and-account-atomicity.md)。
+
+登录会话保存同样须在账号锁内核对ACTIVE及校验密码时的SessionVersion，拒绝改密、禁用或角色调整前读取的旧账号快照；不可先验证旧密码再无条件保存会话。见[登录签发版本保护](../reviews/2026-10-04-login-account-version.md)。
+
+自行改密和管理员重置以读取时SessionVersion做条件更新，版本冲突返回409 `VERSION_CONFLICT`，不写密码/会话/审计；自行改密还须核对当前ACTIVE及认证actor版本，旧actor返回401。管理员重置禁用目标规则独立保留。两处前端表单阻止请求进行中重复提交，失败保留输入。见[密码并发验收](../reviews/2026-10-04-password-concurrency.md)。
 
 #### 7.2.4 导入与审核的正确交互位置
 
@@ -502,8 +529,9 @@ stateDiagram-v2
 
 - 工作台根据普通成员、部门管理员、办公室通报管理员、查看者等角色复用同一布局并组合不同卡片，不为每个角色复制一套实现。
 - 日常检查业务先显示业务卡片/列表；进入业务详情后使用统一页面骨架，动态装载类型专属筛选项、表格列和表单。
-- 数据汇总与统计的筛选条件固定在顶部，统计口径、数据截止时间和未完成部门风险显式展示。
+- 数据汇总与统计的筛选条件固定在顶部；汇总以部门为树状主项、负责的检查类型为可展开子项，类型行可进入分页的已确认真实记录明细。计数承担定位和状态提示，不能替代实际提交记录。统计口径、数据截止时间和未完成部门风险显式展示。
 - 通报详情用步骤条表达汇总、草稿、审核、定稿、发布、归档阶段，并展示版本列表、审核时间线、办公室修正对比和文件列表。
+- 源数据变化后的处理按系统触发配置运行；默认手动重新生成。自动模式配置变更须留痕，自动生成只创建关联新版本和新文件，不覆盖已有版本。
 - 用户详情采用右侧 Drawer 或独立详情页，用“权限—范围—来源”表格解释有效权限，而非只显示角色名。
 - 历史归档中的定稿数据明确标记“快照”，与实时数据分开展示。
 
@@ -535,11 +563,11 @@ reports/{semester}/{week}/{reportId}/v{version}/final.xlsx
 ### 8.2 模板方案
 
 - Excel 导入模板：固定 machine-readable 字段编码，中文表头仅用于展示；模板内含填写说明、字典选项和示例行。
-- Excel 导出：excelize 按模板填充，生成后重新打开校验 sheet、关键单元格和行数。
+- Excel 导出：excelize 按模板填充，生成后重新打开校验 sheet、关键单元格和行数。已核对的第二周历史工作簿有六张分类明细表、没有单元格公式但保留一个外部链接记录；新模板不应未经确认地复制该链接，导出回归须检查工作表、数据范围及非预期外部链接。
 - Word：使用经过审核的 docx 模板，定义段落、循环表格和条件附件占位规则；模板发布后不可覆盖，只能创建新版本。
 - 每个通报版本记录模板版本、数据引用和生成文件，以保证重现。
 
-若真实历史 Word 模板包含复杂跨页表格、页眉页脚和域，需在开发前制作 3—5 份代表性“黄金样例”做兼容性验证。Go 方案无法稳定满足时，再将文档渲染实现替换为 Python/LibreOffice 服务，但 API 和任务协议保持不变。
+已核对一份历史定稿 Word：共 29 页、18 个 A4 页面分节（首页纵向，其余横向）、24 张表，正文后有 6 组附件，属于复杂跨页表格样例。当前隔离渲染环境无法加载文件指定的中文字体，渲染图片中的中文标题和表头变成方框或空白，部分分页留白也无法据此判定为原文件缺陷；该文件尚未被核验为可复用的生成模板。配套 Excel 工作簿含六张分类明细表、没有单元格公式，但保留一个未核实的外部链接记录，且未设置打印区域、重复表头或页面缩放。新导出模板应从平台结构化数据生成并避免继承未核实外链。开发前仍需用 3—5 份代表性“黄金样例”验证跨页表格、页眉页脚、域和附件顺序，并在目标 Microsoft Office/WPS 环境检查实际输出。Go 方案无法稳定满足时，再将文档渲染实现替换为 Python/LibreOffice 服务，但 API 和任务协议保持不变。
 
 ## 9. 安全、隐私与审计
 
@@ -679,18 +707,21 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 ## 14. 必须在开发前确认的业务项
 
 1. 七类检查各自的标准 Excel 字段、必填项和唯一/重复判定键，以现有参考材料为基线形成系统标准模板。
-2. 到课率、早锻炼等“应到人数”取检查时点班级实际在籍人数，并在通报定稿时固化统计快照。
-3. 同一周、部门、检查类型是否允许多次提交，以及退回后是覆盖还是形成新修订号。
+2. 确认到课率、早锻炼等“应到人数”的权威来源（例如检查时点班级实际在籍人数或签到应到表）；当前候选来源尚未批准，最终口径须写入统计规则并在定稿快照中固化。
+3. **已确认（2026-10-04）：** 成员按记录批次提交、部门按周汇总；同一周/部门/类型允许多个批次，退回沿用原批次并保存递增修订。
 4. 通报草稿锁定粒度：整周、检查类型、提交批次还是单条记录。本方案推荐按被引用记录锁定。
-5. 强制生成缺失部门通报所需权限和风险确认文本。
-6. 办公室修正同步到提交信息后，部门端如何展示、是否需要只读确认。
-7. Word/Excel 正式样式、空数据规则、文件命名和兼容软件范围。
-8. 身份证号是否确属业务必需；若非必要，建议 MVP 不采集，以满足数据最小化原则。
+5. **已确认（2026-10-25）：** 未完成部门数据默认阻止生成；强制生成权限单独配置给学生会办公室部长或其指定负责周通报的副部长（学生会办公室通报管理员），其他业务部门的部长身份不自动获得该权限；须手动填写理由并审计。
+6. **已确认（2026-10-25）：** 同一学期的每个周次一份合并周通报；源数据变化后重新生成，默认手动触发，并可配置自动触发。重生成创建新版本及其 Word/Excel 文件，保留历史版本。
+7. **已确认（2026-10-25）：** 下载 Word/Excel 不用于修改或回写数据；数据应在平台修正后重新生成。下载副本仅可调整格式/样式，不得改动数据内容。
+8. 通报展示指标族、字段、统计公式、排序及空数据规则待后续业务统计规则制定并确认；历史样例只能作为核对材料。
+9. 办公室修正同步到提交信息后，部门端如何展示、是否需要只读确认。
+10. Word/Excel 正式样式、空数据规则、文件命名和兼容软件范围。
+11. 身份证号是否确属业务必需；若非必要，建议 MVP 不采集，以满足数据最小化原则。
 
 ## 15. 关键风险与决策
 
 - **Word 兼容性是首要技术风险**：先做真实模板 PoC，再承诺全部版式。
-- **出勤率的分母来源未定义**：需要课程排课/班级人数/签到应到表之一作为权威来源。
+- **出勤率的分母来源未定义**：后续须单独确定班级人数或签到应到表等权威来源；课程排课不属于当前课程关联模型，也不得作为录入或统计前置条件。
 - **权限不宜做成任意表达式引擎**：MVP 使用固定维度和少量特批，保证可解释、可测试。
 - **定稿不是普通状态更新**：必须同时固化引用数据、统计结果、模板版本和文件校验结果。
 - **不建议 MVP 上微服务、Kubernetes、Elasticsearch**：它们不会解决当前核心业务风险，反而提高部署维护成本。
@@ -716,7 +747,7 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 
 ### 到课率手工创建增量
 
-新增受保护的 `POST /api/v1/inspections/attendance`，由 `inspection.ManualService` 编排有效权限、学期周次、部门类型配置、复用的到课率字段校验及审计。现有 `AttendanceAdapter` 通过手工输入适配方法复用 XLSX 校验，不创建文件或导入批次。PostgreSQL 在同一事务中锁定并复核相关基础数据/排课、写入 MANUAL/DRAFT 主记录、扩展明细与 INSPECTION_RECORD_CREATED 审计，沿用有效记录唯一索引阻止重复。前端新增表单位于 `features/attendance/ui`，经 mutation hook 与统一 HTTP Client 提交；成功后刷新检查列表与工作台。
+新增受保护的 `POST /api/v1/inspections/attendance`，由 `inspection.ManualService` 编排有效权限、学期周次、部门类型配置、复用的到课率字段校验及审计。现有 `AttendanceAdapter` 通过手工输入适配方法复用 XLSX 校验，不创建文件或导入批次。PostgreSQL 在同一事务中分别锁定并复核学生、班级、课程、教室、周次等独立引用，不检查课程排课；写入 MANUAL/DRAFT 主记录、扩展明细与 INSPECTION_RECORD_CREATED 审计，沿用有效记录唯一索引阻止重复。前端课程字段使用服务端模糊搜索分页选项；成功后刷新检查列表与工作台。
 
 
 ## 2026-09-06 到课率记录管理增量
@@ -728,27 +759,31 @@ Docker Compose 服务包括：`nginx`、`web`（也可由 Nginx直接托管）�
 
 ## 2026-09-06 七类字段核对状态
 
-[字段核对稿](./2026-09-06-seven-inspection-field-review.md)已补参考模板表头和公共区 Word 证据。用户已确认到课率/无机课堂共用扩展表、早锻炼与早签不分类型、卫生对象级记录与责任关联、重复报错和复查时间/轮次。本文既有扩展表示意未包含公共宿舍卫生，不应视为完整可执行迁移清单；实施计划已统一为新增五张业务扩展表，七类共用六张业务扩展表。现阶段不创建新迁移，不改变现有到课率行为。
+[字段核对稿](./2026-09-06-seven-inspection-field-review.md)已补参考模板表头和公共区 Word 证据。用户已确认到课率/无机课堂共用扩展表、早锻炼与早签不分类型、卫生对象级记录与责任关联、重复报错和复查时间/轮次。本文既有扩展表示意未包含公共宿舍卫生，不应视为完整可执行迁移清单；实施计划已统一为新增五张业务扩展表，七类共用六张业务扩展表。012 迁移和七类 API 已完成；现有到课率专用契约保留，页面与导入范围见项目状态。
 
 
-七类目录已落于 `server/internal/inspection/catalog.json`（Go 嵌入读取）与 `web/src/entities/inspection/model/types.ts`（测试保证一致）。字段元数据与实际校验器分离，模板版本 1 对六类新业务仅为 PLANNED；只有到课率声明当前可用动作。卫生时间/轮次、区域和责任关联的数据库结构在下一增量追加，当前目录不改变权限或 SQL 读写行为。
+七类目录已落于 `server/internal/inspection/catalog.json`（Go 嵌入读取）与 `web/src/entities/inspection/model/types.ts`（测试保证一致）。字段元数据与实际校验器分离，模板版本 1 对六类新业务仅为 PLANNED；只有到课率声明当前可用动作。卫生时间/轮次、区域和责任关联已在 012 落地；目录描述本身不授予权限，也不证明目标库已有可用配置和发布模板。
 
 ## 2026-09-06 物理结构增量：012
 
-已追加五张业务扩展表，与 attendance_details 合计六张；新增两张卫生区域表及责任班级/学生/寝室关联表。主表 occurrence_kind 为 TIME、DATE 或 ROUND：分别存 occurred_at、inspection_date、inspection_date + inspection_round，三种形态互斥。旧记录保持 TIME；早锻炼 DATE，课程与晚归 TIME，卫生 TIME/ROUND。卫生使用独立多责任关系，主表 student_id/class_id 为空；责任范围后续必须编译进查询 SQL。
+已追加五张业务扩展表，与 attendance_details 合计六张；新增两张卫生区域表及责任班级/学生/寝室关联表。主表 occurrence_kind 为 TIME、DATE 或 ROUND：分别存 occurred_at、inspection_date、inspection_date + inspection_round，三种形态互斥。旧记录保持 TIME；早锻炼 DATE，课程与晚归 TIME，卫生 TIME/ROUND。卫生使用独立多责任关系，主表 student_id/class_id 为空；责任范围已在通用检查仓储中编译进查询 SQL。
 
-卫生结果互斥，不合格原因必填；violation_count 为不合格 1、优秀/合格 0，提交事务时验证结果/计数及至少一个责任班级。学生责任引用本记录责任班级，快照不随转班改变。新关联限制物理删除，软删除保留历史。既有有效 dedup_key 唯一索引继续有效；自然键构造、当前归属、周日期和完整聚合校验由后续应用服务负责。具体迁移与验证见交接记录，新增六类 API 尚未开放。
+卫生结果互斥，不合格原因必填；violation_count 为不合格 1、优秀/合格 0，提交事务时验证结果/计数及至少一个责任班级。学生责任引用本记录责任班级，快照不随转班改变。新关联限制物理删除，软删除保留历史。既有有效 dedup_key 唯一索引继续有效；自然键构造、当前归属、周日期和完整聚合校验已由领域、应用服务与仓储接入。具体迁移与历史验证见交接记录，七类 API 已开放，其余六类页面尚缺失。
 
 ### Task 3 校验边界（2026-09-06）
 
-新增 inspection.ValidateDetails 与七类明确模型，目录描述字段通用约束，领域校验负责形态、跨字段不变量、周日期及自然键。原始 JSON 仅在领域输入边界使用 RawMessage，拒绝重复成员和未知字段，后续 Repository 消费具体结构。DetailContext 是服务端已解析的周/类型上下文，不是授权凭证。所有数据库引用/字典启用与关系校验、责任范围 SQL、乐观锁、审计及聚合事务仍由 Application Service 与 Repository 落实。领域错误只输出安全路径/代码，不回显输入；新类型 API 暂未开放。
+新增 inspection.ValidateDetails 与七类明确模型，目录描述字段通用约束，领域校验负责形态、跨字段不变量、周日期及自然键。原始 JSON 仅在领域输入边界使用 RawMessage，拒绝重复成员和未知字段，后续 Repository 消费具体结构。DetailContext 是服务端已解析的周/类型上下文，不是授权凭证。所有数据库引用/字典启用与关系校验、责任范围 SQL、乐观锁、审计及聚合事务仍由 Application Service 与 Repository 落实。领域错误只输出安全路径/代码，不回显输入；七类 API 已由下述 Task 4/5 接入。
 
 ### Task 4/5 服务落地（2026-09-06）
 
 七类统一 CRUD 现由 RecordService 编排 InspectionTransaction，Postgres 实现配置/引用锁定、完整聚合持久化、范围 SQL、版本及审计。详情与列表使用一致快照；卫生 SQL 对所有责任班级逐项判权，不暴露部分授权聚合。未提交草稿允许本人 ENTER / 他人 MANAGE，编辑验证原与目标范围，批删按固定顺序锁定并全部校验；各动作 DENY 独立。审计失败导致全部回滚。
 
-详见 [API 契约](./2026-09-06-inspection-api-contract.md)，包括到课率专用路径兼容、原因字典命名、区域依赖及字段/权限边界。其余类型 API 已接通，页面/Excel/部门流程未随此增量开放。历史“新增六类 API 尚未开放”描述由本条更新。
+详见 [API 契约](./2026-09-06-inspection-api-contract.md)，包括到课率专用路径兼容、原因字典命名、区域依赖及字段/权限边界。其余类型 API 已接通，页面/Excel/部门流程未随此增量开放。错误响应中字段校验 422 与其余错误的封装不一致，当前 httpClient 不能完整解析；已列为接页面前的契约修复待办。
 
 ### Task 6/7 落地（2026-09-07）
 
 统一外壳、工作台根路由及既有页面归属保留，导航/路由扣除完全覆盖动作授权的 DENY。临时工作周已通过 013 的 system_settings 实现；沿用现有校历管理权限，全局生效，明确 expiresAt、乐观版本及审计事务。到期或目标/父级停用时回退，当前无教学周返回空值。默认周次与工作台共用服务器解析；前端周期刷新仅使相应缓存失效，不覆盖已打开表单。[完整契约](./2026-09-07-navigation-work-context.md)。
+
+### 2026-10-05 五类执行范围的已批准偏差
+
+到课率未标记周默认普通周 1 倍，仅显式配置教学礼拜周为 2 倍；020 只补全周次配置，历史记录里未知的处罚快照不回填。管理员可在完整授权范围内选择校级归属，校级记录以空部门持久化，021 使记录、导入批次和提交批次支持 `department_id IS NULL`，并用生成的范围键维持提交批次到记录的复合外键校验。校级批次独立于任何部门，只有相应动作及检查范围的显式授权人可以录入、查看或审核；超级管理员保留全权。普通成员的录入归属始终来自可信主部门。校级和部门批次分别按周汇总，只有已确认记录进入后续通报链路。当前仅到课率、无机课堂、早锻炼/早签、宿舍卫生、晚归五类进入本批验收；教室卫生与公共宿舍卫生专项规则延期并保留已有接入能力。

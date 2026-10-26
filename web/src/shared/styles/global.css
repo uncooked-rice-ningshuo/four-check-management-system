@@ -730,6 +730,95 @@ body {
 .master-data-import-field-rule { margin-block: 0 !important; }
 .selected-table-row > td { background: #eaf4ff !important; }
 .history-entry + .history-entry { margin-block-start: 16px; }
+.weekly-report-table .ant-table { font-variant-numeric: tabular-nums; }
+.weekly-report-table .ant-table-thead > tr > th {
+  padding-block: 12px;
+  color: #405a73;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #f5f8fb;
+  border-bottom: 1px solid #e2e9f1;
+}
+.weekly-report-table .ant-table-thead > tr > th::before { display: none; }
+.weekly-report-table .ant-table-tbody > tr > td {
+  padding-block: 13px;
+  border-bottom: 1px solid #eef3f8;
+}
+.weekly-report-table .ant-table-tbody > tr.weekly-report-department-row > td {
+  color: #17324d;
+  font-weight: 600;
+  background: #f7f9fc;
+}
+.weekly-report-table .ant-table-tbody > tr.weekly-report-department-row > td:first-child {
+  box-shadow: inset 3px 0 #1d6fb8;
+}
+.weekly-report-table .ant-table-tbody > tr.weekly-report-department-row:hover > td {
+  background: #f0f5fb !important;
+}
+.weekly-report-table .ant-table-tbody > tr.weekly-report-inspection-row > td {
+  color: #42566b;
+}
+.weekly-report-table .ant-table-tbody > tr.weekly-report-inspection-row:hover > td {
+  background: #f8fbff !important;
+}
+.weekly-report-table .wr-name { font-size: 13px; }
+.weekly-report-table .wr-kind-count {
+  display: inline-block;
+  padding: 0 8px;
+  color: #1b5e93;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  background: #e8f1fa;
+  border-radius: 10px;
+}
+.wr-count {
+  display: inline-block;
+  min-width: 20px;
+  color: #1d2b3a;
+  font-size: 13px;
+  font-weight: 500;
+}
+.wr-count--zero { color: #c3cad3; font-weight: 400; }
+/* 「已确认记录」列强调：浅绿胶囊，部门汇总行淡一档 */
+.wr-count-pill {
+  display: inline-block;
+  min-width: 36px;
+  padding: 1px 9px;
+  background: #e9f6e3;
+  border: 1px solid #c6e4b9;
+  border-radius: 12px;
+  color: #2b680c;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.wr-count-pill--sum {
+  background: #f3faf0;
+  border-color: #dbeed2;
+  color: #3d7a1c;
+}
+.wr-hint { font-size: 12px; white-space: nowrap; }
+.weekly-report-table .wr-detail-link { padding-inline: 4px; font-size: 13px; }
+.weekly-report-records .ant-table-thead > tr > th {
+  padding-block: 10px;
+  color: #405a73;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #f5f8fb;
+  border-bottom: 1px solid #e2e9f1;
+}
+.weekly-report-records .ant-table-thead > tr > th::before { display: none; }
+.weekly-report-records .ant-table-tbody > tr > td {
+  padding-block: 11px;
+  border-bottom: 1px solid #f0f4f8;
+}
+.weekly-report-records .ant-table-tbody > tr:hover > td { background: #f2f8ff !important; }
+.weekly-report-records .ant-table-tbody > tr.ant-table-expanded-row > td { background: #f8fbfe; }
+.wr-rec-main { color: #1d2b3a; font-size: 13px; line-height: 1.45; }
+.wr-rec-sub { margin-top: 3px; color: #8497a8; font-size: 12px; line-height: 1.4; }
 .admin-page .ant-table-cell { font-variant-numeric: tabular-nums; }
 .admin-page h1, .admin-page h2, .admin-page h3 { text-wrap: balance; }
 .ant-modal-body, .ant-drawer-body { overscroll-behavior: contain; }

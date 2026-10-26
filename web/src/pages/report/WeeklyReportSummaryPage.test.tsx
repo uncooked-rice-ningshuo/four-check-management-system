@@ -74,7 +74,7 @@ describe('周通报汇总缓存状态', () => {
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
     await screen.findByText('部门与校级批次汇总', { exact: true })
     expect(screen.getAllByText(/2026年3月9日—2026年3月15日/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('columnheader', { name: '待审核/退回记录' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '待办记录' })).toBeVisible()
     expect(screen.queryByRole('columnheader', { name: '未确认记录' })).not.toBeInTheDocument()
     expect(screen.getAllByText('42').length).toBeGreaterThan(0)
 

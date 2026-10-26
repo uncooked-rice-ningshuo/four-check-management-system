@@ -147,42 +147,69 @@ function displayPeriod(period: ReportingPeriod): string {
   return `${period.academicYearName} · ${period.semesterName} · 第 ${period.weekNo} 周 · ${displayDate(period.startDate)}—${displayDate(period.endDate)}`
 }
 
-function displayRecordDate(record: ReportingRecord): string {
-  const date = record.details.date ? displayDate(record.details.date) : '—'
-  const time = record.details.time
-  return time ? `${date} ${time}` : date
-}
-
 function inspectionResult(result: string): string {
   const labels: Record<string, string> = { EXCELLENT: '优秀', QUALIFIED: '合格', UNQUALIFIED: '不合格' }
   return labels[result] ?? result
 }
 
-function recordSummary(record: ReportingRecord): string {
-  const { details } = record
-  const parts: string[] = []
-  if (details.result) parts.push(inspectionResult(details.result))
-  if (details.period) parts.push(`${details.period}节`)
-  if (details.absenceHours !== undefined) parts.push(`缺课 ${details.absenceHours} 小时`)
-  if (details.absenceCount !== undefined) parts.push(`缺勤 ${details.absenceCount} 次`)
-  if (record.currentCourseName) parts.push(record.currentCourseName)
-  if (record.currentClassroomName) parts.push(record.currentClassroomName)
-  if (record.currentDormitoryName) parts.push(record.currentDormitoryName)
-  if (record.currentAreaName) parts.push(record.currentAreaName)
-  if (details.description) parts.push(details.description)
-  if (record.currentReasonLabel) parts.push(record.currentReasonLabel)
-  if (details.remark) parts.push(details.remark)
-  return parts.length > 0 ? parts.join(' · ') : '已确认记录'
+function uniqueLabels(values: Array<string | undefined | null>): string[] {
+  return [...new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value)))]
 }
 
-function recordPeople(record: ReportingRecord): string {
-  const names = [
-    record.studentName,
-    ...(record.responsibleStudents ?? []).map(item => item.label),
-    ...(record.responsibleClasses ?? []).map(item => item.label),
-    ...(record.responsibleDormitories ?? []).map(item => item.label),
-  ].filter(Boolean)
-  return [...new Set(names)].join('、') || '—'
+/** 「测试-计科2401班」与「测试-计科2401班（2024级）」视为同一个班级，只保留信息更全的那条 */
+function dedupeClasses(labels: string[]): string[] {
+  return labels.filter(label => !labels.some(other => other !== label && other.includes(label)))
+}
+
+type RecordCellContent = { main: string; sub?: string }
+
+function recordObjectCell(record: ReportingRecord): RecordCellContent {
+  const people = uniqueLabels([record.studentName, ...(record.responsibleStudents ?? []).map(item => item.label)])
+  return { main: people.join('、') || '—', sub: record.studentNumber ? `学号 ${record.studentNumber}` : '' }
+}
+
+function recordClassCell(record: ReportingRecord): RecordCellContent {
+  const classes = dedupeClasses(uniqueLabels([record.className, ...(record.responsibleClasses ?? []).map(item => item.label)]))
+  return { main: classes.join('、') || '—', sub: record.grade || '' }
+}
+
+function recordPlaceCell(record: ReportingRecord): RecordCellContent {
+  const place = uniqueLabels([record.currentAreaName, record.currentDormitoryName]).join(' · ')
+  const main = place || record.currentClassroomName || '—'
+  const sub = uniqueLabels([
+    record.currentCourseName,
+    place ? record.currentClassroomName : undefined,
+  ]).join(' · ')
+  return { main, sub }
+}
+
+function recordNoteCell(record: ReportingRecord): RecordCellContent {
+  const description = record.details.description?.trim()
+  const remark = record.details.remark?.trim()
+  // 没有描述时把备注直接作为主内容显示，避免出现「—」加一行灰色小字
+  if (!description) return { main: remark || '—' }
+  return { main: description, sub: remark && remark !== description ? remark : '' }
+}
+
+function RecordCell({ main, sub }: RecordCellContent) {
+  return (
+    <div className="wr-rec">
+      <div className="wr-rec-main">{main}</div>
+      {sub ? <div className="wr-rec-sub">{sub}</div> : null}
+    </div>
+  )
+}
+
+const resultTags: Record<string, { color: string; text: string }> = {
+  EXCELLENT: { color: 'green', text: '优秀' },
+  QUALIFIED: { color: 'blue', text: '合格' },
+  UNQUALIFIED: { color: 'red', text: '不合格' },
+}
+
+function RecordResultTag({ result }: { result?: string }) {
+  if (!result) return <Typography.Text type="secondary">—</Typography.Text>
+  const tone = resultTags[result]
+  return <Tag color={tone?.color}>{tone?.text ?? result}</Tag>
 }
 
 function requiredCellState(row: ReportingSummaryRow) {
@@ -196,6 +223,19 @@ function requiredCellState(row: ReportingSummaryRow) {
   if (row.submissionCount === 0) return <Space wrap><Tag color="gold">应交</Tag><Tag>未提交</Tag></Space>
   return <Space wrap><Tag color="gold">应交</Tag><Tag color="blue">已有记录批次</Tag></Space>
 }
+
+function CountText({ value }: { value: number }) {
+  const className = value === 0 ? 'wr-count wr-count--zero' : 'wr-count'
+  return <span className={className}>{value}</span>
+}
+
+function ConfirmedRecordCell({ value, summaryRow }: { value: number; summaryRow: boolean }) {
+  if (value === 0) return <CountText value={0} />
+  const className = summaryRow ? 'wr-count-pill wr-count-pill--sum' : 'wr-count-pill'
+  return <span className={className}>{value}</span>
+}
+
+const countRender = (value: number) => <CountText value={value} />
 
 function RecordDetailsView({ record }: { record: ReportingRecord }) {
   const { details } = record
@@ -283,41 +323,77 @@ export function WeeklyReportSummaryPage() {
       title: '部门 / 检查类型',
       dataIndex: 'name',
       key: 'name',
-      width: 230,
+      width: 210,
       render: (_name, row) => row.kind === 'department'
-        ? <Space><Typography.Text strong>{row.name}</Typography.Text><Tag>{row.children?.length ?? 0} 类</Tag></Space>
-        : <Typography.Text>{row.name}</Typography.Text>,
+        ? <Space size={8}><Typography.Text strong className="wr-name">{row.name}</Typography.Text><span className="wr-kind-count">{row.children?.length ?? 0} 类</span></Space>
+        : <Typography.Text className="wr-name">{row.name}</Typography.Text>,
     },
     { title: '应交 / 零回执', key: 'requiredState', width: 220, render: (_value, row) => row.kind === 'inspection' ? requiredCellState(row.summary) : <Typography.Text type="secondary">—</Typography.Text> },
-    { title: '提交批次', dataIndex: ['summary', 'submissionCount'], key: 'submissionCount', width: 92, align: 'right' },
-    { title: '草稿', dataIndex: ['summary', 'draftBatchCount'], key: 'draftBatchCount', width: 76, align: 'right' },
-    { title: '待审核', dataIndex: ['summary', 'pendingReviewBatchCount'], key: 'pendingReviewBatchCount', width: 76, align: 'right' },
-    { title: '退回', dataIndex: ['summary', 'returnedBatchCount'], key: 'returnedBatchCount', width: 68, align: 'right' },
-    { title: '已确认批次', dataIndex: ['summary', 'confirmedBatchCount'], key: 'confirmedBatchCount', width: 102, align: 'right' },
+    { title: '提交批次', dataIndex: ['summary', 'submissionCount'], key: 'submissionCount', width: 82, align: 'center', render: countRender },
+    { title: '草稿', dataIndex: ['summary', 'draftBatchCount'], key: 'draftBatchCount', width: 70, align: 'center', render: countRender },
+    { title: '待审核', dataIndex: ['summary', 'pendingReviewBatchCount'], key: 'pendingReviewBatchCount', width: 78, align: 'center', render: countRender },
+    { title: '退回', dataIndex: ['summary', 'returnedBatchCount'], key: 'returnedBatchCount', width: 70, align: 'center', render: countRender },
+    { title: '已确认批次', dataIndex: ['summary', 'confirmedBatchCount'], key: 'confirmedBatchCount', width: 102, align: 'center', render: countRender },
     {
-      title: '已确认记录', dataIndex: ['summary', 'confirmedRecordCount'], key: 'confirmedRecordCount', width: 105, align: 'right',
-      render: (count: number, row) => row.kind === 'inspection' && count > 0 ? <Tag color="green">{count}</Tag> : count,
+      title: '已确认记录', dataIndex: ['summary', 'confirmedRecordCount'], key: 'confirmedRecordCount', width: 102, align: 'center',
+      render: (count: number, row) => <ConfirmedRecordCell value={count} summaryRow={row.kind === 'department'} />,
     },
-    { title: '待审核/退回记录', dataIndex: ['summary', 'pendingReviewOrReturnedRecordCount'], key: 'pendingReviewOrReturnedRecordCount', width: 136, align: 'right' },
+    { title: '待办记录', dataIndex: ['summary', 'pendingReviewOrReturnedRecordCount'], key: 'pendingReviewOrReturnedRecordCount', width: 92, align: 'center', render: countRender },
     {
-      title: '记录明细', key: 'action', width: 145, fixed: 'right',
-      render: (_value, row) => row.kind === 'inspection' && row.summary.confirmedRecordCount > 0
-        ? <Button type="link" size="small" onClick={() => { setSelectedCell(row.summary); setRecordPage(1) }}>查看已确认记录</Button>
-        : row.kind === 'department' ? <Typography.Text type="secondary">展开查看类型</Typography.Text> : <Typography.Text type="secondary">暂无已确认记录</Typography.Text>,
+      title: '记录明细', key: 'action', width: 160, align: 'center',
+      render: (_value, row) => {
+        if (row.kind === 'department') return <Typography.Text type="secondary" className="wr-hint">—</Typography.Text>
+        if (row.summary.confirmedRecordCount > 0) {
+          return <Button type="link" size="small" className="wr-detail-link" onClick={() => { setSelectedCell(row.summary); setRecordPage(1) }}>查看已确认记录</Button>
+        }
+        return <Typography.Text type="secondary" className="wr-hint">暂无已确认记录</Typography.Text>
+      },
     },
   ]
 
+  const records = recordsQuery.data?.items ?? []
+  // 只有填了检查结果的检查类型（如宿舍卫生、教室卫生）才需要「结果」列，否则整列都是「—」
+  const showResultColumn = records.some(record => Boolean(record.details.result))
+
   const recordColumns: ColumnsType<ReportingRecord> = [
-    { title: '日期 / 时间', key: 'occurredAt', width: 150, render: (_value, record) => displayRecordDate(record) },
     {
-      title: '学生 / 责任对象', key: 'people', width: 190,
-      render: (_value, record) => <Typography.Text>{recordPeople(record)}</Typography.Text>,
+      title: '检查时间', key: 'occurredAt', width: 108,
+      render: (_value, record) => (
+        <RecordCell main={record.details.date ? displayDate(record.details.date) : '—'} sub={record.details.time} />
+      ),
     },
     {
-      title: '班级', key: 'class', width: 140,
-      render: (_value, record) => record.className || record.responsibleClasses?.map(item => item.label).join('、') || '—',
+      title: '学生 / 责任对象', key: 'object', width: 190,
+      render: (_value, record) => {
+        const { main, sub } = recordObjectCell(record)
+        return <RecordCell main={main} sub={sub} />
+      },
     },
-    { title: '提交记录内容', key: 'detail', render: (_value, record) => <Typography.Text>{recordSummary(record)}</Typography.Text> },
+    {
+      title: '班级', key: 'class', width: 180,
+      render: (_value, record) => {
+        const { main, sub } = recordClassCell(record)
+        return <RecordCell main={main} sub={sub} />
+      },
+    },
+    ...(showResultColumn ? [{
+      title: '结果', key: 'result', width: 84, align: 'center' as const,
+      render: (_value: unknown, record: ReportingRecord) => <RecordResultTag result={record.details.result} />,
+    }] : []),
+    {
+      title: '地点 / 课程', key: 'place', width: 210,
+      render: (_value, record) => {
+        const { main, sub } = recordPlaceCell(record)
+        return <RecordCell main={main} sub={sub} />
+      },
+    },
+    {
+      title: '情况说明', key: 'note',
+      render: (_value, record) => {
+        const { main, sub } = recordNoteCell(record)
+        return <RecordCell main={main} sub={sub} />
+      },
+    },
   ]
 
   const summary = summaryQuery.data
@@ -325,7 +401,6 @@ export function WeeklyReportSummaryPage() {
   const selectedCellTitle = selectedCell
     ? `${selectedCell.collegeLevel ? '校级' : selectedCell.departmentName} · ${selectedCell.inspectionTypeName} · 已确认记录`
     : '已确认记录'
-  const records = recordsQuery.data?.items ?? []
 
   return (
     <Space direction="vertical" size="large" style={{ display: 'flex' }}>
@@ -398,17 +473,19 @@ export function WeeklyReportSummaryPage() {
           </Row>
           <Card title="部门与校级批次汇总" extra={<Typography.Text type="secondary">展开部门查看检查类型与提交记录</Typography.Text>}>
             {treeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (
-              <Table<ReportTreeRow>
-                rowKey="key"
-                size="middle"
-                columns={columns}
-                dataSource={treeRows}
-                defaultExpandAllRows
-                pagination={false}
-                scroll={{ x: 1300 }}
-                loading={summaryQuery.isFetching}
-                rowClassName={row => row.kind === 'department' ? 'weekly-report-department-row' : 'weekly-report-inspection-row'}
-              />
+              <div className="weekly-report-table">
+                <Table<ReportTreeRow>
+                  rowKey="key"
+                  size="middle"
+                  columns={columns}
+                  dataSource={treeRows}
+                  defaultExpandAllRows
+                  pagination={false}
+                  scroll={{ x: 1190 }}
+                  loading={summaryQuery.isFetching}
+                  rowClassName={row => row.kind === 'department' ? 'weekly-report-department-row' : 'weekly-report-inspection-row'}
+                />
+              </div>
             )}
           </Card>
         </>
@@ -436,28 +513,30 @@ export function WeeklyReportSummaryPage() {
           {recordsQuery.isError && records.length === 0 && (
             <Alert type="error" showIcon message="已确认记录加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
           )}
-          <Table<ReportingRecord>
-            rowKey="id"
-            size="small"
-            columns={recordColumns}
-            dataSource={records}
-            loading={recordsQuery.isFetching}
-            locale={{ emptyText: recordsQuery.isError ? '记录加载失败' : '本项暂无已确认的提交记录' }}
-            expandable={{ expandedRowRender: record => <RecordDetailsView record={record} /> }}
-            scroll={{ x: 760 }}
-            pagination={{
-              current: recordPage,
-              pageSize: recordPageSize,
-              total: recordsQuery.data?.total ?? 0,
-              showSizeChanger: true,
-              pageSizeOptions: [10, 20, 50, 100],
-              showTotal: total => `共 ${total} 条已确认记录`,
-              onChange: (page, pageSize) => {
-                if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) }
-                else setRecordPage(page)
-              },
-            }}
-          />
+          <div className="weekly-report-records">
+            <Table<ReportingRecord>
+              rowKey="id"
+              size="small"
+              columns={recordColumns}
+              dataSource={records}
+              loading={recordsQuery.isFetching}
+              locale={{ emptyText: recordsQuery.isError ? '记录加载失败' : '本项暂无已确认的提交记录' }}
+              expandable={{ expandedRowRender: record => <RecordDetailsView record={record} /> }}
+              scroll={{ x: showResultColumn ? 880 : 796 }}
+              pagination={{
+                current: recordPage,
+                pageSize: recordPageSize,
+                total: recordsQuery.data?.total ?? 0,
+                showSizeChanger: true,
+                pageSizeOptions: [10, 20, 50, 100],
+                showTotal: total => `共 ${total} 条已确认记录`,
+                onChange: (page, pageSize) => {
+                  if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) }
+                  else setRecordPage(page)
+                },
+              }}
+            />
+          </div>
         </Space>
       </Drawer>
     </Space>

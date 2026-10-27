@@ -56,6 +56,7 @@ func main() {
 	services := newApplicationServices(db, storageService, storageConfig.MaxFileSize)
 	services.PostgresReady = db
 	services.ObjectStorageReady = objectStorage
+	startImportTemplateBootstrap(db, storageService)
 	r := httpapi.NewRouter(svc, os.Getenv("COOKIE_SECURE") == "true", services)
 	if err := httpapi.ConfigureTrustedProxies(r, os.Getenv("TRUSTED_PROXY_CIDRS")); err != nil {
 		log.Fatal(err)

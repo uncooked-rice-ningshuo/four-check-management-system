@@ -77,6 +77,19 @@ func (p *Postgres) FindInspectionTemplate(ctx context.Context, typeCode string) 
 	return result, nil
 }
 
+// FindTemplatePublisherActor names the account that attributes automatic
+// template publication at service start. It only selects an attribution; the
+// publication transaction still re-checks that the account is an active super
+// administrator before inserting a template version.
+func (p *Postgres) FindTemplatePublisherActor(ctx context.Context) (string, error) {
+	var id string
+	err := p.Pool.QueryRow(ctx, `SELECT id FROM accounts WHERE status='ACTIVE' AND is_super_admin ORDER BY created_at,id LIMIT 1`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", auth.ErrForbidden
+	}
+	return id, err
+}
+
 func (p *Postgres) FindReusableTemplateFile(ctx context.Context, digest string) (storage.File, error) {
 	var id string
 	err := p.Pool.QueryRow(ctx, `SELECT id FROM files WHERE retention_type='TEMPLATE' AND status='AVAILABLE' AND sha256=$1 ORDER BY created_at,id LIMIT 1`, digest).Scan(&id)

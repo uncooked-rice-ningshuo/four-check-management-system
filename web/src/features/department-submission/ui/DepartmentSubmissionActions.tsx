@@ -8,19 +8,39 @@ import { submissionCartApi } from '../../../shared/api/submissionCartApi'
 import { ApiError } from '../../../shared/api/httpClient'
 import { createIdempotencyKey } from '../../../shared/utils/idempotencyKey'
 import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../../entities/inspection/model/inspectionScope'
+import { inspectionTypeLabel } from '../../../entities/inspection/model/types'
+import { recordSourceLabel, recordStatusLabel } from '../../../entities/inspection/model/recordLabels'
 
 type SelectableRecord = DepartmentSubmissionScope & { id: string; rowVersion: number; status: string; source?: string; studentNumber?: string; studentName?: string; className?: string; grade?: string; typeCode?: string; importBatchId?: string }
+type ScopeOption = { id: string; label: string }
+/** Optional readable names for the scope ids; without them the drawer must never print raw UUIDs. */
+type ScopeLabels = { semesters?: ScopeOption[]; weeks?: ScopeOption[]; departments?: ScopeOption[]; inspectionTypeName?: string }
 type Props = {
   inspectionTypeId: string
   listScope?: Partial<Record<'semesterId' | 'weekId' | 'departmentId', string | number | undefined>>
   selected: SelectableRecord[]
   canReview: boolean
+  scopeLabels?: ScopeLabels
   onChanged: () => void
   onOpenRecord?: (id: string, status: string) => void
 }
 
 const labels: Record<DepartmentSubmission['status'], string> = {
   PENDING_REVIEW: '待部门审核', RETURNED: '已退回', CONFIRMED: '部门已确认',
+}
+
+function optionLabel(options: ScopeOption[] | undefined, id: string) {
+  return options?.find(item => item.id === id)?.label
+}
+
+/** Readable scope text; raw ids must never reach the confirmation dialogs. */
+function scopeText(target: DepartmentSubmissionScope, scopeLabels?: ScopeLabels) {
+  return [
+    optionLabel(scopeLabels?.semesters, target.semesterId) ?? '当前学期',
+    optionLabel(scopeLabels?.weeks, target.weekId) ?? '当前周次',
+    target.departmentId ? optionLabel(scopeLabels?.departments, target.departmentId) ?? '所属部门' : '校级',
+    scopeLabels?.inspectionTypeName ?? '当前检查类型',
+  ].join(' · ')
 }
 
 function oneScope(records: SelectableRecord[]): DepartmentSubmissionScope | undefined {
@@ -40,8 +60,8 @@ function explicitReceiptScope(listScope: Props['listScope'], inspectionTypeId: s
   return { semesterId, weekId, departmentId: departmentId === COLLEGE_DEPARTMENT_OPTION_ID ? '' : departmentId, inspectionTypeId }
 }
 
-/** Batch actions are shared by the five active inspection pages. The API enforces every scope and transition. */
-export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selected, canReview, onChanged, onOpenRecord }: Props) {
+/** Batch actions are shared by the active inspection pages. The API enforces every scope and transition. */
+export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selected, canReview, scopeLabels, onChanged, onOpenRecord }: Props) {
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [reasonFor, setReasonFor] = useState<DepartmentSubmission>()
@@ -119,7 +139,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
       queryClient.invalidateQueries({ queryKey: ['course-inspections'] }), queryClient.invalidateQueries({ queryKey: ['late-returns'] }),
       queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     onChanged()
-    void notice.success(`${variables.kind === 'submit' ? '已创建提交批次' : '批次状态已更新'}：${result.id}（${result.status}）`)
+    void notice.success(`${variables.kind === 'submit' ? '已创建提交批次' : '批次状态已更新'}：${result.id}（${labels[result.status as DepartmentSubmission['status']] ?? result.status}）`)
   }, onError: error => {
     void Promise.all([queryClient.invalidateQueries({ queryKey: ['department-submissions'] }),
       queryClient.invalidateQueries({ queryKey: ['submission-cart'] }),
@@ -239,7 +259,16 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
     return next
   })
 
-  const recordLabel = (record: SubmissionCartRecord) => [record.studentName, record.studentNumber, record.className, record.grade].filter(Boolean).join(' · ') || record.id
+  const recordLabel = (record: SubmissionCartRecord) => {
+    const people = [record.studentName, record.studentNumber, record.className, record.grade].filter(Boolean).join(' · ')
+    if (people) return people
+    // Object-level inspections carry no student snapshot; use the live reference name instead of the raw id.
+    const reference = record as SubmissionCartRecord & Record<string, unknown>
+    const subject = ['currentDormitoryName', 'currentClassroomName', 'currentAreaName', 'currentCourseName']
+      .map(key => reference[key]).find(value => typeof value === 'string' && value.trim()) as string | undefined
+    const date = typeof record.details?.date === 'string' ? record.details.date : undefined
+    return [subject, date].filter(Boolean).join(' · ') || '（无名称记录）'
+  }
 
   return <>
     {noticeContext}
@@ -250,7 +279,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
       onCancel={() => setPendingSubmit(undefined)} onOk={confirmSubmit}>
       {pendingSubmit?.submissionKind === 'ZERO_RECORD'
         ? <><Typography.Paragraph>将提交所选部门或校级范围在当前学期、周次和检查类型下“已检查、确认零条”的回执。提交后进入现有审核流程。</Typography.Paragraph><Input.TextArea aria-label="零记录说明（可选）" placeholder="说明可选" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} rows={3} /></>
-        : <><Typography.Paragraph>范围：{pendingSubmit?.scope.semesterId} · {pendingSubmit?.scope.weekId} · {pendingSubmit?.scope.departmentId || '校级'}；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选，提交后进入授权审核人的批次审核。</Typography.Paragraph><Table size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 680, y: 280 }} columns={[{ title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item) }, { title: '来源', dataIndex: 'source', render: value => value === 'EXCEL' ? 'Excel' : '手工' }, { title: '导入批次/行', key: 'import', render: (_, item) => item.source === 'EXCEL' ? `${item.importBatchId ?? '批次'}${item.importRowNo ? ` / 第 ${item.importRowNo} 行` : ''}` : '—' }]} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph></>}
+        : <><Typography.Paragraph>范围：{pendingSubmit ? scopeText(pendingSubmit.scope, scopeLabels) : ''}；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选，提交后进入授权审核人的批次审核。</Typography.Paragraph><Table size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 680, y: 280 }} columns={[{ title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item) }, { title: '来源', dataIndex: 'source', render: value => recordSourceLabel(value as string) }, { title: '导入批次/行', key: 'import', render: (_, item) => item.source === 'EXCEL' ? `${item.importBatchId ? `批次 ${item.importBatchId.slice(0, 8)}` : 'Excel 批次'}${item.importRowNo ? ` / 第 ${item.importRowNo} 行` : ''}` : '—' }]} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph></>}
     </Modal>
     <Modal title={decisionFor?.kind === 'confirm' ? '确认该批次？' : '重新提交该批次？'} open={!!decisionFor}
       confirmLoading={action.isPending} okText={decisionFor?.kind === 'confirm' ? '确认批次' : '重新提交'}
@@ -267,7 +296,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
           { title: '周次范围', key: 'scope', render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.departmentName ?? '校级'}</> },
           { title: '记录数', key: 'count', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
           { title: '修订', dataIndex: 'revisionNo' },
-          { title: '状态', key: 'status', render: (_, item) => <Tag>{item.scope.departmentId ? labels[item.status] : item.status === 'PENDING_REVIEW' ? '待校级审核' : item.status === 'CONFIRMED' ? '校级已确认' : labels[item.status]}</Tag> },
+          { title: '状态', key: 'status', render: (_, item) => <Tag>{item.scope.departmentId ? labels[item.status] ?? item.status : item.status === 'PENDING_REVIEW' ? '待校级审核' : item.status === 'CONFIRMED' ? '校级已确认' : labels[item.status] ?? item.status}</Tag> },
           { title: '操作', key: 'actions', render: (_, item) => <Space wrap>
             {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
             {item.status === 'RETURNED' && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}
@@ -278,7 +307,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
       if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
       else setCartOpen(false)
     }}>
-      {cartScope && <Typography.Paragraph strong>范围：{cartScope.semesterId} · {cartScope.weekId} · {cartScope.departmentId || '校级'} · {cartScope.inspectionTypeId}</Typography.Paragraph>}
+      {cartScope && <Typography.Paragraph strong>范围：{scopeText(cartScope, scopeLabels)}</Typography.Paragraph>}
       {contextChanged && <Alert type="warning" showIcon title="业务范围已变化。清空旧清单后才能在新范围选择记录。" action={<Button onClick={() => { setCart(new Map()); setCartScopeSnapshot(cartScopeKey); setStaleRecords([]) }}>清空并切换范围</Button>} />}
       <Typography.Paragraph>待提交 {cart.size} 条；当前范围仍可首次提交 {candidates.data?.total ?? '—'} 条。以下候选按服务端权限和当前记录状态筛选。</Typography.Paragraph>
       {candidates.isError && <Alert type="error" title="候选记录加载失败" action={<Button onClick={() => void candidates.refetch()}>重试</Button>} />}
@@ -288,7 +317,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
         locale={{ emptyText: candidates.isError ? '候选记录加载失败，请重试' : '当前范围暂无可提交记录' }}
         rowSelection={{ selectedRowKeys: candidates.data?.items.filter(item => cart.has(item.id)).map(item => item.id), getCheckboxProps: () => ({ disabled: contextChanged }), onSelect: (item, checked) => toggleCartRecord(item, checked), onSelectAll: (checked, rows) => { if (checked) rows.forEach(item => toggleCartRecord(item, true)); else candidates.data?.items.forEach(item => toggleCartRecord(item, false)) } }}
         pagination={{ current: candidatePage, pageSize: 10, total: candidates.data?.total ?? 0, onChange: setCandidatePage }} scroll={{ x: 640 }}
-        columns={[{ title: '学生/事项', key: 'student', render: (_, item) => recordLabel(item) }, { title: '类型', dataIndex: 'typeCode' }, { title: '来源', dataIndex: 'source', render: value => value === 'EXCEL' ? 'Excel' : '手工' }, { title: '状态', dataIndex: 'status' }]} />
+        columns={[{ title: '学生/事项', key: 'student', render: (_, item) => recordLabel(item) }, { title: '类型', key: 'typeCode', render: (_, item) => inspectionTypeLabel(item.typeCode) }, { title: '来源', dataIndex: 'source', render: value => recordSourceLabel(value as string) }, { title: '状态', key: 'status', render: (_, item) => recordStatusLabel(item.status) }]} />
       <Typography.Title level={5}>从 Excel 批次添加</Typography.Title>
       {importBatches.isError && <Alert type="error" title="本人历史导入批次加载失败" action={<Button onClick={() => void importBatches.refetch()}>重试</Button>} />}
       <Table size="small" rowKey="id" loading={importBatches.isLoading} dataSource={importBatches.isError ? [] : importBatches.data?.items ?? []} locale={{ emptyText: importBatches.isError ? '批次加载失败，请重试' : '当前范围暂无已确认入库的 Excel 批次' }}
@@ -299,12 +328,12 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
         ]} />
       {activeImportBatch && <><Typography.Title level={5}>批次内现存业务记录</Typography.Title>{batchRecords.isError && <Alert type="error" title="批次记录加载失败" action={<Button onClick={() => void batchRecords.refetch()}>重试</Button>} />}<Table<SubmissionCartBatchRecord> size="small" rowKey={item => item.record.id} loading={batchRecords.isLoading} dataSource={batchRecords.isError ? [] : batchRecords.data?.items ?? []} locale={{ emptyText: batchRecords.isError ? '批次记录加载失败，请重试' : '该批次当前没有可显示的业务记录' }}
         rowSelection={{ selectedRowKeys: batchRecords.data?.items.filter(item => cart.has(item.record.id)).map(item => item.record.id), getCheckboxProps: item => ({ disabled: contextChanged || !item.selectable }), onSelect: (item, checked) => toggleCartRecord(item.record, checked), onSelectAll: (checked, rows) => { if (checked) rows.filter(item => item.selectable).forEach(item => toggleCartRecord(item.record, true)); else batchRecords.data?.items.forEach(item => toggleCartRecord(item.record, false)) } }}
-        pagination={{ current: batchRecordPage, pageSize: 10, total: batchRecords.data?.total ?? 0, onChange: setBatchRecordPage }} scroll={{ x: 780 }} columns={[{ title: 'Excel 行', dataIndex: ['record', 'importRowNo'], render: value => value ? `第 ${value} 行` : '—' }, { title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item.record) }, { title: '状态', dataIndex: ['record', 'status'] }, { title: '可选状态', key: 'availability', render: (_, item) => item.selectable ? <Tag color="green">可提交</Tag> : item.unavailableReason === 'ALREADY_SUBMITTED' ? '已属原提交批次，仅可从原批次重提' : '当前不可提交' }]} />
+        pagination={{ current: batchRecordPage, pageSize: 10, total: batchRecords.data?.total ?? 0, onChange: setBatchRecordPage }} scroll={{ x: 780 }} columns={[{ title: 'Excel 行', dataIndex: ['record', 'importRowNo'], render: value => value ? `第 ${value} 行` : '—' }, { title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item.record) }, { title: '状态', key: 'status', render: (_, item) => recordStatusLabel(item.record.status) }, { title: '可选状态', key: 'availability', render: (_, item) => item.selectable ? <Tag color="green">可提交</Tag> : item.unavailableReason === 'ALREADY_SUBMITTED' ? '已属原提交批次，仅可从原批次重提' : '当前不可提交' }]} />
       </>}
       {staleRecords.length > 0 && <Alert type="warning" showIcon title="部分记录已失效，请移除后重新添加" description={staleRecords.map(item => `${recordLabel(cart.get(item.id) ?? { id: item.id } as SubmissionCartRecord)}：${item.reason}`).join('；')} />}
       <Typography.Title level={5}>统一待提交清单</Typography.Title>
       <Space style={{ marginBottom: 8 }}><Button onClick={() => { setCart(new Map()); setCartScopeSnapshot(cartScopeKey); setStaleRecords([]) }} disabled={!cart.size}>清空清单</Button><Typography.Text type="secondary">移除清单项不会修改业务记录。</Typography.Text></Space>
-      <Table<SubmissionCartRecord> size="small" rowKey="id" dataSource={[...cart.values()]} pagination={{ pageSize: 8 }} scroll={{ x: 760 }} columns={[{ title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item) }, { title: '来源', dataIndex: 'source', render: value => value === 'EXCEL' ? 'Excel' : '手工' }, { title: '导入批次/行', key: 'import', render: (_, item) => item.source === 'EXCEL' ? `${item.importBatchId ?? '批次'}${item.importRowNo ? ` / 第 ${item.importRowNo} 行` : ''}` : '—' }, { title: '操作', key: 'remove', render: (_, item) => <Button type="link" danger onClick={() => removeCartRecord(item.id)}>移除</Button> }]} />
+      <Table<SubmissionCartRecord> size="small" rowKey="id" dataSource={[...cart.values()]} pagination={{ pageSize: 8 }} scroll={{ x: 760 }} columns={[{ title: '学生/事项', key: 'record', render: (_, item) => recordLabel(item) }, { title: '来源', dataIndex: 'source', render: value => recordSourceLabel(value as string) }, { title: '导入批次/行', key: 'import', render: (_, item) => item.source === 'EXCEL' ? `${item.importBatchId ? `批次 ${item.importBatchId.slice(0, 8)}` : 'Excel 批次'}${item.importRowNo ? ` / 第 ${item.importRowNo} 行` : ''}` : '—' }, { title: '操作', key: 'remove', render: (_, item) => <Button type="link" danger onClick={() => removeCartRecord(item.id)}>移除</Button> }]} />
       <Button type="primary" disabled={!cart.size || !cartScope} loading={action.isPending} onClick={() => void verifyCart()}>核对并提交</Button>
     </Drawer>
     <Modal title="退回提交批次" open={!!reasonFor} okText="确认退回" okButtonProps={{ disabled: !reason.trim() || action.isPending }}

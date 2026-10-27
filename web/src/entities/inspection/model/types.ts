@@ -699,3 +699,8 @@ export function getInspectionDefinition(code: string): InspectionDefinition {
   if (!definition) throw new Error('VALIDATION_FAILED')
   return structuredClone(definition)
 }
+/** Read-only display name; unknown codes stay visible so a catalog drift is still diagnosable. */
+export function inspectionTypeLabel(code?: string): string {
+  if (!code) return '—'
+  return catalog.find(item => item.code === code)?.name ?? code
+}

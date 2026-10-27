@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { DepartmentSubmissionActions } from './DepartmentSubmissionActions'
 import { departmentSubmissionApi } from '../../../shared/api/departmentSubmissionApi'
@@ -16,6 +16,12 @@ const cartApi = vi.mocked(submissionCartApi)
 const scope = { semesterId: 'semester', weekId: 'week', departmentId: 'department', inspectionTypeId: 'type' }
 const record = { ...scope, id: 'record', rowVersion: 1, status: 'DRAFT' }
 const cartRecord = { ...record, typeCode: 'ATTENDANCE_RATE', studentNumber: 'S001', studentName: '测试同学', className: '计科 2401', grade: '2024', source: 'MANUAL', canEdit: true, details: {} }
+const scopeLabels = {
+  semesters: [{ id: 'semester', label: '2026-2027学年 / 秋季学期' }],
+  weeks: [{ id: 'week', label: '第 8 周' }],
+  departments: [{ id: 'department', label: '学习部' }],
+  inspectionTypeName: '早锻炼/早签',
+}
 const batch = { id: 'batch', scope, semesterName: '秋季学期', weekNo: 3, departmentName: '学习部', status: 'PENDING_REVIEW' as const,
   revisionNo: 1, rowVersion: 1, createdBy: 'actor', submittedBy: 'actor', createdAt: '2026-09-01T00:00:00Z',
   submittedAt: '2026-09-01T00:00:00Z', recordIds: ['record'], records: [{ id: 'record', rowVersion: 2, status: 'PENDING_REVIEW', createdBy: 'actor' }] }
@@ -36,7 +42,7 @@ beforeEach(() => {
 function show(selected = [record], canReview = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onChanged = vi.fn()
-  render(<QueryClientProvider client={client}><DepartmentSubmissionActions inspectionTypeId="type" selected={selected} canReview={canReview} onChanged={onChanged} /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><DepartmentSubmissionActions inspectionTypeId="type" selected={selected} canReview={canReview} scopeLabels={scopeLabels} onChanged={onChanged} /></QueryClientProvider>)
   return onChanged
 }
 
@@ -96,4 +102,26 @@ it('does not show review controls without a review action hint', async () => {
   expect(await screen.findByText(/秋季学期/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '退回' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '确认' })).not.toBeInTheDocument()
+})
+
+it('names the submission scope and translates record type, source and status', async () => {
+  cartApi.candidates.mockResolvedValue({ items: [cartRecord], total: 1, page: 1, pageSize: 10 })
+  show()
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
+  const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
+  expect(drawer.getByText('范围：2026-2027学年 / 秋季学期 · 第 8 周 · 学习部 · 早锻炼/早签')).toBeInTheDocument()
+  expect(drawer.queryByText(/semester · week · department/)).not.toBeInTheDocument()
+  expect((await drawer.findAllByText('到课率')).length).toBeGreaterThan(0)
+  expect(drawer.getAllByText('手工录入').length).toBeGreaterThan(0)
+  expect(drawer.getAllByText('草稿').length).toBeGreaterThan(0)
+  expect(drawer.queryByText('ATTENDANCE_RATE')).not.toBeInTheDocument()
+  expect(drawer.queryByText('DRAFT')).not.toBeInTheDocument()
+})
+
+it('falls back to readable placeholders instead of raw ids without scope labels', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><DepartmentSubmissionActions inspectionTypeId="type" selected={[record]} canReview onChanged={() => {}} /></QueryClientProvider>)
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
+  const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
+  expect(drawer.getByText('范围：当前学期 · 当前周次 · 所属部门 · 当前检查类型')).toBeInTheDocument()
 })

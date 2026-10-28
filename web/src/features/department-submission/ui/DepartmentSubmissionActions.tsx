@@ -9,7 +9,7 @@ import { ApiError } from '../../../shared/api/httpClient'
 import { createIdempotencyKey } from '../../../shared/utils/idempotencyKey'
 import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../../entities/inspection/model/inspectionScope'
 import { inspectionTypeLabel } from '../../../entities/inspection/model/types'
-import { recordSourceLabel, recordStatusLabel } from '../../../entities/inspection/model/recordLabels'
+import { recordSourceLabel, recordStatusLabel, hygieneResultLabel } from '../../../entities/inspection/model/recordLabels'
 
 type SelectableRecord = DepartmentSubmissionScope & {
   id: string; rowVersion: number; status: string; source?: string; studentNumber?: string; studentName?: string
@@ -45,13 +45,21 @@ function optionLabel(options: ScopeOption[] | undefined, id: string) {
   return options?.find(item => item.id === id)?.label
 }
 
+/**
+ * A name is missing. Keep a short id suffix so the operator can still tell which scope the
+ * dialog refers to instead of reading a generic placeholder, without exposing a full UUID.
+ */
+function scopePart(options: ScopeOption[] | undefined, id: string, fallback: string) {
+  return optionLabel(options, id) ?? `${fallback}（${id.slice(0, 8)}）`
+}
+
 /** Readable scope text; raw ids must never reach the confirmation dialogs. */
 function scopeText(target: DepartmentSubmissionScope, scopeLabels?: ScopeLabels) {
   return [
-    optionLabel(scopeLabels?.semesters, target.semesterId) ?? '当前学期',
-    optionLabel(scopeLabels?.weeks, target.weekId) ?? '当前周次',
-    target.departmentId ? optionLabel(scopeLabels?.departments, target.departmentId) ?? '所属部门' : '校级',
-    scopeLabels?.inspectionTypeName ?? '当前检查类型',
+    scopePart(scopeLabels?.semesters, target.semesterId, '当前学期'),
+    scopePart(scopeLabels?.weeks, target.weekId, '当前周次'),
+    target.departmentId ? scopePart(scopeLabels?.departments, target.departmentId, '所属部门') : '校级',
+    scopeLabels?.inspectionTypeName ?? `当前检查类型（${target.inspectionTypeId.slice(0, 8)}）`,
   ].join(' · ')
 }
 
@@ -287,8 +295,15 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
     // Object-level inspections carry no student snapshot; use the live reference name instead of the raw id.
     const subject = [record.currentDormitoryName, record.currentClassroomName, record.currentAreaName, record.currentCourseName]
       .filter(Boolean).join(' / ')
-    const date = typeof record.details?.date === 'string' ? record.details.date : undefined
-    return [subject, date].filter(Boolean).join(' · ') || `记录 ${record.id.slice(0, 8)}`
+    // The server keys an event by date plus time or round, so both must stay visible: without them two
+    // records of the same room on the same day collapse into identical rows and hide a missed selection.
+    const detail = (key: string) => {
+      const value = record.details?.[key]
+      return typeof value === 'string' ? value.trim() : ''
+    }
+    const when = [detail('date'), detail('time').slice(0, 5)].filter(Boolean).join(' ')
+    return [subject, when, detail('round'), hygieneResultLabel(detail('result'))]
+      .filter(Boolean).join(' · ') || `记录 ${record.id.slice(0, 8)}`
   }
 
   return <>

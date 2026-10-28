@@ -123,24 +123,38 @@ it('falls back to readable placeholders instead of raw ids without scope labels'
   render(<QueryClientProvider client={client}><DepartmentSubmissionActions inspectionTypeId="type" selected={[record]} canReview onChanged={() => {}} /></QueryClientProvider>)
   fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
   const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
-  expect(drawer.getByText('范围：当前学期 · 当前周次 · 所属部门 · 当前检查类型')).toBeInTheDocument()
+  expect(drawer.getByText('范围：当前学期（semester） · 当前周次（week） · 所属部门（departme） · 当前检查类型（type）')).toBeInTheDocument()
 })
 
 it('keeps the live reference name of an object-level record through the cart and the final confirmation', async () => {
   const dormitory = {
     ...scope, id: 'dormitory-record', rowVersion: 1, status: 'DRAFT', typeCode: 'DORMITORY_HYGIENE',
-    source: 'MANUAL', details: { date: '2026-10-20', result: 'QUALIFIED' }, currentDormitoryName: '紫荆 3 栋 305',
+    source: 'MANUAL', details: { date: '2026-10-20', time: '14:30:00', result: 'QUALIFIED' }, currentDormitoryName: '紫荆 3 栋 305',
   }
   show([dormitory])
   fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
   const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
-  expect(drawer.getAllByText('紫荆 3 栋 305 · 2026-10-20').length).toBeGreaterThan(0)
+  expect(drawer.getAllByText('紫荆 3 栋 305 · 2026-10-20 14:30 · 合格').length).toBeGreaterThan(0)
   expect(drawer.queryByText(/无名称记录/)).not.toBeInTheDocument()
   fireEvent.click(drawer.getByRole('button', { name: '核对并提交' }))
   expect(await screen.findByText('最终确认本次提交')).toBeInTheDocument()
   const confirm = within(screen.getByText('最终确认本次提交').closest('.ant-modal') as HTMLElement)
-  expect(confirm.getAllByText('紫荆 3 栋 305 · 2026-10-20').length).toBeGreaterThan(0)
+  expect(confirm.getAllByText('紫荆 3 栋 305 · 2026-10-20 14:30 · 合格').length).toBeGreaterThan(0)
   expect(confirm.queryByText(/无名称记录/)).not.toBeInTheDocument()
+})
+
+it('keeps same-day records of one object distinguishable by round and result', async () => {
+  const room = {
+    ...scope, rowVersion: 1, status: 'DRAFT', typeCode: 'DORMITORY_HYGIENE', source: 'MANUAL',
+    currentDormitoryName: '紫荆 3 栋 305',
+  }
+  const firstRound = { ...room, id: 'dorm-round-1', details: { date: '2026-10-20', round: '第一轮', result: 'QUALIFIED' } }
+  const secondRound = { ...room, id: 'dorm-round-2', details: { date: '2026-10-20', round: '第二轮', result: 'UNQUALIFIED' } }
+  show([firstRound, secondRound])
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 2）' }))
+  const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
+  expect(drawer.getAllByText('紫荆 3 栋 305 · 2026-10-20 · 第一轮 · 合格').length).toBeGreaterThan(0)
+  expect(drawer.getAllByText('紫荆 3 栋 305 · 2026-10-20 · 第二轮 · 不合格').length).toBeGreaterThan(0)
 })
 
 it('labels a college-level batch as pending college review in the success notice', async () => {

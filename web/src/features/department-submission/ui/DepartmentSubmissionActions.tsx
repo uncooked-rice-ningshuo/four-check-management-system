@@ -11,7 +11,12 @@ import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../../entities/inspection/model
 import { inspectionTypeLabel } from '../../../entities/inspection/model/types'
 import { recordSourceLabel, recordStatusLabel } from '../../../entities/inspection/model/recordLabels'
 
-type SelectableRecord = DepartmentSubmissionScope & { id: string; rowVersion: number; status: string; source?: string; studentNumber?: string; studentName?: string; className?: string; grade?: string; typeCode?: string; importBatchId?: string }
+type SelectableRecord = DepartmentSubmissionScope & {
+  id: string; rowVersion: number; status: string; source?: string; studentNumber?: string; studentName?: string
+  className?: string; grade?: string; typeCode?: string; importBatchId?: string; importRowNo?: number
+  details?: Record<string, unknown>
+  currentDormitoryName?: string; currentClassroomName?: string; currentAreaName?: string; currentCourseName?: string
+}
 type ScopeOption = { id: string; label: string }
 /** Optional readable names for the scope ids; without them the drawer must never print raw UUIDs. */
 type ScopeLabels = { semesters?: ScopeOption[]; weeks?: ScopeOption[]; departments?: ScopeOption[]; inspectionTypeName?: string }
@@ -27,6 +32,13 @@ type Props = {
 
 const labels: Record<DepartmentSubmission['status'], string> = {
   PENDING_REVIEW: '待部门审核', RETURNED: '已退回', CONFIRMED: '部门已确认',
+}
+
+/** College-level batches follow a different review path than department batches. */
+function submissionStatusLabel(status: string, departmentId: string) {
+  if (status === 'PENDING_REVIEW') return departmentId ? '待部门审核' : '待校级审核'
+  if (status === 'CONFIRMED') return departmentId ? '部门已确认' : '校级已确认'
+  return labels[status as DepartmentSubmission['status']] ?? status
 }
 
 function optionLabel(options: ScopeOption[] | undefined, id: string) {
@@ -139,7 +151,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
       queryClient.invalidateQueries({ queryKey: ['course-inspections'] }), queryClient.invalidateQueries({ queryKey: ['late-returns'] }),
       queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     onChanged()
-    void notice.success(`${variables.kind === 'submit' ? '已创建提交批次' : '批次状态已更新'}：${result.id}（${labels[result.status as DepartmentSubmission['status']] ?? result.status}）`)
+    void notice.success(`${variables.kind === 'submit' ? '已创建提交批次' : '批次状态已更新'}：${result.id}（${submissionStatusLabel(result.status, result.scope.departmentId)}）`)
   }, onError: error => {
     void Promise.all([queryClient.invalidateQueries({ queryKey: ['department-submissions'] }),
       queryClient.invalidateQueries({ queryKey: ['submission-cart'] }),
@@ -169,8 +181,10 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
           id: item.id, semesterId: item.semesterId, weekId: item.weekId, inspectionTypeId: item.inspectionTypeId,
           departmentId: item.departmentId, typeCode: item.typeCode ?? '', studentNumber: item.studentNumber ?? '',
           studentName: item.studentName ?? '', className: item.className ?? '', grade: item.grade ?? '',
-          status: item.status, source: item.source ?? 'MANUAL', importBatchId: item.importBatchId,
-          rowVersion: item.rowVersion, canEdit: true, details: {},
+          status: item.status, source: item.source ?? 'MANUAL', importBatchId: item.importBatchId, importRowNo: item.importRowNo,
+          rowVersion: item.rowVersion, canEdit: true, details: item.details ?? {},
+          currentDormitoryName: item.currentDormitoryName, currentClassroomName: item.currentClassroomName,
+          currentAreaName: item.currentAreaName, currentCourseName: item.currentCourseName,
         })
       }
       return next
@@ -191,12 +205,14 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
   const verifyCart = async () => {
     if (!cartScope || !cart.size || contextChanged) return
     setStaleRecords([])
+    const verified: SubmissionCartRecord[] = []
     const checks = await Promise.all([...cart.values()].map(async record => {
       try {
         const current = await submissionCartApi.detail(record.id)
         if (current.rowVersion !== record.rowVersion) return { id: record.id, reason: '记录已被修改，请重新加载后选择' }
         if (current.status !== 'DRAFT') return { id: record.id, reason: '记录已进入原提交批次，仅可从原批次重提' }
         if (!current.canEdit) return { id: record.id, reason: '当前权限或通报锁定状态已变化' }
+        verified.push(current)
         return undefined
       } catch (error) {
         return { id: record.id, reason: error instanceof ApiError && error.status === 404 ? '记录已删除或不可见' : '当前无法读取记录，请重试' }
@@ -207,6 +223,12 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
       setStaleRecords(stale)
       return
     }
+    // The authoritative detail carries reference names the list rows may omit; confirm on those values.
+    if (verified.length) setCart(current => {
+      const next = new Map(current)
+      for (const item of verified) if (next.has(item.id)) next.set(item.id, item)
+      return next
+    })
     const records = [...cart.values()].map(item => ({ id: item.id, version: item.rowVersion }))
     const signature = `RECORDS:${cartScope.semesterId}:${cartScope.weekId}:${cartScope.departmentId}:${cartScope.inspectionTypeId}:${records.map(item => `${item.id}:${item.version}`).sort().join('|')}:`
     if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: createIdempotencyKey() }
@@ -263,11 +285,10 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
     const people = [record.studentName, record.studentNumber, record.className, record.grade].filter(Boolean).join(' · ')
     if (people) return people
     // Object-level inspections carry no student snapshot; use the live reference name instead of the raw id.
-    const reference = record as SubmissionCartRecord & Record<string, unknown>
-    const subject = ['currentDormitoryName', 'currentClassroomName', 'currentAreaName', 'currentCourseName']
-      .map(key => reference[key]).find(value => typeof value === 'string' && value.trim()) as string | undefined
+    const subject = [record.currentDormitoryName, record.currentClassroomName, record.currentAreaName, record.currentCourseName]
+      .filter(Boolean).join(' / ')
     const date = typeof record.details?.date === 'string' ? record.details.date : undefined
-    return [subject, date].filter(Boolean).join(' · ') || '（无名称记录）'
+    return [subject, date].filter(Boolean).join(' · ') || `记录 ${record.id.slice(0, 8)}`
   }
 
   return <>
@@ -296,7 +317,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, listScope, selec
           { title: '周次范围', key: 'scope', render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.departmentName ?? '校级'}</> },
           { title: '记录数', key: 'count', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
           { title: '修订', dataIndex: 'revisionNo' },
-          { title: '状态', key: 'status', render: (_, item) => <Tag>{item.scope.departmentId ? labels[item.status] ?? item.status : item.status === 'PENDING_REVIEW' ? '待校级审核' : item.status === 'CONFIRMED' ? '校级已确认' : labels[item.status] ?? item.status}</Tag> },
+          { title: '状态', key: 'status', render: (_, item) => <Tag>{submissionStatusLabel(item.status, item.scope.departmentId)}</Tag> },
           { title: '操作', key: 'actions', render: (_, item) => <Space wrap>
             {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
             {item.status === 'RETURNED' && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}

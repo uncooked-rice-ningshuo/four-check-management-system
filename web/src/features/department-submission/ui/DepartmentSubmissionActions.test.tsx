@@ -125,3 +125,31 @@ it('falls back to readable placeholders instead of raw ids without scope labels'
   const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
   expect(drawer.getByText('范围：当前学期 · 当前周次 · 所属部门 · 当前检查类型')).toBeInTheDocument()
 })
+
+it('keeps the live reference name of an object-level record through the cart and the final confirmation', async () => {
+  const dormitory = {
+    ...scope, id: 'dormitory-record', rowVersion: 1, status: 'DRAFT', typeCode: 'DORMITORY_HYGIENE',
+    source: 'MANUAL', details: { date: '2026-10-20', result: 'QUALIFIED' }, currentDormitoryName: '紫荆 3 栋 305',
+  }
+  show([dormitory])
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
+  const drawer = within(await screen.findByRole('dialog', { name: '准备提交' }))
+  expect(drawer.getAllByText('紫荆 3 栋 305 · 2026-10-20').length).toBeGreaterThan(0)
+  expect(drawer.queryByText(/无名称记录/)).not.toBeInTheDocument()
+  fireEvent.click(drawer.getByRole('button', { name: '核对并提交' }))
+  expect(await screen.findByText('最终确认本次提交')).toBeInTheDocument()
+  const confirm = within(screen.getByText('最终确认本次提交').closest('.ant-modal') as HTMLElement)
+  expect(confirm.getAllByText('紫荆 3 栋 305 · 2026-10-20').length).toBeGreaterThan(0)
+  expect(confirm.queryByText(/无名称记录/)).not.toBeInTheDocument()
+})
+
+it('labels a college-level batch as pending college review in the success notice', async () => {
+  api.submit.mockResolvedValue({ ...batch, scope: { ...scope, departmentId: '' }, status: 'PENDING_REVIEW' })
+  const onChanged = show()
+  fireEvent.click(screen.getByRole('button', { name: '准备提交（已选 1）' }))
+  fireEvent.click(screen.getByRole('button', { name: '核对并提交' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认提交' }))
+  expect(await screen.findByText(/待校级审核/)).toBeInTheDocument()
+  expect(screen.queryByText(/待部门审核/)).not.toBeInTheDocument()
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+})

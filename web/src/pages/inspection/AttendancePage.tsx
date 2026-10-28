@@ -97,7 +97,14 @@ export function AttendancePage() {
 	const canMutate = (record: AttendanceRecord) => Boolean(user && canMutateAttendance(record, user, permissions.data?.permissions, options?.semesters.find(semester => semester.id === record.semesterId)?.academicYearId))
   const selected = selection.filter(item => records.data?.items.some(record => record.id === item.id) && canMutate(item))
   const selectedDrafts = selected.flatMap(item => item.status === 'DRAFT' && item.semesterId && item.weekId && item.inspectionTypeId
-    ? [{ id: item.id, rowVersion: item.rowVersion, status: item.status, semesterId: item.semesterId, weekId: item.weekId, departmentId: item.departmentId ?? '', inspectionTypeId: item.inspectionTypeId }] : [])
+    ? [{
+      id: item.id, rowVersion: item.rowVersion, status: item.status,
+      semesterId: item.semesterId, weekId: item.weekId, departmentId: item.departmentId ?? '', inspectionTypeId: item.inspectionTypeId,
+      // The cart rebuilds its rows from these display fields, so keep the name snapshots the list already holds.
+      typeCode: 'ATTENDANCE_RATE', studentNumber: item.studentNo, studentName: item.studentName,
+      className: item.className, grade: item.grade, source: item.source, importBatchId: item.importBatchId,
+      details: { date: item.occurredAt.slice(0, 10) },
+    }] : [])
   const canReview = Boolean(user?.isSuperAdmin || (attendanceTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', attendanceTypeId)))
   const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId)))
 	const error = records.error instanceof ApiError ? records.error : undefined

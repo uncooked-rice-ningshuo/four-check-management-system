@@ -16,6 +16,11 @@ export type SubmissionCartRecord = {
   rowVersion: number
   canEdit: boolean
   details: Record<string, unknown>
+  /** Live reference labels resolved by the API for object-level inspections; empty for student records. */
+  currentDormitoryName?: string
+  currentClassroomName?: string
+  currentAreaName?: string
+  currentCourseName?: string
 }
 
 export type SubmissionCartBatch = {

@@ -4,14 +4,17 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
 import { AttendancePage } from './AttendancePage'
-vi.mock('../../features/department-submission/ui/DepartmentSubmissionActions', () => ({ DepartmentSubmissionActions: () => null }))
+const submittedSelection = vi.hoisted(() => ({ selected: [] as Record<string, unknown>[] }))
+vi.mock('../../features/department-submission/ui/DepartmentSubmissionActions', () => ({
+  DepartmentSubmissionActions: (props: { selected: Record<string, unknown>[] }) => { submittedSelection.selected = props.selected; return null },
+}))
 vi.mock('../../features/course-inspection/ui/CourseCreatePanel', () => ({ CourseCreatePanel: () => <div role="dialog" aria-label="新增到课率记录"><input role="combobox" aria-label="目标部门" /></div> }))
 
 const recordsQuery = vi.fn()
 const permissionsQuery = vi.fn()
 const filterOptionsQuery = vi.fn()
 const currentWeekQuery = vi.fn()
-let currentUser = { isSuperAdmin: false, primaryDepartmentId: 'department-study' }
+let currentUser: { id?: string; isSuperAdmin: boolean; primaryDepartmentId: string } = { isSuperAdmin: false, primaryDepartmentId: 'department-study' }
 vi.mock('../../features/attendance/hooks/useAttendanceRecords', () => ({ useAttendanceRecords: (...args: unknown[]) => recordsQuery(...args) }))
 vi.mock('../../features/attendance/hooks/useAttendancePermissions', () => ({
 	useAttendancePermissions: () => permissionsQuery(),
@@ -49,6 +52,7 @@ describe('AttendancePage', () => {
 		filterOptionsQuery.mockReset()
 		currentWeekQuery.mockReset()
 		currentUser = { isSuperAdmin: false, primaryDepartmentId: 'department-study' }
+		submittedSelection.selected = []
 		permissionsQuery.mockReturnValue({ data: { permissions: [permission('INSPECTION_VIEW'), permission('INSPECTION_ENTER')] }, isLoading: false })
 		currentWeekQuery.mockReturnValue({ data: { week: null }, isLoading: false })
 		filterOptionsQuery.mockReturnValue({ data: filterOptions, isLoading: false, isError: false })
@@ -213,5 +217,20 @@ describe('AttendancePage', () => {
 		fireEvent.click(document.querySelector('.ant-drawer-close') as HTMLElement)
 
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: '批量导入到课率' })).not.toBeInTheDocument())
+	})
+
+	it('passes the selected draft name snapshots to the submission cart', () => {
+		currentUser = { id: 'actor-1', isSuperAdmin: false, primaryDepartmentId: 'department-study' }
+		recordsQuery.mockReturnValue({ data: { items: [{ id: 'record-1', semesterId: 'semester-1', weekId: 'week-1', inspectionTypeId: 'type-attendance', departmentId: 'department-study', createdBy: 'actor-1', studentNo: 'S001', studentName: '测试同学', classId: 'class-1', className: '计科 2401', grade: '2026级', courseId: 'course-1', courseName: '软件工程', occurredAt: '2026-08-30T08:00:00Z', absenceHours: 2, period: '1-2', remark: '', source: 'MANUAL', status: 'DRAFT', rowVersion: 1 }], total: 1, page: 1, pageSize: 20 }, isLoading: false })
+		const { container } = render(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
+
+		const rowCheckbox = container.querySelector('.ant-table-tbody input[type="checkbox"]')
+		expect(rowCheckbox).not.toBeNull()
+		fireEvent.click(rowCheckbox as HTMLElement)
+
+		expect(submittedSelection.selected).toEqual([expect.objectContaining({
+			id: 'record-1', typeCode: 'ATTENDANCE_RATE', studentNumber: 'S001', studentName: '测试同学',
+			className: '计科 2401', grade: '2026级', source: 'MANUAL', details: { date: '2026-08-30' },
+		})])
 	})
 })

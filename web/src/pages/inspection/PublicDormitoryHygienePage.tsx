@@ -8,7 +8,7 @@ import type { PublicDormitoryHygieneRecord } from '../../entities/inspection/mod
 import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
@@ -57,6 +57,7 @@ export function PublicDormitoryHygienePage() {
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
   }),
+  createInspectionSortColumn<PublicDormitoryHygieneRecord>(),
   {title:'检查日期',key:'date',search:false,width:160,render:(_,record)=>record.details.date},
   {title:'检查结果',key:'result',search:false,width:100,render:(_,record)=>results[record.details.result]},
   {title:'责任班级',key:'responsibleClasses',search:false,width:220,render:(_,record)=>record.responsibleClasses.map(item=>item.label).join('、')},

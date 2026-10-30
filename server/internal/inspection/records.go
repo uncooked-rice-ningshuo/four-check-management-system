@@ -371,7 +371,7 @@ func (s *RecordService) List(ctx context.Context, actor ManualActor, f Inspectio
 		f.Sort = SortOccurredAtDescending
 	}
 	f.Keyword = strings.TrimSpace(f.Keyword)
-	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || len(f.Keyword) > 80 || (f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
+	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || len(f.Keyword) > 80 || (f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending && f.Sort != SortStudentNoAscending && f.Sort != SortStudentNoDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
 		return InspectionPage{}, ErrInspectionRequest
 	}
 	a, err := s.access(ctx, actor)

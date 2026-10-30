@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { ProTable, type ProFormInstance, type ProColumns } from '@ant-design/pro-components'
@@ -57,6 +57,7 @@ export function DormitoryHygienePage() {
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
   }),
+  createInspectionSortColumn<DormitoryHygieneRecord>(),
   {title:'寝室（当前名称）',dataIndex:'currentDormitoryName',search:false,width:230},
   {title:'检查日期',key:'date',search:false,width:160,render:(_,record)=>record.details.date},
   {title:'检查结果',key:'result',search:false,width:100,render:(_,record)=>results[record.details.result]},

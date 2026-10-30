@@ -10,7 +10,7 @@ import { attributionLabel } from '../../entities/inspection/model/inspectionScop
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
 import { useClassroomHygieneRecords, useInspectionContext } from '../../features/classroom-hygiene/model/queries'
 import { ClassroomHygieneCreatePanel } from '../../features/classroom-hygiene/ui/ClassroomHygieneCreatePanel'
@@ -57,6 +57,7 @@ export function ClassroomHygienePage() {
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
   }),
+  createInspectionSortColumn<ClassroomHygieneRecord>(),
   {title:'教室（当前名称）',dataIndex:'currentClassroomName',search:false,width:200},
   {title:'检查日期',key:'date',search:false,width:160,render:(_,record)=>record.details.date},
   {title:'检查结果',key:'result',search:false,width:100,render:(_,record)=>results[record.details.result]},

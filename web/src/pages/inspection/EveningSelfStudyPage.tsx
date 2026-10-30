@@ -9,7 +9,7 @@ import { attributionLabel } from '../../entities/inspection/model/inspectionScop
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { useEveningSelfStudyRecords, useInspectionContext } from '../../features/evening-self-study/model/queries'
 import { EveningSelfStudyCreatePanel } from '../../features/evening-self-study/ui/EveningSelfStudyCreatePanel'
 import { EveningSelfStudyDeleteDialog } from '../../features/evening-self-study/ui/EveningSelfStudyDeleteDialog'
@@ -60,6 +60,7 @@ export function EveningSelfStudyPage() {
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
   }),
+  createInspectionSortColumn<EveningSelfStudyRecord>(),
   { title: '学号', dataIndex: 'studentNumber', search: false, width: 140 },
   { title: '姓名', dataIndex: 'studentName', search: false, width: 120 },
   { title: '年级', dataIndex: 'grade', search: false, width: 90 },

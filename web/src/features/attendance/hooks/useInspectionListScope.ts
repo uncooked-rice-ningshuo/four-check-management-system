@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { InspectionQuery, InspectionOption } from '../../../shared/api/inspectionOptionsApi'
 import { useCurrentAcademicWeek } from './useAttendancePermissions'
 
-const filterKeys = ['departmentId', 'classId', 'grade', 'keyword', 'status', 'source'] as const
+const filterKeys = ['departmentId', 'classId', 'grade', 'keyword', 'status', 'source', 'sort'] as const
 
 /** Keep an explicit list choice in the URL; use the work week only when no choice exists. */
 export function useInspectionListScope(semesters?: InspectionOption[]) {
@@ -26,6 +26,7 @@ export function useInspectionListScope(semesters?: InspectionOption[]) {
       pageSize: Number.isInteger(pageSize) && pageSize > 0 ? pageSize : 20,
     }
     for (const key of filterKeys) filters[key] = search.get(key) ?? undefined
+    if (filters.sort === undefined) filters.sort = 'occurredAtDesc'
     return { weekId, filters, ready: !!semesterId && !!weekId, invalidSelection }
   }
   const update = (values: InspectionQuery) => {

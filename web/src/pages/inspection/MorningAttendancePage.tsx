@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { ProTable, type ProFormInstance, type ProColumns } from '@ant-design/pro-components'
@@ -56,6 +56,7 @@ export function MorningAttendancePage() {
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
   }),
+  createInspectionSortColumn<MorningAttendanceRecord>(),
   {title:'学号',dataIndex:'studentNumber',search:false,width:140},
   {title:'姓名',dataIndex:'studentName',search:false,width:120},
   {title:'年级',dataIndex:'grade',search:false,width:90},

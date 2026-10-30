@@ -62,6 +62,24 @@ export function createInspectionFilterColumns<T>({
 
 type InspectionRecordProvenance = { source: string; status: string; submitterName?: string }
 
+/** Shared sort control keeps the ordering choice identical on every inspection list. */
+export function createInspectionSortColumn<T>(): ProColumns<T> {
+  return {
+    title: '排序',
+    dataIndex: 'sort',
+    hideInTable: true,
+    order: 0,
+    valueType: 'select',
+    valueEnum: {
+      occurredAtDesc: { text: '检查时间从新到旧' },
+      occurredAtAsc: { text: '检查时间从旧到新' },
+      studentNoAsc: { text: '学号升序' },
+      studentNoDesc: { text: '学号降序' },
+    },
+    fieldProps: { placeholder: '检查时间从新到旧', allowClear: false },
+  }
+}
+
 /** Shared visible provenance fields make the submitting actor easy to find in every list. */
 export function createInspectionProvenanceColumns<T extends InspectionRecordProvenance>(): ProColumns<T>[] {
   return [

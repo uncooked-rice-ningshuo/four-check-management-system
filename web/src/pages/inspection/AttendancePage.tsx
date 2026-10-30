@@ -15,7 +15,7 @@ import { canMutateAttendance } from '../../features/attendance/hooks/canMutateAt
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
 import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { ApiError } from '../../shared/api/httpClient'
 
 type AttendanceSearchValues = {
@@ -27,6 +27,7 @@ type AttendanceSearchValues = {
 	keyword?: string
 	status?: AttendanceFilters['status']
 	source?: AttendanceFilters['source']
+	sort?: AttendanceFilters['sort']
 }
 
 const statusLabels: Record<NonNullable<AttendanceFilters['status']>, string> = {
@@ -94,7 +95,7 @@ export function AttendancePage() {
 		keyword: search.get('keyword') ?? '',
 		status: optionalStatus(search.get('status')),
 		source: optionalSource(search.get('source')),
-		sort: 'occurredAtDesc',
+		sort: optionalSort(search.get('sort')) ?? 'occurredAtDesc',
 		page,
 		pageSize,
 	}
@@ -111,7 +112,6 @@ export function AttendancePage() {
 	const replaceSearch = (values: AttendanceSearchValues, nextPage = 1, nextPageSize = pageSize) => {
 		setSelection([])
 		const next = new URLSearchParams(search)
-		next.delete('sort')
 		const entries: Record<keyof AttendanceSearchValues, string | undefined> = {
 			semesterId: values.semesterId,
 			weekId: values.weekId,
@@ -121,6 +121,7 @@ export function AttendancePage() {
 			keyword: values.keyword?.trim(),
 			status: values.status,
 			source: values.source,
+			sort: values.sort,
 		}
 		Object.entries(entries).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
 		next.set('page', String(nextPage))
@@ -136,7 +137,9 @@ export function AttendancePage() {
 		keyword: filters.keyword,
 		status: filters.status,
 		source: filters.source,
+		sort: filters.sort,
 	}
+
 	const columns = useMemo<ProColumns<AttendanceRecord>[]>(() => {
 		const semesterOptions = options?.semesters.map(item => ({ id: item.id, label: item.name })) ?? []
 		const currentFilterSemester = draftSemester === undefined ? semesterId : draftSemester
@@ -152,6 +155,7 @@ export function AttendancePage() {
 		})
 		const result: ProColumns<AttendanceRecord>[] = [
 			...filters,
+			createInspectionSortColumn<AttendanceRecord>(),
 			{ title: '学号', dataIndex: 'studentNo', width: 140, search: false, copyable: true },
 			{ title: '姓名', dataIndex: 'studentName', width: 110, search: false },
 			{ title: '年级', dataIndex: 'grade', width: 90, search: false, renderText: value => value ? gradeLabel(String(value)) : '—' },
@@ -239,4 +243,8 @@ function optionalStatus(value: string | null): AttendanceFilters['status'] {
 
 function optionalSource(value: string | null): AttendanceFilters['source'] {
 	return value && value in sourceLabels ? value as AttendanceFilters['source'] : undefined
+}
+
+function optionalSort(value: string | null): AttendanceFilters['sort'] {
+	return value && ['occurredAtDesc', 'occurredAtAsc', 'studentNoAsc', 'studentNoDesc'].includes(value) ? value as AttendanceFilters['sort'] : undefined
 }

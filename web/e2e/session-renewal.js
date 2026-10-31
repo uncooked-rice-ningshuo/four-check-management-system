@@ -37,7 +37,7 @@ async (page) => {
   })
   await page.clock.install()
   await page.goto(base + '/admin/academic')
-  await page.getByRole('region', { name: '当前工作上下文' }).waitFor()
+  await page.getByRole('group', { name: '当前工作上下文' }).waitFor()
   await page.getByRole('tab', { name: '周次', exact: true }).click()
   await page.getByRole('button', { name: '编辑', exact: true }).first().click()
   const dialog = page.getByRole('dialog', { name: '编辑周次', exact: true })
@@ -87,7 +87,7 @@ async (page) => {
   await dialog.getByRole('button', { name: /取\s*消/ }).click()
   await page.getByRole('button', { name: '重试', exact: true }).click()
   await recovered
-  await page.getByRole('region', { name: '当前工作上下文' }).waitFor()
+  await page.getByRole('group', { name: '当前工作上下文' }).waitFor()
   cases.push('续期500保留页面和表单；故障解除后工作周重试成功，不要求重新登录')
 
   await page.context().clearCookies({ name: 'refresh_token' })
@@ -102,7 +102,7 @@ async (page) => {
   expireRequests = false
   await page.getByRole('button', { name: /^登\s*录$/ }).click()
   await page.getByRole('heading', { name: '学期与周次', exact: true }).waitFor()
-  await page.getByRole('region', { name: '当前工作上下文' }).waitFor()
+  await page.getByRole('group', { name: '当前工作上下文' }).waitFor()
   cases.push('Refresh Cookie失效时真实401转登录并明确提示；重新登录返回原业务页')
   check(errors.length === 0, 'Unexpected browser runtime error')
   await page.unrouteAll({ behavior: 'wait' })

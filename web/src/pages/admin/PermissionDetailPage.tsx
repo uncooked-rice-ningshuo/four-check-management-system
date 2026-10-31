@@ -10,7 +10,7 @@ const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
   ['CONFIGURATION_VIEW', '系统配置查看'],
   ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
-  ['REPORT_VIEW', '查看通报汇总'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '历史归档查看'],
+  ['REPORT_VIEW', '通报工作台查看'], ['REPORT_GENERATE', '生成通报草稿'], ['REPORT_CORRECT', '通报内修正'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '通报归档查看'],
 ].map(([value, label]) => ({ value, label }))
 const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value
 
@@ -56,9 +56,9 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
       <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ? { ...editing, scope: permissionRuleScope(editing.scope) } : { effect: 'ALLOW', scope: {}, note: '' }} onFinish={values => save.mutate(values)} preserve={false}>
         <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => {
-          if (getFieldValue('action') === 'REPORT_VIEW') return <Typography.Paragraph type="secondary">用户规则可按学年、学期、周次和检查类型收窄通报查看范围；不再设置部门、班级或年级范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_FORCE_GENERATE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；一般通报权限不会自动包含此权限。此操作作用于整份周通报，只能按学年、学期、周次和检查类型收窄范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_OBLIGATION_MANAGE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；此权限允许维护各周应交部门和检查类型，与日常录入范围分开管理，可按学年、学期、周次和检查类型收窄。</Typography.Paragraph>
+          if (getFieldValue('action')?.startsWith('REPORT_')) return <Typography.Paragraph type="secondary">通报动作规则可按学年、学期、周次和检查类型收窄范围；不再设置部门、班级或年级范围。</Typography.Paragraph>
           return null
         }}</Form.Item>
         <Form.Item name="effect" label="规则效果" rules={[{ required: true }]}><Select options={[{ value: 'ALLOW', label: '允许（补充授权）' }, { value: 'DENY', label: '拒绝（单独限制）' }]} /></Form.Item>

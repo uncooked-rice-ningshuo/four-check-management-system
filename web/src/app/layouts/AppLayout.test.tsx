@@ -42,6 +42,25 @@ describe('AppLayout', () => {
     expect(screen.queryByText('管理概览')).not.toBeInTheDocument()
   })
 
+  it('uses the designed sidebar logo and mascot account avatar, with a compact mark when collapsed', () => {
+    renderLayout()
+
+    const brand = screen.getByRole('img', { name: '日常管理系统图标' })
+    expect(brand).toHaveAttribute('src', '/logo.png')
+    expect(screen.getByText('学生日常管理系统')).toBeVisible()
+    expect(screen.getByText('湖南科技大学 · 计算机科学与工程学院')).toBeVisible()
+    expect(screen.getByRole('complementary', { name: '主导航' }).querySelector('.ant-menu')).toHaveClass('ant-menu-light')
+    expect(document.querySelector('.account-mascot-avatar img'))
+      .toHaveAttribute('src', '/assets/characters/account-avatar.png')
+
+    fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
+
+    expect(screen.getByRole('img', { name: '日常管理系统图标' })).toBe(brand)
+    fireEvent.click(screen.getByRole('button', { name: '展开侧边栏' }))
+    expect(screen.getByRole('img', { name: '日常管理系统图标' })).toBe(brand)
+    expect(screen.getByRole('button', { name: '收起侧边栏' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it('shows the assigned department and position instead of the system member role', () => {
     currentUser = { ...currentUser, primaryDepartmentName: '学习部', organizationRoleName: '委员' }
     renderLayout()

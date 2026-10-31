@@ -101,7 +101,6 @@ export function AttendancePage() {
   const canReview = Boolean(user?.isSuperAdmin || (attendanceTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', attendanceTypeId)))
   const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId)))
 	const error = records.error instanceof ApiError ? records.error : undefined
-	const responsibleDepartmentNames = (options?.responsibleDepartments ?? []).map(item => item.name).join('、')
 	const departmentCount = options?.departments.length ?? 0
 	const showDepartmentFilter = departmentCount > 1 || (departmentCount === 1 && !departmentId)
 
@@ -175,7 +174,7 @@ export function AttendancePage() {
 		<div className="attendance-page-heading">
 			<div>
 				<Typography.Title id="attendance-title" level={2}>到课率检查</Typography.Title>
-				{responsibleDepartmentNames && <Typography.Text type="secondary">负责部门：{responsibleDepartmentNames}</Typography.Text>}
+				<Typography.Text type="secondary">按授权范围查询到课率记录；新增时单独选择录入目标。</Typography.Text>
 			</div>
 		</div>
 		{(permissions.isError || currentWeek.isError) && <Alert role="alert" type="error" showIcon title="无法加载权限或当前周次，请稍后重试" />}
@@ -196,7 +195,7 @@ export function AttendancePage() {
 			onSubmit={values => replaceSearch({ ...searchValues, ...values })}
 			onReset={() => replaceSearch({ semesterId, weekId, sort: 'occurredAtDesc' })}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
-			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
+			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
 			scroll={{ x: 1320 }}
 			locale={{ emptyText: <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}

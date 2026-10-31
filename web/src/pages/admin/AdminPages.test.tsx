@@ -64,7 +64,7 @@ describe('超级管理员页面', () => {
     expect(screen.getByText('注册申请')).toBeInTheDocument()
     expect(screen.getByText('基础数据')).toBeInTheDocument()
     expect(screen.getByText('到课率检查')).toBeInTheDocument()
-    expect(screen.getByText('超级管理员工作台')).toBeInTheDocument()
+    expect(screen.queryByText('超级管理员工作台')).not.toBeInTheDocument()
   })
 
   it('不向缺少检查查看权限的系统管理员展示到课率入口', () => {

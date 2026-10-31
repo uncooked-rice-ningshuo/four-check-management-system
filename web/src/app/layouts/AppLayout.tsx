@@ -24,7 +24,7 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Alert, Avatar, Button, Dropdown, Layout, Menu, Space, Tag, Typography, type MenuProps } from 'antd'
+import { Alert, Avatar, Button, Dropdown, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
@@ -87,9 +87,14 @@ export function AppLayout() {
     ...(canViewType(lateReturnContext.data?.inspectionTypeId) ? [{ key: '/inspections/late-return', icon: <MoonOutlined />, label: <Link to="/inspections/late-return">晚归</Link> }] : []),
     ...(canViewType(publicHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/public-dormitory-hygiene', icon: <EnvironmentOutlined />, label: <Link to="/inspections/public-dormitory-hygiene">公共宿舍卫生</Link> }] : []),
   ]
-  const reportItems = user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'REPORT_VIEW')
-    ? [{ key: '/reports/weekly-summary', icon: <FileTextOutlined />, label: <Link to="/reports/weekly-summary">数据汇总与统计</Link> }]
-    : []
+  const reportItems = [
+    ...(user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'REPORT_VIEW') ? [
+      { key: '/reports/workbench', icon: <FileTextOutlined />, label: <Link to="/reports/workbench">通报工作台</Link> },
+    ] : []),
+    ...(user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'ARCHIVE_VIEW') ? [
+      { key: '/reports/archive', icon: <FileTextOutlined />, label: <Link to="/reports/archive">通报归档</Link> },
+    ] : []),
+  ]
   const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems]
   const menuItems: NonNullable<MenuProps['items']> = [workbenchItem]
   if (basicItems.length === 1) menuItems.push(basicItems[0])
@@ -140,6 +145,7 @@ export function AppLayout() {
     <Layout.Sider
       width={256}
       id="admin-navigation"
+      aria-label="主导航"
       className="admin-sider"
       breakpoint="lg"
       collapsed={collapsed}
@@ -149,15 +155,14 @@ export function AppLayout() {
       }}
     >
       <div className="admin-brand">
-        <span className="admin-brand-mark">计</span>
-        <div className="admin-brand-copy">
-          <small>计算机学院</small>
-          <strong>日常管理系统</strong>
+        <img className="admin-brand-image" src="/logo.png" alt="日常管理系统图标" />
+        <div className="admin-brand-text" aria-hidden={collapsed}>
+          <strong>学生日常管理系统</strong>
+          <span>湖南科技大学 · 计算机科学与工程学院</span>
         </div>
       </div>
-      <Menu mode="inline" theme="dark" inlineIndent={14} selectedKeys={selectedKey ? [selectedKey] : []} openKeys={openKeys} onOpenChange={keys => setOpenMenuState({ signature: menuSignature, keys: keys.filter(key => !openKeys.includes(key)).slice(-1) })} onClick={({ key }) => { if (key === '/') setOpenMenuState({ signature: menuSignature, keys: [] }) }} items={menuItems} />
+      <Menu mode="inline" theme="light" inlineIndent={14} selectedKeys={selectedKey ? [selectedKey] : []} openKeys={openKeys} onOpenChange={keys => setOpenMenuState({ signature: menuSignature, keys: keys.filter(key => !openKeys.includes(key)).slice(-1) })} onClick={({ key }) => { if (key === '/') setOpenMenuState({ signature: menuSignature, keys: [] }) }} items={menuItems} />
       <div className="admin-sider-footer">
-        <div className="admin-sider-role">{user?.isSuperAdmin ? '超级管理员工作台' : user?.systemRole === 'ADMIN' ? '系统管理员工作台' : '日常检查业务'}</div>
         <Button
           type="text"
           className="sider-toggle"
@@ -171,10 +176,9 @@ export function AppLayout() {
     </Layout.Sider>
     <Layout>
       <Layout.Header className="admin-header">
-        <div className="admin-header-title"><Typography.Text className="admin-header-eyebrow">计算机学院</Typography.Text><Typography.Text strong>日常管理与基础平台</Typography.Text></div>
-        <Dropdown menu={{ items: accountItems, onClick: onAccountAction }} placement="bottomRight"><Button type="text" className="account-trigger" aria-label={`${user?.name ?? '当前用户'}账户菜单`}><Space><Avatar size={34} icon={<UserOutlined />} /><span className="account-copy"><strong>{user?.name}</strong><small>{accountRoleLabel}</small></span><Tag color="blue">在线</Tag><DownOutlined /></Space></Button></Dropdown>
+        <WorkContextBar canManage={user?.isSuperAdmin === true} />
+        <Dropdown menu={{ items: accountItems, onClick: onAccountAction }} placement="bottomRight"><Button type="text" className="account-trigger" aria-label={`${user?.name ?? '当前用户'}账户菜单`}><Space><Avatar className="account-mascot-avatar" size={34} src="/assets/characters/account-avatar.png" alt="" icon={<UserOutlined />} /><span className="account-copy"><strong>{user?.name}</strong><small>{accountRoleLabel}</small></span><Tag color="blue">在线</Tag><DownOutlined /></Space></Button></Dropdown>
       </Layout.Header>
-      <WorkContextBar canManage={user?.isSuperAdmin === true} />
       <Layout.Content id="main-content" className="admin-content">{logoutFailed && <Alert role="alert" type="error" showIcon title="暂时无法确认退出，请重试。" action={<Button loading={signingOut} disabled={signingOut} onClick={() => void onAccountAction({key:'logout'})}>重试退出</Button>} />}<Outlet /></Layout.Content>
     </Layout>
   </Layout>

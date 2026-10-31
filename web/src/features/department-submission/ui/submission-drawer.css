@@ -1,0 +1,36 @@
+/* A quiet task surface: the sheet, form and tables share one neutral hierarchy. */
+.submission-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+.submission-drawer .ant-drawer-content { background: #fff; }
+.submission-drawer .ant-drawer-header { padding: 20px 28px; border-bottom: 1px solid #e8eaed; }
+.submission-drawer .ant-drawer-title { color: #1d2939; font-size: 17px; font-weight: 650; }
+.submission-drawer .ant-drawer-body { display: flex; flex-direction: column; padding: 0 28px 28px; color: #263445; }
+.submission-steps { margin: 0 0 36px; padding: 24px 0 0; }
+.submission-stage { display: flex; flex: 1; flex-direction: column; padding: 0 0 20px; }
+.submission-stage-heading { margin-bottom: 24px; }
+.submission-stage-heading h3 { margin: 0 0 6px; color: #1d2939; font-size: 18px; font-weight: 650; }
+.submission-stage-heading p { margin: 0; color: #667085; font-size: 13px; line-height: 1.6; }
+.submission-scope-grid { display: grid; width: min(100%, 560px); grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.submission-scope-grid label { display: grid; gap: 8px; color: #344054; font-size: 13px; font-weight: 600; }
+.submission-scope-grid .ant-select { width: 100%; min-height: 40px; font-weight: 400; }
+.submission-scope-summary { margin-bottom: 26px; padding: 12px 14px; border: 1px solid #e4e7ec; border-radius: 6px; background: #f9fafb; color: #667085; font-size: 13px; }
+.submission-scope-summary strong { margin-left: 10px; color: #344054; font-weight: 550; }
+.submission-tabs { display: inline-flex; align-self: flex-start; gap: 2px; margin-bottom: 20px; padding: 3px; border-radius: 6px; background: #f2f4f7; }
+.submission-tabs button { padding: 7px 14px; border: 0; border-radius: 4px; background: transparent; color: #526071; cursor: pointer; font-size: 13px; }
+.submission-tabs button.active { background: #fff; color: #1d2939; font-weight: 600; box-shadow: 0 1px 3px #1018281a; }
+.submission-tabs button:focus-visible { outline: 2px solid #2563a5; outline-offset: 2px; }
+.submission-drawer .ant-table-wrapper { border: 1px solid #e4e7ec; border-radius: 6px; overflow: hidden; }
+.submission-drawer .ant-table-wrapper .ant-table-thead > tr > th { background: #f9fafb; color: #667085; font-size: 12px; font-weight: 600; }
+.submission-drawer .ant-table-wrapper .ant-table-thead > tr > th::before { display: none; }
+.submission-drawer .ant-table-wrapper .ant-table-tbody > tr > td { border-bottom-color: #f0f2f4; }
+.submission-drawer .ant-table-wrapper .ant-pagination { padding: 0 12px; }
+.submission-drawer .ant-select-selector, .submission-drawer .ant-input-affix-wrapper, .submission-drawer .ant-btn { border-radius: 6px; }
+.submission-footer { position: sticky; bottom: -28px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: auto -28px -28px; padding: 16px 28px; border-top: 1px solid #e8eaed; background: #fff; color: #667085; font-size: 13px; }
+.submission-footer strong { color: #1d2939; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .submission-drawer .ant-drawer-header { padding: 17px 20px; }
+  .submission-drawer .ant-drawer-body { padding: 0 20px 20px; }
+  .submission-steps { margin: 0 0 30px; padding: 22px 0 0; }
+  .submission-steps .ant-steps-item-title { font-size: 12px; }
+  .submission-scope-grid { grid-template-columns: 1fr; }
+  .submission-footer { bottom: -20px; flex-wrap: wrap; margin: auto -20px -20px; padding: 14px 20px; }
+}

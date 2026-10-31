@@ -14,7 +14,89 @@ async (page) => {
     cases.push(`${heading}真实页面/API 加载`)
   }
   await page.goto(base + '/admin/users')
+  await page.setViewportSize({ width: 1200, height: 360 })
+  await page.getByRole('heading', { name: '用户与角色', exact: true }).waitFor()
+  const beforeScroll = await page.evaluate(() => ({ header: document.querySelector('.admin-header').getBoundingClientRect().top, sidebar: document.querySelector('#admin-navigation').getBoundingClientRect().top }))
+  await page.locator('.admin-content').hover()
+  await page.mouse.wheel(0, 600)
+  await page.waitForFunction(() => document.querySelector('.admin-content').scrollTop > 0)
+  const scrollState = await page.evaluate(before => {
+    const content = document.querySelector('.admin-content')
+    const header = document.querySelector('.admin-header')
+    const sidebar = document.querySelector('#admin-navigation')
+    return { before, after: { header: header.getBoundingClientRect().top, sidebar: sidebar.getBoundingClientRect().top }, contentScroll: content.scrollTop, windowScroll: window.scrollY }
+  }, beforeScroll)
+  if (scrollState.contentScroll <= 0 || scrollState.windowScroll !== 0 || scrollState.before.header !== scrollState.after.header || scrollState.before.sidebar !== scrollState.after.sidebar) throw new Error('Header/sidebar or content scrolling is incorrect: ' + JSON.stringify(scrollState))
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.locator('.admin-content').evaluate(content => { content.scrollTop = 0 })
   const navigation = page.locator('#admin-navigation')
+  const brandImage = navigation.locator('.admin-brand-image')
+  if (await brandImage.getAttribute('src') !== '/logo.png' || !(await brandImage.evaluate(image => image.complete && image.naturalWidth > 0))) throw new Error('Sidebar brand logo did not load')
+  if (!(await navigation.getByText('学生日常管理系统').isVisible())) throw new Error('Expanded sidebar brand title is missing')
+  const brandTextFits = await navigation.locator('.admin-brand-text').evaluate(element => {
+    const container = element.closest('.admin-brand').getBoundingClientRect()
+    return [...element.children].every(child => {
+      const bounds = child.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(child)
+      const text = range.getBoundingClientRect()
+      return text.right <= container.right && bounds.top >= container.top && bounds.bottom <= container.bottom
+    })
+  })
+  if (!brandTextFits) throw new Error('Sidebar brand text is clipped')
+  const brandHeight = await navigation.locator('.admin-brand').evaluate(element => element.getBoundingClientRect().height)
+  const headerHeight = await page.locator('.admin-header').evaluate(element => element.getBoundingClientRect().height)
+  if (Math.abs(brandHeight - headerHeight) > 1) throw new Error('Sidebar brand and header heights do not match')
+  const toggle = page.getByRole('button', { name: '收起侧边栏' })
+  const togglePosition = await toggle.evaluate(button => {
+    const sidebar = button.closest('#admin-navigation').getBoundingClientRect()
+    const bounds = button.getBoundingClientRect()
+    return { centerOffset: Math.abs((sidebar.left + sidebar.right - bounds.left - bounds.right) / 2), rightGap: sidebar.right - bounds.right }
+  })
+  if (togglePosition.centerOffset < 40 || togglePosition.rightGap > 30) throw new Error('Expanded sidebar toggle is not right aligned')
+  if (await navigation.locator('.admin-sider-role').count()) throw new Error('Unexpected role text in sidebar footer')
+  const selectedBackground = await navigation.locator('.ant-menu-item-selected').first().evaluate(item => getComputedStyle(item).backgroundColor)
+  const workbench = navigation.getByRole('menuitem', { name: '工作台' })
+  const watchHoverColors = async (selector, textSelector) => page.evaluate(({ selector, textSelector }) => {
+    const item = document.querySelector(selector)
+    const icon = item.querySelector('.ant-menu-item-icon')
+    const label = item.querySelector(textSelector)
+    const start = performance.now()
+    window.__sidebarHoverFrames = []
+    const sample = now => {
+      window.__sidebarHoverFrames.push({ icon: getComputedStyle(icon).color, text: getComputedStyle(label).color })
+      if (now - start < 450) requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  }, { selector, textSelector })
+  const assertHoverColors = async () => {
+    await page.waitForFunction(() => window.__sidebarHoverFrames.length > 2)
+    await page.waitForTimeout(450)
+    const frames = await page.evaluate(() => window.__sidebarHoverFrames)
+    const colorChannels = color => color.match(/\d+/g).slice(0, 3).map(Number)
+    if (new Set(frames.map(frame => frame.icon)).size < 2 || frames.some(frame => colorChannels(frame.icon).some((channel, index) => Math.abs(channel - colorChannels(frame.text)[index]) > 8))) throw new Error('Sidebar icon and text colors change out of sync: ' + JSON.stringify(frames))
+  }
+  await page.mouse.move(1100, 700)
+  await page.waitForTimeout(400)
+  await watchHoverColors('#admin-navigation .ant-menu-root > .ant-menu-item', 'a')
+  await workbench.hover()
+  await assertHoverColors()
+  await watchHoverColors('#admin-navigation .ant-menu-root > .ant-menu-item', 'a')
+  await page.mouse.move(1100, 700)
+  await assertHoverColors()
+  const group = navigation.getByText('系统配置', { exact: true })
+  await watchHoverColors('#admin-navigation .ant-menu-submenu:nth-child(3) > .ant-menu-submenu-title', '.ant-menu-title-content')
+  await group.hover()
+  await assertHoverColors()
+  await watchHoverColors('#admin-navigation .ant-menu-submenu:nth-child(3) > .ant-menu-submenu-title', '.ant-menu-title-content')
+  await page.mouse.move(1100, 700)
+  await assertHoverColors()
+  const topLevelWeights = await navigation.locator('.ant-menu-root > .ant-menu-item, .ant-menu-root > .ant-menu-submenu > .ant-menu-submenu-title').evaluateAll(items => items.map(item => getComputedStyle(item).fontWeight))
+  if (new Set(topLevelWeights).size !== 1) throw new Error('Top-level navigation font weights differ: ' + topLevelWeights.join(', '))
+  await workbench.hover()
+  await page.waitForFunction(expected => getComputedStyle(document.querySelector('#admin-navigation .ant-menu-item:hover')).backgroundColor === expected, selectedBackground)
+  const hoverBackground = await workbench.evaluate(item => getComputedStyle(item).backgroundColor)
+  if (selectedBackground !== hoverBackground) throw new Error('Selected and hovered sidebar items use different backgrounds')
   for (const group of ['基础功能','系统配置','日常检查']) await navigation.getByText(group,{exact:true}).waitFor()
   for (const group of ['基础功能','系统配置','日常检查']) {
     const parent = navigation.getByText(group,{exact:true}).locator('xpath=ancestor::li[contains(@class,"ant-menu-submenu")]')
@@ -35,9 +117,45 @@ async (page) => {
   }
   const scrollbarWidth = await navigation.locator('.ant-menu-root').evaluate(menu => getComputedStyle(menu).scrollbarWidth)
   if (scrollbarWidth !== 'none') throw new Error('Sidebar scrollbar remains visible during expansion')
+  const watchBrand = async () => page.evaluate(() => {
+    const images = [...document.querySelectorAll('.admin-brand img')]
+    const sidebar = document.querySelector('#admin-navigation')
+    const started = performance.now()
+    window.__brandFrames = []
+    const record = now => {
+      const current = [...document.querySelectorAll('.admin-brand img')]
+      window.__brandFrames.push(images.map((image, index) => {
+        const bounds = image.getBoundingClientRect()
+        return { width: bounds.width, x: bounds.left - sidebar.getBoundingClientRect().left, sameNode: image === current[index] }
+      }))
+      if (now - started < 500) requestAnimationFrame(record)
+    }
+    requestAnimationFrame(record)
+  })
+  const assertBrandStable = async () => {
+    const frames = await page.evaluate(() => window.__brandFrames)
+    if (frames.length < 2 || frames.some(frame => frame.some((image, index) => !image.sameNode || Math.abs(image.width - frames[0][index].width) > 1 || Math.abs(image.x - frames[0][index].x) > 1))) throw new Error('Sidebar logo moves or scales during transition: ' + JSON.stringify(frames))
+  }
   await page.screenshot({path:`${output}/sidebar-expanded.png`})
+  await watchBrand()
   await page.getByRole('button',{name:'收起侧边栏'}).click()
   await page.waitForFunction(() => Math.abs(document.querySelector('#admin-navigation').getBoundingClientRect().width - 80) < 1)
+  await assertBrandStable()
+  const compactBrand = navigation.locator('.admin-brand-image')
+  if (await compactBrand.getAttribute('src') !== '/logo.png' || !(await compactBrand.evaluate(image => image.complete && image.naturalWidth > 0))) throw new Error('Collapsed sidebar logo did not load')
+  const compactGeometry = await compactBrand.evaluate(image => {
+    const imageBox = image.getBoundingClientRect()
+    const container = image.parentElement.getBoundingClientRect()
+    return { fullyVisible: imageBox.left >= container.left && imageBox.right <= container.right && imageBox.top >= container.top && imageBox.bottom <= container.bottom }
+  })
+  if (!compactGeometry.fullyVisible) throw new Error('Collapsed sidebar logo is clipped')
+  if (Math.abs(await navigation.locator('.admin-brand').evaluate(element => element.getBoundingClientRect().height) - headerHeight) > 1) throw new Error('Collapsed sidebar brand and header heights do not match')
+  const collapsedToggleOffset = await page.getByRole('button', { name: '展开侧边栏' }).evaluate(button => {
+    const sidebar = button.closest('#admin-navigation').getBoundingClientRect()
+    const bounds = button.getBoundingClientRect()
+    return Math.abs((sidebar.left + sidebar.right - bounds.left - bounds.right) / 2)
+  })
+  if (collapsedToggleOffset > 2) throw new Error('Collapsed sidebar toggle is not centered')
   const collapsedIconOffsets = await navigation.locator('.ant-menu-root > .ant-menu-item, .ant-menu-root > .ant-menu-submenu > .ant-menu-submenu-title').evaluateAll(items => items.map(item => {
     const icon = item.querySelector('.ant-menu-item-icon')
     if (!icon) return null
@@ -47,8 +165,10 @@ async (page) => {
   }).filter(Boolean))
   if (collapsedIconOffsets.some(item => item.x > 2 || item.y > 2)) throw new Error('Collapsed sidebar icons are off-center: ' + JSON.stringify(collapsedIconOffsets))
   await page.screenshot({path:`${output}/sidebar-collapsed.png`})
+  await watchBrand()
   await page.getByRole('button',{name:'展开侧边栏'}).click()
   await page.waitForFunction(() => Math.abs(document.querySelector('#admin-navigation').getBoundingClientRect().width - 256) < 1)
+  await assertBrandStable()
   const closedInspection = navigation.locator('.ant-menu-submenu:not(.ant-menu-submenu-open) > .ant-menu-submenu-title').filter({hasText:'日常检查'})
   if (await closedInspection.count()) await closedInspection.click()
   if (await navigation.getByRole('link',{name:'无机课堂检查'}).count() !== 1) throw new Error('Expanded sidebar lost inspection navigation')
@@ -61,6 +181,14 @@ async (page) => {
   await page.getByRole('heading',{name:'工作台',exact:true}).waitFor()
   if (await navigation.locator('.ant-menu-submenu-open').count()) throw new Error('Workbench did not collapse the selected child menu on return')
   cases.push('工作台独立入口、一级菜单互斥展开、展开时滚动条隐藏及文字完整显示')
+  if (fixture.sidebarOnly) {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.waitForFunction(() => Math.abs(document.querySelector('#admin-navigation').getBoundingClientRect().width - 80) < 1)
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Narrow viewport has horizontal overflow')
+    await page.screenshot({path:`${output}/sidebar-narrow.png`})
+    if (errors.length || failures.length) throw new Error(JSON.stringify({errors,failures}))
+    return { cases: [...cases, '侧边栏配色、按钮位置及 390px 收起布局', '管理内容独立滚动且顶部与侧边栏固定'], browserErrors: errors }
+  }
   await page.goto(base + '/admin/master-data')
   for (const name of ['年级','院系','专业','班级','教职工/班主任','学生','宿舍','宿舍区','宿舍楼','教学楼','教室','课程']) {
     await page.getByRole('menuitem', { name, exact:true }).click()
@@ -110,7 +238,7 @@ async (page) => {
   await page.getByRole('cell',{name:'E2E faculty edited',exact:true}).waitFor()
   cases.push('基础数据院系真实新建、首次编辑回显及保存')
   await page.goto(base + '/')
-  await page.getByRole('region', { name:'当前工作上下文' }).waitFor()
+  await page.getByRole('group', { name:'当前工作上下文' }).waitFor()
   await page.getByRole('button', { name:'设置临时工作周' }).click()
   await page.getByRole('combobox', { name:'目标周次' }).click()
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:'第 2 周'}).first().click()
@@ -118,13 +246,13 @@ async (page) => {
   await page.getByLabel('到期时间（北京时间）').press('Enter')
   await page.getByRole('textbox', { name:'覆盖原因' }).fill('E2E override')
   await page.getByRole('button', { name:'确认全局覆盖' }).click()
-  await page.getByText(/当前工作周：第 2 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 2 周' }).waitFor()
   await page.reload()
-  await page.getByText(/当前工作周：第 2 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 2 周' }).waitFor()
   await page.getByRole('button', { name:'设置临时工作周' }).click()
   await page.getByRole('textbox', { name:'覆盖原因' }).fill('E2E restore')
   await page.getByRole('button', { name:'恢复校历', exact:true }).click()
-  await page.getByText(/当前工作周：第 3 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 3 周' }).waitFor()
   cases.push('工作台真实加载、临时工作周设置/重载/恢复校历')
   await page.setViewportSize({ width:390,height:844 })
   await page.goto(base + '/inspections/attendance')

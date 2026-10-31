@@ -25,17 +25,17 @@ async (page) => {
     await page.getByRole('button', { name: /登\s*录/ }).click()
     const response = await responsePromise
     check(response.status() === 200, `Synthetic account login failed for ${loginName}: ${response.status()}`)
-    await page.getByRole('region', { name: '当前工作上下文' }).waitFor()
+    await page.getByRole('group', { name: '当前工作上下文' }).waitFor()
     return (await response.json()).accessToken
   }
   const openReportFromNavigation = async () => {
     await page.getByRole('menuitem', { name: /通报管理/ }).click()
-    const reportLink = page.getByRole('link', { name: '数据汇总与统计', exact: true })
+    const reportLink = page.getByRole('link', { name: '通报工作台', exact: true })
     await reportLink.waitFor()
     await reportLink.click()
-    await page.getByRole('heading', { name: '数据汇总与统计', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
   }
-  const reportPath = `${base}/reports/weekly-summary`
+  const reportPath = `${base}/reports/workbench`
 
   await page.goto(`${base}/admin/users`)
   await page.getByRole('heading', { name: '用户与角色', exact: true }).waitFor()
@@ -69,13 +69,11 @@ async (page) => {
     }
     throw new Error(`Could not select ${optionName} from ${label}`)
   }
-  await chooseOption('权限动作', '查看通报汇总')
+  await chooseOption('权限动作', '通报工作台查看')
   await chooseOption('学年', '2026-2027 学年')
   await chooseOption('学期', '浏览器回归学期')
   await chooseOption('周次', '第 1 周')
   await chooseOption('检查类型', '到课率')
-  await page.getByText('高级数据范围（部门、班级、年级）', { exact: true }).click()
-  await chooseOption('部门范围', '学习部')
   await page.getByRole('textbox', { name: '授权说明' }).fill('隔离浏览器验收：配置本周到课率通报范围')
 
   const createdPermissionRuleResponse = page.waitForResponse(response => {
@@ -88,10 +86,10 @@ async (page) => {
   const createdPermission = await createdPermissionRule.json()
   check(createdPermission.action === 'REPORT_VIEW' && createdPermission.scope.weekId === 'b0000000-0000-0000-0000-000000000003' &&
     createdPermission.scope.inspectionTypeId === '30000000-0000-0000-0000-000000000001' &&
-    createdPermission.scope.departmentId === '10000000-0000-0000-0000-000000000002',
+    !createdPermission.scope.departmentId && !createdPermission.scope.classId && !createdPermission.scope.grade,
   `Permission UI saved an unexpected report scope: ${JSON.stringify(createdPermission.scope)}`)
-  await page.getByText(/部门：学习部；检查类型：到课率/).waitFor()
-  cases.push('系统管理员通过用户权限详情页面新增 REPORT_VIEW，并保存学年、学期、周次、类型和部门范围')
+  await page.getByText(/检查类型：到课率/).waitFor()
+  cases.push('系统管理员通过用户权限详情页面新增 REPORT_VIEW，并保存学年、学期、周次和检查类型范围')
   await page.getByText('权限规则已保存', { exact: true }).waitFor({ state: 'hidden' })
 
   await page.getByRole('button', { name: '新增权限规则', exact: true }).click()
@@ -153,7 +151,9 @@ async (page) => {
     })
     check(periodResponse.status() === 200, `${loginName} should read report periods`)
     await openReportFromNavigation()
-    await page.getByText(/第 1 周 ·/).first().waitFor()
+    await page.locator('.weekly-report-period-select').getByText(/第 1 周/).waitFor()
+    await page.getByRole('button', { name: /确认来源数据/ }).click()
+    await page.getByRole('heading', { name: '部门与校级批次汇总', exact: true }).waitFor()
     const departmentRow = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
     await departmentRow.waitFor()
     const departmentCells = await departmentRow.getByRole('cell').allInnerTexts()
@@ -173,18 +173,37 @@ async (page) => {
   const scopedPeriodPage = await scopedPeriods.json()
   check(scopedPeriods.status() === 200 && scopedPeriodPage.items.length === 1, 'Scoped report admin should see only the granted week')
   await openReportFromNavigation()
-  await page.getByText(/第 1 周 ·/).first().waitFor()
+  await page.locator('.weekly-report-period-select').getByText(/第 1 周/).waitFor()
+  await page.getByText('当前账号无权查看完整通报版本', { exact: true }).waitFor()
+  await page.getByRole('button', { name: /确认来源数据/ }).click()
+  await page.getByRole('heading', { name: '部门与校级批次汇总', exact: true }).waitFor()
   const scopedRows = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
   await scopedRows.waitFor()
   const scopedCells = await scopedRows.getByRole('cell').allInnerTexts()
   check(scopedCells[2] === '2' && scopedCells[6] === '2' && scopedCells[7] === '3', `Scoped report admin saw an unexpected department summary: ${scopedCells.join('|')}`)
-  check(await page.getByRole('row').filter({ hasText: '校级独立批次' }).count() === 0, 'Scoped report admin saw a college-level batch outside the department grant')
+  const scopedCollegeRow = page.locator('tr[data-row-key="college:type:30000000-0000-0000-0000-000000000001"]')
+  const scopedCollegeCells = await scopedCollegeRow.getByRole('cell').allInnerTexts()
+  check(scopedCollegeCells[2] === '1' && scopedCollegeCells[6] === '1' && scopedCollegeCells[7] === '2',
+    `Inspection-type permission should apply across department boundaries, including the college cell: ${scopedCollegeCells.join('|')}`)
+  check(await page.getByRole('link', { name: '通报归档', exact: true }).count() === 0,
+    'REPORT_VIEW alone must not expose the ARCHIVE_VIEW navigation item')
+  const archiveRequest = await page.request.get(`${base}/api/v1/reports/archive?page=1&pageSize=20`, {
+    headers: { Authorization: `Bearer ${scopedToken}` },
+  })
+  check(archiveRequest.status() === 403 && (await archiveRequest.json()).code === 'FORBIDDEN_SCOPE',
+    `REPORT_VIEW alone must not authorize archive reads: ${archiveRequest.status()}`)
+  const reportRequestCountBeforeArchiveRoute = reportRequests.length
+  await page.goto(`${base}/reports/archive`)
+  await page.getByText('403', { exact: true }).waitFor()
+  await page.getByText('无权访问该业务', { exact: true }).waitFor()
+  check(reportRequests.length === reportRequestCountBeforeArchiveRoute,
+    'The archive route requested report data before checking ARCHIVE_VIEW')
   await logout()
-  cases.push('指定通报管理员页面仅展示其授权周次、类型与部门范围')
+  cases.push('用户 REPORT_VIEW 只授权指定周次和类型且按类型跨部门生效；不能通过侧栏、直达路由或 API 读取归档')
 
   const ordinaryToken = await login(fixture.reportingRoleUsers.member)
   const requestCountBeforeDeniedNavigation = reportRequests.length
-  check(await page.getByRole('link', { name: '数据汇总与统计', exact: true }).count() === 0, 'Ordinary member saw the reporting navigation item')
+  check(await page.getByRole('link', { name: '通报工作台', exact: true }).count() === 0, 'Ordinary member saw the reporting navigation item')
   await page.goto(reportPath)
   await page.getByText('403', { exact: true }).waitFor()
   await page.getByText('无权访问该业务', { exact: true }).waitFor()
@@ -202,7 +221,7 @@ async (page) => {
 
   const presidiumToken = await login(fixture.reportingRoleUsers.presidium)
   const requestCountBeforePresidiumDeniedNavigation = reportRequests.length
-  check(await page.getByRole('link', { name: '数据汇总与统计', exact: true }).count() === 0,
+  check(await page.getByRole('link', { name: '通报工作台', exact: true }).count() === 0,
     'Presidium membership alone must not show the reporting navigation item')
   await page.goto(reportPath)
   await page.getByText('403', { exact: true }).waitFor()

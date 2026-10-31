@@ -141,7 +141,7 @@ async (page) => {
     throw new Error(`Idempotent confirmation retry failed: ${retryResponse.status()} ${JSON.stringify(confirmation)}`)
   }
   await drawer.getByText('成功新增 1 个周次。', { exact: true }).waitFor()
-  await page.getByText(/当前工作周：第 1 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 1 周' }).waitFor()
   cases.push('真实确认后刷新当前工作周；模拟响应丢失后用同一幂等键安全重试')
 
   await drawer.getByRole('button', { name: 'Close' }).click()

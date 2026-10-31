@@ -38,6 +38,138 @@ export type ReportingSummary = {
   totals: ReportingSummaryTotals
 }
 
+export type ReportCountRow = {
+  departmentId: string
+  departmentName: string
+  collegeLevel: boolean
+  inspectionTypeId: string
+  inspectionType: string
+  recordCount: number
+  confirmedZeroReceiptCount: number
+  dataStatus: string
+}
+
+export type ReportVersionContent = {
+  period: ReportingPeriod
+  scopeLimited: boolean
+  statisticsRuleVersion: string
+  confirmedRecordCount: number
+  rows: ReportCountRow[]
+  incompleteCells: { departmentId: string; departmentName: string; collegeLevel: boolean; inspectionTypeId: string; inspectionType: string }[]
+  pendingDepartmentReconfirmationCount: number
+  corrections: { id: string; recordId: string; field: string; factChanged: boolean; status: string }[]
+  adjustments?: ReportAdjustmentSummary[] | null
+  generatedAt: string
+}
+
+export type ReportAdjustmentSummary = {
+  id: string
+  recordId: string
+  operation: 'INCLUDE' | 'EXCLUDE'
+  reason: string
+  record: ReportingRecord
+  adjustedBy: string
+  adjustedAt: string
+}
+
+export type ReportStatus = 'DRAFT' | 'PENDING_REVIEW' | 'RETURNED' | 'FINALIZING' | 'FINALIZED' | 'PUBLISHED' | 'ARCHIVED'
+
+export type ReportState = {
+  id: string
+  semesterId: string
+  weekId: string
+  status: ReportStatus
+  versionNo: number
+  rowVersion: number
+  updatedAt: string
+}
+
+export type ReportVersion = {
+  id: string
+  versionNo: number
+  content: ReportVersionContent
+  createdBy: string
+  createdAt: string
+}
+
+export type ReportDraft = {
+  id: string
+  status: 'DRAFT'
+  rowVersion: number
+  versionNo: number
+  content: ReportVersionContent
+  createdAt: string
+}
+
+export type ReportReview = {
+  id: string
+  versionNo: number
+  action: string
+  comment: string
+  actorId: string
+  createdAt: string
+}
+
+export type ReportCorrectionLog = {
+  id: string
+  versionNo: number
+  recordId: string
+  field: string
+  reason: string
+  factChanged: boolean
+  reconfirmationStatus: string
+  correctedBy: string
+  correctedAt: string
+  decision?: string
+  decisionComment?: string
+  decisionActorId?: string
+  decisionCreatedAt?: string
+}
+
+export type ReportWorkflow = {
+  report: ReportState | null
+  versions: ReportVersion[]
+  reviews: ReportReview[]
+  corrections: ReportCorrectionLog[]
+}
+
+export type ReportArchiveStatus = ReportStatus
+export type ReportArchiveQuery = { page: number; pageSize: number; status?: ReportArchiveStatus }
+export type ReportArchiveEntry = {
+  id: string
+  period: ReportingPeriod
+  status: ReportArchiveStatus
+  versionNo: number
+  versionCount: number
+  confirmedRecordCount: number
+  confirmedZeroReceiptCount: number
+  cellCount: number
+  scopeLimited: boolean
+  finalizedAt?: string
+  publishedAt?: string
+  updatedAt: string
+}
+export type ReportArchivePage = { items: ReportArchiveEntry[]; total: number; page: number; pageSize: number }
+
+export type ReportVersionRecordsQuery = {
+  semesterId: string
+  weekId: string
+  versionNo: number
+  departmentId?: string
+  collegeLevel?: boolean
+  inspectionTypeId?: string
+  page: number
+  pageSize: number
+}
+export type AddReportCorrectionInput = { rowVersion: number; recordId: string; field: string; afterValue: string | number | null; reason: string; factChanged: boolean }
+export type ReportCorrectionResult = { correctionId: string; report: ReportState }
+export type AddReportAdjustmentInput = { rowVersion: number; recordId: string; operation: 'INCLUDE' | 'EXCLUDE'; reason: string }
+export type ReportAdjustmentResult = { adjustmentId: string; report: ReportState }
+
+export type GenerateReportDraftInput = { semesterId: string; weekId: string; expectedRowVersion: number }
+export type ReportTransitionAction = 'submit' | 'return' | 'approve' | 'finalize'
+export type ReportTransitionInput = { rowVersion: number; comment?: string }
+
 export type ReportingRecordDetails = {
   date?: string
   time?: string

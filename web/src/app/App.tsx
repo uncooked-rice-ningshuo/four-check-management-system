@@ -24,6 +24,7 @@ import { UnattendedClassroomPage } from '../pages/inspection/UnattendedClassroom
 import { InspectionTypeRoute } from './router/InspectionTypeRoute'
 import { AttendancePage } from '../pages/inspection/AttendancePage'
 import { WeeklyReportSummaryPage } from '../pages/report/WeeklyReportSummaryPage'
+import { WeeklyReportArchivePage } from '../pages/report/WeeklyReportArchivePage'
 import { AppLayout } from './layouts/AppLayout'
 import { ProtectedRoute } from './router/ProtectedRoute'
 import { SuperAdminOnly, SuperAdminRoute } from './router/SuperAdminRoute'
@@ -52,7 +53,10 @@ export default function App() {
 				<Route path="security" element={<AccountSecurityPage />} />
 			</Route>
 			<Route path="inspections/attendance" element={<InspectionTypeRoute typeCode="ATTENDANCE_RATE"><AttendancePage /></InspectionTypeRoute>} />
-			<Route path="reports/weekly-summary" element={<EffectivePermissionRoute action="REPORT_VIEW"><WeeklyReportSummaryPage /></EffectivePermissionRoute>} />
+			<Route path="reports/workbench" element={<EffectivePermissionRoute action="REPORT_VIEW"><WeeklyReportSummaryPage /></EffectivePermissionRoute>} />
+			<Route path="reports/weekly-summary" element={<Navigate to="/reports/workbench" replace />} />
+			<Route path="reports/weekly-draft" element={<Navigate to="/reports/workbench" replace />} />
+			<Route path="reports/archive" element={<EffectivePermissionRoute action="ARCHIVE_VIEW"><WeeklyReportArchivePage /></EffectivePermissionRoute>} />
 			<Route path="admin/hygiene-areas" element={<HygieneAreaPage />} />
 			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
 			<Route path="inspections/evening-self-study" element={<InspectionTypeRoute typeCode="EVENING_SELF_STUDY"><EveningSelfStudyPage /></InspectionTypeRoute>} />

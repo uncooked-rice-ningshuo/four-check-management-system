@@ -4,7 +4,8 @@
 Requires PostgreSQL 16 via Docker (default) or disposable native binaries
 (BROWSER_DB_MODE=native), plus Go, Node 24, MinIO, mc and Google Chrome.
 PLAYWRIGHT_CLI_JS may select a preinstalled official CLI; otherwise npx uses the
-pinned CLI version. BROWSER_SUITE=weekly-report-summary verifies the report preview.
+pinned CLI version. BROWSER_SUITE=evening-self-study verifies the dedicated evening
+record, department-review, permission and weekly-report path.
 Only sanitized results/screenshots remain in output/playwright.
 """
 import datetime
@@ -296,6 +297,16 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
   page.on('console', message => {
     if (message.type() === 'error' && message.text().includes('Static function can not consume context')) messageContextWarnings.push(message.text());
   });
+  const logo = page.locator('.system-brand--auth img');
+  await logo.waitFor();
+  if (await logo.getAttribute('src') !== '/logo.png' || !(await logo.evaluate(image => image.complete && image.naturalWidth > 0))) throw new Error('Login brand logo did not load');
+  const icon = page.locator('link[rel="icon"]');
+  const origin = page.url().split('/').slice(0, 3).join('/');
+  if (await icon.getAttribute('href') !== '/logo.png' || !(await page.request.get(origin + '/logo.png')).ok()) throw new Error('Browser icon did not load');
+  for (const asset of ['/assets/backgrounds/auth-background.png', '/assets/backgrounds/login-visual.png', '/assets/backgrounds/register-visual.png', '/assets/characters/account-avatar.png']) {
+    const response = await page.request.get(origin + asset);
+    if (!response.ok() || !response.headers()['content-type']?.startsWith('image/')) throw new Error('Static asset did not load: ' + asset);
+  }
   await page.getByRole('textbox', {name:'账号', exact:true}).fill('browser-admin');
   await page.getByLabel('密码', {exact:true}).fill(PASSWORD);
   await page.getByRole('button', {name:/登\s*录/}).click();
@@ -310,7 +321,7 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
   await page.getByRole('textbox', {name:'账号', exact:true}).fill('browser-admin');
   await page.getByLabel('密码', {exact:true}).fill(CHANGED);
   await page.getByRole('button', {name:/登\s*录/}).click();
-  await page.getByRole('region', {name:'当前工作上下文'}).waitFor();
+  await page.getByRole('group', {name:'当前工作上下文'}).waitFor();
   return 'login, mandatory password change and relogin passed';
 }'''.replace('PASSWORD', json.dumps(password)).replace('CHANGED', json.dumps(changed_password)))
         cli('run-code', '--filename', str(login))
@@ -428,6 +439,69 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             report['browserErrors'] += payload.get('browserErrors', [])
             print('PASS: ' + name, flush=True)
             return payload
+
+        if os.environ.get('BROWSER_SUITE') == 'evening-self-study':
+            actors = {
+                'entry': ('evening-browser-entry', str(uuid.uuid4()), '晚自习浏览器录入成员', '10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000004'),
+                'reviewer': ('evening-browser-reviewer', str(uuid.uuid4()), '晚自习浏览器审核部长', '10000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002'),
+                'outsider': ('evening-browser-outsider', str(uuid.uuid4()), '晚自习浏览器无权成员', '10000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000004'),
+            }
+            account_values = ',\n'.join(
+                f"('{account_id}'::uuid,'{login_name}','{display_name}','{department_id}'::uuid)"
+                for login_name, account_id, display_name, department_id, _ in actors.values())
+            role_values = ',\n'.join(
+                f"('{uuid.uuid4()}'::uuid,'{account_id}'::uuid,'{department_id}'::uuid,'{role_id}'::uuid)"
+                for _, account_id, _, department_id, role_id in actors.values())
+            entry_id = actors['entry'][1]
+            reviewer_id = actors['reviewer'][1]
+            admin_id = run(sql_command('-tAc', "SELECT id FROM accounts WHERE login_name='browser-admin'"), text=True).stdout.strip()
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password,primary_department_id)
+SELECT fixture.account_id,fixture.login_name,fixture.display_name,source.password_hash,'ACTIVE','SYSTEM','MEMBER',false,false,fixture.department_id
+FROM accounts source CROSS JOIN (VALUES {account_values}) AS fixture(account_id,login_name,display_name,department_id)
+WHERE source.login_name='browser-admin';
+INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id)
+VALUES {role_values};
+INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_view,can_review,can_export,can_summarize)
+SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true,true,false,false
+FROM inspection_types WHERE code='EVENING_SELF_STUDY'
+ON CONFLICT(department_id,inspection_type_id) DO UPDATE
+SET enabled=true,can_enter=true,can_view=true,can_review=true,can_export=false,can_summarize=false;
+INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,inspection_type_id,note,enabled,created_by)
+SELECT '{uuid.uuid4()}', '{reviewer_id}', 'INSPECTION_ENTER', 'DENY', 'USER_RULE', id, 'isolated evening reviewer cannot enter', true, '{admin_id}'
+FROM inspection_types WHERE code='EVENING_SELF_STUDY';
+""".encode())
+            fixture.update(
+                authPassword=changed_password,
+                semesterId='b0000000-0000-0000-0000-000000000002',
+                weekId='b0000000-0000-0000-0000-000000000003',
+                eveningActors={
+                    'entry': actors['entry'][0],
+                    'reviewer': actors['reviewer'][0],
+                    'outsider': actors['outsider'][0],
+                    'departmentId': '10000000-0000-0000-0000-000000000002',
+                    'inspectionTypeId': run(sql_command('-tAc', "SELECT id FROM inspection_types WHERE code='EVENING_SELF_STUDY'"), text=True).stdout.strip(),
+                },
+            )
+            payload = browser_suite('evening-self-study')
+            if payload.get('browserErrors'):
+                raise RuntimeError('Evening self-study browser reported uncaught errors')
+            persisted = run(sql_command('-tAc', """
+SELECT count(*) FILTER (WHERE r.status='CONFIRMED' AND b.status='CONFIRMED'),
+       count(*) FILTER (WHERE d.period_text='9-10' AND d.absence_hours=2 AND d.penalty_hours=2*d.penalty_multiplier),
+       count(*) FILTER (WHERE c.record_id IS NULL)
+FROM inspection_records r
+JOIN inspection_types t ON t.id=r.inspection_type_id AND t.code='EVENING_SELF_STUDY'
+JOIN evening_self_study_details d ON d.record_id=r.id
+LEFT JOIN department_submissions b ON b.id=r.submission_id
+LEFT JOIN attendance_details c ON c.record_id=r.id
+WHERE r.remark='晚自习专属浏览器验收' AND r.deleted_at IS NULL
+"""), text=True).stdout.strip()
+            if persisted != '1|1|1':
+                raise RuntimeError('Evening self-study confirmation persistence mismatch: ' + persisted)
+            report['cases'].append('一次性 PostgreSQL 持久化核对：晚自习记录及批次已确认、固定节次/学时有效且无课程详情')
+            report['status'] = 'passed'
+            raise SystemExit(0)
 
         if os.environ.get('BROWSER_SUITE') == 'weekly-report-obligation-flow':
             weekly_report_actors = {
@@ -552,6 +626,12 @@ VALUES
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=b"UPDATE semester_weeks SET week_no=1 WHERE id='b0000000-0000-0000-0000-000000000003';")
             browser_suite('weekly-report-summary')
             browser_suite('weekly-report-roles')
+            report['status'] = 'passed'
+            raise SystemExit(0)
+
+        if os.environ.get('BROWSER_SUITE') == 'sidebar':
+            fixture['sidebarOnly'] = True
+            browser_suite('platform-regression')
             report['status'] = 'passed'
             raise SystemExit(0)
 

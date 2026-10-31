@@ -100,6 +100,11 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			fields["time"] = "08:00"
 			fields["period"] = "1-2"
 			fields["absenceHours"] = 2
+		case inspection.InspectionTypeEveningSelfStudy:
+			fields["studentId"] = rf("07")
+			fields["classId"] = rf("06")
+			fields["classroomId"] = rf("09")
+			fields["time"] = "20:15"
 		case inspection.InspectionTypeMorning:
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
@@ -702,6 +707,18 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			if e != nil || read.TypeCode != def.Code || read.Details == nil {
 				t.Fatal("read", e)
 			}
+			if def.Code == inspection.InspectionTypeEveningSelfStudy {
+				details, ok := read.Details.(*inspection.EveningSelfStudyDetails)
+				if !ok || details.Period != "9-10" || details.AbsenceHours != 2 || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 1 || details.PenaltyHours == nil || *details.PenaltyHours != 2 {
+					t.Fatalf("server-derived evening rule or penalty snapshot missing: %#v", read.Details)
+				}
+				if read.CurrentCourseName != "" {
+					t.Fatalf("evening self-study unexpectedly has a course: %#v", read)
+				}
+				if _, err := svc.Create(ctx, admin, makeInput(def.Code, map[string]any{"period": "8-9"}), audit.Metadata{}); err == nil {
+					t.Fatal("client supplied fixed evening period")
+				}
+			}
 			if def.Code == inspection.InspectionTypeUnattended {
 				if _, err := pool.Exec(ctx, "UPDATE students SET name='Renamed student' WHERE id=$1", rf("07")); err != nil {
 					t.Fatal(err)
@@ -745,6 +762,9 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 					course = "Fixture course"
 					classroom = "Fixture teaching building 101"
 				}
+				if def.Code == inspection.InspectionTypeEveningSelfStudy {
+					classroom = "Fixture teaching building 101"
+				}
 				if def.Code == inspection.InspectionTypeClassroomHygiene {
 					classroom = "Fixture teaching building 101"
 				}
@@ -765,9 +785,23 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				assertCurrentLabels(record)
 			}
 			input = makeInput(def.Code, map[string]any{"remark": "corrected"})
+			if def.Code == inspection.InspectionTypeEveningSelfStudy {
+				if _, e = pool.Exec(ctx, `UPDATE semester_weeks SET attendance_penalty_multiplier=2 WHERE id=$1`, rf("04")); e != nil {
+					t.Fatal(e)
+				}
+			}
 			updated, e := svc.Update(ctx, admin, r.ID, inspection.InspectionEdit{Version: 1, Reason: "核对", Record: input}, audit.Metadata{})
 			if e != nil || updated.RowVersion != 2 {
 				t.Fatal("update", e)
+			}
+			if def.Code == inspection.InspectionTypeEveningSelfStudy {
+				details, ok := updated.Details.(*inspection.EveningSelfStudyDetails)
+				if _, restoreErr := pool.Exec(ctx, `UPDATE semester_weeks SET attendance_penalty_multiplier=1 WHERE id=$1`, rf("04")); restoreErr != nil {
+					t.Fatal(restoreErr)
+				}
+				if !ok || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 2 || details.PenaltyHours == nil || *details.PenaltyHours != 4 {
+					t.Fatalf("editable draft did not use the current week penalty configuration: %#v", updated.Details)
+				}
 			}
 			assertCurrentLabels(updated)
 			if def.Code == inspection.InspectionTypeUnattended {
@@ -956,7 +990,12 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	 VALUES($1,$2,$3,$4,$5,$6,repeat('0',64))`, submissionID, own.SemesterID, own.WeekID, own.DepartmentID, own.InspectionTypeID, own.CreatedBy); err != nil {
 		t.Fatal(err)
 	}
-	for _, column := range []string{"status='CONFIRMED'", "status='RETURNED'", "status='LOCKED'", "status='DRAFT',submission_id='" + submissionID + "'", "status='DRAFT',submission_id=NULL,locked_by_report_id=gen_random_uuid()"} {
+	reportLockID := rf("31")
+	if _, err = pool.Exec(ctx, `INSERT INTO weekly_reports(id,semester_id,week_id,created_by,updated_by)
+VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); err != nil {
+		t.Fatal("create report lock fixture:", err)
+	}
+	for _, column := range []string{"status='CONFIRMED'", "status='RETURNED'", "status='LOCKED'", "status='DRAFT',submission_id='" + submissionID + "'", "status='DRAFT',submission_id=NULL,locked_by_report_id='" + reportLockID + "'"} {
 		if _, err = pool.Exec(ctx, "UPDATE inspection_records SET "+column+" WHERE id=$1", own.ID); err != nil {
 			t.Fatal(err)
 		}

@@ -12,7 +12,7 @@ async (page) => {
     await page.getByRole('button', { name: /登\s*录/ }).click()
     const response = await responsePromise
     check(response.status() === 200, `Synthetic account login failed for ${loginName}: ${response.status()}`)
-    await page.getByRole('region', { name: '当前工作上下文' }).waitFor()
+    await page.getByRole('group', { name: '当前工作上下文' }).waitFor()
     return (await response.json()).accessToken
   }
   const logout = async () => {
@@ -65,7 +65,7 @@ async (page) => {
   await logout()
   const managerToken = await login(fixture.weeklyReport.manager)
   await page.goto(reportPath)
-  await page.getByRole('heading', { name: '数据汇总与统计', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
   await page.getByText('该周应交范围配置', { exact: true }).waitFor()
   await chooseOption('应交检查类型', '到课率')
   await chooseOption('应交部门或校级范围', '学习部')
@@ -190,7 +190,7 @@ async (page) => {
   await logout()
   await login(fixture.weeklyReport.manager)
   await page.goto(reportPath)
-  await page.getByRole('heading', { name: '数据汇总与统计', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
   await page.getByText('零回执已确认 1', { exact: true }).waitFor()
   await page.getByText('应交', { exact: true }).first().waitFor()
   cases.push('通报汇总页显示已确认零回执，不把它计成实际记录')

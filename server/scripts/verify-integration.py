@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='four-check-isolated-') as directory:
         def database(label):
             run(['docker', 'exec', name, 'createdb', '-U', 'postgres', label])
             return f"postgres://postgres:{env['POSTGRES_PASSWORD']}@127.0.0.1:{port}/{label}?sslmode=disable"
-        for (key, label) in [('READINESS_TEST_DATABASE_URL', 'readiness'), ('INSPECTION_TEST_DATABASE_URL', 'inspection'), ('WORK_CONTEXT_TEST_DATABASE_URL', 'workcontext'), ('EXTENSION_TEST_DATABASE_URL', 'extensions'), ('MANUAL_TEST_DATABASE_URL', 'manual'), ('MUTATION_TEST_DATABASE_URL', 'mutations'), ('ORPHAN_SOURCE_TEST_DATABASE_URL', 'orphan_source')]:
+        for (key, label) in [('READINESS_TEST_DATABASE_URL', 'readiness'), ('INSPECTION_TEST_DATABASE_URL', 'inspection'), ('WORK_CONTEXT_TEST_DATABASE_URL', 'workcontext'), ('EXTENSION_TEST_DATABASE_URL', 'extensions'), ('MANUAL_TEST_DATABASE_URL', 'manual'), ('MUTATION_TEST_DATABASE_URL', 'mutations'), ('ORPHAN_SOURCE_TEST_DATABASE_URL', 'orphan_source'), ('REPORT_WORKFLOW_TEST_DATABASE_URL', 'report_workflow')]:
             env[key] = database(label)
         env['TEST_DATABASE_URL'] = database('store_tests')
         for migration in sorted((repo / 'migrations').glob('*.sql')):

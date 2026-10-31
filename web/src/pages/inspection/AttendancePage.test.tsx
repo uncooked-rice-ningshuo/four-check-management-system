@@ -96,7 +96,7 @@ describe('AttendancePage', () => {
 
 		expect(recordsQuery).toHaveBeenLastCalledWith(expect.objectContaining({ departmentId: '', semesterId: '', weekId: '' }), false)
 		const heading = container.querySelector('.attendance-page-heading')
-		expect(heading).toHaveTextContent('负责部门：学习部')
+		expect(heading).toHaveTextContent('按授权范围查询到课率记录；新增时单独选择录入目标。')
 		expect(heading).not.toHaveTextContent('宿管部')
 		expect(heading).not.toHaveTextContent('2026-2027 学年上学期')
 		expect(heading).not.toHaveTextContent('第 1 周')
@@ -168,7 +168,7 @@ describe('AttendancePage', () => {
     recordsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })
     rerender(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
     expect(screen.getByText('当前范围暂无到课率记录')).toBeInTheDocument()
-		expect(screen.getByText('负责部门：学习部')).toBeInTheDocument()
+		expect(screen.getByText('按授权范围查询到课率记录；新增时单独选择录入目标。')).toBeInTheDocument()
   })
 
   it('renders record status/source, pagination and opens only an in-page import drawer', () => {

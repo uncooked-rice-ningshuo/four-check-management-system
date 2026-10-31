@@ -60,7 +60,7 @@ async (page) => {
   lifecycleStage = 'initial calendar page render'
   await page.goto(page.url().split('/').slice(0, 3).join('/') + '/admin/academic')
   await page.getByRole('heading', { name: '学期与周次', exact: true }).waitFor()
-  await page.getByText(/当前工作周：第 1 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 1 周' }).waitFor()
 
   // Real browser lifecycle: create -> close -> first edit -> close -> reopen.
   for (const kind of ['学年', '学期', '周次']) {
@@ -110,7 +110,7 @@ async (page) => {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '教学礼拜周（2 倍）' }).click()
   await submit(dialog, '/academic/weeks/', 200)
   await dialog.waitFor({ state: 'hidden' })
-  await page.getByText(/当前工作周：第 3 周/).waitFor({ timeout: 5000 })
+  await page.locator('.work-context-week').filter({ hasText: '第 3 周' }).waitFor({ timeout: 5000 })
   await page.getByRole('row').filter({ hasText: '浏览器回归 A' }).getByText('2 倍').waitFor()
   lifecycleStage = 'open global work context editor'
   await page.getByRole('button', { name: '设置临时工作周', exact: true }).click()
@@ -146,7 +146,7 @@ async (page) => {
     await close(dialog)
   }
   await page.reload()
-  await page.getByText(/当前工作周：第 3 周/).waitFor()
+  await page.locator('.work-context-week').filter({ hasText: '第 3 周' }).waitFor()
   dialog = await openWeek('浏览器回归 A')
   await waitValue(dialog.getByLabel('周次', { exact: true }), '3')
   await waitValue(dialog.getByLabel('备注'), '浏览器回归 A')

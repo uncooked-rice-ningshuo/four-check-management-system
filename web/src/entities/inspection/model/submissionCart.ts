@@ -5,6 +5,14 @@ export type SubmissionCartRecord = {
   inspectionTypeId: string
   departmentId: string
   typeCode: string
+  currentCourseName?: string
+  currentClassroomName?: string
+  currentDormitoryName?: string
+  currentAreaName?: string
+  currentReasonLabel?: string
+  responsibleClasses?: { id: string; label: string }[]
+  responsibleStudents?: { id: string; label: string }[]
+  responsibleDormitories?: { id: string; label: string }[]
   studentNumber: string
   studentName: string
   className: string

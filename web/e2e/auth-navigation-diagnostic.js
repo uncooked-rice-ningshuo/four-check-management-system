@@ -9,7 +9,7 @@ async (page) => {
     await page.getByRole('textbox', {name:'账号',exact:true}).fill('browser-admin')
     await page.getByLabel('密码', {exact:true}).fill(fixture.authPassword)
     await page.getByRole('button', {name:/登\s*录/}).click()
-    await page.getByRole('region', {name:'当前工作上下文'}).waitFor()
+    await page.getByRole('group', {name:'当前工作上下文'}).waitFor()
   }
   for (let index = 0; index < 12; index++) {
     const events = []

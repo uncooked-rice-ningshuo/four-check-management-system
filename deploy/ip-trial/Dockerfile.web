@@ -5,7 +5,6 @@ WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ .
-COPY 页面使用素材/ ../页面使用素材/
 COPY server/internal/inspection/catalog.json /server/internal/inspection/catalog.json
 RUN pnpm lint && pnpm test --maxWorkers=2 && pnpm build
 FROM registry-1.docker.io/library/nginx:1.27-alpine

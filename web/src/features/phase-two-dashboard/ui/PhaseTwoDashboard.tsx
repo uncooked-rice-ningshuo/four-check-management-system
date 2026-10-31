@@ -60,7 +60,7 @@ export function PhaseTwoDashboard({ userName }: { userName?: string }) {
 
 	return <section className="workbench-page">
 		<div className="dashboard-hero workbench-hero">
-			<div><Tag color="cyan" icon={<CheckCircleOutlined />}>个人业务中控台</Tag><Typography.Title level={1}>工作台</Typography.Title><Typography.Paragraph>{userName ? `${userName}，` : ''}{contextLabel}</Typography.Paragraph></div>
+			<div><Tag color="blue" icon={<CheckCircleOutlined />}>个人业务中控台</Tag><Typography.Title level={1}>工作台</Typography.Title><Typography.Paragraph>{userName ? `${userName}，` : ''}{contextLabel}</Typography.Paragraph></div>
 			<div className="hero-seal">日常<br />管理</div>
 		</div>
 		{!context ? <Alert type="warning" showIcon title="当前日期未匹配到已启用的学期周次" description="工作台不会用其他周次或模拟数字替代，请联系管理员核对学期与周次配置。" /> : <>

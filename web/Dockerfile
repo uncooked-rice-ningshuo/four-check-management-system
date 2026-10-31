@@ -4,7 +4,7 @@ WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ .
-COPY 页面使用素材/ ../页面使用素材/
+COPY server/internal/inspection/catalog.json /server/internal/inspection/catalog.json
 RUN pnpm build
 FROM nginx:1.27-alpine
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf

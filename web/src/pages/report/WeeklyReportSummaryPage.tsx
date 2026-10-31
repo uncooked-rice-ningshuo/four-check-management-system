@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { absenceSummary } from './recordSummary'
+import { useCallback, useMemo, useState } from 'react'
+import { InfoCircleOutlined, SyncOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Popconfirm, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Popconfirm, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useCreateReportObligation, useRemoveReportObligation, useReportObligationOptions, useReportObligations, useReportingPeriods, useReportingRecords, useReportingSummary } from '../../features/reporting/model/queries'
+import { useSearchParams } from 'react-router-dom'
+import { useCreateReportObligation, useRemoveReportObligation, useReportObligationOptions, useReportObligations, useReportWorkflow, useReportingPeriods, useReportingRecords, useReportingSummary } from '../../features/reporting/model/queries'
 import type { ReportObligation, ReportingPeriod, ReportingRecord, ReportingRecordsQuery, ReportingSummaryRow } from '../../entities/reporting/model/reporting'
 import { useWorkContext } from '../../features/work-context/useWorkContext'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
+import { WeeklyReportWorkflowPanel } from '../../features/reporting/ui/WeeklyReportWorkflowPanel'
+import { inspectionResultLabel } from '../../features/reporting/model/labels'
 
 const collegeTarget = '__college__'
 
@@ -38,9 +43,9 @@ function WeeklyObligationManagement({ period }: { period: ReportingPeriod }) {
 
   return <Card title="该周应交范围配置" extra={<Typography.Text type="secondary">配置应交项，不改变录入或审核权限</Typography.Text>}>
     {noticeContext}
-    <Space direction="vertical" style={{ display: 'flex' }} size="middle">
-      {optionsQuery.isError && <Alert type="error" message="应交配置选项加载失败" action={<Button onClick={() => void optionsQuery.refetch()}>重试</Button>} />}
-      {obligationsQuery.isError && <Alert type="error" message="现有应交项加载失败" action={<Button onClick={() => void obligationsQuery.refetch()}>重试</Button>} />}
+    <Space orientation="vertical" style={{ display: 'flex' }} size="middle">
+      {optionsQuery.isError && <Alert type="error" title="应交配置选项加载失败" action={<Button onClick={() => void optionsQuery.refetch()}>重试</Button>} />}
+      {obligationsQuery.isError && <Alert type="error" title="现有应交项加载失败" action={<Button onClick={() => void obligationsQuery.refetch()}>重试</Button>} />}
       <Space wrap>
         <Select aria-label="应交检查类型" placeholder="选择检查类型" style={{ minWidth: 190 }} loading={optionsQuery.isFetching}
           value={inspectionTypeId || undefined} options={options?.inspectionTypes.map(item => ({ label: item.name, value: item.id })) ?? []}
@@ -143,8 +148,11 @@ function displayDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(parsed)
 }
 
-function displayPeriod(period: ReportingPeriod): string {
-  return `${period.academicYearName} · ${period.semesterName} · 第 ${period.weekNo} 周 · ${displayDate(period.startDate)}—${displayDate(period.endDate)}`
+function periodLabel(period: ReportingPeriod): string {
+  const year = period.academicYearName.replace(/\s|学年/g, '')
+  const semester = period.semesterName.replace(/\s|学年/g, '')
+  const name = year && semester.includes(year) ? period.semesterName : `${period.academicYearName} · ${period.semesterName}`
+  return `${name} · 第 ${period.weekNo} 周`
 }
 
 function displayRecordDate(record: ReportingRecord): string {
@@ -153,17 +161,13 @@ function displayRecordDate(record: ReportingRecord): string {
   return time ? `${date} ${time}` : date
 }
 
-function inspectionResult(result: string): string {
-  const labels: Record<string, string> = { EXCELLENT: '优秀', QUALIFIED: '合格', UNQUALIFIED: '不合格' }
-  return labels[result] ?? result
-}
-
 function recordSummary(record: ReportingRecord): string {
   const { details } = record
   const parts: string[] = []
-  if (details.result) parts.push(inspectionResult(details.result))
+  if (details.result) parts.push(inspectionResultLabel(details.result))
   if (details.period) parts.push(`${details.period}节`)
-  if (details.absenceHours !== undefined) parts.push(`缺课 ${details.absenceHours} 小时`)
+  const absence = absenceSummary(record)
+  if (absence) parts.push(absence)
   if (details.absenceCount !== undefined) parts.push(`缺勤 ${details.absenceCount} 次`)
   if (record.currentCourseName) parts.push(record.currentCourseName)
   if (record.currentClassroomName) parts.push(record.currentClassroomName)
@@ -209,13 +213,12 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
     ['缺课学时', details.absenceHours],
     ['计入学时', details.penaltyHours],
     ['缺勤次数', details.absenceCount],
-    ['检查结果', details.result ? inspectionResult(details.result) : undefined],
-    ['原因代码', details.reasonCode && !record.currentReasonLabel ? details.reasonCode : undefined],
+    ['检查结果', details.result ? inspectionResultLabel(details.result) : undefined],
     ['课程', record.currentCourseName],
     ['教室', record.currentClassroomName],
     ['宿舍', record.currentDormitoryName],
     ['检查区域', record.currentAreaName],
-    ['原因', record.currentReasonLabel],
+    ['原因', record.currentReasonLabel || (details.reasonCode ? '原因标签不可用' : undefined)],
     ['责任人', record.responsibleStudents?.map(item => item.label).join('、')],
     ['责任班级', record.responsibleClasses?.map(item => item.label).join('、')],
     ['责任宿舍', record.responsibleDormitories?.map(item => item.label).join('、')],
@@ -233,38 +236,59 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
 
 export function WeeklyReportSummaryPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [selectedPeriodKey, setSelectedPeriodKey] = useState('')
+  const [manualPeriodSelection, setManualPeriodSelection] = useState(false)
   const [selectedCell, setSelectedCell] = useState<ReportingSummaryRow | null>(null)
+  const [departmentExpansion, setDepartmentExpansion] = useState<{ scope: string; keys: string[] } | null>(null)
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(20)
   const [reportScopeChanged, setReportScopeChanged] = useState(false)
-  const manualPeriodSelection = useRef(false)
   const workContextQuery = useWorkContext()
   const permissionQuery = useAttendancePermissions()
   const periodQuery = useReportingPeriods()
   const periods = useMemo(() => periodQuery.data?.items ?? [], [periodQuery.data?.items])
-  useEffect(() => {
-    if (!periodQuery.isSuccess || workContextQuery.isPending || manualPeriodSelection.current) return
-    const currentWeekId = workContextQuery.data?.week?.id
-    const currentPeriod = currentWeekId ? periods.find(item => item.weekId === currentWeekId) : undefined
-    setSelectedPeriodKey(currentPeriod ? `${currentPeriod.semesterId}:${currentPeriod.weekId}` : '')
-  }, [periodQuery.isSuccess, periods, workContextQuery.data?.week?.id, workContextQuery.isPending])
-  const selectedPeriod = periods.find(item => `${item.semesterId}:${item.weekId}` === selectedPeriodKey)
+  const requestedSemesterId = searchParams.get('semesterId')
+  const requestedWeekId = searchParams.get('weekId')
+  const hasRequestedPeriod = Boolean(requestedSemesterId && requestedWeekId)
+  const requestedPeriod = hasRequestedPeriod
+    ? periods.find(item => item.semesterId === requestedSemesterId && item.weekId === requestedWeekId)
+    : undefined
+  const currentWeekId = workContextQuery.data?.week?.id
+  const currentPeriod = currentWeekId ? periods.find(item => item.weekId === currentWeekId) : undefined
+  const defaultPeriod = !manualPeriodSelection ? currentPeriod : undefined
+  const effectivePeriodKey = hasRequestedPeriod
+    ? requestedPeriod ? `${requestedPeriod.semesterId}:${requestedPeriod.weekId}` : ''
+    : manualPeriodSelection ? selectedPeriodKey : defaultPeriod ? `${defaultPeriod.semesterId}:${defaultPeriod.weekId}` : ''
+  const selectedPeriod = periods.find(item => `${item.semesterId}:${item.weekId}` === effectivePeriodKey)
+  const stageValue = searchParams.get('stage')
+  const requestedStage = stageValue === null ? Number.NaN : Number(stageValue)
+  const selectedStage = hasRequestedPeriod && Number.isInteger(requestedStage) && requestedStage >= 0 && requestedStage <= 2 ? requestedStage : null
+  const selectStage = (stage: number) => {
+    if (selectedPeriod) setSearchParams({ semesterId: selectedPeriod.semesterId, weekId: selectedPeriod.weekId, stage: String(stage) }, { replace: true })
+  }
   const canManageObligations = permissionQuery.data?.permissions.some(item => item.action === 'REPORT_OBLIGATION_MANAGE' && item.effect === 'ALLOW') ?? false
   const clearReportScope = useCallback(() => {
     queryClient.removeQueries({ queryKey: ['reports', 'summary'] })
     queryClient.removeQueries({ queryKey: ['reports', 'records'] })
+    queryClient.removeQueries({ queryKey: ['reports', 'workflow'] })
     queryClient.removeQueries({ queryKey: ['reports', 'periods'] })
     setSelectedCell(null)
     setSelectedPeriodKey('')
     setReportScopeChanged(true)
-    manualPeriodSelection.current = true
-  }, [queryClient])
+    setManualPeriodSelection(true)
+    setSearchParams({}, { replace: true })
+  }, [queryClient, setSearchParams])
   const summaryQuery = useReportingSummary(
     selectedPeriod?.semesterId ?? '',
     selectedPeriod?.weekId ?? '',
     Boolean(selectedPeriod),
     clearReportScope,
+  )
+  const workflowQuery = useReportWorkflow(
+    selectedPeriod?.semesterId ?? '',
+    selectedPeriod?.weekId ?? '',
+    Boolean(selectedPeriod),
   )
   const recordsQueryArgs: ReportingRecordsQuery = useMemo(() => ({
     semesterId: selectedPeriod?.semesterId ?? '',
@@ -277,6 +301,12 @@ export function WeeklyReportSummaryPage() {
   }), [selectedCell, selectedPeriod, recordPage, recordPageSize])
   const recordsQuery = useReportingRecords(recordsQueryArgs, Boolean(selectedCell && selectedPeriod), clearReportScope)
   const treeRows = useMemo(() => buildTree(summaryQuery.data?.rows ?? []), [summaryQuery.data?.rows])
+  const departmentKeys = treeRows.map(row => row.key)
+  const departmentExpansionScope = `${selectedPeriodKey}:${departmentKeys.join('|')}`
+  const expandedDepartmentKeys = departmentExpansion?.scope === departmentExpansionScope
+    ? departmentExpansion.keys
+    : departmentKeys
+  const allDepartmentsExpanded = treeRows.length > 0 && treeRows.every(row => expandedDepartmentKeys.includes(row.key))
 
   const columns: ColumnsType<ReportTreeRow> = [
     {
@@ -303,7 +333,7 @@ export function WeeklyReportSummaryPage() {
       title: '记录明细', key: 'action', width: 145, fixed: 'right',
       render: (_value, row) => row.kind === 'inspection' && row.summary.confirmedRecordCount > 0
         ? <Button type="link" size="small" onClick={() => { setSelectedCell(row.summary); setRecordPage(1) }}>查看已确认记录</Button>
-        : row.kind === 'department' ? <Typography.Text type="secondary">展开查看类型</Typography.Text> : <Typography.Text type="secondary">暂无已确认记录</Typography.Text>,
+        : <Typography.Text type="secondary">—</Typography.Text>,
     },
   ]
 
@@ -320,58 +350,60 @@ export function WeeklyReportSummaryPage() {
     { title: '提交记录内容', key: 'detail', render: (_value, record) => <Typography.Text>{recordSummary(record)}</Typography.Text> },
   ]
 
-  const summary = summaryQuery.data
-  const periodOptions = periods.map(period => ({ value: `${period.semesterId}:${period.weekId}`, label: `${period.academicYearName} · ${period.semesterName} · 第 ${period.weekNo} 周` }))
+  const summary = selectedPeriod ? summaryQuery.data : undefined
+  const workflow = workflowQuery.isError ? undefined : workflowQuery.data
+  const report = workflow?.report
+  const maxStage = !report ? 0 : report.status === 'DRAFT' || report.status === 'RETURNED' ? 1 : 2
+  const defaultStage = !report ? 0 : report.status === 'DRAFT' || report.status === 'RETURNED' ? 1 : 2
+  const activeStage = selectedStage === null ? defaultStage : Math.min(selectedStage, maxStage)
+  const periodOptions = periods.map(period => ({ value: `${period.semesterId}:${period.weekId}`, label: periodLabel(period) }))
   const selectedCellTitle = selectedCell
     ? `${selectedCell.collegeLevel ? '校级' : selectedCell.departmentName} · ${selectedCell.inspectionTypeName} · 已确认记录`
     : '已确认记录'
   const records = recordsQuery.data?.items ?? []
 
   return (
-    <Space direction="vertical" size="large" style={{ display: 'flex' }}>
-      <div>
-        <Typography.Title level={2}>数据汇总与统计</Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          默认定位到系统当前工作周。按部门查看提交和确认情况；展开部门可进入检查类型，再查看已确认提交的实际记录。
-        </Typography.Paragraph>
+    <section className="attendance-page weekly-report-summary-page" aria-labelledby="weekly-report-summary-title">
+      <div className="attendance-page-heading">
+        <div>
+          <Typography.Title id="weekly-report-summary-title" level={2}>通报工作台</Typography.Title>
+        </div>
+        <Space wrap align="center" className="weekly-report-period-controls">
+          <Select
+            aria-label="选择通报学期和周次"
+            placeholder="请选择学期和周次"
+            className="weekly-report-period-select"
+            value={effectivePeriodKey || undefined}
+            options={periodOptions}
+            loading={periodQuery.isPending || periodQuery.isFetching}
+            disabled={periodQuery.isError}
+            onChange={value => { setManualPeriodSelection(true); setSelectedPeriodKey(value); setSelectedCell(null); setReportScopeChanged(false); setSearchParams({}, { replace: true }) }}
+          />
+          {selectedPeriod && summary && <Typography.Text type="secondary" className="weekly-report-period-range">{displayDate(summary.period.startDate)}—{displayDate(summary.period.endDate)}</Typography.Text>}
+        </Space>
       </div>
 
-      <Card>
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Space wrap align="center">
-            <Typography.Text strong>通报周期</Typography.Text>
-            <Select
-              aria-label="选择通报学期和周次"
-              placeholder="请选择学期和周次"
-              style={{ minWidth: 340 }}
-      value={selectedPeriodKey || undefined}
-      options={periodOptions}
-      loading={periodQuery.isPending || periodQuery.isFetching}
-      disabled={periodQuery.isError}
-      onChange={value => { manualPeriodSelection.current = true; setSelectedPeriodKey(value); setSelectedCell(null); setReportScopeChanged(false) }}
-            />
-            {summary && <Typography.Text type="secondary">{displayPeriod(summary.period)}</Typography.Text>}
-            {selectedPeriod && summary && (
-              <Button onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching}>刷新汇总</Button>
-            )}
-          </Space>
-          <Alert
-            type="info"
-            showIcon
-            message="当前为提交数据预览，统计口径尚待确认"
-            description="本页展示提交批次状态和确认后的原始记录数，不计算到课率、出勤率等指标。若授权范围只覆盖部分部门或检查类型，合计仅代表当前授权范围。"
-          />
-        </Space>
-      </Card>
+      {selectedPeriod && <div className="weekly-report-workbench-steps">
+        <Steps current={activeStage} onChange={stage => {
+          if (stage <= maxStage) {
+            selectStage(stage)
+            setSelectedCell(null)
+          }
+        }} items={[
+          { title: '确认来源数据', content: '核对部门提交与应交状态' },
+          { title: '编制和修订草稿', content: '确认本版数据集' , disabled: maxStage < 1 },
+          { title: '确认定稿数据', content: '审核通过并固定数据', disabled: maxStage < 2 },
+        ]} />
+      </div>}
 
       {periodQuery.isError && (
-        <Alert type="error" showIcon message="可查看的学期周次加载失败。" action={<Button onClick={() => void periodQuery.refetch()}>重试</Button>} />
+        <Alert type="error" showIcon title="可查看的学期周次加载失败。" action={<Button onClick={() => void periodQuery.refetch()}>重试</Button>} />
       )}
       {reportScopeChanged && (
-        <Alert type="warning" showIcon message="你的通报查看权限已变化，系统已清除本地汇总数据。请重新选择当前可查看的周期。" />
+        <Alert type="warning" showIcon title="你的通报查看权限已变化，系统已清除本地汇总数据。请重新选择当前可查看的周期。" />
       )}
       {workContextQuery.isError && !workContextQuery.data && (
-        <Alert type="warning" showIcon message="系统当前工作周加载失败，无法自动定位通报周期。" action={<Button onClick={() => void workContextQuery.refetch()}>重试工作周</Button>} />
+        <Alert type="warning" showIcon title="系统当前工作周加载失败，无法自动定位通报周期。" action={<Button onClick={() => void workContextQuery.refetch()}>重试工作周</Button>} />
       )}
       {periodQuery.data && periods.length === 0 && <Empty description="当前授权范围内没有可查看的通报周期" />}
       {!selectedPeriod && !periodQuery.isError && periods.length > 0 && <Empty description={reportScopeChanged ? '请重新选择当前可查看的通报周期' : workContextQuery.isError ? '当前工作周加载失败，请重试或手动选择学期和周次' : workContextQuery.data?.week ? '系统当前工作周不在可查看范围，请手动选择学期和周次' : '系统当前未设置工作周，请手动选择学期和周次'} />}
@@ -379,62 +411,98 @@ export function WeeklyReportSummaryPage() {
         <Alert
           type="warning"
           showIcon
-          message="周汇总刷新失败"
+          title="周汇总刷新失败"
           description="本次刷新失败，以下为最近一次成功加载的数据。请重试确认最新状态。"
           action={<Button onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching}>重试周汇总</Button>}
         />
       )}
       {selectedPeriod && summaryQuery.isError && !summaryQuery.data && (
-        <Alert type="error" showIcon message="周汇总加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void summaryQuery.refetch()}>重试周汇总</Button>} />
+        <Alert type="error" showIcon title="周汇总加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void summaryQuery.refetch()}>重试周汇总</Button>} />
       )}
-      {selectedPeriod && summaryQuery.isFetching && !summary && <Card loading />}
-      {summary && (
-        <>
-          <Row gutter={[16, 16]}>
-            <Col xs={12} md={6}><Card><Statistic title="已确认批次" value={summary.totals.confirmedBatchCount} /></Card></Col>
-            <Col xs={12} md={6}><Card><Statistic title="已确认记录" value={summary.totals.confirmedRecordCount} /></Card></Col>
-            <Col xs={12} md={6}><Card><Statistic title="待审核 / 退回批次" value={summary.totals.pendingReviewBatchCount + summary.totals.returnedBatchCount} /></Card></Col>
-            <Col xs={12} md={6}><Card><Statistic title="草稿批次" value={summary.totals.draftBatchCount} /></Card></Col>
-          </Row>
-          <Card title="部门与校级批次汇总" extra={<Typography.Text type="secondary">展开部门查看检查类型与提交记录</Typography.Text>}>
-            {treeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (
-              <Table<ReportTreeRow>
-                rowKey="key"
-                size="middle"
-                columns={columns}
-                dataSource={treeRows}
-                defaultExpandAllRows
-                pagination={false}
-                scroll={{ x: 1300 }}
-                loading={summaryQuery.isFetching}
-                rowClassName={row => row.kind === 'department' ? 'weekly-report-department-row' : 'weekly-report-inspection-row'}
-              />
-            )}
-          </Card>
-        </>
+      {selectedPeriod && summaryQuery.isFetching && !summary && <Skeleton active paragraph={{ rows: 4 }} />}
+      {summary && activeStage === 0 && (
+        <section className="weekly-report-summary-table-section" aria-labelledby="weekly-report-summary-table-title">
+          <div className="weekly-report-summary-table-toolbar">
+            <div>
+              <Space size={6} align="center">
+                <Typography.Title id="weekly-report-summary-table-title" level={4}>部门与校级批次汇总</Typography.Title>
+                <Tooltip title="草稿默认只引用已确认来源记录；零记录回执标记完成状态，不计入记录数。">
+                  <Button type="text" size="small" aria-label="查看来源与零记录口径" icon={<InfoCircleOutlined aria-hidden="true" />} />
+                </Tooltip>
+              </Space>
+              <Typography.Text type="secondary">已确认批次 {summary.totals.confirmedBatchCount} · 已确认记录 {summary.totals.confirmedRecordCount} · 待审核/退回 {summary.totals.pendingReviewBatchCount + summary.totals.returnedBatchCount} · 草稿 {summary.totals.draftBatchCount}</Typography.Text>
+            </div>
+            <Space wrap>
+              <Typography.Text type="secondary">{treeRows.length} 个单位</Typography.Text>
+              {treeRows.length > 0 && <Button size="small" onClick={() => setDepartmentExpansion({ scope: departmentExpansionScope, keys: allDepartmentsExpanded ? [] : departmentKeys })}>{allDepartmentsExpanded ? '收起全部' : '展开全部'}</Button>}
+              {selectedPeriod && <Button size="small" icon={<SyncOutlined aria-hidden="true" />} onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching}>刷新汇总</Button>}
+            </Space>
+          </div>
+          {treeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (
+            <Table<ReportTreeRow>
+              rowKey="key"
+              size="middle"
+              columns={columns}
+              dataSource={treeRows}
+              expandable={{
+                expandedRowKeys: expandedDepartmentKeys,
+                onExpandedRowsChange: keys => setDepartmentExpansion({ scope: departmentExpansionScope, keys: keys.map(key => String(key)) }),
+              }}
+              pagination={false}
+              scroll={{ x: 1300 }}
+              loading={summaryQuery.isFetching}
+              className="weekly-report-summary-table"
+              rowClassName={row => row.kind === 'department' ? 'weekly-report-department-row' : 'weekly-report-inspection-row'}
+            />
+          )}
+        </section>
       )}
 
-      {selectedPeriod && canManageObligations && <WeeklyObligationManagement period={selectedPeriod} />}
-
+      {selectedPeriod && summary && activeStage === 0 && <WeeklyReportWorkflowPanel
+        stage="source"
+        period={selectedPeriod}
+        summaryRows={summary.rows}
+        permissions={permissionQuery.data?.permissions ?? []}
+        onAccessDenied={clearReportScope}
+        onStageChange={selectStage}
+      />}
+      {selectedPeriod && summary && activeStage === 1 && <WeeklyReportWorkflowPanel
+        stage="draft"
+        period={selectedPeriod}
+        summaryRows={summary.rows}
+        permissions={permissionQuery.data?.permissions ?? []}
+        onAccessDenied={clearReportScope}
+        onStageChange={selectStage}
+      />}
+      {selectedPeriod && summary && activeStage === 2 && <WeeklyReportWorkflowPanel
+        stage="final"
+        period={selectedPeriod}
+        summaryRows={summary.rows}
+        permissions={permissionQuery.data?.permissions ?? []}
+        onAccessDenied={clearReportScope}
+        onStageChange={selectStage}
+      />}
+      {selectedPeriod && canManageObligations && activeStage === 0 && <WeeklyObligationManagement period={selectedPeriod} />}
       <Drawer
-        title={selectedCellTitle}
+        className="weekly-report-record-drawer"
+        title={<span className="weekly-report-drawer-title">{selectedCellTitle}</span>}
         open={Boolean(selectedCell)}
-        width={1040}
+        size={1040}
         styles={{ body: { overflowX: 'hidden' } }}
         onClose={() => setSelectedCell(null)}
       >
-        <Space direction="vertical" size="middle" style={{ display: 'flex' }}>
+        <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
           <Alert
             type="info"
             showIcon
-            message="以下为当前确认修订中的实际提交记录"
+            title="以下为当前确认修订中的实际提交记录"
             description="这里不包含草稿、待审核或已退回记录。需要修正数据时，请回到平台的业务记录流程处理后再刷新通报汇总。"
           />
           {recordsQuery.isError && records.length > 0 && (
-            <Alert type="warning" showIcon message="记录刷新失败，仍显示最近一次成功加载的内容。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
+            <Alert type="warning" showIcon title="记录刷新失败，仍显示最近一次成功加载的内容。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
           )}
           {recordsQuery.isError && records.length === 0 && (
-            <Alert type="error" showIcon message="已确认记录加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
+            <Alert type="error" showIcon title="已确认记录加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
           )}
           <Table<ReportingRecord>
             rowKey="id"
@@ -443,7 +511,7 @@ export function WeeklyReportSummaryPage() {
             dataSource={records}
             loading={recordsQuery.isFetching}
             locale={{ emptyText: recordsQuery.isError ? '记录加载失败' : '本项暂无已确认的提交记录' }}
-            expandable={{ expandedRowRender: record => <RecordDetailsView record={record} /> }}
+            expandable={{ expandedRowRender: record => <RecordDetailsView record={record} />, expandRowByClick: false }}
             scroll={{ x: 760 }}
             pagination={{
               current: recordPage,
@@ -460,6 +528,6 @@ export function WeeklyReportSummaryPage() {
           />
         </Space>
       </Drawer>
-    </Space>
+    </section>
   )
 }

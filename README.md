@@ -32,6 +32,10 @@ Compose 从已包含安全修复的 `RELEASE.2025-10-15T17-29-55Z` 源码构建�
 
 本地开发的 Vite 代理配置为 `5173 → localhost:8080`；Compose 对外入口为 `8088`，内部 API 为 `api:8080`，内部数据库为 `postgres:5432`。宿主机原生 PostgreSQL 与 Compose 数据库可能并存，迁移前必须核对 API 实际目标，不能只看端口或容器名。存活检查不等于就绪；还需 `/health/ready` 和已登录业务验证。不要为排障输出 `.env` 全文、Token 或完整数据库连接串。
 
+## 前端静态素材
+
+前端公共静态文件位于 `web/public/`。`logo.png` 是页面主标识和浏览器标签图标；`assets/backgrounds/` 保存登录、注册场景背景，`assets/brand/` 保存其他品牌版本，`assets/characters/` 保存人物和头像。页面通过以 `/` 开头的路径引用这些文件，Vite 和 Web 镜像构建从该目录复制素材。根目录中文素材文件夹保留为临时来源，不参与前端构建。
+
 ## 测试
 
 先核对 `node --version`、`pnpm --version` 与 `web/package.json`。当前指定 pnpm@11.7.0；09-20 已用本机现有 Node 24.12.0 与 pnpm 11.7.0 完成验证，默认 PATH 仍可能指向旧版，执行前须自行核对。外部服务 SKIP、超时或中断必须单列。
@@ -239,6 +243,8 @@ pnpm test:browser
 当前补验范围、发现及下一步见 [09-21 E2E 记录](docs/reviews/2026-09-21-expanded-e2e.md) 和 [实际实施顺序](docs/plans/2026-09-21-next-implementation.md)。十二类列表加载不等于十二类全部管理动作验收，隔离通过不等于目标业务环境通过。
 
 无机课堂隔离浏览器聚焦验证：在原 `verify-browser.py` 环境配置前加 `BROWSER_SUITE=unattended-classroom`，仍使用一次性 PostgreSQL/MinIO/API/Vite，并保留登录与校历前置回归。验证边界见[页面记录](docs/reviews/2026-09-21-unattended-classroom-page.md)。
+
+晚自习专属浏览器验收：从 `web/` 执行 `BROWSER_SUITE=evening-self-study pnpm test:browser`。该用例覆盖页面录入、提交、部门审核、录入/审核/越权边界以及进入周通报计数和明细；Excel 模板映射和导入事务另由晚自习 PostgreSQL 集成测试覆盖，尚不代表浏览器上传 UI 或目标环境模板已验收。
 
 ### 有界文件恢复命令
 

@@ -124,6 +124,33 @@ func TestHygieneOtherReasonRequiresDescription(t *testing.T) {
 		})
 	}
 }
+
+func TestEveningSelfStudyUsesFixedNinthAndTenthPeriods(t *testing.T) {
+	fields := validDetails(InspectionTypeEveningSelfStudy)
+	if _, issues := validateFixture(InspectionTypeEveningSelfStudy, fields); len(issues) != 0 {
+		t.Fatalf("fixed evening rule rejected: %+v", issues)
+	}
+	for _, test := range []struct {
+		field, value string
+		path, code   string
+	}{
+		{"period", `"8-9"`, "details.period", "INVALID_ENUM"},
+		{"period", `"9-11"`, "details.period", "INVALID_ENUM"},
+		{"absenceHours", `1`, "details.absenceHours", "OUT_OF_RANGE"},
+		{"absenceHours", `2.5`, "details.absenceHours", "OUT_OF_RANGE"},
+	} {
+		t.Run(test.field+test.value, func(t *testing.T) {
+			invalid := validDetails(InspectionTypeEveningSelfStudy)
+			invalid[test.field] = json.RawMessage(test.value)
+			_, issues := validateFixture(InspectionTypeEveningSelfStudy, invalid)
+			requireIssue(t, issues, test.path, test.code)
+		})
+	}
+	fields["courseId"] = json.RawMessage(`"` + detailID + `"`)
+	_, issues := validateFixture(InspectionTypeEveningSelfStudy, fields)
+	requireIssue(t, issues, "details", "UNKNOWN_FIELD")
+}
+
 func requireIssue(t *testing.T, issues []DetailIssue, path, code string) {
 	t.Helper()
 	for _, i := range issues {

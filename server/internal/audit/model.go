@@ -39,6 +39,10 @@ const (
 	ActionDepartmentConfirmed     Action = "DEPARTMENT_CONFIRMED"
 	ActionDepartmentResubmitted   Action = "DEPARTMENT_RESUBMITTED"
 	ActionReportObligationChanged Action = "REPORT_OBLIGATION_CHANGED"
+	ActionReportDraftGenerated    Action = "REPORT_DRAFT_GENERATED"
+	ActionReportWorkflowChanged   Action = "REPORT_WORKFLOW_CHANGED"
+	ActionReportCorrectionAdded   Action = "REPORT_CORRECTION_ADDED"
+	ActionReportAdjustmentAdded   Action = "REPORT_ADJUSTMENT_ADDED"
 )
 
 var (

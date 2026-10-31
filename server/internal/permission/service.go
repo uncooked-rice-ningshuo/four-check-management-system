@@ -34,6 +34,8 @@ const (
 	ActionInspectionExport       = "INSPECTION_EXPORT"
 	ActionInspectionSummary      = "INSPECTION_SUMMARIZE"
 	ActionReportView             = "REPORT_VIEW"
+	ActionReportGenerate         = "REPORT_GENERATE"
+	ActionReportCorrect          = "REPORT_CORRECT"
 	ActionReportForceGenerate    = "REPORT_FORCE_GENERATE"
 	ActionReportObligationManage = "REPORT_OBLIGATION_MANAGE"
 	ActionReportReview           = "REPORT_REVIEW"
@@ -50,7 +52,7 @@ var ErrReportObligationRoleRequired = errors.New("weekly obligation permission r
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
 	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary,
-	ActionReportView, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
+	ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
 type Scope struct {
@@ -232,7 +234,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 	}
 	if profile.DepartmentCode == "OFFICE" && leadership {
-		for _, action := range []string{ActionReportView, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
+		for _, action := range []string{ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceOrganizationRole, Label: "学生会办公室部长/副部长"}))
 		}
 	}

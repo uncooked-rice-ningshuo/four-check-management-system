@@ -57,12 +57,23 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.department_submissions') IS NOT NULL
 		AND to_regclass('public.department_submission_revisions') IS NOT NULL
 		AND to_regclass('public.weekly_report_obligations') IS NOT NULL
+		AND to_regclass('public.weekly_reports') IS NOT NULL
+		AND to_regclass('public.weekly_report_versions') IS NOT NULL
+		AND to_regclass('public.weekly_report_version_records') IS NOT NULL
+		AND to_regclass('public.weekly_report_version_zero_receipts') IS NOT NULL
+		AND to_regclass('public.weekly_report_version_adjustments') IS NOT NULL
 		AND to_regclass('public.master_data_import_batches') IS NOT NULL
 		AND to_regclass('public.academic_week_import_batches') IS NOT NULL
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')
 			AND tgname='department_submission_revisions_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submissions')
 			AND tgname='department_submissions_submission_kind_immutable' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.weekly_report_versions')
+			AND tgname='weekly_report_versions_append_only' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.weekly_report_version_zero_receipts')
+			AND tgname='weekly_report_version_zero_receipts_append_only' AND NOT tgisinternal)
+		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.weekly_report_version_adjustments')
+			AND tgname='weekly_report_version_adjustments_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submissions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submission_revisions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')

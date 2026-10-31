@@ -3,6 +3,7 @@ import {
   AUTH_REGISTER_FORM_SPACING,
   AUTH_SHELL_DESKTOP_LAYOUT,
 } from "./authLayoutConfig";
+import { BrandLockup } from "./BrandLockup";
 
 export function AuthLayout({
   variant,
@@ -26,10 +27,7 @@ export function AuthLayout({
     <main className="auth-page">
       <section className={`auth-shell ${variant}`} style={shellVariables}>
         <aside className="auth-visual">
-          <div className="brand">
-            <img src="/hnust-logo.svg" />
-            湖南科技大学 · 计算机学院学生会
-          </div>
+          <BrandLockup className="system-brand--auth" />
           {variant === "login" && (
             <div className="visual-copy">
               <h1>

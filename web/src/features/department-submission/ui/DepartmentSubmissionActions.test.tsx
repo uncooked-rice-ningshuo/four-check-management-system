@@ -174,3 +174,21 @@ it('shows the imported record details in batch selection and final confirmation'
   expect(dialog).toHaveTextContent('2026-09-11')
   expect(dialog).toHaveTextContent('3-4')
 })
+
+it('labels a confirmed college batch as college confirmed', async () => {
+  const college = { ...batch, scope: { ...scope, departmentId: '' }, departmentName: undefined }
+  api.list.mockResolvedValue({ items: [college], total: 1, page: 1, pageSize: 10 })
+  api.decide.mockResolvedValue({ ...college, status: 'CONFIRMED' })
+  show()
+  fireEvent.click(screen.getByRole('button', { name: '检查提交批次' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认批次' }))
+  expect(await screen.findByText('批次状态：校级已确认')).toBeInTheDocument()
+})
+
+it('does not describe a department batch with a missing name as college-level', async () => {
+  api.list.mockResolvedValue({ items: [{ ...batch, departmentName: undefined }], total: 1, page: 1, pageSize: 10 })
+  show()
+  fireEvent.click(screen.getByRole('button', { name: '检查提交批次' }))
+  expect(await screen.findByRole('cell', { name: /部门名称不可用/ })).toBeInTheDocument()
+})

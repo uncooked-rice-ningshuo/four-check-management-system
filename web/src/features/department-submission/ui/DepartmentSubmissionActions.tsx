@@ -29,6 +29,12 @@ const labels: Record<DepartmentSubmission['status'], string> = {
   PENDING_REVIEW: '待部门审核', RETURNED: '已退回', CONFIRMED: '部门已确认',
 }
 
+function submissionStatusLabel(status: DepartmentSubmission['status'], departmentId: string) {
+  if (!departmentId && status === 'PENDING_REVIEW') return '待校级审核'
+  if (!departmentId && status === 'CONFIRMED') return '校级已确认'
+  return labels[status]
+}
+
 function explicitReceiptScope(listScope: Props['listScope'], inspectionTypeId: string): DepartmentSubmissionScope | undefined {
   const semesterId = listScope?.semesterId
   const weekId = listScope?.weekId
@@ -125,7 +131,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       queryClient.invalidateQueries({ queryKey: ['course-inspections'] }), queryClient.invalidateQueries({ queryKey: ['late-returns'] }),
       queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     onChanged()
-    void notice.success(variables.kind === 'submit' ? `已提交${variables.submissionKind === 'RECORDS' ? ` ${variables.records.length} 条记录` : '零记录回执'}，等待审核` : `批次状态：${labels[result.status] ?? '已更新'}`)
+    void notice.success(variables.kind === 'submit' ? `已提交${variables.submissionKind === 'RECORDS' ? ` ${variables.records.length} 条记录` : '零记录回执'}，等待审核` : `批次状态：${submissionStatusLabel(result.status, result.scope.departmentId)}`)
   }, onError: error => {
     void Promise.all([queryClient.invalidateQueries({ queryKey: ['department-submissions'] }),
       queryClient.invalidateQueries({ queryKey: ['submission-cart'] }),
@@ -256,10 +262,10 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
         locale={{ emptyText: list.isError ? '批次加载失败，请重试' : '当前范围暂无提交批次' }}
         pagination={{ current: page, pageSize: 10, total: list.data?.total ?? 0, onChange: setPage }}
         scroll={{ x: 650 }} columns={[
-          { title: '周次范围', key: 'scope', render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.departmentName ?? '校级'}</> },
+          { title: '周次范围', key: 'scope', render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.scope.departmentId ? item.departmentName || '部门名称不可用' : '校级'}</> },
           { title: '记录数', key: 'count', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
           { title: '修订', dataIndex: 'revisionNo' },
-          { title: '状态', key: 'status', render: (_, item) => <Tag>{item.scope.departmentId ? labels[item.status] : item.status === 'PENDING_REVIEW' ? '待校级审核' : item.status === 'CONFIRMED' ? '校级已确认' : labels[item.status]}</Tag> },
+          { title: '状态', key: 'status', render: (_, item) => <Tag>{submissionStatusLabel(item.status, item.scope.departmentId)}</Tag> },
           { title: '操作', key: 'actions', render: (_, item) => <Space wrap>
             {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
             {item.status === 'RETURNED' && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}

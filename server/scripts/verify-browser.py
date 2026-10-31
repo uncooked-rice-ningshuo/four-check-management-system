@@ -488,7 +488,7 @@ FROM inspection_types WHERE code='EVENING_SELF_STUDY';
                 raise RuntimeError('Evening self-study browser reported uncaught errors')
             persisted = run(sql_command('-tAc', """
 SELECT count(*) FILTER (WHERE r.status='CONFIRMED' AND b.status='CONFIRMED'),
-       count(*) FILTER (WHERE d.period_text='9-10' AND d.absence_hours=2 AND d.penalty_hours=2*d.penalty_multiplier),
+       count(*) FILTER (WHERE d.period_text='9-10' AND d.absence_hours IS NULL AND d.penalty_hours IS NULL AND d.penalty_count=d.penalty_multiplier),
        count(*) FILTER (WHERE c.record_id IS NULL)
 FROM inspection_records r
 JOIN inspection_types t ON t.id=r.inspection_type_id AND t.code='EVENING_SELF_STUDY'
@@ -499,7 +499,7 @@ WHERE r.remark='晚自习专属浏览器验收' AND r.deleted_at IS NULL
 """), text=True).stdout.strip()
             if persisted != '1|1|1':
                 raise RuntimeError('Evening self-study confirmation persistence mismatch: ' + persisted)
-            report['cases'].append('一次性 PostgreSQL 持久化核对：晚自习记录及批次已确认、固定节次/学时有效且无课程详情')
+            report['cases'].append('一次性 PostgreSQL 持久化核对：晚自习记录及批次已确认、固定节次和计入次数有效且无课程详情')
             report['status'] = 'passed'
             raise SystemExit(0)
 

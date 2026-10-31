@@ -125,6 +125,15 @@ func TestHygieneOtherReasonRequiresDescription(t *testing.T) {
 	}
 }
 
+func TestEveningSelfStudyOneIncidentWithoutHours(t *testing.T) {
+	fields := validDetails(InspectionTypeEveningSelfStudy)
+	delete(fields, "absenceHours")
+	result, issues := validateFixture(InspectionTypeEveningSelfStudy, fields)
+	if len(issues) != 0 || result.ViolationCount != 1 {
+		t.Fatalf("expected one incident without hours, got count=%d issues=%+v", result.ViolationCount, issues)
+	}
+}
+
 func TestEveningSelfStudyUsesFixedNinthAndTenthPeriods(t *testing.T) {
 	fields := validDetails(InspectionTypeEveningSelfStudy)
 	if _, issues := validateFixture(InspectionTypeEveningSelfStudy, fields); len(issues) != 0 {
@@ -136,8 +145,6 @@ func TestEveningSelfStudyUsesFixedNinthAndTenthPeriods(t *testing.T) {
 	}{
 		{"period", `"8-9"`, "details.period", "INVALID_ENUM"},
 		{"period", `"9-11"`, "details.period", "INVALID_ENUM"},
-		{"absenceHours", `1`, "details.absenceHours", "OUT_OF_RANGE"},
-		{"absenceHours", `2.5`, "details.absenceHours", "OUT_OF_RANGE"},
 	} {
 		t.Run(test.field+test.value, func(t *testing.T) {
 			invalid := validDetails(InspectionTypeEveningSelfStudy)

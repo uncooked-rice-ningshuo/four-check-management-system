@@ -55,10 +55,10 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 	if len(issues) > 0 {
 		return ValidatedDetails{}, issues
 	}
-	if code == InspectionTypeAttendance || code == InspectionTypeEveningSelfStudy {
+	if code == InspectionTypeAttendance {
 		hours, valid := AttendanceHoursForPeriod(detailString(values, "period"))
 		var submitted float64
-		if !valid || json.Unmarshal(values["absenceHours"], &submitted) != nil || submitted != hours || (code == InspectionTypeEveningSelfStudy && detailString(values, "period") != "9-10") {
+		if !valid || json.Unmarshal(values["absenceHours"], &submitted) != nil || submitted != hours {
 			return ValidatedDetails{}, []DetailIssue{detailIssue("details.absenceHours", "PERIOD_HOURS_MISMATCH")}
 		}
 	}

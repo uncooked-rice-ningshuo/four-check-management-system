@@ -25,7 +25,7 @@ const correctionFieldLabels: Record<string, string> = {
   currentDormitoryName: '宿舍', currentCourseName: '课程', currentClassroomName: '教室',
   currentAreaName: '检查区域', currentReasonLabel: '原因类别', 'details.date': '检查日期',
   'details.time': '发生时间', 'details.period': '节次', 'details.round': '检查轮次',
-  'details.absenceHours': '缺课学时', 'details.penaltyHours': '计入学时', 'details.absenceCount': '缺勤次数',
+  'details.absenceHours': '缺课数量', 'details.penaltyHours': '违纪计入数量', 'details.absenceCount': '缺勤次数',
   'details.result': '检查结果', 'details.reasonCode': '原因类别', 'details.description': '情况说明', 'details.remark': '备注',
 }
 

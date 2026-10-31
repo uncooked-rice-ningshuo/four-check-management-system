@@ -709,7 +709,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 			if def.Code == inspection.InspectionTypeEveningSelfStudy {
 				details, ok := read.Details.(*inspection.EveningSelfStudyDetails)
-				if !ok || details.Period != "9-10" || details.AbsenceHours != 2 || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 1 || details.PenaltyHours == nil || *details.PenaltyHours != 2 {
+				if !ok || details.Period != "9-10" || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 1 || details.PenaltyCount == nil || *details.PenaltyCount != 1 {
 					t.Fatalf("server-derived evening rule or penalty snapshot missing: %#v", read.Details)
 				}
 				if read.CurrentCourseName != "" {
@@ -717,6 +717,9 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				}
 				if _, err := svc.Create(ctx, admin, makeInput(def.Code, map[string]any{"period": "8-9"}), audit.Metadata{}); err == nil {
 					t.Fatal("client supplied fixed evening period")
+				}
+				if _, err := svc.Create(ctx, admin, makeInput(def.Code, map[string]any{"penaltyCount": 99}), audit.Metadata{}); err == nil {
+					t.Fatal("client supplied server-owned evening count")
 				}
 			}
 			if def.Code == inspection.InspectionTypeUnattended {
@@ -799,7 +802,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				if _, restoreErr := pool.Exec(ctx, `UPDATE semester_weeks SET attendance_penalty_multiplier=1 WHERE id=$1`, rf("04")); restoreErr != nil {
 					t.Fatal(restoreErr)
 				}
-				if !ok || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 2 || details.PenaltyHours == nil || *details.PenaltyHours != 4 {
+				if !ok || details.PenaltyMultiplier == nil || *details.PenaltyMultiplier != 2 || details.PenaltyCount == nil || *details.PenaltyCount != 2 {
 					t.Fatalf("editable draft did not use the current week penalty configuration: %#v", updated.Details)
 				}
 			}

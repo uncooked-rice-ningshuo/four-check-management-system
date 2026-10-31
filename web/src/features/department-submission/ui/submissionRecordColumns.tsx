@@ -34,11 +34,11 @@ export function submissionRecordColumns<T extends SubmissionCartRecord>(typeCode
   if (hygiene) columns.push(col('检查轮次', 'round', 120, r => detail(r, 'round')))
   if (['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY'].includes(typeCode)) columns.push(
     col('节次', 'period', 100, r => detail(r, 'period')),
-    col('旷课学时', 'absenceHours', 110, r => detail(r, 'absenceHours')),
   )
+  if (typeCode === 'ATTENDANCE_RATE' || typeCode === 'UNATTENDED_CLASSROOM') columns.push(col('旷课节次数', 'absenceHours', 110, r => detail(r, 'absenceHours')))
   if (typeCode === 'ATTENDANCE_RATE' || typeCode === 'EVENING_SELF_STUDY') columns.push(
     col('违纪计入倍数', 'penaltyMultiplier', 120, r => detail(r, 'penaltyMultiplier') === '—' ? '历史待核对' : `${detail(r, 'penaltyMultiplier')} 倍`),
-    col('违纪计入学时', 'penaltyHours', 120, r => detail(r, 'penaltyHours') === '—' ? '历史待核对' : detail(r, 'penaltyHours')),
+    col('违纪计入次数', 'penaltyCount', 120, r => { const key = typeCode === 'EVENING_SELF_STUDY' ? 'penaltyCount' : 'penaltyHours'; return detail(r, key) === '—' ? '历史待核对' : detail(r, key) }),
   )
   if (typeCode === 'MORNING_ATTENDANCE') columns.push(col('缺勤次数', 'absenceCount', 100, r => detail(r, 'absenceCount')))
   if (hygiene) columns.push(

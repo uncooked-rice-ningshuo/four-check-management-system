@@ -169,6 +169,7 @@ function recordSummary(record: ReportingRecord): string {
   const absence = absenceSummary(record)
   if (absence) parts.push(absence)
   if (details.absenceCount !== undefined) parts.push(`缺勤 ${details.absenceCount} 次`)
+  if (details.penaltyCount !== undefined && details.penaltyCount !== null) parts.push(`违纪计入 ${details.penaltyCount} 次`)
   if (record.currentCourseName) parts.push(record.currentCourseName)
   if (record.currentClassroomName) parts.push(record.currentClassroomName)
   if (record.currentDormitoryName) parts.push(record.currentDormitoryName)
@@ -210,8 +211,9 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
     ['发生时间', details.time],
     ['节次', details.period],
     ['检查轮次', details.round],
-    ['缺课学时', details.absenceHours],
-    ['计入学时', details.penaltyHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '缺课节次数' : '缺课学时', details.absenceHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '违纪计入次数' : '计入学时', details.penaltyHours],
+    ['违纪计入次数', details.penaltyCount],
     ['缺勤次数', details.absenceCount],
     ['检查结果', details.result ? inspectionResultLabel(details.result) : undefined],
     ['课程', record.currentCourseName],

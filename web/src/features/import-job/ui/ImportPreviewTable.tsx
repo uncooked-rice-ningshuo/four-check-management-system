@@ -58,7 +58,7 @@ export function ImportPreviewTable({ typeCode = 'ATTENDANCE_RATE', rows, loading
           { title: '检查时间', width: 170, render: (_: unknown, record: ImportRow) => [record.rawData.absence_date, record.rawData.absence_time].filter(Boolean).join(' ') || '—' },
           { title: '教室', render: (_: unknown, record: ImportRow) => record.rawData.classroom_code || '—' },
           { title: '节次', width: 100, render: () => '第 9–10 节' },
-          { title: '旷课学时', width: 100, render: () => 2 },
+          { title: '基础缺勤次数', width: 120, render: () => 1 },
           { title: '备注', render: (_: unknown, record: ImportRow) => record.rawData.remark || '—' },
         ] : typeCode === 'LATE_RETURN' ? [
           { title: '晚归时间', width: 170, render: (_: unknown, record: ImportRow) => [record.rawData.inspection_date,record.rawData.inspection_time].filter(Boolean).join(' ') || '—' },

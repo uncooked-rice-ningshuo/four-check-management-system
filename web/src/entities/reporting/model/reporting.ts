@@ -177,6 +177,7 @@ export type ReportingRecordDetails = {
   round?: string
   absenceHours?: number
   penaltyHours?: number | null
+  penaltyCount?: number | null
   absenceCount?: number
   result?: string
   reasonCode?: string

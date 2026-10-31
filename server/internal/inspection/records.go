@@ -194,13 +194,12 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 		if decodeErr != nil {
 			return InspectionRecord{}, &DetailsValidationError{[]DetailIssue{detailIssue("details", "INVALID_OBJECT")}}
 		}
-		for _, field := range []string{"period", "absenceHours"} {
+		for _, field := range []string{"period", "absenceHours", "penaltyMultiplier", "penaltyHours", "penaltyCount"} {
 			if _, provided := values[field]; provided {
 				return InspectionRecord{}, &DetailsValidationError{[]DetailIssue{detailIssue("details."+field, "SERVER_OWNED_FIELD")}}
 			}
 		}
 		values["period"] = json.RawMessage(`"9-10"`)
-		values["absenceHours"] = json.RawMessage(`2`)
 		i.Details, err = json.Marshal(values)
 		if err != nil {
 			return InspectionRecord{}, err
@@ -242,8 +241,8 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 		}
 		evening.PenaltyMultiplier = multiplier
 		if multiplier != nil {
-			penaltyHours := evening.AbsenceHours * float64(*multiplier)
-			evening.PenaltyHours = &penaltyHours
+			penaltyCount := *multiplier
+			evening.PenaltyCount = &penaltyCount
 		}
 	}
 	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}

@@ -58,7 +58,7 @@ it('submits the selected start and end sections and recalculates attendance hour
  await selectPeriod('开始节次',3)
  await waitFor(()=>expect(screen.getByText('选择结束节次')).toBeInTheDocument())
  await selectPeriod('结束节次',4)
- expect(screen.getByRole('spinbutton',{name:'实际旷课学时（按节次自动计算）'})).toHaveValue('2')
+ expect(screen.getByRole('spinbutton',{name:'实际旷课节次数（按节次自动计算）'})).toHaveValue('2')
  fireEvent.change(screen.getByLabelText('修改原因'),{target:{value:'核对节次范围'}})
  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
  await waitFor(()=>expect(mutate).toHaveBeenCalledWith(expect.objectContaining({record:expect.objectContaining({details:expect.objectContaining({period:'3-4',absenceHours:2})})})))
@@ -74,14 +74,14 @@ it('does not request courses or periods when the inspection date changes',async(
 it('uses the current multiplier after changing the occurrence date without clearing course or period facts',async()=>{
  const returned:CourseRecord={...record,typeCode:'ATTENDANCE_RATE',status:'RETURNED',details:{...record.details,penaltyMultiplier:1,penaltyHours:2}}
  render(<CourseRecordDrawer editing={returned} typeCode="ATTENDANCE_RATE" inspectionTypeId="type" onClose={vi.fn()}/>)
- await screen.findByText('实际旷课 2 学时；原记录按 1 倍计入违纪，共 2 学时。')
+ await screen.findByText('实际旷课 2 节次；原记录按 1 倍计入违纪，共 2 次。')
  fireEvent.click(screen.getByLabelText('检查日期'))
  fireEvent.click(await screen.findByTitle('2026-09-04'))
- await screen.findByText('实际旷课 2 学时；本周按 2 倍计入违纪，共 4 学时。')
+ await screen.findByText('实际旷课 2 节次；本周按 2 倍计入违纪，共 4 次。')
  expect(screen.getByLabelText('课程')).toHaveValue('course')
  expect(screen.getByRole('combobox',{name:'开始节次'}).parentElement).toHaveTextContent('第 1 节')
  expect(screen.getByRole('combobox',{name:'结束节次'}).parentElement).toHaveTextContent('第 2 节')
- expect(screen.getByRole('spinbutton',{name:'实际旷课学时（按节次自动计算）'})).toHaveValue('2')
+ expect(screen.getByRole('spinbutton',{name:'实际旷课节次数（按节次自动计算）'})).toHaveValue('2')
 })
 it('does not offer a silent current-week rule for a returned historical record',async()=>{
  const historical:CourseRecord={...record,typeCode:'ATTENDANCE_RATE',status:'RETURNED',details:{...record.details,penaltyMultiplier:null,penaltyHours:null}}

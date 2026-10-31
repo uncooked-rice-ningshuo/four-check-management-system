@@ -235,11 +235,11 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	}
 	hours, hoursErr := strconv.ParseFloat(value("absence_hours"), 64)
 	if value("absence_hours") != "" && (hoursErr != nil || hours <= 0 || hours > 24) {
-		result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "旷课学时格式或范围无效", "填写大于 0 且不超过 24 的数字"))
+		result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "旷课节次数格式或范围无效", "填写大于 0 且不超过 24 的数字"))
 	} else if value("absence_hours") != "" {
 		expected, validPeriod := inspection.AttendanceHoursForPeriod(period)
 		if !validPeriod || hours != expected {
-			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课学时与节次不一致", "每节课按 1 学时填写，核对缺课节次"))
+			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课节次数与节次不一致", "每节课按 1 节次填写，核对缺课节次"))
 		}
 	}
 	if utf8.RuneCountInString(period) > 64 {

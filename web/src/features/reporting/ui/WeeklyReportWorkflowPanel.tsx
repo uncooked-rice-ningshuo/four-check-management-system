@@ -21,8 +21,8 @@ const correctionFields = [
   { value: 'details.time', label: '发生时间', numeric: false, defaultFactChange: true },
   { value: 'details.period', label: '节次', numeric: false, defaultFactChange: true },
   { value: 'details.round', label: '检查轮次', numeric: false, defaultFactChange: true },
-  { value: 'details.absenceHours', label: '缺课学时', numeric: true, defaultFactChange: true },
-  { value: 'details.penaltyHours', label: '计入学时', numeric: true, defaultFactChange: true },
+  { value: 'details.absenceHours', label: '缺课数量', numeric: true, defaultFactChange: true },
+  { value: 'details.penaltyHours', label: '违纪计入数量', numeric: true, defaultFactChange: true },
   { value: 'details.absenceCount', label: '缺勤次数', numeric: true, defaultFactChange: true },
   { value: 'details.result', label: '检查结果', numeric: false, defaultFactChange: true },
   { value: 'details.reasonCode', label: '原因代码', numeric: false, defaultFactChange: true },
@@ -379,7 +379,7 @@ export function WeeklyReportWorkflowPanel({
       {correctionRecord && <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
         <Typography.Text>{recordPeople(correctionRecord)} · {correctionRecord.className || '未标注班级'} <Tooltip title={`当前值：${displayCorrectionValue(correctionRecord, correctionField)}`}><span style={{ cursor: 'help' }}>ⓘ</span></Tooltip></Typography.Text>
         <label>修正字段
-          <Select aria-label="修正字段" virtual={false} style={{ display: 'block', marginTop: 6 }} value={correctionField} options={correctionFields.map(item => ({ value: item.value, label: item.label }))}
+          <Select aria-label="修正字段" virtual={false} style={{ display: 'block', marginTop: 6 }} value={correctionField} options={correctionFields.map(item => ({ value: item.value, label: correctionRecord?.typeCode === 'ATTENDANCE_RATE' && item.value === 'details.absenceHours' ? '缺课节次数' : correctionRecord?.typeCode === 'ATTENDANCE_RATE' && item.value === 'details.penaltyHours' ? '违纪计入次数' : item.label }))}
             onChange={value => {
               const field = correctionFields.find(item => item.value === value)
               setCorrectionField(value)

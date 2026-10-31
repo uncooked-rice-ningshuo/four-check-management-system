@@ -27,13 +27,12 @@ const catalog: InspectionDefinition[] = [
       { "key": "date", "label": "检查日期", "kind": "date", "required": true },
       { "key": "time", "label": "检查时间", "kind": "time", "required": true },
       { "key": "period", "label": "节次", "kind": "string", "required": true, "enum": ["9-10"] },
-      { "key": "absenceHours", "label": "旷课学时", "kind": "number", "required": true, "constValue": 2 },
       { "key": "remark", "label": "备注", "kind": "string", "required": false, "maxLength": 500 }
     ],
     "duplicateKey": ["semesterId", "weekId", "inspectionTypeId", "studentId", "occurredAt"],
     "plannedActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
     "availableActions": ["CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"],
-    "rules": ["Only absent students are recorded.", "Period 9-10 and two absence hours are server-enforced; no course is linked."]
+    "rules": ["Only absent students are recorded.", "Period 9-10 is server-enforced; each absence is one incident before the weekly multiplier; no course is linked."]
   },
   {
     "code": "ATTENDANCE_RATE",

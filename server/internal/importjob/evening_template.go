@@ -1,6 +1,6 @@
 package importjob
 
-// Evening self-study import leaves the fixed period and two absence hours to
+// Evening self-study import leaves the fixed period and one absence incident to
 // the server; the workbook contains only the student, occurrence and room.
 var eveningSelfStudyImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"},
@@ -14,5 +14,5 @@ var eveningSelfStudyImportFields = []TemplateField{
 
 // BuildEveningSelfStudyTemplate generates the version-locked import workbook.
 func BuildEveningSelfStudyTemplate() ([]byte, error) {
-	return buildImportTemplate("晚自习导入", "EVENING_SELF_STUDY_IMPORT", "填写说明：每名缺勤学生每次记录一行；日期使用 YYYY-MM-DD，时间使用 HH:MM。节次固定为第 9–10 节、实际旷课 2 学时，由系统生成；不要填写到场学生。", eveningSelfStudyImportFields)
+	return buildImportTemplate("晚自习导入", "EVENING_SELF_STUDY_IMPORT", "填写说明：每名缺勤学生每次记录一行；日期使用 YYYY-MM-DD，时间使用 HH:MM。节次固定为第 9–10 节，每次缺勤计 1 次并按周倍数计入违纪，由系统计算；不要填写到场学生。", eveningSelfStudyImportFields)
 }

@@ -169,6 +169,7 @@ type RecordDetails struct {
 	Round        string   `json:"round,omitempty"`
 	AbsenceHours *float64 `json:"absenceHours,omitempty"`
 	PenaltyHours *float64 `json:"penaltyHours,omitempty"`
+	PenaltyCount *int     `json:"penaltyCount,omitempty"`
 	AbsenceCount *int     `json:"absenceCount,omitempty"`
 	Result       string   `json:"result,omitempty"`
 	ReasonCode   string   `json:"reasonCode,omitempty"`

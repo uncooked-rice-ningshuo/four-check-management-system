@@ -62,7 +62,7 @@ func TestEveningSelfStudyAdapterCreatesNoCourseAbsenceAndDetectsDuplicates(t *te
 	if err := json.Unmarshal(record.Input.Details, &input); err != nil {
 		t.Fatal(err)
 	}
-	for _, serverOwned := range []string{"period", "absenceHours", "penaltyMultiplier", "penaltyHours"} {
+	for _, serverOwned := range []string{"period", "absenceHours", "penaltyMultiplier", "penaltyHours", "penaltyCount"} {
 		if _, found := input[serverOwned]; found {
 			t.Fatalf("import input must leave %q to the server: %s", serverOwned, record.Input.Details)
 		}

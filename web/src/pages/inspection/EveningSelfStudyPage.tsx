@@ -59,11 +59,11 @@ export function EveningSelfStudyPage() {
   { title: '晚自习教室', dataIndex: 'currentClassroomName', search: false, width: 180 },
   { title: '缺勤日期与检查时间', key: 'date', search: false, width: 190, render: (_, record) => `${record.details.date} ${record.details.time.slice(0, 5)}` },
   { title: '节次', key: 'period', search: false, width: 100, render: () => '第 9–10 节' },
-  { title: '违纪计入学时', key: 'penaltyHours', search: false, width: 120, render: (_, record) => record.details.penaltyHours ?? '历史待核对' },
+  { title: '违纪计入次数', key: 'penaltyCount', search: false, width: 120, render: (_, record) => record.details.penaltyCount ?? '历史待核对' },
   { title: '操作', valueType: 'option', fixed: 'right', width: 270, render: (_, record) => <Space>{record.importBatchId && record.canEdit && <Button type="link" onClick={() => { setImportBatchId(record.importBatchId); setImporting(true) }}>导入批次</Button>}<Button type="link" onClick={() => setPanel({ record, readOnly: true })}>详情</Button>{record.canEdit && <><Button type="link" onClick={() => setPanel({ record, readOnly: false })}>编辑</Button>{record.status === 'DRAFT' && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</>}</Space> },
  ]
  return <section className="attendance-page" aria-labelledby="inspection-page-title">
-  <div className="attendance-page-heading"><div><Typography.Title id="inspection-page-title" level={2}>晚自习检查</Typography.Title><Typography.Text type="secondary">只记录缺勤学生；节次固定为第 9–10 节、2 学时，不关联课程。</Typography.Text></div></div>
+  <div className="attendance-page-heading"><div><Typography.Title id="inspection-page-title" level={2}>晚自习检查</Typography.Title><Typography.Text type="secondary">只记录缺勤学生；节次固定为第 9–10 节，每次缺勤计 1 次并按周倍数计入违纪，不关联课程。</Typography.Text></div></div>
   {scope.currentWeek.data?.week === null && <Alert type="info" title="当前无有效教学周，请手动选择学期和周次。" />}
   {invalidSelection && <Alert type="error" title="所选学期或周次已不在授权范围内，请重置筛选条件。" action={<Button onClick={() => saveFilters({ page: 1, pageSize: 20 })}>重置筛选</Button>} />}
   {optionError && <Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={() => optionQueries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} />}

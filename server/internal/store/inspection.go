@@ -374,7 +374,7 @@ func (t *inspectionTx) readDetails(ctx context.Context, r inspection.InspectionR
 		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
 	case inspection.InspectionTypeEveningSelfStudy:
 		table = "evening_self_study_details"
-		extra = personal + ` || jsonb_build_object('classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
+		extra = personal + ` || jsonb_build_object('classroomId',d.classroom_id,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyCount',d.penalty_count)`
 	case inspection.InspectionTypeMorning:
 		table = "morning_exercise_details"
 		extra = personal + ` || jsonb_build_object('absenceCount',d.absence_count)`
@@ -483,8 +483,8 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	case *inspection.UnattendedClassroomDetails:
 		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, nil)
 	case *inspection.EveningSelfStudyDetails:
-		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,absence_hours,penalty_multiplier,penalty_hours) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=excluded.absence_hours,penalty_multiplier=excluded.penalty_multiplier,penalty_hours=excluded.penalty_hours`
-		args = []any{r.ID, v.ClassroomID, v.Period, v.AbsenceHours, v.PenaltyMultiplier, v.PenaltyHours}
+		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count) VALUES($1,$2,$3,$4,$5) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=NULL,penalty_hours=NULL,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`
+		args = []any{r.ID, v.ClassroomID, v.Period, v.PenaltyMultiplier, v.PenaltyCount}
 	case *inspection.MorningAttendanceDetails:
 		sql = `INSERT INTO morning_exercise_details(record_id,absence_count) VALUES($1,$2) ON CONFLICT(record_id) DO UPDATE SET absence_count=excluded.absence_count`
 		args = []any{r.ID, v.AbsenceCount}

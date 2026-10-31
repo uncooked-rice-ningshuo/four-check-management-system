@@ -9,7 +9,7 @@ const (
 	InspectionTypeDormitoryHygiene       = "DORMITORY_HYGIENE"
 	InspectionTypeClassroomHygiene       = "CLASSROOM_HYGIENE"
 	InspectionTypePublicDormitoryHygiene = "PUBLIC_DORMITORY_HYGIENE"
-	InspectionTypeEveningSelfStudy        = "EVENING_SELF_STUDY"
+	InspectionTypeEveningSelfStudy       = "EVENING_SELF_STUDY"
 	OccurrenceTime                       = "TIME"
 	OccurrenceDate                       = "DATE"
 	OccurrenceRound                      = "ROUND"
@@ -54,10 +54,11 @@ type EveningSelfStudyDetails struct {
 	Date              string   `json:"date"`
 	Time              string   `json:"time"`
 	Period            string   `json:"period"`
-	AbsenceHours      float64  `json:"absenceHours"`
+	AbsenceHours      float64  `json:"-"`
 	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
-	PenaltyHours      *float64 `json:"penaltyHours,omitempty"`
+	PenaltyHours      *float64 `json:"-"`
 	Remark            string   `json:"remark,omitempty"`
+	PenaltyCount      *int     `json:"penaltyCount,omitempty"`
 }
 
 func (*EveningSelfStudyDetails) inspectionDetails() {}
@@ -164,5 +165,5 @@ var detailAdapters = map[string]DetailAdapter{
 	InspectionTypeDormitoryHygiene:       {func() InspectionDetails { return &DormitoryHygieneDetails{} }},
 	InspectionTypeClassroomHygiene:       {func() InspectionDetails { return &ClassroomHygieneDetails{} }},
 	InspectionTypePublicDormitoryHygiene: {func() InspectionDetails { return &PublicDormitoryHygieneDetails{} }},
-	InspectionTypeEveningSelfStudy:        {func() InspectionDetails { return &EveningSelfStudyDetails{} }},
+	InspectionTypeEveningSelfStudy:       {func() InspectionDetails { return &EveningSelfStudyDetails{} }},
 }

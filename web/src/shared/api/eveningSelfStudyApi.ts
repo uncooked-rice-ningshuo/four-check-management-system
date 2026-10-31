@@ -4,7 +4,7 @@ export type { ContextOptions, InspectionOption, InspectionQuery } from './inspec
 
 export type EveningSelfStudyDetails = {
  classId: string; studentId: string; classroomId: string; date: string; time: string
- period: '9-10'; absenceHours: 2; penaltyMultiplier?: 1 | 2 | null; penaltyHours?: number | null; remark: string
+ period: '9-10'; penaltyMultiplier?: 1 | 2 | null; penaltyCount: number; remark: string
 }
 export type EveningSelfStudyRecordInput = {
  semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string
@@ -20,9 +20,9 @@ function record(value: unknown): EveningSelfStudyRecordDTO {
  if (!object(value) || !object(value.details)) throw badResponse()
  for (const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentClassroomName','status','source','createdBy']) if (typeof value[key] !== 'string') throw badResponse()
  for (const key of ['classId','studentId','classroomId','date','time']) if (typeof value.details[key] !== 'string') throw badResponse()
- if (value.typeCode !== 'EVENING_SELF_STUDY' || value.details.period !== '9-10' || value.details.absenceHours !== 2) throw badResponse()
+ if (value.typeCode !== 'EVENING_SELF_STUDY' || value.details.period !== '9-10' || (value.details.penaltyCount !== 1 && value.details.penaltyCount !== 2) || value.details.penaltyCount !== value.details.penaltyMultiplier) throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()
- for (const key of ['penaltyMultiplier','penaltyHours']) if (value.details[key] !== undefined && value.details[key] !== null && typeof value.details[key] !== 'number') throw badResponse()
+ for (const key of ['penaltyMultiplier']) if (value.details[key] !== undefined && value.details[key] !== null && typeof value.details[key] !== 'number') throw badResponse()
  if (value.importBatchId !== undefined && typeof value.importBatchId !== 'string') throw badResponse()
  if (!Number.isInteger(value.rowVersion) || typeof value.canEdit !== 'boolean') throw badResponse()
  return { ...value, details: { ...value.details, remark: value.details.remark ?? '' } } as EveningSelfStudyRecordDTO

@@ -415,3 +415,21 @@ func rewriteWorkbookPart(t *testing.T, content []byte, name string, change func(
 	}
 	return result.Bytes()
 }
+
+func TestAttendanceHeaderAcceptsNewAndPublishedLegacyWording(t *testing.T) {
+	p := NewAttendanceXLSXParser(1 << 20)
+	codes := make([]string, len(attendanceImportFields))
+	headers := make([]string, len(attendanceImportFields))
+	for i, field := range attendanceImportFields {
+		codes[i] = field.Code
+		headers[i] = field.Header
+	}
+	headers[7] = "旷课节次数"
+	if !p.validHeaders(codes, headers) {
+		t.Fatal("new period count header rejected")
+	}
+	headers[7] = "旷课学时"
+	if !p.validHeaders(codes, headers) {
+		t.Fatal("published legacy template rejected")
+	}
+}

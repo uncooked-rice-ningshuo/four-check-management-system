@@ -66,7 +66,7 @@ export function EveningSelfStudyDrawer({ editing: initialEditing, readOnly = fal
   {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
   {failed && <Alert type="error" showIcon title="录入选项加载失败，请重试。" action={<Button onClick={() => queries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} style={{ marginBottom: 12 }} />}
   {!memberDepartmentAvailable && !departments.isLoading && <Alert type="warning" showIcon title="当前账号所属部门无此范围的录入权限，请联系管理员。" style={{ marginBottom: 12 }} />}
-  {weekId && (effectiveMultiplier ? <Alert type="info" showIcon title={`固定第 9–10 节，实际旷课 2 学时；按 ${effectiveMultiplier} 倍计入违纪，共 ${2 * effectiveMultiplier} 学时。`} style={{ marginBottom: 12 }} /> : <Alert type="warning" showIcon title="该周的违纪计入倍数尚未配置，请联系管理员。" style={{ marginBottom: 12 }} />)}
+  {weekId && (effectiveMultiplier ? <Alert type="info" showIcon title={`固定第 9–10 节，每次缺勤计 1 次；按 ${effectiveMultiplier} 倍计入违纪，共 ${effectiveMultiplier} 次。`} style={{ marginBottom: 12 }} /> : <Alert type="warning" showIcon title="该周的违纪计入倍数尚未配置，请联系管理员。" style={{ marginBottom: 12 }} />)}
   <Form name="evening-self-study-record" form={form} layout="vertical" onFinish={submit} disabled={readOnly || mutation.isPending}
    initialValues={editing ? { semesterId: editing.semesterId, weekId: editing.weekId, departmentId: departmentOptionId(editing.departmentId), classId: editing.details.classId, studentId: editing.details.studentId, classroomId: editing.details.classroomId, date: editing.details.date, time: editing.details.time, remark: editing.details.remark } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: memberDepartmentId }}>
    <Row gutter={16}>
@@ -79,7 +79,7 @@ export function EveningSelfStudyDrawer({ editing: initialEditing, readOnly = fal
     <Col xs={24} sm={12}><ProFormDatePicker name="date" label="缺勤日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
     <Col xs={24} sm={12}><ProFormTimePicker name="time" label="检查时间" rules={required} getValueFromEvent={(_time: unknown, timeString: string) => timeString || undefined} fieldProps={{ format: 'HH:mm:ss', style: { width: '100%' } }} /></Col>
     <Col xs={24}><Form.Item label="检查节次"><Tag color="blue">第 9–10 节</Tag></Form.Item></Col>
-    <Col xs={24}><Form.Item label="实际旷课学时"><Tag color="blue">2 学时（由系统固定）</Tag></Form.Item></Col>
+    <Col xs={24}><Form.Item label="基础缺勤次数"><Tag color="blue">1 次</Tag></Form.Item></Col>
    </Row>
    {editing && !readOnly && <Form.Item name="reason" label="修改原因" rules={[...required, { whitespace: true, message: '请填写修改原因' }]}><Input.TextArea maxLength={255} /></Form.Item>}
    <Form.Item name="remark" label="备注"><Input.TextArea maxLength={500} rows={3} /></Form.Item>

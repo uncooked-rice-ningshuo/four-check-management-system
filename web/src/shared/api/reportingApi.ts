@@ -51,8 +51,8 @@ function isRecordDetails(value: unknown): boolean {
   if (!stringFields.every(field => value[field] === undefined || typeof value[field] === 'string')) return false
   const numberFields = ['absenceHours', 'absenceCount']
   if (!numberFields.every(field => value[field] === undefined || (typeof value[field] === 'number' && Number.isFinite(value[field])))) return false
-  return value.penaltyHours === undefined || value.penaltyHours === null
-    || (typeof value.penaltyHours === 'number' && Number.isFinite(value.penaltyHours))
+  return ['penaltyHours', 'penaltyCount'].every(field => value[field] === undefined || value[field] === null
+    || (typeof value[field] === 'number' && Number.isFinite(value[field])))
 }
 
 function isReportingRecord(value: unknown): value is ReportingRecord {

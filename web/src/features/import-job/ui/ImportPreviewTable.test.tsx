@@ -38,3 +38,8 @@ it('shows a classroom area hygiene preview with responsibilities and round inste
  expect(screen.queryByRole('columnheader',{name:'姓名'})).not.toBeInTheDocument()
  expect(screen.queryByRole('columnheader',{name:'课程'})).not.toBeInTheDocument()
 })
+it('shows one base incident for an evening self-study absence', () => {
+ render(<ImportPreviewTable typeCode="EVENING_SELF_STUDY" rows={[{id:'row',batchId:'batch',rowNo:5,rawData:{student_no:'000001',absence_date:'2026-10-01'},validationStatus:'VALID',errors:[]}]} loading={false} page={1} pageSize={20} total={1} filter="ALL" onFilterChange={vi.fn()} onPageChange={vi.fn()}/>)
+ expect(screen.getByRole('columnheader', { name: '基础缺勤次数' })).toBeInTheDocument()
+ expect(screen.queryByRole('columnheader', { name: '旷课学时' })).not.toBeInTheDocument()
+})

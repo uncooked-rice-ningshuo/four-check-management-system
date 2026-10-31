@@ -41,8 +41,8 @@ async (page) => {
   const entryToken = await login(fixture.eveningActors.entry)
   await page.goto(`${base}/inspections/evening-self-study`)
   await page.getByRole('heading', { name: '晚自习检查', exact: true }).waitFor()
-  await page.getByText('只记录缺勤学生；节次固定为第 9–10 节、2 学时，不关联课程。', { exact: true }).waitFor()
-  await page.getByRole('button', { name: '新增缺勤记录', exact: true }).click()
+  await page.getByText('只记录缺勤学生；节次固定为第 9–10 节，每次缺勤计 1 次并按周倍数计入违纪，不关联课程。', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '新增记录', exact: true }).click()
   const create = page.getByRole('dialog', { name: '新增晚自习缺勤记录' })
   await select(create, '录入学期', '浏览器回归学期')
   await select(create, '录入周次', fixture.weekStart)
@@ -58,15 +58,15 @@ async (page) => {
   await create.getByLabel('备注').fill('晚自习专属浏览器验收')
   check(await create.getByLabel('课程').count() === 0, 'Evening record drawer must not include a course field')
   await create.getByText('第 9–10 节', { exact: true }).waitFor()
-  await create.getByText('2 学时（由系统固定）', { exact: true }).waitFor()
+  await create.getByText('1 次', { exact: true }).waitFor()
   const createResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/v1/inspections') && response.request().method() === 'POST')
   await create.getByRole('button', { name: '保存草稿' }).click()
   const createResponse = await createResponsePromise
   check(createResponse.status() === 201, `Evening record creation returned ${createResponse.status()}`)
   const created = await createResponse.json()
-  check(created.details.period === '9-10' && created.details.absenceHours === 2,
-    `Server did not derive the fixed evening period and absence hours: ${JSON.stringify(created.details)}`)
+  check(created.details.period === '9-10' && created.details.penaltyCount === 2 && created.details.penaltyMultiplier === 2,
+    `Server did not derive the fixed evening period and penalty count: ${JSON.stringify(created.details)}`)
   check(created.departmentId === fixture.eveningActors.departmentId, 'Record did not inherit the entry account department')
   await create.waitFor({ state: 'hidden' })
   const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'E2E student A', exact: true }) })
@@ -90,13 +90,13 @@ async (page) => {
   await confirmation.waitFor({ state: 'hidden' })
   await row.getByText('待审核').waitFor()
   await api(entryToken, `/department-submissions/${batch.id}/confirm`, 'POST', { version: batch.rowVersion }, 403, 'FORBIDDEN_SCOPE')
-  cases.push('有权部门成员通过晚自习页面录入；服务端固定 9–10 节、2 学时且不关联课程；真实提交批次进入待审核')
+  cases.push('有权部门成员通过晚自习页面录入；服务端固定 9–10 节、2 倍计入 2 次且不关联课程；真实提交批次进入待审核')
 
   await logout()
   const reviewerToken = await login(fixture.eveningActors.reviewer)
   await page.goto(`${base}/inspections/evening-self-study`)
   await page.getByRole('heading', { name: '晚自习检查', exact: true }).waitFor()
-  check(await page.getByRole('button', { name: '新增缺勤记录', exact: true }).count() === 0,
+  check(await page.getByRole('button', { name: '新增记录', exact: true }).count() === 0,
     'Review-only account must not see the evening entry action')
   await page.getByRole('button', { name: '检查提交批次' }).click()
   const reviewDrawer = page.getByRole('dialog', { name: '检查提交批次' })
@@ -154,7 +154,7 @@ async (page) => {
   const records = await recordsResponse.json()
   check(records.total === 1 && records.items[0].studentName === 'E2E student A' &&
     records.items[0].typeCode === 'EVENING_SELF_STUDY' && records.items[0].details.period === '9-10' &&
-    records.items[0].details.absenceHours === 2 && records.items[0].currentCourseName === '',
+    records.items[0].details.penaltyCount === 2 && records.items[0].currentCourseName === '',
   `Report detail did not use the confirmed evening snapshot: ${JSON.stringify(records)}`)
   await page.goto(`${base}/reports/weekly-summary`)
   await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()

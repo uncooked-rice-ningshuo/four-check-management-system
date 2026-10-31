@@ -141,7 +141,7 @@ VALUES($1,'EVENING_SELF_STUDY_IMPORT','晚自习',$2,1,$3,'PUBLISHED',now(),$4)`
 	if err := json.Unmarshal(preview.Items[0].NormalizedInspection.Input.Details, &input); err != nil {
 		t.Fatal(err)
 	}
-	for _, serverOwned := range []string{"period", "absenceHours", "penaltyMultiplier", "penaltyHours", "courseId"} {
+	for _, serverOwned := range []string{"period", "absenceHours", "penaltyMultiplier", "penaltyHours", "penaltyCount", "courseId"} {
 		if _, found := input[serverOwned]; found {
 			t.Fatalf("preview input contains server-owned/unsupported field %q: %#v", serverOwned, input)
 		}
@@ -174,7 +174,7 @@ VALUES($1,'EVENING_SELF_STUDY_IMPORT','晚自习',$2,1,$3,'PUBLISHED',now(),$4)`
 		t.Fatalf("evening records are not course-free absence events: count=%d err=%v", confirmedRecords, err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM evening_self_study_details d JOIN inspection_records r ON r.id=d.record_id
-WHERE r.import_batch_id=$1 AND d.period_text='9-10' AND d.absence_hours=2 AND d.penalty_multiplier=1 AND d.penalty_hours=2`, batch.ID).Scan(&correctDetails); err != nil || correctDetails != 2 {
+WHERE r.import_batch_id=$1 AND d.period_text='9-10' AND d.absence_hours IS NULL AND d.penalty_multiplier=1 AND d.penalty_count=1`, batch.ID).Scan(&correctDetails); err != nil || correctDetails != 2 {
 		t.Fatalf("evening server-derived values missing: count=%d err=%v", correctDetails, err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM attendance_details d JOIN inspection_records r ON r.id=d.record_id WHERE r.import_batch_id=$1`, batch.ID).Scan(&attendanceRows); err != nil || attendanceRows != 0 {

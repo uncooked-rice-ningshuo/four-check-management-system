@@ -85,7 +85,7 @@ var attendanceImportFields = []TemplateField{
 	{Code: "absence_date", Header: "旷课日期"},
 	{Code: "absence_time", Header: "旷课时间"},
 	{Code: "period", Header: "节次"},
-	{Code: "absence_hours", Header: "旷课学时"},
+	{Code: "absence_hours", Header: "旷课节次数"},
 	{Code: "classroom_code", Header: "上课地点"},
 	{Code: "remark", Header: "备注"},
 }
@@ -231,7 +231,8 @@ func (p *XLSXParser) validHeaders(codes, headers []string) bool {
 	normalizedCodes := normalizedRow(codes, len(p.config.Fields))
 	normalizedHeaders := normalizedRow(headers, len(p.config.Fields))
 	for index, field := range p.config.Fields {
-		if normalizedCodes[index] != field.Code || normalizedHeaders[index] != field.Header {
+		legacyAttendanceHeader := p.config.ExpectedTemplateCode == "ATTENDANCE_IMPORT" && field.Code == "absence_hours" && normalizedHeaders[index] == "旷课学时"
+		if normalizedCodes[index] != field.Code || (normalizedHeaders[index] != field.Header && !legacyAttendanceHeader) {
 			return false
 		}
 	}

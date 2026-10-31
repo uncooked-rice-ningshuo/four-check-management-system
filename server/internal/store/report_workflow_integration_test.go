@@ -108,8 +108,8 @@ VALUES($1,$2,$3,$4,$5,'CONFIRMED',1,2,$6,$6,$6,repeat('b',64),now(),now())`, eve
 SELECT $1,it.id,source.semester_id,source.week_id,source.department_id,source.student_id,source.student_no_snapshot,source.student_name_snapshot,
  source.class_id,source.class_name_snapshot,source.grade_snapshot,'2026-09-02 20:15+08'::timestamptz,'TIME',1,'晚自习缺勤','MANUAL','CONFIRMED',$2,repeat('b',64),2,source.created_by
 FROM inspection_records source JOIN inspection_types it ON it.code='EVENING_SELF_STUDY' WHERE source.id=$3`, eveningID, eveningSubmissionID, recordID); err == nil {
-		_, err = eveningTx.Exec(ctx, `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,absence_hours,penalty_multiplier,penalty_hours)
-VALUES($1,'a0000000-0000-0000-0000-000000000009','9-10',2,1,2)`, eveningID)
+		_, err = eveningTx.Exec(ctx, `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count)
+VALUES($1,'a0000000-0000-0000-0000-000000000009','9-10',1,1)`, eveningID)
 	}
 	if err == nil {
 		_, err = eveningTx.Exec(ctx, `INSERT INTO department_submission_revisions(id,submission_id,revision_no,submitted_by,submission_kind,record_ids,records_snapshot)
@@ -181,9 +181,9 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 		t.Fatalf("version source references = %d, %v", refs, err)
 	}
 	var eveningPeriod, eveningHours, eveningCourse string
-	if err := pool.QueryRow(ctx, `SELECT included_data_json->'details'->>'period',included_data_json->'details'->>'absenceHours',
+	if err := pool.QueryRow(ctx, `SELECT included_data_json->'details'->>'period',included_data_json->'details'->>'penaltyCount',
 COALESCE(included_data_json->>'currentCourseName','') FROM weekly_report_version_records
-WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=1) AND inspection_record_id=$2`, draft.ID, eveningID).Scan(&eveningPeriod, &eveningHours, &eveningCourse); err != nil || eveningPeriod != "9-10" || eveningHours != "2" || eveningCourse != "" {
+WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=1) AND inspection_record_id=$2`, draft.ID, eveningID).Scan(&eveningPeriod, &eveningHours, &eveningCourse); err != nil || eveningPeriod != "9-10" || eveningHours != "1" || eveningCourse != "" {
 		t.Fatalf("evening report detail snapshot period=%q hours=%q course=%q err=%v", eveningPeriod, eveningHours, eveningCourse, err)
 	}
 	if _, err := pool.Exec(ctx, "UPDATE inspection_records SET row_version=row_version+1 WHERE id=$1", recordID); err != nil {
@@ -279,7 +279,7 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 		t.Fatalf("confirmed report snapshot name = %q, %v", correctedName, err)
 	}
 	versionRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 5, reporting.ReportVersionRecordsQuery{Page: 1, PageSize: 10})
-	if err != nil || versionRecords.Total != 1 || len(versionRecords.Items) != 1 ||
+	if err != nil || versionRecords.Total != 2 || len(versionRecords.Items) != 2 ||
 		versionRecords.Items[0].ID != recordID || versionRecords.Items[0].StudentName != "Confirmed student name" {
 		t.Fatalf("read corrected immutable version records = %+v, %v", versionRecords, err)
 	}

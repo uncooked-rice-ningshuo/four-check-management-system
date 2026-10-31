@@ -39,7 +39,6 @@ func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.I
 			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
 		}
 		fields["period"] = json.RawMessage(`"9-10"`)
-		fields["absenceHours"] = json.RawMessage(`2`)
 		var err error
 		details, err = json.Marshal(fields)
 		if err != nil {
@@ -57,8 +56,8 @@ func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.I
 			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
 		}
 		evening.PenaltyMultiplier = locked.AttendancePenaltyMultiplier
-		penaltyHours := evening.AbsenceHours * float64(*locked.AttendancePenaltyMultiplier)
-		evening.PenaltyHours = &penaltyHours
+		penaltyCount := *locked.AttendancePenaltyMultiplier
+		evening.PenaltyCount = &penaltyCount
 		record.PenaltyMultiplier = locked.AttendancePenaltyMultiplier
 	}
 	// The API reauthorizes the whole batch before confirmation. Every reference

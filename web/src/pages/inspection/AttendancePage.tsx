@@ -157,9 +157,9 @@ export function AttendancePage() {
 			{ title: '课程', dataIndex: 'courseName', width: 180, search: false, ellipsis: true },
 			{ title: '检查时间', dataIndex: 'occurredAt', width: 180, search: false, renderText: value => dateTimeFormatter.format(new Date(value)) },
 			{ title: '节次', dataIndex: 'period', width: 100, search: false },
-			{ title: '实际旷课学时', dataIndex: 'absenceHours', width: 125, search: false },
+			{ title: '实际旷课节次数', dataIndex: 'absenceHours', width: 125, search: false },
 			{ title: '违纪计入倍数', dataIndex: 'penaltyMultiplier', width: 125, search: false, render: (_, record) => record.penaltyMultiplier ? `${record.penaltyMultiplier} 倍` : '历史待核对' },
-			{ title: '违纪计入学时', dataIndex: 'penaltyHours', width: 125, search: false, render: (_, record) => record.penaltyHours ?? '历史待核对' },
+			{ title: '违纪计入次数', dataIndex: 'penaltyHours', width: 125, search: false, render: (_, record) => record.penaltyHours ?? '历史待核对' },
 			{ title: '数据来源', dataIndex: 'source', width: 110, search: false, render: (_, record) => <Tag>{sourceLabels[record.source] ?? record.source}</Tag> },
 			{ title: '数据状态', dataIndex: 'status', width: 110, search: false, render: (_, record) => <Tag color={record.status === 'CONFIRMED' ? 'green' : record.status === 'RETURNED' ? 'red' : 'blue'}>{statusLabels[record.status as keyof typeof statusLabels] ?? record.status}</Tag> },
 		)

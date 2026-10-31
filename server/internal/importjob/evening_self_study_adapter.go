@@ -86,7 +86,7 @@ func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceRef
 	}
 	details := inspection.EveningSelfStudyDetails{
 		StudentID: student.ID, ClassID: class.ID, ClassroomID: classroom.ID,
-		Date: value("absence_date"), Time: value("absence_time"), Period: "9-10", AbsenceHours: 2, Remark: value("remark"),
+		Date: value("absence_date"), Time: value("absence_time"), Period: "9-10", Remark: value("remark"),
 	}
 	raw, err := json.Marshal(details)
 	if err != nil {
@@ -102,9 +102,9 @@ func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceRef
 		} else if strings.Contains(issue.Path, "time") {
 			code, field, message = ErrorInvalidTime, "absence_time", "检查时间格式无效"
 		} else if strings.Contains(issue.Path, "period") || strings.Contains(issue.Path, "absenceHours") {
-			code, field, message = ErrorInvalidHours, "absence_date", "晚自习时段或缺勤学时不符合固定规则"
+			code, field, message = ErrorInvalidHours, "absence_date", "晚自习时段不符合固定规则"
 		}
-		result.Errors = append(result.Errors, validationError(code, field, message, "晚自习固定为第 9–10 节、2 学时；日期须处于所选周次"))
+		result.Errors = append(result.Errors, validationError(code, field, message, "晚自习固定为第 9–10 节；日期须处于所选周次"))
 	}
 	if len(result.Errors) > 0 {
 		return result

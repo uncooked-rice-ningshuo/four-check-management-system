@@ -96,7 +96,6 @@ type reportingHTTPService interface {
 	TransitionReport(context.Context, string, string, string, reporting.ReportTransitionInput, audit.Metadata) (reporting.ReportState, error)
 	AddReportCorrection(context.Context, string, string, reporting.AddReportCorrectionInput, audit.Metadata) (reporting.ReportCorrectionResult, error)
 	AddReportAdjustment(context.Context, string, string, reporting.AddReportAdjustmentInput, audit.Metadata) (reporting.ReportAdjustmentResult, error)
-	DecideReportCorrection(context.Context, string, string, reporting.DecideReportCorrectionInput, audit.Metadata) (reporting.ReportState, error)
 }
 
 type reportingObligationHTTPService interface {
@@ -289,7 +288,6 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.POST("/reports/:id/finalize", h.finalizeReportDraft)
 	v1.POST("/reports/:id/corrections", h.addReportCorrection)
 	v1.POST("/reports/:id/adjustments", h.addReportAdjustment)
-	v1.POST("/report-corrections/:id/decision", h.decideReportCorrection)
 	v1.GET("/reports/obligation-options", h.reportObligationOptions)
 	v1.GET("/reports/obligations", h.reportObligations)
 	v1.POST("/reports/obligations", h.createReportObligation)

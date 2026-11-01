@@ -159,6 +159,27 @@ func TestRecordsPassesAuthenticatedActorToRepositoryForReadHint(t *testing.T) {
 	}
 }
 
+func TestRecordsCanReadOneTypeAcrossVisibleSources(t *testing.T) {
+	const semesterID = "a0000000-0000-0000-0000-000000000003"
+	const weekID = "a0000000-0000-0000-0000-000000000004"
+	const typeID = "30000000-0000-0000-0000-000000000001"
+	repository := &reportingRepositoryStub{summary: Summary{Rows: []SummaryRow{
+		{DepartmentID: "10000000-0000-0000-0000-000000000002", DepartmentName: "学习部", InspectionTypeID: typeID},
+		{DepartmentID: "", DepartmentName: "校级", CollegeLevel: true, InspectionTypeID: typeID},
+	}}, records: []inspection.InspectionRecord{{ID: "record-1", DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: typeID},
+		{ID: "record-2", InspectionTypeID: typeID}}, recordTotal: 2}
+	grant := permission.EffectivePermission{Action: permission.ActionReportView, Effect: permission.EffectAllow}
+	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{grant}}})
+	result, err := service.Records(context.Background(), "actor", RecordsQuery{SemesterID: semesterID, WeekID: weekID, InspectionTypeID: typeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.recordQuery.DepartmentID != "" || repository.recordQuery.CollegeLevel || result.Total != 2 ||
+		result.Items[0].SourceDepartmentName != "学习部" || result.Items[1].SourceDepartmentName != "校级" {
+		t.Fatalf("cross-source records = %+v; query = %+v", result, repository.recordQuery)
+	}
+}
+
 func TestRepositoryFailureIsPropagated(t *testing.T) {
 	want := errors.New("repository unavailable")
 	repository := &reportingRepositoryStub{summaryErr: want}

@@ -204,6 +204,42 @@ func (p *Postgres) ReportRecords(ctx context.Context, accountID string, query re
 	return page.Items, page.Total, nil
 }
 
+// ReportSourceDetails enriches only record IDs already authorized and paged by ReportRecords.
+func (p *Postgres) ReportSourceDetails(ctx context.Context, recordIDs []string) (map[string]reporting.RecordSourceDetails, error) {
+	result := make(map[string]reporting.RecordSourceDetails, len(recordIDs))
+	if len(recordIDs) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(recordIDs))
+	args := make([]any, len(recordIDs))
+	for index, id := range recordIDs {
+		placeholders[index] = fmt.Sprintf("$%d::uuid", index+1)
+		args[index] = id
+	}
+	rows, err := p.Pool.Query(ctx, `SELECT record.id::text,submission.id::text,revision.revision_no,
+ COALESCE(department.name,'校级'),submitter.name,revision.submitted_at
+ FROM inspection_records record
+ JOIN department_submissions submission ON submission.id=record.submission_id AND submission.status='CONFIRMED'
+ JOIN department_submission_revisions revision ON revision.submission_id=submission.id AND revision.revision_no=submission.revision_no
+ LEFT JOIN departments department ON department.id=submission.department_id
+ JOIN accounts submitter ON submitter.id=revision.submitted_by
+ WHERE record.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var details reporting.RecordSourceDetails
+		if err := rows.Scan(&id, &details.SubmissionID, &details.RevisionNo, &details.DepartmentName,
+			&details.SubmittedBy, &details.SubmittedAt); err != nil {
+			return nil, err
+		}
+		result[id] = details
+	}
+	return result, rows.Err()
+}
+
 type reportScopeColumns struct {
 	academicYear   string
 	semester       string

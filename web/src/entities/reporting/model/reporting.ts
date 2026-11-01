@@ -56,8 +56,7 @@ export type ReportVersionContent = {
   confirmedRecordCount: number
   rows: ReportCountRow[]
   incompleteCells: { departmentId: string; departmentName: string; collegeLevel: boolean; inspectionTypeId: string; inspectionType: string }[]
-  pendingDepartmentReconfirmationCount: number
-  corrections: { id: string; recordId: string; field: string; factChanged: boolean; status: string }[]
+  corrections: { id: string; recordId: string; field: string }[]
   adjustments?: ReportAdjustmentSummary[] | null
   generatedAt: string
 }
@@ -116,14 +115,10 @@ export type ReportCorrectionLog = {
   recordId: string
   field: string
   reason: string
-  factChanged: boolean
-  reconfirmationStatus: string
+  beforeValue: string | number | null
+  afterValue: string | number
   correctedBy: string
   correctedAt: string
-  decision?: string
-  decisionComment?: string
-  decisionActorId?: string
-  decisionCreatedAt?: string
 }
 
 export type ReportWorkflow = {
@@ -158,10 +153,14 @@ export type ReportVersionRecordsQuery = {
   departmentId?: string
   collegeLevel?: boolean
   inspectionTypeId?: string
+  studentNumber?: string
+  studentName?: string
+  className?: string
+  grade?: string
   page: number
   pageSize: number
 }
-export type AddReportCorrectionInput = { rowVersion: number; recordId: string; field: string; afterValue: string | number | null; reason: string; factChanged: boolean }
+export type AddReportCorrectionInput = { rowVersion: number; recordId: string; changes: { field: string; afterValue: string | number | null }[]; reason: string }
 export type ReportCorrectionResult = { correctionId: string; report: ReportState }
 export type AddReportAdjustmentInput = { rowVersion: number; recordId: string; operation: 'INCLUDE' | 'EXCLUDE'; reason: string }
 export type ReportAdjustmentResult = { adjustmentId: string; report: ReportState }
@@ -176,6 +175,7 @@ export type ReportingRecordDetails = {
   period?: string
   round?: string
   absenceHours?: number
+  penaltyMultiplier?: number
   penaltyHours?: number | null
   penaltyCount?: number | null
   absenceCount?: number
@@ -189,11 +189,17 @@ export type ReportingRecordReference = { label: string; grade?: string }
 
 export type ReportingRecord = {
   id: string
+  sourceSubmissionId?: string
+  sourceRevisionNo?: number
+  sourceDepartmentName?: string
+  submittedByName?: string
+  submittedAt?: string
   studentNumber: string
   studentName: string
   className: string
   grade: string
   typeCode: string
+  source?: string
   details: ReportingRecordDetails
   currentDormitoryName: string
   currentCourseName: string
@@ -220,6 +226,14 @@ export type ReportingRecordPage = {
   total: number
   page: number
   pageSize: number
+  filterOptions?: ReportVersionRecordFilterOptions
+}
+
+export type ReportVersionRecordFilterOptions = {
+  studentNumbers: string[]
+  studentNames: string[]
+  classNames: string[]
+  grades: string[]
 }
 
 export type ReportObligationPeriodQuery = { semesterId: string; weekId: string }

@@ -11,6 +11,7 @@ import { useWorkContext } from '../../features/work-context/useWorkContext'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { WeeklyReportWorkflowPanel } from '../../features/reporting/ui/WeeklyReportWorkflowPanel'
 import { inspectionResultLabel } from '../../features/reporting/model/labels'
+import { groupSummaryRows } from '../../features/reporting/model/groupReportRows'
 
 const collegeTarget = '__college__'
 
@@ -66,78 +67,6 @@ function WeeklyObligationManagement({ period }: { period: ReportingPeriod }) {
         locale={{ emptyText: obligationsQuery.isError ? '应交项加载失败' : '本周尚未配置应交项' }} pagination={false} />
     </Space>
   </Card>
-}
-
-type ReportTreeRow = {
-  key: string
-  kind: 'department' | 'inspection'
-  name: string
-  inspectionTypeName?: string
-  summary: ReportingSummaryRow
-  children?: ReportTreeRow[]
-}
-
-const emptySummary = (departmentId: string, departmentName: string, collegeLevel: boolean): ReportingSummaryRow => ({
-  departmentId,
-  departmentName,
-  collegeLevel,
-  inspectionTypeId: '',
-  inspectionTypeName: '',
-  isRequired: false,
-  submissionCount: 0,
-  draftBatchCount: 0,
-  pendingReviewBatchCount: 0,
-  returnedBatchCount: 0,
-  confirmedBatchCount: 0,
-  confirmedRecordCount: 0,
-  pendingReviewOrReturnedRecordCount: 0,
-  zeroRecordPendingReviewBatchCount: 0,
-  zeroRecordReturnedBatchCount: 0,
-  zeroRecordConfirmedBatchCount: 0,
-})
-
-const sumRows = (rows: ReportingSummaryRow[], departmentId: string, departmentName: string, collegeLevel: boolean) => {
-  const total = emptySummary(departmentId, departmentName, collegeLevel)
-  for (const row of rows) {
-    total.submissionCount += row.submissionCount
-    total.draftBatchCount += row.draftBatchCount
-    total.pendingReviewBatchCount += row.pendingReviewBatchCount
-    total.returnedBatchCount += row.returnedBatchCount
-    total.confirmedBatchCount += row.confirmedBatchCount
-    total.confirmedRecordCount += row.confirmedRecordCount
-    total.pendingReviewOrReturnedRecordCount += row.pendingReviewOrReturnedRecordCount
-    total.zeroRecordPendingReviewBatchCount += row.zeroRecordPendingReviewBatchCount
-    total.zeroRecordReturnedBatchCount += row.zeroRecordReturnedBatchCount
-    total.zeroRecordConfirmedBatchCount += row.zeroRecordConfirmedBatchCount
-  }
-  return total
-}
-
-function buildTree(rows: ReportingSummaryRow[]): ReportTreeRow[] {
-  const groups = new Map<string, ReportingSummaryRow[]>()
-  for (const row of rows) {
-    const key = row.collegeLevel ? 'college' : `department:${row.departmentId}`
-    groups.set(key, [...(groups.get(key) ?? []), row])
-  }
-  return [...groups.entries()]
-    .map(([key, items]) => {
-      const first = items[0]
-      const departmentName = first.collegeLevel ? '校级' : first.departmentName
-      return {
-        key,
-        kind: 'department' as const,
-        name: departmentName,
-        summary: sumRows(items, first.departmentId, departmentName, first.collegeLevel),
-        children: items.map(row => ({
-          key: `${key}:type:${row.inspectionTypeId}`,
-          kind: 'inspection' as const,
-          name: row.inspectionTypeName,
-          inspectionTypeName: row.inspectionTypeName,
-          summary: row,
-        })),
-      }
-    })
-    .sort((left, right) => Number(right.summary.collegeLevel) - Number(left.summary.collegeLevel) || left.name.localeCompare(right.name, 'zh-CN'))
 }
 
 function displayDate(value: string): string {
@@ -205,6 +134,10 @@ function requiredCellState(row: ReportingSummaryRow) {
 function RecordDetailsView({ record }: { record: ReportingRecord }) {
   const { details } = record
   const values: Array<[string, string | number | undefined | null]> = [
+    ['提交归属（当前名称）', record.sourceDepartmentName],
+    ['提交人（当前姓名）', record.submittedByName],
+    ['提交时间', record.submittedAt ? new Date(record.submittedAt).toLocaleString('zh-CN') : undefined],
+    ['来源修订', record.sourceRevisionNo ? `第 ${record.sourceRevisionNo} 次提交` : undefined],
     ['学号', record.studentNumber],
     ['年级', record.grade],
     ['检查日期', details.date],
@@ -242,7 +175,8 @@ export function WeeklyReportSummaryPage() {
   const [selectedPeriodKey, setSelectedPeriodKey] = useState('')
   const [manualPeriodSelection, setManualPeriodSelection] = useState(false)
   const [selectedCell, setSelectedCell] = useState<ReportingSummaryRow | null>(null)
-  const [departmentExpansion, setDepartmentExpansion] = useState<{ scope: string; keys: string[] } | null>(null)
+  const [selectedTypeId, setSelectedTypeId] = useState('')
+  const [selectedTypePeriodKey, setSelectedTypePeriodKey] = useState('')
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(20)
   const [reportScopeChanged, setReportScopeChanged] = useState(false)
@@ -263,6 +197,7 @@ export function WeeklyReportSummaryPage() {
     ? requestedPeriod ? `${requestedPeriod.semesterId}:${requestedPeriod.weekId}` : ''
     : manualPeriodSelection ? selectedPeriodKey : defaultPeriod ? `${defaultPeriod.semesterId}:${defaultPeriod.weekId}` : ''
   const selectedPeriod = periods.find(item => `${item.semesterId}:${item.weekId}` === effectivePeriodKey)
+  const visibleTypeId = selectedTypePeriodKey === effectivePeriodKey ? selectedTypeId : ''
   const stageValue = searchParams.get('stage')
   const requestedStage = stageValue === null ? Number.NaN : Number(stageValue)
   const selectedStage = hasRequestedPeriod && Number.isInteger(requestedStage) && requestedStage >= 0 && requestedStage <= 2 ? requestedStage : null
@@ -276,6 +211,7 @@ export function WeeklyReportSummaryPage() {
     queryClient.removeQueries({ queryKey: ['reports', 'workflow'] })
     queryClient.removeQueries({ queryKey: ['reports', 'periods'] })
     setSelectedCell(null)
+    setSelectedTypeId('')
     setSelectedPeriodKey('')
     setReportScopeChanged(true)
     setManualPeriodSelection(true)
@@ -301,41 +237,32 @@ export function WeeklyReportSummaryPage() {
     page: recordPage,
     pageSize: recordPageSize,
   }), [selectedCell, selectedPeriod, recordPage, recordPageSize])
-  const recordsQuery = useReportingRecords(recordsQueryArgs, Boolean(selectedCell && selectedPeriod), clearReportScope)
-  const treeRows = useMemo(() => buildTree(summaryQuery.data?.rows ?? []), [summaryQuery.data?.rows])
-  const departmentKeys = treeRows.map(row => row.key)
-  const departmentExpansionScope = `${selectedPeriodKey}:${departmentKeys.join('|')}`
-  const expandedDepartmentKeys = departmentExpansion?.scope === departmentExpansionScope
-    ? departmentExpansion.keys
-    : departmentKeys
-  const allDepartmentsExpanded = treeRows.length > 0 && treeRows.every(row => expandedDepartmentKeys.includes(row.key))
+  const recordsQuery = useReportingRecords(recordsQueryArgs, Boolean(visibleTypeId && selectedCell && selectedPeriod), clearReportScope)
+  const typeRows = useMemo(() => groupSummaryRows(summaryQuery.data?.rows ?? []), [summaryQuery.data?.rows])
+  const sourceCells = (summaryQuery.data?.rows ?? []).filter(row => row.inspectionTypeId === visibleTypeId)
+  const incompleteCells = (summaryQuery.data?.rows ?? []).filter(row => row.isRequired && row.confirmedBatchCount === 0 && row.zeroRecordConfirmedBatchCount === 0)
 
-  const columns: ColumnsType<ReportTreeRow> = [
+  const columns: ColumnsType<ReportingSummaryRow> = [
+    { title: '检查类型', dataIndex: 'inspectionTypeName', width: 190 },
+    { title: '提交批次', dataIndex: 'submissionCount', width: 92, align: 'right' },
+    { title: '草稿', dataIndex: 'draftBatchCount', width: 76, align: 'right' },
+    { title: '待审核', dataIndex: 'pendingReviewBatchCount', width: 76, align: 'right' },
+    { title: '退回', dataIndex: 'returnedBatchCount', width: 68, align: 'right' },
+    { title: '已确认批次', dataIndex: 'confirmedBatchCount', width: 102, align: 'right' },
     {
-      title: '部门 / 检查类型',
-      dataIndex: 'name',
-      key: 'name',
-      width: 230,
-      render: (_name, row) => row.kind === 'department'
-        ? <Space><Typography.Text strong>{row.name}</Typography.Text><Tag>{row.children?.length ?? 0} 类</Tag></Space>
-        : <Typography.Text>{row.name}</Typography.Text>,
+      title: '已确认记录', dataIndex: 'confirmedRecordCount', width: 105, align: 'right',
+      render: (count: number) => count > 0 ? <Tag color="green">{count}</Tag> : count,
     },
-    { title: '应交 / 零回执', key: 'requiredState', width: 220, render: (_value, row) => row.kind === 'inspection' ? requiredCellState(row.summary) : <Typography.Text type="secondary">—</Typography.Text> },
-    { title: '提交批次', dataIndex: ['summary', 'submissionCount'], key: 'submissionCount', width: 92, align: 'right' },
-    { title: '草稿', dataIndex: ['summary', 'draftBatchCount'], key: 'draftBatchCount', width: 76, align: 'right' },
-    { title: '待审核', dataIndex: ['summary', 'pendingReviewBatchCount'], key: 'pendingReviewBatchCount', width: 76, align: 'right' },
-    { title: '退回', dataIndex: ['summary', 'returnedBatchCount'], key: 'returnedBatchCount', width: 68, align: 'right' },
-    { title: '已确认批次', dataIndex: ['summary', 'confirmedBatchCount'], key: 'confirmedBatchCount', width: 102, align: 'right' },
+    { title: '已确认零回执', dataIndex: 'zeroRecordConfirmedBatchCount', width: 125, align: 'right' },
+    { title: '未完成应交项', key: 'incomplete', width: 120, align: 'right', render: (_value, row) => incompleteCells.filter(item => item.inspectionTypeId === row.inspectionTypeId).length },
     {
-      title: '已确认记录', dataIndex: ['summary', 'confirmedRecordCount'], key: 'confirmedRecordCount', width: 105, align: 'right',
-      render: (count: number, row) => row.kind === 'inspection' && count > 0 ? <Tag color="green">{count}</Tag> : count,
-    },
-    { title: '待审核/退回记录', dataIndex: ['summary', 'pendingReviewOrReturnedRecordCount'], key: 'pendingReviewOrReturnedRecordCount', width: 136, align: 'right' },
-    {
-      title: '记录明细', key: 'action', width: 145, fixed: 'right',
-      render: (_value, row) => row.kind === 'inspection' && row.summary.confirmedRecordCount > 0
-        ? <Button type="link" size="small" onClick={() => { setSelectedCell(row.summary); setRecordPage(1) }}>查看已确认记录</Button>
-        : <Typography.Text type="secondary">—</Typography.Text>,
+      title: '来源明细', key: 'action', width: 145, fixed: 'right',
+      render: (_value, row) => <Button type="link" size="small" onClick={() => {
+        setSelectedTypeId(row.inspectionTypeId)
+        setSelectedTypePeriodKey(effectivePeriodKey)
+        setSelectedCell(row)
+        setRecordPage(1)
+      }}>查看提交与记录</Button>,
     },
   ]
 
@@ -350,6 +277,7 @@ export function WeeklyReportSummaryPage() {
       render: (_value, record) => record.className || record.responsibleClasses?.map(item => item.label).join('、') || '—',
     },
     { title: '提交记录内容', key: 'detail', render: (_value, record) => <Typography.Text>{recordSummary(record)}</Typography.Text> },
+    { title: '提交归属', key: 'source', width: 130, render: (_value, record) => record.sourceDepartmentName || '归属不可用' },
   ]
 
   const summary = selectedPeriod ? summaryQuery.data : undefined
@@ -359,9 +287,7 @@ export function WeeklyReportSummaryPage() {
   const defaultStage = !report ? 0 : report.status === 'DRAFT' || report.status === 'RETURNED' ? 1 : 2
   const activeStage = selectedStage === null ? defaultStage : Math.min(selectedStage, maxStage)
   const periodOptions = periods.map(period => ({ value: `${period.semesterId}:${period.weekId}`, label: periodLabel(period) }))
-  const selectedCellTitle = selectedCell
-    ? `${selectedCell.collegeLevel ? '校级' : selectedCell.departmentName} · ${selectedCell.inspectionTypeName} · 已确认记录`
-    : '已确认记录'
+  const selectedCellTitle = typeRows.find(row => row.inspectionTypeId === visibleTypeId)?.inspectionTypeName ?? '来源明细'
   const records = recordsQuery.data?.items ?? []
 
   return (
@@ -427,7 +353,7 @@ export function WeeklyReportSummaryPage() {
           <div className="weekly-report-summary-table-toolbar">
             <div>
               <Space size={6} align="center">
-                <Typography.Title id="weekly-report-summary-table-title" level={4}>部门与校级批次汇总</Typography.Title>
+                <Typography.Title id="weekly-report-summary-table-title" level={4}>按检查类型汇总</Typography.Title>
                 <Tooltip title="草稿默认只引用已确认来源记录；零记录回执标记完成状态，不计入记录数。">
                   <Button type="text" size="small" aria-label="查看来源与零记录口径" icon={<InfoCircleOutlined aria-hidden="true" />} />
                 </Tooltip>
@@ -435,28 +361,32 @@ export function WeeklyReportSummaryPage() {
               <Typography.Text type="secondary">已确认批次 {summary.totals.confirmedBatchCount} · 已确认记录 {summary.totals.confirmedRecordCount} · 待审核/退回 {summary.totals.pendingReviewBatchCount + summary.totals.returnedBatchCount} · 草稿 {summary.totals.draftBatchCount}</Typography.Text>
             </div>
             <Space wrap>
-              <Typography.Text type="secondary">{treeRows.length} 个单位</Typography.Text>
-              {treeRows.length > 0 && <Button size="small" onClick={() => setDepartmentExpansion({ scope: departmentExpansionScope, keys: allDepartmentsExpanded ? [] : departmentKeys })}>{allDepartmentsExpanded ? '收起全部' : '展开全部'}</Button>}
+              <Typography.Text type="secondary">{typeRows.length} 类检查</Typography.Text>
               {selectedPeriod && <Button size="small" icon={<SyncOutlined aria-hidden="true" />} onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching}>刷新汇总</Button>}
             </Space>
           </div>
-          {treeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (
-            <Table<ReportTreeRow>
-              rowKey="key"
+          {typeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (
+            <Table<ReportingSummaryRow>
+              rowKey="inspectionTypeId"
               size="middle"
               columns={columns}
-              dataSource={treeRows}
-              expandable={{
-                expandedRowKeys: expandedDepartmentKeys,
-                onExpandedRowsChange: keys => setDepartmentExpansion({ scope: departmentExpansionScope, keys: keys.map(key => String(key)) }),
-              }}
+              dataSource={typeRows}
               pagination={false}
               scroll={{ x: 1300 }}
               loading={summaryQuery.isFetching}
               className="weekly-report-summary-table"
-              rowClassName={row => row.kind === 'department' ? 'weekly-report-department-row' : 'weekly-report-inspection-row'}
+              rowClassName={() => 'weekly-report-inspection-row'}
             />
           )}
+          {incompleteCells.length > 0 && <section aria-label="待完成应交项">
+            <Typography.Title level={5}>待完成应交项</Typography.Title>
+            <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
+              dataSource={incompleteCells} columns={[
+                { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '校级' : row.departmentName },
+                { title: '检查类型', dataIndex: 'inspectionTypeName' },
+                { title: '状态', key: 'state', render: (_value, row) => requiredCellState(row) },
+              ]} />
+          </section>}
         </section>
       )}
 
@@ -488,12 +418,26 @@ export function WeeklyReportSummaryPage() {
       <Drawer
         className="weekly-report-record-drawer"
         title={<span className="weekly-report-drawer-title">{selectedCellTitle}</span>}
-        open={Boolean(selectedCell)}
+        open={Boolean(visibleTypeId)}
         size={1040}
         styles={{ body: { overflowX: 'hidden' } }}
-        onClose={() => setSelectedCell(null)}
+        onClose={() => { setSelectedCell(null); setSelectedTypeId('') }}
       >
         <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
+          <Typography.Title level={5}>各单位提交汇总</Typography.Title>
+          <Button size="small" onClick={() => { setSelectedCell(typeRows.find(row => row.inspectionTypeId === visibleTypeId) ?? null); setRecordPage(1) }}>查看此类全部已确认记录</Button>
+          <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
+            dataSource={sourceCells} columns={[
+              { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '校级' : row.departmentName },
+              { title: '提交批次', dataIndex: 'submissionCount' },
+              { title: '已确认批次', dataIndex: 'confirmedBatchCount' },
+              { title: '已确认记录', dataIndex: 'confirmedRecordCount' },
+              { title: '零记录回执', dataIndex: 'zeroRecordConfirmedBatchCount' },
+              { title: '记录', key: 'records', render: (_value, row) => row.confirmedRecordCount > 0
+                ? <Button type="link" onClick={() => { setSelectedCell(row); setRecordPage(1) }}>查看记录</Button> : '—' },
+            ]} />
+          {selectedCell && <Typography.Text strong>{selectedCell.departmentId || selectedCell.collegeLevel ? selectedCell.collegeLevel ? '校级' : selectedCell.departmentName : '全部来源'} · 已确认记录</Typography.Text>}
+          {selectedCell && <>
           <Alert
             type="info"
             showIcon
@@ -528,6 +472,7 @@ export function WeeklyReportSummaryPage() {
               },
             }}
           />
+          </>}
         </Space>
       </Drawer>
     </section>

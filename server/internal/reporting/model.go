@@ -2,6 +2,7 @@ package reporting
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -70,10 +71,29 @@ type RecordsQuery struct {
 
 // RecordPage contains the confirmed source records visible in a report cell.
 type RecordPage struct {
-	Items    []Record `json:"items"`
-	Total    int      `json:"total"`
-	Page     int      `json:"page"`
-	PageSize int      `json:"pageSize"`
+	Items         []Record                          `json:"items"`
+	Total         int                               `json:"total"`
+	Page          int                               `json:"page"`
+	PageSize      int                               `json:"pageSize"`
+	FilterOptions *ReportVersionRecordFilterOptions `json:"filterOptions,omitempty"`
+}
+
+// RecordSourceDetails identifies the confirmed submission revision behind a report record.
+// Names are current display names; submission ID and timestamp identify the historical event.
+type RecordSourceDetails struct {
+	SubmissionID   string
+	RevisionNo     int
+	DepartmentName string
+	SubmittedBy    string
+	SubmittedAt    time.Time
+}
+
+// ReportVersionRecordFilterOptions contains values present in one frozen report cell.
+type ReportVersionRecordFilterOptions struct {
+	StudentNumbers []string `json:"studentNumbers"`
+	StudentNames   []string `json:"studentNames"`
+	ClassNames     []string `json:"classNames"`
+	Grades         []string `json:"grades"`
 }
 
 // ReportVersionRecordsQuery pages the immutable, report-facing record data for
@@ -82,6 +102,10 @@ type ReportVersionRecordsQuery struct {
 	DepartmentID     string `form:"departmentId"`
 	CollegeLevel     bool   `form:"collegeLevel"`
 	InspectionTypeID string `form:"inspectionTypeId"`
+	StudentNumber    string `form:"studentNumber"`
+	StudentName      string `form:"studentName"`
+	ClassName        string `form:"className"`
+	Grade            string `form:"grade"`
 	Page             int    `form:"page"`
 	PageSize         int    `form:"pageSize"`
 }
@@ -144,12 +168,18 @@ type CreateReportObligationInput struct {
 // It exposes typed business details and reference labels without database provenance fields.
 type Record struct {
 	ID                     string            `json:"id"`
+	SourceSubmissionID     string            `json:"sourceSubmissionId,omitempty"`
+	SourceRevisionNo       int               `json:"sourceRevisionNo,omitempty"`
+	SourceDepartmentName   string            `json:"sourceDepartmentName,omitempty"`
+	SubmittedByName        string            `json:"submittedByName,omitempty"`
+	SubmittedAt            *time.Time        `json:"submittedAt,omitempty"`
 	RowVersion             int               `json:"-"`
 	StudentNumber          string            `json:"studentNumber"`
 	StudentName            string            `json:"studentName"`
 	ClassName              string            `json:"className"`
 	Grade                  string            `json:"grade"`
 	TypeCode               string            `json:"typeCode"`
+	Source                 string            `json:"source,omitempty"`
 	Details                RecordDetails     `json:"details"`
 	CurrentDormitoryName   string            `json:"currentDormitoryName"`
 	CurrentCourseName      string            `json:"currentCourseName"`
@@ -163,18 +193,19 @@ type Record struct {
 
 // RecordDetails contains only report-facing values; foreign keys and mutation metadata stay server-side.
 type RecordDetails struct {
-	Date         string   `json:"date,omitempty"`
-	Time         string   `json:"time,omitempty"`
-	Period       string   `json:"period,omitempty"`
-	Round        string   `json:"round,omitempty"`
-	AbsenceHours *float64 `json:"absenceHours,omitempty"`
-	PenaltyHours *float64 `json:"penaltyHours,omitempty"`
-	PenaltyCount *int     `json:"penaltyCount,omitempty"`
-	AbsenceCount *int     `json:"absenceCount,omitempty"`
-	Result       string   `json:"result,omitempty"`
-	ReasonCode   string   `json:"reasonCode,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	Remark       string   `json:"remark,omitempty"`
+	Date              string   `json:"date,omitempty"`
+	Time              string   `json:"time,omitempty"`
+	Period            string   `json:"period,omitempty"`
+	Round             string   `json:"round,omitempty"`
+	AbsenceHours      *float64 `json:"absenceHours,omitempty"`
+	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
+	PenaltyHours      *float64 `json:"penaltyHours,omitempty"`
+	PenaltyCount      *int     `json:"penaltyCount,omitempty"`
+	AbsenceCount      *int     `json:"absenceCount,omitempty"`
+	Result            string   `json:"result,omitempty"`
+	ReasonCode        string   `json:"reasonCode,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	Remark            string   `json:"remark,omitempty"`
 }
 
 // RecordReference is a human-readable responsibility label without internal IDs.
@@ -216,24 +247,21 @@ type IncompleteReportCell struct {
 // ReportVersionContent freezes only approved count and detail-navigation data.
 // Formal Word/Excel layout and other derived metrics are deliberately absent.
 type ReportVersionContent struct {
-	Period                               PeriodOption              `json:"period"`
-	ScopeLimited                         bool                      `json:"scopeLimited"`
-	StatisticsRuleVersion                string                    `json:"statisticsRuleVersion"`
-	ConfirmedRecordCount                 int                       `json:"confirmedRecordCount"`
-	Rows                                 []ReportCountRow          `json:"rows"`
-	IncompleteCells                      []IncompleteReportCell    `json:"incompleteCells"`
-	PendingDepartmentReconfirmationCount int                       `json:"pendingDepartmentReconfirmationCount"`
-	Corrections                          []ReportCorrectionSummary `json:"corrections"`
-	Adjustments                          []ReportAdjustmentSummary `json:"adjustments"`
-	GeneratedAt                          time.Time                 `json:"generatedAt"`
+	Period                PeriodOption              `json:"period"`
+	ScopeLimited          bool                      `json:"scopeLimited"`
+	StatisticsRuleVersion string                    `json:"statisticsRuleVersion"`
+	ConfirmedRecordCount  int                       `json:"confirmedRecordCount"`
+	Rows                  []ReportCountRow          `json:"rows"`
+	IncompleteCells       []IncompleteReportCell    `json:"incompleteCells"`
+	Corrections           []ReportCorrectionSummary `json:"corrections"`
+	Adjustments           []ReportAdjustmentSummary `json:"adjustments"`
+	GeneratedAt           time.Time                 `json:"generatedAt"`
 }
 
 type ReportCorrectionSummary struct {
-	ID          string `json:"id"`
-	RecordID    string `json:"recordId"`
-	Field       string `json:"field"`
-	FactChanged bool   `json:"factChanged"`
-	Status      string `json:"status"`
+	ID       string `json:"id"`
+	RecordID string `json:"recordId"`
+	Field    string `json:"field"`
 }
 
 // ReportAdjustmentSummary records an include/exclude choice made for one
@@ -261,24 +289,21 @@ type ReportAdjustmentResult struct {
 	Report       ReportState `json:"report"`
 }
 
+type ReportCorrectionChange struct {
+	Field      string          `json:"field"`
+	AfterValue json.RawMessage `json:"afterValue"`
+}
+
 type AddReportCorrectionInput struct {
-	RowVersion  int             `json:"rowVersion"`
-	RecordID    string          `json:"recordId"`
-	Field       string          `json:"field"`
-	AfterValue  json.RawMessage `json:"afterValue"`
-	Reason      string          `json:"reason"`
-	FactChanged bool            `json:"factChanged"`
+	RowVersion int                      `json:"rowVersion"`
+	RecordID   string                   `json:"recordId"`
+	Changes    []ReportCorrectionChange `json:"changes"`
+	Reason     string                   `json:"reason"`
 }
 
 type ReportCorrectionResult struct {
 	CorrectionID string      `json:"correctionId"`
 	Report       ReportState `json:"report"`
-}
-
-type DecideReportCorrectionInput struct {
-	RowVersion int    `json:"rowVersion"`
-	Decision   string `json:"decision"`
-	Comment    string `json:"comment,omitempty"`
 }
 
 func ReportCorrectionFieldPath(field string) ([]string, bool) {
@@ -290,11 +315,48 @@ func ReportCorrectionFieldPath(field string) ([]string, bool) {
 		"details.time": {"details", "time"}, "details.period": {"details", "period"},
 		"details.round": {"details", "round"}, "details.absenceHours": {"details", "absenceHours"},
 		"details.penaltyHours": {"details", "penaltyHours"}, "details.absenceCount": {"details", "absenceCount"},
-		"details.result": {"details", "result"}, "details.reasonCode": {"details", "reasonCode"},
+		"details.penaltyCount": {"details", "penaltyCount"},
+		"details.result":       {"details", "result"}, "details.reasonCode": {"details", "reasonCode"},
 		"details.description": {"details", "description"}, "details.remark": {"details", "remark"},
 	}
 	path, ok := paths[field]
 	return append([]string(nil), path...), ok
+}
+
+// ReportCorrectionFieldAllowed limits office edits to fields that belong to each record type.
+func ReportCorrectionFieldAllowed(typeCode, field string) bool {
+	fields := map[string][]string{
+		"ATTENDANCE_RATE":          {"studentNumber", "studentName", "className", "grade", "currentCourseName", "currentClassroomName", "details.date", "details.time", "details.period", "details.absenceHours", "details.penaltyHours", "details.remark"},
+		"UNATTENDED_CLASSROOM":     {"studentNumber", "studentName", "className", "grade", "currentCourseName", "currentClassroomName", "details.date", "details.time", "details.period", "details.absenceHours", "details.penaltyHours", "details.remark"},
+		"EVENING_SELF_STUDY":       {"studentNumber", "studentName", "className", "grade", "currentClassroomName", "details.date", "details.time", "details.period", "details.penaltyCount", "details.remark"},
+		"MORNING_ATTENDANCE":       {"studentNumber", "studentName", "className", "grade", "details.date", "details.absenceCount", "details.remark"},
+		"LATE_RETURN":              {"studentNumber", "studentName", "className", "grade", "currentDormitoryName", "details.date", "details.time", "details.remark"},
+		"DORMITORY_HYGIENE":        {"currentDormitoryName", "details.date", "details.time", "details.round", "details.result", "details.description", "details.remark"},
+		"CLASSROOM_HYGIENE":        {"currentClassroomName", "currentAreaName", "details.date", "details.time", "details.round", "details.result", "details.description", "details.remark"},
+		"PUBLIC_DORMITORY_HYGIENE": {"currentAreaName", "details.date", "details.time", "details.round", "details.result", "details.description", "details.remark"},
+	}
+	for _, allowed := range fields[typeCode] {
+		if allowed == field {
+			return true
+		}
+	}
+	return false
+}
+
+// ReportCorrectionValueAllowed applies type-specific semantics to values that the service has already validated.
+func ReportCorrectionValueAllowed(typeCode, field string, raw json.RawMessage) bool {
+	if !ReportCorrectionFieldAllowed(typeCode, field) {
+		return false
+	}
+	if typeCode == "ATTENDANCE_RATE" && field == "details.penaltyHours" {
+		var count json.Number
+		if err := json.Unmarshal(raw, &count); err != nil {
+			return false
+		}
+		_, err := strconv.Atoi(count.String())
+		return err == nil
+	}
+	return true
 }
 
 type ReportDraft struct {
@@ -383,17 +445,13 @@ type ReportReview struct {
 }
 
 type ReportCorrectionLog struct {
-	ID                string     `json:"id"`
-	VersionNo         int        `json:"versionNo"`
-	RecordID          string     `json:"recordId"`
-	Field             string     `json:"field"`
-	Reason            string     `json:"reason"`
-	FactChanged       bool       `json:"factChanged"`
-	Reconfirmation    string     `json:"reconfirmationStatus"`
-	CorrectedBy       string     `json:"correctedBy"`
-	CorrectedAt       time.Time  `json:"correctedAt"`
-	Decision          string     `json:"decision,omitempty"`
-	DecisionComment   string     `json:"decisionComment,omitempty"`
-	DecisionActorID   string     `json:"decisionActorId,omitempty"`
-	DecisionCreatedAt *time.Time `json:"decisionCreatedAt,omitempty"`
+	ID          string          `json:"id"`
+	VersionNo   int             `json:"versionNo"`
+	RecordID    string          `json:"recordId"`
+	Field       string          `json:"field"`
+	Reason      string          `json:"reason"`
+	BeforeValue json.RawMessage `json:"beforeValue"`
+	AfterValue  json.RawMessage `json:"afterValue"`
+	CorrectedBy string          `json:"correctedBy"`
+	CorrectedAt time.Time       `json:"correctedAt"`
 }

@@ -15,40 +15,38 @@ import (
 )
 
 type reportingHTTPStub struct {
-	periods          []reporting.PeriodOption
-	periodsErr       error
-	summary          reporting.Summary
-	summaryErr       error
-	periodActor      string
-	summaryActor     string
-	workflow         reporting.ReportWorkflow
-	workflowErr      error
-	workflowActor    string
-	archive          reporting.ReportArchivePage
-	archiveErr       error
-	archiveQuery     reporting.ReportArchiveQuery
-	archiveActor     string
-	archiveWorkflow  reporting.ReportWorkflow
-	archiveWFErr     error
-	semesterID       string
-	weekID           string
-	versionRecords   reporting.RecordPage
-	versionNo        int
-	draft            reporting.ReportDraft
-	draftErr         error
-	transition       reporting.ReportState
-	transitionErr    error
-	transitionID     string
-	transitionAction string
-	correctionResult reporting.ReportCorrectionResult
-	correctionErr    error
-	correctionID     string
-	adjustmentResult reporting.ReportAdjustmentResult
-	adjustmentErr    error
-	adjustmentID     string
-	decisionState    reporting.ReportState
-	decisionErr      error
-	decisionID       string
+	periods            []reporting.PeriodOption
+	periodsErr         error
+	summary            reporting.Summary
+	summaryErr         error
+	periodActor        string
+	summaryActor       string
+	workflow           reporting.ReportWorkflow
+	workflowErr        error
+	workflowActor      string
+	archive            reporting.ReportArchivePage
+	archiveErr         error
+	archiveQuery       reporting.ReportArchiveQuery
+	archiveActor       string
+	archiveWorkflow    reporting.ReportWorkflow
+	archiveWFErr       error
+	semesterID         string
+	weekID             string
+	versionRecords     reporting.RecordPage
+	versionNo          int
+	versionRecordQuery reporting.ReportVersionRecordsQuery
+	draft              reporting.ReportDraft
+	draftErr           error
+	transition         reporting.ReportState
+	transitionErr      error
+	transitionID       string
+	transitionAction   string
+	correctionResult   reporting.ReportCorrectionResult
+	correctionErr      error
+	correctionID       string
+	adjustmentResult   reporting.ReportAdjustmentResult
+	adjustmentErr      error
+	adjustmentID       string
 }
 
 func (s *reportingHTTPStub) Periods(_ context.Context, actorID string) ([]reporting.PeriodOption, error) {
@@ -69,6 +67,7 @@ func (s *reportingHTTPStub) Workflow(_ context.Context, actorID, semesterID, wee
 func (s *reportingHTTPStub) ReportVersionRecords(_ context.Context, actorID, semesterID, weekID string,
 	versionNo int, query reporting.ReportVersionRecordsQuery) (reporting.RecordPage, error) {
 	s.workflowActor, s.semesterID, s.weekID, s.versionNo = actorID, semesterID, weekID, versionNo
+	s.versionRecordQuery = query
 	s.versionRecords.Page, s.versionRecords.PageSize = query.Page, query.PageSize
 	return s.versionRecords, nil
 }
@@ -106,11 +105,6 @@ func (s *reportingHTTPStub) AddReportAdjustment(_ context.Context, _ string, id 
 	return s.adjustmentResult, s.adjustmentErr
 }
 
-func (s *reportingHTTPStub) DecideReportCorrection(_ context.Context, _ string, id string, _ reporting.DecideReportCorrectionInput, _ audit.Metadata) (reporting.ReportState, error) {
-	s.decisionID = id
-	return s.decisionState, s.decisionErr
-}
-
 func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T) {
 	repository := &accounts{values: map[string]auth.Account{}}
 	authService := auth.NewService(repository, &sessions{values: map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
@@ -142,11 +136,14 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 	}{
 		{path: "/api/v1/reports/weekly-report/finalize", body: reporting.ReportTransitionInput{RowVersion: 1}},
 		{path: "/api/v1/reports/weekly-report/corrections", body: reporting.AddReportCorrectionInput{RowVersion: 1}},
-		{path: "/api/v1/report-corrections/correction-id/decision", body: reporting.DecideReportCorrectionInput{RowVersion: 1}},
 	} {
 		if response := performJSON(router, http.MethodPost, route.path, route.body, ""); response.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated %s response = %d %s", route.path, response.Code, response.Body.String())
 		}
+	}
+	legacyDecision := performJSON(router, http.MethodPost, "/api/v1/report-corrections/correction-id/decision", map[string]any{"rowVersion": 1, "decision": "CONFIRMED"}, "")
+	if legacyDecision.Code != http.StatusNotFound {
+		t.Fatalf("legacy department confirmation endpoint response = %d %s; want 404", legacyDecision.Code, legacyDecision.Body.String())
 	}
 
 	periodsResponse := performJSON(router, http.MethodGet, "/api/v1/reports/periods", nil, tokens.AccessToken)
@@ -170,12 +167,14 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 		t.Fatalf("workflow response = %d %s actor=%q period=%q/%q", workflowResponse.Code, workflowResponse.Body.String(), stub.workflowActor, stub.semesterID, stub.weekID)
 	}
 	stub.versionRecords = reporting.RecordPage{Items: []reporting.Record{}, Total: 0, Page: 2, PageSize: 5}
-	versionRecordsResponse := performJSON(router, http.MethodGet, "/api/v1/reports/workflow/semester/week/versions/3/records?page=2&pageSize=5", nil, tokens.AccessToken)
+	versionRecordsResponse := performJSON(router, http.MethodGet, "/api/v1/reports/workflow/semester/week/versions/3/records?page=2&pageSize=5&studentNumber=20260001&studentName=%E6%B5%8B%E8%AF%95%E5%AD%A6%E7%94%9F&className=%E8%AE%A1%E7%A7%91%E4%B8%80%E7%8F%AD&grade=2026%E7%BA%A7", nil, tokens.AccessToken)
 	if versionRecordsResponse.Code != http.StatusOK || !strings.Contains(versionRecordsResponse.Body.String(), `"items":[]`) ||
 		stub.workflowActor != admin.ID || stub.semesterID != "semester" || stub.weekID != "week" || stub.versionNo != 3 ||
-		stub.versionRecords.Page != 2 || stub.versionRecords.PageSize != 5 {
+		stub.versionRecords.Page != 2 || stub.versionRecords.PageSize != 5 ||
+		stub.versionRecordQuery.StudentNumber != "20260001" || stub.versionRecordQuery.StudentName != "测试学生" ||
+		stub.versionRecordQuery.ClassName != "计科一班" || stub.versionRecordQuery.Grade != "2026级" {
 		t.Fatalf("version records response = %d %s actor=%q period=%q/%q version=%d query=%+v", versionRecordsResponse.Code,
-			versionRecordsResponse.Body.String(), stub.workflowActor, stub.semesterID, stub.weekID, stub.versionNo, stub.versionRecords)
+			versionRecordsResponse.Body.String(), stub.workflowActor, stub.semesterID, stub.weekID, stub.versionNo, stub.versionRecordQuery)
 	}
 	archivePeriod := reporting.PeriodOption{AcademicYearID: "year", AcademicYearName: "2025-2026学年", SemesterID: "semester", SemesterName: "第二学期", WeekID: "week", WeekNo: 2, StartDate: time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)}
 	stub.archive = reporting.ReportArchivePage{Items: []reporting.ReportArchiveEntry{{
@@ -215,7 +214,7 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 	}
 	stub.correctionResult = reporting.ReportCorrectionResult{CorrectionID: "correction-id", Report: reporting.ReportState{ID: "weekly-report", Status: reporting.ReportStatusDraft, RowVersion: 4}}
 	correctionResponse := performJSON(router, http.MethodPost, "/api/v1/reports/weekly-report/corrections", reporting.AddReportCorrectionInput{
-		RowVersion: 3, RecordID: "record-id", Field: "details.remark", AfterValue: []byte(`"修正后"`), Reason: "修正通报错字",
+		RowVersion: 3, RecordID: "record-id", Changes: []reporting.ReportCorrectionChange{{Field: "details.remark", AfterValue: []byte(`"修正后"`)}}, Reason: "修正通报错字",
 	}, tokens.AccessToken)
 	if correctionResponse.Code != http.StatusCreated || stub.correctionID != "weekly-report" {
 		t.Fatalf("correction response = %d %s; stub report=%q", correctionResponse.Code, correctionResponse.Body.String(), stub.correctionID)
@@ -226,13 +225,6 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 	}, tokens.AccessToken)
 	if adjustmentResponse.Code != http.StatusCreated || stub.adjustmentID != "weekly-report" {
 		t.Fatalf("adjustment response = %d %s; stub report=%q", adjustmentResponse.Code, adjustmentResponse.Body.String(), stub.adjustmentID)
-	}
-	stub.decisionState = reporting.ReportState{ID: "weekly-report", Status: reporting.ReportStatusDraft, RowVersion: 5}
-	decisionResponse := performJSON(router, http.MethodPost, "/api/v1/report-corrections/correction-id/decision", reporting.DecideReportCorrectionInput{
-		RowVersion: 4, Decision: "CONFIRMED",
-	}, tokens.AccessToken)
-	if decisionResponse.Code != http.StatusOK || stub.decisionID != "correction-id" {
-		t.Fatalf("decision response = %d %s; stub correction=%q", decisionResponse.Code, decisionResponse.Body.String(), stub.decisionID)
 	}
 }
 
@@ -271,13 +263,13 @@ func TestReportingEndpointsMapDomainErrorsAndHideInternalDetails(t *testing.T) {
 			stub.transitionErr = reporting.ErrReportSourceChanged
 		}, status: http.StatusConflict, code: "REPORT_SOURCE_CHANGED"},
 		{name: "invalid report correction", method: http.MethodPost, path: "/api/v1/reports/weekly-report/corrections", body: reporting.AddReportCorrectionInput{
-			RowVersion: 1, RecordID: "record-id", Field: "details.remark", AfterValue: []byte(`"x"`), Reason: "修正",
+			RowVersion: 1, RecordID: "record-id", Changes: []reporting.ReportCorrectionChange{{Field: "details.remark", AfterValue: []byte(`"x"`)}}, Reason: "修正",
 		}, setError: func() { stub.correctionErr = reporting.ErrInvalidReportCorrection }, status: http.StatusBadRequest, code: "INVALID_REPORT_CORRECTION"},
 		{name: "internal error", path: "/api/v1/reports/periods", setError: func() { stub.periodsErr = errors.New("private database diagnostic") }, status: http.StatusInternalServerError, code: "REPORT_SUMMARY_FAILED", mustHide: "private database diagnostic"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			stub.periodsErr, stub.summaryErr, stub.draftErr = nil, nil, nil
-			stub.transitionErr, stub.correctionErr, stub.decisionErr = nil, nil, nil
+			stub.transitionErr, stub.correctionErr = nil, nil
 			test.setError()
 			method := test.method
 			if method == "" {

@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +73,10 @@ func TestWeeklyReportVersionWorkflowPostgres(t *testing.T) {
 		eveningSubmissionID = "b0000000-0000-0000-0000-000000000003"
 	)
 	var eveningTypeID string
+	if _, err := pool.Exec(ctx, `UPDATE inspection_records SET student_no_snapshot='20260001',student_name_snapshot='Fixture student',
+ class_name_snapshot='计算机 1 班',grade_snapshot='2026级' WHERE id=$1`, recordID); err != nil {
+		t.Fatal("prepare searchable report fixture:", err)
+	}
 	if err := pool.QueryRow(ctx, `SELECT id FROM inspection_types WHERE code='EVENING_SELF_STUDY' AND participates_in_report`).Scan(&eveningTypeID); err != nil {
 		t.Fatal("load evening self-study report type:", err)
 	}
@@ -235,10 +242,11 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 		t.Fatal("report zero-receipt history allowed deletion")
 	}
 
-	// Append a report-only note correction, then require the source department to confirm a fact change.
+	// Office edits apply atomically to a new report version without changing the source submission.
 	_, err = service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
-		RowVersion: draft.RowVersion, RecordID: recordID, Field: "details.remark",
-		AfterValue: []byte(`"Audit rollback probe"`), Reason: "验证审计失败时回滚", FactChanged: false,
+		RowVersion: draft.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{
+			Field: "details.remark", AfterValue: []byte(`"Audit rollback probe"`),
+		}}, Reason: "验证审计失败时回滚",
 	}, audit.Metadata{IP: "not-an-ip"})
 	if err == nil {
 		t.Fatal("report correction succeeded despite an invalid audit IP")
@@ -251,40 +259,102 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 		t.Fatalf("failed audit left a correction row: count=%d err=%v", correctionCount, err)
 	}
 	remarkCorrection, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
-		RowVersion: draft.RowVersion, RecordID: recordID, Field: "details.remark",
-		AfterValue: []byte(`"Corrected report remark"`), Reason: "修正通报备注错字", FactChanged: false,
+		RowVersion: draft.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{
+			Field: "details.remark", AfterValue: []byte(`"Corrected report remark"`),
+		}}, Reason: "修正通报备注错字",
 	}, audit.Metadata{})
 	if err != nil || remarkCorrection.Report.VersionNo != 3 || remarkCorrection.Report.RowVersion != 3 {
 		t.Fatalf("append report-only correction = %+v, %v", remarkCorrection, err)
 	}
 	factCorrection, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
-		RowVersion: remarkCorrection.Report.RowVersion, RecordID: recordID, Field: "studentName",
-		AfterValue: []byte(`"Confirmed student name"`), Reason: "部门核实后的姓名更正", FactChanged: true,
+		RowVersion: remarkCorrection.Report.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{
+			{Field: "studentName", AfterValue: []byte(`"Confirmed student name"`)},
+			{Field: "details.date", AfterValue: []byte(`"2026-09-03"`)},
+		}, Reason: "办公室根据学生证据核对姓名和日期",
 	}, audit.Metadata{})
 	if err != nil || factCorrection.Report.VersionNo != 4 || factCorrection.Report.RowVersion != 4 {
 		t.Fatalf("append fact correction = %+v, %v", factCorrection, err)
 	}
-	if _, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionSubmit,
-		reporting.ReportTransitionInput{RowVersion: factCorrection.Report.RowVersion}, audit.Metadata{}); !errors.Is(err, reporting.ErrReportReconfirmationPending) {
-		t.Fatalf("pending fact correction did not block report submission: %v", err)
-	}
-	confirmed, err := service.DecideReportCorrection(ctx, actorID, factCorrection.CorrectionID,
-		reporting.DecideReportCorrectionInput{RowVersion: factCorrection.Report.RowVersion, Decision: "CONFIRMED"}, audit.Metadata{})
-	if err != nil || confirmed.VersionNo != 5 || confirmed.RowVersion != 5 {
-		t.Fatalf("department confirmation of fact correction = %+v, %v", confirmed, err)
+	var pendingCorrectionCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM weekly_report_corrections WHERE report_id=$1 AND department_reconfirmation_status='REQUIRED'`, draft.ID).Scan(&pendingCorrectionCount); err != nil || pendingCorrectionCount != 0 {
+		t.Fatalf("office correction requested department confirmation: count=%d err=%v", pendingCorrectionCount, err)
 	}
 	var correctedName, sourceName string
 	if err := pool.QueryRow(ctx, `SELECT included_data_json->>'studentName' FROM weekly_report_version_records
-WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=5) AND inspection_record_id=$2`, draft.ID, recordID).Scan(&correctedName); err != nil || correctedName != "Confirmed student name" {
-		t.Fatalf("confirmed report snapshot name = %q, %v", correctedName, err)
+WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=4) AND inspection_record_id=$2`, draft.ID, recordID).Scan(&correctedName); err != nil || correctedName != "Confirmed student name" {
+		t.Fatalf("office-edited report snapshot name = %q, %v", correctedName, err)
 	}
-	versionRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 5, reporting.ReportVersionRecordsQuery{Page: 1, PageSize: 10})
+	versionRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{Page: 1, PageSize: 10})
 	if err != nil || versionRecords.Total != 2 || len(versionRecords.Items) != 2 ||
-		versionRecords.Items[0].ID != recordID || versionRecords.Items[0].StudentName != "Confirmed student name" {
+		versionRecords.Items[0].ID != recordID || versionRecords.Items[0].StudentName != "Confirmed student name" || versionRecords.Items[0].Details.Date != "2026-09-03" {
 		t.Fatalf("read corrected immutable version records = %+v, %v", versionRecords, err)
+	}
+	snapshotRecord := versionRecords.Items[0]
+	if snapshotRecord.SourceSubmissionID != submissionID || snapshotRecord.SourceRevisionNo != 1 ||
+		snapshotRecord.SourceDepartmentName == "" || snapshotRecord.SubmittedByName == "" || snapshotRecord.SubmittedAt == nil {
+		t.Fatalf("version record lost submission provenance: %+v", snapshotRecord)
+	}
+	sourceRecords, err := service.Records(ctx, actorID, reporting.RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: attendanceID, Page: 1, PageSize: 10,
+	})
+	if err != nil || sourceRecords.Total != 1 || len(sourceRecords.Items) != 1 ||
+		sourceRecords.Items[0].SourceSubmissionID != submissionID || sourceRecords.Items[0].SubmittedByName == "" {
+		t.Fatalf("type-wide confirmed source provenance = %+v, %v", sourceRecords, err)
+	}
+	typeRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		InspectionTypeID: attendanceID, Page: 1, PageSize: 10,
+	})
+	if err != nil || typeRecords.Total != 1 || len(typeRecords.Items) != 1 || typeRecords.Items[0].ID != recordID {
+		t.Fatalf("type-wide frozen records = %+v, %v", typeRecords, err)
+	}
+	if snapshotRecord.StudentNumber == "" || snapshotRecord.ClassName == "" || snapshotRecord.Grade == "" || snapshotRecord.Source == "" {
+		t.Fatalf("fixture report snapshot is missing searchable personal fields: %+v", snapshotRecord)
+	}
+	if versionRecords.FilterOptions == nil || !slices.Contains(versionRecords.FilterOptions.StudentNumbers, snapshotRecord.StudentNumber) ||
+		!slices.Contains(versionRecords.FilterOptions.StudentNames, snapshotRecord.StudentName) ||
+		!slices.Contains(versionRecords.FilterOptions.ClassNames, snapshotRecord.ClassName) ||
+		!slices.Contains(versionRecords.FilterOptions.Grades, snapshotRecord.Grade) {
+		t.Fatalf("version filter choices were not derived from its frozen records: %+v", versionRecords.FilterOptions)
+	}
+	filteredRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		StudentNumber: " " + snapshotRecord.StudentNumber + " ", StudentName: " " + strings.ToLower(snapshotRecord.StudentName) + " ", ClassName: snapshotRecord.ClassName,
+		Grade: snapshotRecord.Grade, Page: 1, PageSize: 10,
+	})
+	if err != nil || filteredRecords.Total != 1 || len(filteredRecords.Items) != 1 || filteredRecords.Items[0].ID != recordID {
+		t.Fatalf("filter frozen version records by student details = %+v, %v", filteredRecords, err)
+	}
+	noMatchRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		StudentName: "not a saved student", Page: 1, PageSize: 10,
+	})
+	if err != nil || noMatchRecords.Total != 0 || len(noMatchRecords.Items) != 0 {
+		t.Fatalf("nonmatching version filter returned records = %+v, %v", noMatchRecords, err)
+	}
+	if _, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		Grade: "12345678901234567", Page: 1, PageSize: 10,
+	}); !errors.Is(err, reporting.ErrInvalidRecordsQuery) {
+		t.Fatalf("oversized version record filter error = %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT student_name_snapshot FROM inspection_records WHERE id=$1`, recordID).Scan(&sourceName); err != nil || sourceName == correctedName {
 		t.Fatalf("department source revision was mutated by report correction: source=%q report=%q err=%v", sourceName, correctedName, err)
+	}
+	correctionHistory, err := service.Workflow(ctx, actorID, semesterID, weekID)
+	if err != nil || len(correctionHistory.Corrections) != 3 {
+		t.Fatalf("read field-level correction history = %+v, %v", correctionHistory.Corrections, err)
+	}
+	var nameAuditFound bool
+	for _, correction := range correctionHistory.Corrections {
+		if correction.Field != "studentName" {
+			continue
+		}
+		var beforeName, afterName string
+		if json.Unmarshal(correction.BeforeValue, &beforeName) != nil || json.Unmarshal(correction.AfterValue, &afterName) != nil ||
+			beforeName != sourceName || afterName != correctedName || correction.Reason != "办公室根据学生证据核对姓名和日期" {
+			t.Fatalf("field-level audit values = %+v", correction)
+		}
+		nameAuditFound = true
+	}
+	if !nameAuditFound {
+		t.Fatal("office correction audit did not expose the changed field's before and after values")
 	}
 
 	archivePermissions := append(append([]permission.EffectivePermission(nil), permissions...), permission.EffectivePermission{
@@ -303,22 +373,22 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 
 	// The creator may review and approve their own report when the action grant allows it.
 	pending, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionSubmit,
-		reporting.ReportTransitionInput{RowVersion: confirmed.RowVersion}, audit.Metadata{})
-	if err != nil || pending.Status != reporting.ReportStatusPending || pending.RowVersion != 6 {
+		reporting.ReportTransitionInput{RowVersion: factCorrection.Report.RowVersion}, audit.Metadata{})
+	if err != nil || pending.Status != reporting.ReportStatusPending || pending.RowVersion != 5 {
 		t.Fatalf("submit report = %+v, %v", pending, err)
 	}
 	if _, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionApprove,
-		reporting.ReportTransitionInput{RowVersion: confirmed.RowVersion}, audit.Metadata{}); !errors.Is(err, reporting.ErrReportVersionConflict) {
+		reporting.ReportTransitionInput{RowVersion: factCorrection.Report.RowVersion}, audit.Metadata{}); !errors.Is(err, reporting.ErrReportVersionConflict) {
 		t.Fatalf("stale approval error = %v", err)
 	}
 	finalizing, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionApprove,
 		reporting.ReportTransitionInput{RowVersion: pending.RowVersion}, audit.Metadata{})
-	if err != nil || finalizing.Status != reporting.ReportStatusFinalizing || finalizing.RowVersion != 7 {
+	if err != nil || finalizing.Status != reporting.ReportStatusFinalizing || finalizing.RowVersion != 6 {
 		t.Fatalf("approve report = %+v, %v", finalizing, err)
 	}
 	finalized, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionFinalized,
 		reporting.ReportTransitionInput{RowVersion: finalizing.RowVersion}, audit.Metadata{})
-	if err != nil || finalized.Status != reporting.ReportStatusFinalized || finalized.RowVersion != 8 {
+	if err != nil || finalized.Status != reporting.ReportStatusFinalized || finalized.RowVersion != 7 {
 		t.Fatalf("finalize structured data without output files = %+v, %v", finalized, err)
 	}
 	var finalizer string
@@ -326,19 +396,19 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 		t.Fatalf("finalizer metadata = %q, %v", finalizer, err)
 	}
 	var auditCount int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM audit_logs WHERE resource_type='weeklyReport' AND resource_id=$1", draft.ID).Scan(&auditCount); err != nil || auditCount != 8 {
-		t.Fatalf("weekly report audit entries = %d, %v; want two drafts, corrections, department confirmation, submit, approve and finalize", auditCount, err)
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM audit_logs WHERE resource_type='weeklyReport' AND resource_id=$1", draft.ID).Scan(&auditCount); err != nil || auditCount != 7 {
+		t.Fatalf("weekly report audit entries = %d, %v; want two drafts, two corrections, submit, approve and finalize", auditCount, err)
 	}
 
 	archive, err := archiveService.Archive(ctx, actorID, reporting.ReportArchiveQuery{Page: 1, PageSize: 10, Status: reporting.ReportStatusFinalized})
 	if err != nil || archive.Total != 1 || len(archive.Items) != 1 || archive.Items[0].ID != draft.ID ||
-		archive.Items[0].Status != reporting.ReportStatusFinalized || archive.Items[0].VersionNo != 5 ||
-		archive.Items[0].VersionCount != 5 || archive.Items[0].ConfirmedRecordCount != 2 || archive.Items[0].CellCount != len(draft.Content.Rows) {
+		archive.Items[0].Status != reporting.ReportStatusFinalized || archive.Items[0].VersionNo != 4 ||
+		archive.Items[0].VersionCount != 4 || archive.Items[0].ConfirmedRecordCount != 2 || archive.Items[0].CellCount != len(draft.Content.Rows) {
 		t.Fatalf("finalized report archive page = %+v, %v", archive, err)
 	}
 	archiveWorkflow, err := archiveService.ArchiveWorkflow(ctx, actorID, semesterID, weekID)
 	if err != nil || archiveWorkflow.Report == nil || archiveWorkflow.Report.Status != reporting.ReportStatusFinalized ||
-		len(archiveWorkflow.Versions) != 5 || len(archiveWorkflow.Reviews) < 3 {
+		len(archiveWorkflow.Versions) != 4 || len(archiveWorkflow.Reviews) < 3 {
 		t.Fatalf("archive version history = %+v, %v", archiveWorkflow, err)
 	}
 	partialArchiveService := reporting.NewService(database, reportWorkflowPermissionStub{permissions: []permission.EffectivePermission{{
@@ -353,31 +423,32 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 		t.Fatalf("partial-scope archive viewer read a report with an out-of-scope cell: %v", err)
 	}
 	archiveCorrection, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
-		RowVersion: finalized.RowVersion, RecordID: recordID, Field: "details.remark",
-		AfterValue: []byte(`"Corrected after finalization"`), Reason: "定稿后发现备注需要更正", FactChanged: false,
+		RowVersion: finalized.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{
+			Field: "details.remark", AfterValue: []byte(`"Corrected after finalization"`),
+		}}, Reason: "定稿后发现备注需要更正",
 	}, audit.Metadata{})
-	if err != nil || archiveCorrection.Report.Status != reporting.ReportStatusDraft || archiveCorrection.Report.VersionNo != 6 {
+	if err != nil || archiveCorrection.Report.Status != reporting.ReportStatusDraft || archiveCorrection.Report.VersionNo != 5 {
 		t.Fatalf("create append-only correction from finalized archive = %+v, %v", archiveCorrection, err)
 	}
 	excluded, err := service.AddReportAdjustment(ctx, actorID, draft.ID, reporting.AddReportAdjustmentInput{
 		RowVersion: archiveCorrection.Report.RowVersion, RecordID: recordID, Operation: "EXCLUDE", Reason: "该记录不属于本周通报",
 	}, audit.Metadata{})
-	if err != nil || excluded.Report.VersionNo != 7 || excluded.Report.Status != reporting.ReportStatusDraft {
+	if err != nil || excluded.Report.VersionNo != 6 || excluded.Report.Status != reporting.ReportStatusDraft {
 		t.Fatalf("exclude record from a new report version = %+v, %v", excluded, err)
 	}
 	var excludedCount int
 	if err := pool.QueryRow(ctx, `SELECT confirmed_record_count FROM (
  SELECT (content_json->>'confirmedRecordCount')::int AS confirmed_record_count FROM weekly_report_versions
- WHERE report_id=$1 AND version_no=7) version`, draft.ID).Scan(&excludedCount); err != nil || excludedCount != 1 {
+	 WHERE report_id=$1 AND version_no=6) version`, draft.ID).Scan(&excludedCount); err != nil || excludedCount != 1 {
 		t.Fatalf("excluded report snapshot count = %d, %v", excludedCount, err)
 	}
 	included, err := service.AddReportAdjustment(ctx, actorID, draft.ID, reporting.AddReportAdjustmentInput{
 		RowVersion: excluded.Report.RowVersion, RecordID: recordID, Operation: "INCLUDE", Reason: "复核后恢复纳入本周通报",
 	}, audit.Metadata{})
-	if err != nil || included.Report.VersionNo != 8 {
+	if err != nil || included.Report.VersionNo != 7 {
 		t.Fatalf("restore previously excluded confirmed record = %+v, %v", included, err)
 	}
-	restoredRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 8, reporting.ReportVersionRecordsQuery{
+	restoredRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 7, reporting.ReportVersionRecordsQuery{
 		InspectionTypeID: attendanceID, DepartmentID: departmentID, Page: 1, PageSize: 10,
 	})
 	if err != nil || restoredRecords.Total != 1 || len(restoredRecords.Items) != 1 || restoredRecords.Items[0].ID != recordID {

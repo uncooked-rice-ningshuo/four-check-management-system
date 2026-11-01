@@ -51,6 +51,8 @@ function isRecordDetails(value: unknown): boolean {
   if (!stringFields.every(field => value[field] === undefined || typeof value[field] === 'string')) return false
   const numberFields = ['absenceHours', 'absenceCount']
   if (!numberFields.every(field => value[field] === undefined || (typeof value[field] === 'number' && Number.isFinite(value[field])))) return false
+  if (value.penaltyMultiplier !== undefined
+    && (typeof value.penaltyMultiplier !== 'number' || !Number.isInteger(value.penaltyMultiplier) || value.penaltyMultiplier < 1)) return false
   return ['penaltyHours', 'penaltyCount'].every(field => value[field] === undefined || value[field] === null
     || (typeof value[field] === 'number' && Number.isFinite(value[field])))
 }
@@ -58,11 +60,17 @@ function isRecordDetails(value: unknown): boolean {
 function isReportingRecord(value: unknown): value is ReportingRecord {
   return object(value)
     && typeof value.id === 'string'
+    && (value.sourceSubmissionId === undefined || typeof value.sourceSubmissionId === 'string')
+    && (value.sourceRevisionNo === undefined || Number.isInteger(value.sourceRevisionNo))
+    && (value.sourceDepartmentName === undefined || typeof value.sourceDepartmentName === 'string')
+    && (value.submittedByName === undefined || typeof value.submittedByName === 'string')
+    && (value.submittedAt === undefined || typeof value.submittedAt === 'string')
     && typeof value.studentNumber === 'string'
     && typeof value.studentName === 'string'
     && typeof value.className === 'string'
     && typeof value.grade === 'string'
     && typeof value.typeCode === 'string'
+    && (value.source === undefined || typeof value.source === 'string')
     && isRecordDetails(value.details)
     && typeof value.currentDormitoryName === 'string'
     && typeof value.currentCourseName === 'string'
@@ -72,6 +80,12 @@ function isReportingRecord(value: unknown): value is ReportingRecord {
     && (value.responsibleClasses === undefined || (Array.isArray(value.responsibleClasses) && value.responsibleClasses.every(isRecordReference)))
     && (value.responsibleStudents === undefined || (Array.isArray(value.responsibleStudents) && value.responsibleStudents.every(isRecordReference)))
     && (value.responsibleDormitories === undefined || (Array.isArray(value.responsibleDormitories) && value.responsibleDormitories.every(isRecordReference)))
+}
+
+function isReportVersionRecordFilterOptions(value: unknown): boolean {
+  return object(value)
+    && ['studentNumbers', 'studentNames', 'classNames', 'grades'].every(field =>
+      Array.isArray(value[field]) && value[field].every(item => typeof item === 'string'))
 }
 
 function isReportObligation(value: unknown): value is ReportObligation {
@@ -114,7 +128,8 @@ function isReportVersionContent(value: unknown): value is ReportVersionContent {
   if (!object(value) || !isPeriod(value.period) || typeof value.scopeLimited !== 'boolean'
     || typeof value.statisticsRuleVersion !== 'string' || !Number.isInteger(value.confirmedRecordCount)
     || !Array.isArray(value.rows) || !Array.isArray(value.incompleteCells)
-    || !Number.isInteger(value.pendingDepartmentReconfirmationCount) || !Array.isArray(value.corrections)
+    || !Array.isArray(value.corrections) || !value.corrections.every(item => object(item)
+      && typeof item.id === 'string' && typeof item.recordId === 'string' && typeof item.field === 'string')
     || (value.adjustments !== undefined && value.adjustments !== null && (!Array.isArray(value.adjustments) || !value.adjustments.every(isReportAdjustmentSummary)))
     || typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))) return false
   return value.rows.every(row => object(row) && typeof row.departmentId === 'string' && typeof row.departmentName === 'string'
@@ -155,12 +170,9 @@ function isReportReview(value: unknown): value is ReportReview {
 function isReportCorrection(value: unknown): value is ReportCorrectionLog {
   return object(value) && typeof value.id === 'string' && Number.isInteger(value.versionNo)
     && typeof value.recordId === 'string' && typeof value.field === 'string' && typeof value.reason === 'string'
-    && typeof value.factChanged === 'boolean' && typeof value.reconfirmationStatus === 'string'
+    && (value.beforeValue === null || typeof value.beforeValue === 'string' || (typeof value.beforeValue === 'number' && Number.isFinite(value.beforeValue)))
+    && (typeof value.afterValue === 'string' || (typeof value.afterValue === 'number' && Number.isFinite(value.afterValue)))
     && typeof value.correctedBy === 'string' && typeof value.correctedAt === 'string' && Number.isFinite(Date.parse(value.correctedAt))
-    && (value.decision === undefined || typeof value.decision === 'string')
-    && (value.decisionComment === undefined || typeof value.decisionComment === 'string')
-    && (value.decisionActorId === undefined || typeof value.decisionActorId === 'string')
-    && (value.decisionCreatedAt === undefined || (typeof value.decisionCreatedAt === 'string' && Number.isFinite(Date.parse(value.decisionCreatedAt))))
 }
 
 function isReportWorkflow(value: unknown): value is ReportWorkflow {
@@ -238,13 +250,22 @@ export const reportingApi = {
     const params = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) })
     if (query.inspectionTypeId) {
       params.set('inspectionTypeId', query.inspectionTypeId)
-      params.set('departmentId', query.departmentId ?? '')
-      params.set('collegeLevel', String(query.collegeLevel === true))
+      if (query.departmentId) params.set('departmentId', query.departmentId)
+      if (query.collegeLevel) params.set('collegeLevel', 'true')
+    }
+    for (const [key, value] of Object.entries({
+      studentNumber: query.studentNumber,
+      studentName: query.studentName,
+      className: query.className,
+      grade: query.grade,
+    })) {
+      if (value?.trim()) params.set(key, value.trim())
     }
     const value = await apiRequest<unknown>(`/reports/workflow/${encodeURIComponent(query.semesterId)}/${encodeURIComponent(query.weekId)}/versions/${query.versionNo}/records?${params.toString()}`)
     if (!object(value) || !Array.isArray(value.items) || !value.items.every(isReportingRecord)
       || !Number.isInteger(value.total) || Number(value.total) < 0
-      || value.page !== query.page || value.pageSize !== query.pageSize) throw badResponse()
+      || value.page !== query.page || value.pageSize !== query.pageSize
+      || (value.filterOptions !== undefined && !isReportVersionRecordFilterOptions(value.filterOptions))) throw badResponse()
     return value as ReportingRecordPage
   },
   async generateDraft(input: GenerateReportDraftInput): Promise<ReportDraft> {

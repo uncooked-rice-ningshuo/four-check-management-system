@@ -10,7 +10,9 @@
 
 **本目录的已有部署升级文件是历史说明，不是当前工作区的更新指引。** [r1 升级说明](UPGRADE.md)记录 2026-10-06 的迁移 014–021；[r2 更新说明](UPDATE-R2.md)记录 2026-10-06 的 Web 会话续期补丁，数据库仍为 001–021。文件名中的 r2 不等于 2026-10-25 的 r2 候选包。
 
-**最近一次已部署更新：**[r4 离线归档](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar)及[SHA256 文件](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar.sha256)。该包以 r3 API/Web 和 `028_hygiene_reason_dictionaries.sql` 为基线，升级 API/Web 到 r4 并应用 `028_login_device_sessions.sql`、029、030；测试机已报告四服务 healthy、`8088/health/ready=200`。本次 Web `Created` 状态的恢复步骤与剩余验收见[部署记录](../../docs/deployment/ip-trial-deployment-log.md)及[操作说明](UPDATE-R4.md)。该归档保留原始校验值，不要在已更新服务器上重跑。r3a、`build-release.sh`、`update.py` 和早期 `upgrade.py` 都是历史路径。
+**最近一次已部署更新仍为 r4。**当前可用的是 [r5a 离线更新包](../../output/releases/upgrade-20261031-r5a/four-check-update-20261031-r5a.tar)、[SHA256 文件](../../output/releases/upgrade-20261031-r5a/four-check-update-20261031-r5a.tar.sha256)和[逐步操作说明](../../output/releases/upgrade-20261031-r5a/release/UPDATE.md)。它以现有腾讯云服务器 r4 镜像和迁移账本 030 为基线，包含 API/Web `ip-trial-20261031-r5`、迁移 031–035。原 r5 包的只读预检因构建机与服务器 Docker image ID 表示不同而误报，**不要再运行原 r5 包里的脚本**；r5a 已按归档 config digest 和 RootFS layer digest 修正。r5a 尚未上传或应用；若发现旧版晚自习记录，预检会停止且不会改数据。候选包限制及部署记录见[部署记录](../../docs/deployment/ip-trial-deployment-log.md)。
+
+已部署的 r4 历史归档：[r4 离线归档](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar)及[SHA256 文件](../../output/releases/upgrade-20261025-r4/four-check-update-20261025-r4.tar.sha256)。该包已将 API/Web 更新到 r4 并应用 `028_login_device_sessions.sql`、029、030；测试机已报告四服务 healthy、`8088/health/ready=200`。该归档保留原始校验值，不要在已更新服务器上重跑。r3a、`build-release.sh`、`update.py` 和早期 `upgrade.py` 都是历史路径。
 
 ## 2026-09-22 首次交付历史证据
 

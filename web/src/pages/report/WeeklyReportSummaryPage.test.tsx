@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { reportingApi } from '../../shared/api/reportingApi'
@@ -65,6 +65,28 @@ beforeEach(() => {
 })
 
 describe('周通报汇总缓存状态', () => {
+  it('同一检查类型跨来源只显示一行，同时可核对各单位明细与未完成应交项', async () => {
+    vi.mocked(reportingApi.summary).mockReset().mockResolvedValue({
+      ...summary,
+      rows: [summary.rows[0], { ...summary.rows[0], departmentId: '', departmentName: '校级', collegeLevel: true,
+        submissionCount: 1, confirmedBatchCount: 0, confirmedRecordCount: 0, isRequired: true }],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<MemoryRouter><QueryClientProvider client={client}><WeeklyReportSummaryPage /></QueryClientProvider></MemoryRouter>)
+    const selector = await screen.findByRole('combobox', { name: '选择通报学期和周次' })
+    await waitFor(() => expect(selector).toBeEnabled())
+    fireEvent.mouseDown(selector)
+    fireEvent.click(await screen.findByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
+    const typeSection = await screen.findByRole('region', { name: '按检查类型汇总' })
+    const typeTable = typeSection.querySelector('.weekly-report-summary-table')
+    expect(typeTable).not.toBeNull()
+    expect(within(typeTable as HTMLElement).getAllByRole('row').filter(row => row.textContent?.includes('到课率'))).toHaveLength(1)
+    expect(within(typeSection).getByText('待完成应交项')).toBeVisible()
+    fireEvent.click(within(typeSection).getByRole('button', { name: '查看提交与记录' }))
+    expect(await screen.findByText('各单位提交汇总')).toBeVisible()
+    expect(screen.getAllByText('校级').length).toBeGreaterThan(0)
+  })
+
   it('在草稿中用中文展示来源状态、审核动作和修正字段，未知值不暴露内部代码', async () => {
     const statuses = ['NO_CONFIRMED_DATA', 'CONFIRMED_RECORDS', 'CONFIRMED_ZERO_RECORD_RECEIPT', 'CONFIRMED_RECORDS_AND_ZERO_RECEIPT', 'FUTURE_STATUS']
     const workflow: ReportWorkflow = {
@@ -73,28 +95,25 @@ describe('周通报汇总缓存状态', () => {
         period, scopeLimited: false, statisticsRuleVersion: 'COUNT_DETAILS_V1', confirmedRecordCount: 42,
         rows: statuses.map((dataStatus, index) => ({ departmentId: `department-${index}`, departmentName: `部门${index}`, collegeLevel: false,
           inspectionTypeId: `type-${index}`, inspectionType: '到课率', recordCount: 0, confirmedZeroReceiptCount: 0, dataStatus })),
-        incompleteCells: [], pendingDepartmentReconfirmationCount: 0, corrections: [], generatedAt: '2026-03-16T08:00:00Z',
+        incompleteCells: [], corrections: [], generatedAt: '2026-03-16T08:00:00Z',
       } }],
       reviews: [{ id: 'review-1', versionNo: 1, action: 'FINALIZED', comment: '', actorId: 'actor-1', createdAt: '2026-03-16T08:00:00Z' }],
-      corrections: [{ id: 'correction-1', versionNo: 1, recordId: 'record-1', field: 'details.result', reason: '核对结果', factChanged: true,
-        reconfirmationStatus: 'REQUIRED', correctedBy: 'actor-1', correctedAt: '2026-03-16T08:00:00Z' }],
+      corrections: [{ id: 'correction-1', versionNo: 1, recordId: 'record-1', field: 'details.result', reason: '核对结果',
+        beforeValue: 'UNQUALIFIED', afterValue: 'QUALIFIED', correctedBy: 'actor-1', correctedAt: '2026-03-16T08:00:00Z' }],
     }
     vi.mocked(reportingApi.summary).mockReset().mockResolvedValue(summary)
     vi.mocked(reportingApi.workflow).mockResolvedValue(workflow)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
     render(<MemoryRouter initialEntries={['/reports/workbench?semesterId=semester-1&weekId=week-2&stage=1']}><QueryClientProvider client={client}><WeeklyReportSummaryPage /></QueryClientProvider></MemoryRouter>)
 
-    expect(await screen.findByText('暂无已确认数据')).toBeVisible()
-    expect(screen.getByText('已确认记录')).toBeVisible()
-    expect(screen.getByText('已确认零记录')).toBeVisible()
-    expect(screen.getByText('已确认记录及零记录回执')).toBeVisible()
-    expect(screen.getByText('未知来源状态')).toBeVisible()
+    expect(await screen.findByText('草稿 · V1')).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '检查类型' })).toBeVisible()
     expect(screen.getByText('草稿 · V1')).toBeVisible()
     expect(screen.getByRole('combobox', { name: '选择通报学期和周次' }).closest('.ant-select')).toHaveTextContent('2025-2026下学期 · 第 2 周')
     fireEvent.click(screen.getByText('版本与操作记录'))
     expect(screen.getByText('检查结果')).toBeVisible()
     expect(screen.getByText(/确认定稿 · V1/)).toBeVisible()
-    expect(screen.getByRole('cell', { name: '待部门重确认' })).toBeVisible()
+    expect(screen.queryByText('待部门重确认')).not.toBeInTheDocument()
     for (const code of [...statuses, 'details.result', 'FINALIZED', 'REQUIRED']) expect(screen.queryByText(code)).not.toBeInTheDocument()
   })
 
@@ -108,14 +127,14 @@ describe('周通报汇总缓存状态', () => {
     expect(selector.closest('.attendance-page-heading')).not.toBeNull()
     fireEvent.mouseDown(selector)
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
-    await screen.findByText('部门与校级批次汇总', { exact: true })
+    await screen.findByText('按检查类型汇总', { exact: true })
     expect(screen.queryByText('周通报版本与状态')).not.toBeInTheDocument()
     const refreshButton = screen.getByRole('button', { name: '刷新汇总' })
     expect(refreshButton.closest('.weekly-report-summary-table-toolbar')).not.toBeNull()
     expect(container.querySelector('.weekly-report-summary-table')?.closest('.ant-card')).toBeNull()
     expect(container.querySelector('.weekly-report-kpi-card')).toBeNull()
     expect(screen.getAllByText(/2026年3月9日—2026年3月15日/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('columnheader', { name: '待审核/退回记录' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '待审核' })).toBeVisible()
     expect(screen.queryByRole('columnheader', { name: '未确认记录' })).not.toBeInTheDocument()
     expect(screen.getAllByText('42').length).toBeGreaterThan(0)
 
@@ -137,15 +156,15 @@ describe('周通报汇总缓存状态', () => {
     await waitFor(() => expect(selector).toBeEnabled())
     fireEvent.mouseDown(selector)
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
-    await screen.findByText('部门与校级批次汇总', { exact: true })
+    await screen.findByText('按检查类型汇总', { exact: true })
     expect(screen.getAllByText('42').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇总' }))
 
     await screen.findByText('你的通报查看权限已变化，系统已清除本地汇总数据。请重新选择当前可查看的周期。')
-    expect(screen.queryByText('部门与校级批次汇总', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText('按检查类型汇总', { exact: true })).not.toBeInTheDocument()
     await waitFor(() => expect(client.getQueryData(['reports', 'summary', 'semester-1', 'week-2'])).toBeUndefined())
-    expect(screen.queryByText('部门与校级批次汇总', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText('按检查类型汇总', { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText('42')).not.toBeInTheDocument()
     expect(reportingApi.summary).toHaveBeenCalledTimes(2)
   })
@@ -162,7 +181,7 @@ describe('周通报汇总缓存状态', () => {
     fireEvent.mouseDown(selector)
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
 
-    expect(await screen.findByRole('heading', { name: '部门与校级批次汇总' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '按检查类型汇总' })).toBeVisible()
     expect(screen.getAllByText('42').length).toBeGreaterThan(0)
     expect(screen.getByText('当前账号无权查看完整通报版本')).toBeVisible()
     expect(screen.getByText(/2026年3月9日—2026年3月15日/)).toBeVisible()

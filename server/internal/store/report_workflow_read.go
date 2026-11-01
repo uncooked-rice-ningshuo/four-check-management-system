@@ -132,25 +132,24 @@ WHERE review.report_id=$1::uuid ORDER BY review.created_at,review.id`, state.ID)
 	reviewRows.Close()
 
 	correctionRows, err := tx.Query(ctx, `SELECT correction.id::text,version.version_no,correction.inspection_record_id::text,
- correction.after_json->>'field',correction.reason,correction.fact_changed,correction.department_reconfirmation_status,
- correction.corrected_by::text,correction.corrected_at,
- COALESCE(response.decision,''),COALESCE(response.comment,''),COALESCE(response.actor_id::text,''),response.created_at
+ correction.after_json->>'field',correction.reason,correction.before_json::text,correction.after_json->'value',
+ correction.corrected_by::text,correction.corrected_at
 FROM weekly_report_corrections correction
 JOIN weekly_report_versions version ON version.id=correction.report_version_id
-LEFT JOIN weekly_report_correction_responses response ON response.correction_id=correction.id
 WHERE correction.report_id=$1::uuid ORDER BY correction.corrected_at,correction.id`, state.ID)
 	if err != nil {
 		return reporting.ReportWorkflow{}, err
 	}
 	for correctionRows.Next() {
 		var correction reporting.ReportCorrectionLog
+		var beforeValue, afterValue []byte
 		if err := correctionRows.Scan(&correction.ID, &correction.VersionNo, &correction.RecordID, &correction.Field,
-			&correction.Reason, &correction.FactChanged, &correction.Reconfirmation, &correction.CorrectedBy,
-			&correction.CorrectedAt, &correction.Decision, &correction.DecisionComment, &correction.DecisionActorID,
-			&correction.DecisionCreatedAt); err != nil {
+			&correction.Reason, &beforeValue, &afterValue, &correction.CorrectedBy, &correction.CorrectedAt); err != nil {
 			correctionRows.Close()
 			return reporting.ReportWorkflow{}, err
 		}
+		correction.BeforeValue = append(correction.BeforeValue[:0], beforeValue...)
+		correction.AfterValue = append(correction.AfterValue[:0], afterValue...)
 		workflow.Corrections = append(workflow.Corrections, correction)
 	}
 	if err := correctionRows.Err(); err != nil {
@@ -182,16 +181,38 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 	 JOIN weekly_reports wr ON wr.id=version.report_id
 	 JOIN semesters sem ON sem.id=wr.semester_id
 	 JOIN inspection_records record ON record.id=version_record.inspection_record_id
+	 JOIN department_submissions submission ON submission.id=version_record.source_submission_id
+	 LEFT JOIN departments department ON department.id=submission.department_id
+	 JOIN department_submission_revisions revision ON revision.submission_id=version_record.source_submission_id AND revision.revision_no=version_record.source_revision_no
+	 JOIN accounts submitter ON submitter.id=revision.submitted_by
 	 WHERE wr.semester_id=$1::uuid AND wr.week_id=$2::uuid AND version.version_no=$3 AND (` + access + `)`
 	if query.InspectionTypeID != "" {
 		args = append(args, query.InspectionTypeID)
 		typePosition := len(args)
+		base += fmt.Sprintf(" AND record.inspection_type_id=$%d::uuid", typePosition)
 		if query.CollegeLevel {
-			base += fmt.Sprintf(" AND record.inspection_type_id=$%d::uuid AND record.department_id IS NULL", typePosition)
-		} else {
+			base += " AND record.department_id IS NULL"
+		} else if query.DepartmentID != "" {
 			args = append(args, query.DepartmentID)
-			base += fmt.Sprintf(" AND record.inspection_type_id=$%d::uuid AND record.department_id=$%d::uuid", typePosition, len(args))
+			base += fmt.Sprintf(" AND record.department_id=$%d::uuid", len(args))
 		}
+	}
+	cellBase := base
+	cellArgs := append([]any(nil), args...)
+	for _, filter := range []struct {
+		column string
+		value  string
+	}{
+		{column: "studentNumber", value: query.StudentNumber},
+		{column: "studentName", value: query.StudentName},
+		{column: "className", value: query.ClassName},
+		{column: "grade", value: query.Grade},
+	} {
+		if filter.value == "" {
+			continue
+		}
+		args = append(args, filter.value)
+		base += fmt.Sprintf(" AND lower(COALESCE(version_record.included_data_json->>'%s', '')) = lower($%d)", filter.column, len(args))
 	}
 	var total int
 	if err := p.Pool.QueryRow(ctx, "SELECT COUNT(*) "+base, args...).Scan(&total); err != nil {
@@ -199,7 +220,9 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 	}
 	pageArgs := append([]any(nil), args...)
 	pageArgs = append(pageArgs, query.PageSize, (query.Page-1)*query.PageSize)
-	rows, err := p.Pool.Query(ctx, `SELECT version_record.included_data_json::text `+base+
+	rows, err := p.Pool.Query(ctx, `SELECT version_record.included_data_json::text,
+ version_record.source_submission_id::text,version_record.source_revision_no,
+ COALESCE(department.name,'校级'),submitter.name,revision.submitted_at `+base+
 		fmt.Sprintf(" ORDER BY version_record.inspection_record_id LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), pageArgs...)
 	if err != nil {
 		return reporting.RecordPage{}, err
@@ -209,7 +232,8 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 	for rows.Next() {
 		var encoded string
 		var record reporting.Record
-		if err := rows.Scan(&encoded); err != nil {
+		if err := rows.Scan(&encoded, &record.SourceSubmissionID, &record.SourceRevisionNo,
+			&record.SourceDepartmentName, &record.SubmittedByName, &record.SubmittedAt); err != nil {
 			return reporting.RecordPage{}, err
 		}
 		if err := json.Unmarshal([]byte(encoded), &record); err != nil {
@@ -220,5 +244,15 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 	if err := rows.Err(); err != nil {
 		return reporting.RecordPage{}, err
 	}
+	var options reporting.ReportVersionRecordFilterOptions
+	if err := p.Pool.QueryRow(ctx, `SELECT
+ COALESCE(array_agg(DISTINCT nullif(included_data_json->>'studentNumber','') ORDER BY nullif(included_data_json->>'studentNumber','')) FILTER (WHERE nullif(included_data_json->>'studentNumber','') IS NOT NULL), ARRAY[]::text[]),
+ COALESCE(array_agg(DISTINCT nullif(included_data_json->>'studentName','') ORDER BY nullif(included_data_json->>'studentName','')) FILTER (WHERE nullif(included_data_json->>'studentName','') IS NOT NULL), ARRAY[]::text[]),
+ COALESCE(array_agg(DISTINCT nullif(included_data_json->>'className','') ORDER BY nullif(included_data_json->>'className','')) FILTER (WHERE nullif(included_data_json->>'className','') IS NOT NULL), ARRAY[]::text[]),
+ COALESCE(array_agg(DISTINCT nullif(included_data_json->>'grade','') ORDER BY nullif(included_data_json->>'grade','')) FILTER (WHERE nullif(included_data_json->>'grade','') IS NOT NULL), ARRAY[]::text[])
+`+cellBase, cellArgs...).Scan(&options.StudentNumbers, &options.StudentNames, &options.ClassNames, &options.Grades); err != nil {
+		return reporting.RecordPage{}, err
+	}
+	page.FilterOptions = &options
 	return page, nil
 }

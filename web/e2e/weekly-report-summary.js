@@ -91,37 +91,35 @@ async (page) => {
   await page.getByRole('button', { name: '查看来源与零记录口径' }).hover()
   await page.getByText('草稿默认只引用已确认来源记录；零记录回执标记完成状态，不计入记录数。', { exact: true }).waitFor()
   await page.locator('.weekly-report-period-select').getByText(/第 1 周/).waitFor()
-  await page.getByText('部门与校级批次汇总', { exact: true }).waitFor()
-  const attendanceRow = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
+  await page.getByText('按检查类型汇总', { exact: true }).waitFor()
+  const attendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await attendanceRow.waitFor()
   const cells = await attendanceRow.getByRole('cell').allInnerTexts()
-  check(cells[2] === '1' && cells[6] === '1' && cells[7] === '2', `Summary did not use only the current confirmed revision: ${cells.join('|')}`)
+  check(cells[1] === '2' && cells[5] === '2' && cells[6] === '4', `Type summary did not combine current confirmed revisions: ${cells.join('|')}`)
   check(await page.getByRole('cell', { name: '教室卫生', exact: true }).count() === 0, 'Paused inspection type appeared in reporting summary')
-  const collegeRow = page.locator('tr[data-row-key="college:type:30000000-0000-0000-0000-000000000001"]')
-  const collegeCells = await collegeRow.getByRole('cell').allInnerTexts()
-  check(collegeCells[2] === '1' && collegeCells[6] === '1' && collegeCells[7] === '2', `Unexpected college summary row: ${collegeCells.join('|')}`)
-  const collegeRows = page.locator('tr[data-row-key="college"]')
-  check(await collegeRows.count() === 1, `Summary showed college-level cells without a college submission: ${await collegeRows.allInnerTexts()}`)
-  cases.push('自动选中当前工作周并加载真实汇总；只统计确认批次当前第 2 版修订快照，核对校级分列和暂停类型排除')
+  check(await attendanceRow.count() === 1, 'One type should occupy only one summary row')
+  cases.push('自动选中当前工作周并按检查类型合并部门与校级来源，保留已确认记录口径和暂停类型排除')
 
   const recordResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/v1/reports/records?') && response.url().includes('weekId=b0000000-0000-0000-0000-000000000003'))
-  await attendanceRow.getByRole('button', { name: '查看已确认记录' }).click()
+  await attendanceRow.getByRole('button', { name: '查看提交与记录' }).click()
   const recordResponse = await recordResponsePromise
   check(recordResponse.status() === 200,
     `Records endpoint returned ${recordResponse.status()}: ${JSON.stringify(await recordResponse.json().catch(() => ({})))}`)
   const recordPage = await recordResponse.json()
-  check(recordPage.total === 2 && recordPage.items.some(item => item.studentName === 'E2E student A') &&
+  check(recordPage.total === 4 && recordPage.items.some(item => item.studentName === 'E2E student A') &&
     recordPage.items.some(item => item.studentName === 'E2E student B'),
-  `Records endpoint did not return the two actual confirmed snapshot records: ${JSON.stringify(recordPage)}`)
+  `Records endpoint did not return cross-source confirmed records: ${JSON.stringify(recordPage)}`)
   await page.getByText('以下为当前确认修订中的实际提交记录', { exact: true }).waitFor()
-  await page.getByRole('row').filter({ hasText: 'E2E student A' }).waitFor()
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  const sourceDrawer = page.getByRole('dialog', { name: '到课率' })
+  await sourceDrawer.getByRole('row').filter({ hasText: 'E2E student A' }).first().waitFor()
+  const collegeRow = sourceDrawer.locator('tr[data-row-key="college:30000000-0000-0000-0000-000000000001"]')
+  await collegeRow.waitFor()
 
   const collegeRecordsResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/v1/reports/records?') && response.url().includes('collegeLevel=true') &&
     response.url().includes('weekId=b0000000-0000-0000-0000-000000000003'))
-  await collegeRow.getByRole('button', { name: '查看已确认记录' }).click()
+  await collegeRow.getByRole('button', { name: '查看记录' }).click()
   const collegeRecordsResponse = await collegeRecordsResponsePromise
   check(collegeRecordsResponse.status() === 200,
     `College-level records endpoint returned ${collegeRecordsResponse.status()}: ${JSON.stringify(await collegeRecordsResponse.json().catch(() => ({})))}`)
@@ -129,10 +127,10 @@ async (page) => {
   check(collegeRecordPage.total === 2 && collegeRecordPage.items.some(item => item.studentName === 'E2E student A') &&
     collegeRecordPage.items.some(item => item.studentName === 'E2E student B'),
   `College-level records endpoint returned unexpected records: ${JSON.stringify(collegeRecordPage)}`)
-  await page.getByRole('dialog', { name: '校级 · 到课率 · 已确认记录' }).waitFor()
-  await page.getByRole('row').filter({ hasText: 'E2E student B' }).waitFor()
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
-  cases.push('部门与校级类型行均打开真实记录抽屉，并展示当前确认修订中的记录')
+  await sourceDrawer.getByText('校级 · 已确认记录').waitFor()
+  await sourceDrawer.getByRole('row').filter({ hasText: 'E2E student B' }).waitFor()
+  await sourceDrawer.getByRole('button', { name: 'Close', exact: true }).click()
+  cases.push('类型汇总抽屉展示跨来源记录，并可按提交归属查看校级记录')
 
   const cachedSummaryFailure = async route => {
     if (route.request().url().includes('weekId=b0000000-0000-0000-0000-000000000003')) {
@@ -182,7 +180,7 @@ async (page) => {
   await page.getByRole('button', { name: '刷新汇总', exact: true }).click()
   await forbiddenResponse
   await page.getByText('你的通报查看权限已变化，系统已清除本地汇总数据。请重新选择当前可查看的周期。', { exact: true }).waitFor()
-  check(await page.getByText('部门与校级批次汇总', { exact: true }).count() === 0, 'Previously authorized summary remained visible after a 403')
+  check(await page.getByText('按检查类型汇总', { exact: true }).count() === 0, 'Previously authorized summary remained visible after a 403')
   check(await attendanceRow.count() === 0, 'Previously authorized department row remained visible after a 403')
   check(forbiddenRequests === 1, `A 403 summary request was retried ${forbiddenRequests} times`)
   await page.unroute('**/api/v1/reports/summary*', revokedSummary)
@@ -193,7 +191,7 @@ async (page) => {
   })
   await selectWeek(1)
   await restoredAfterPermissionRefresh
-  await page.getByText('部门与校级批次汇总', { exact: true }).waitFor()
+  await page.getByText('按检查类型汇总', { exact: true }).waitFor()
   cases.push('汇总刷新遇到 403 时立即隐藏并清除旧数据、取消重试；重新选择当前可查看周期后恢复')
 
   let summaryFailures = 0
@@ -248,10 +246,10 @@ async (page) => {
   })
   await selectWeek(2)
   await secondWeekResponse
-  const secondWeekAttendanceRow = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
+  const secondWeekAttendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await secondWeekAttendanceRow.waitFor()
   let secondWeekCells = await secondWeekAttendanceRow.getByRole('cell').allInnerTexts()
-  check(secondWeekCells[2] === '0' && secondWeekCells[3] === '0' && secondWeekCells[4] === '0',
+  check(secondWeekCells[1] === '0' && secondWeekCells[2] === '0' && secondWeekCells[3] === '0',
     `The second week's own summary was not shown: ${secondWeekCells.join('|')}`)
 
   const delayedFirstWeekResponseReceived = page.waitForResponse(response => {
@@ -262,7 +260,7 @@ async (page) => {
   await delayedFirstWeekResponseReceived
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   secondWeekCells = await secondWeekAttendanceRow.getByRole('cell').allInnerTexts()
-  check(secondWeekCells[2] === '0' && secondWeekCells[3] === '0' && secondWeekCells[4] === '0',
+  check(secondWeekCells[1] === '0' && secondWeekCells[2] === '0' && secondWeekCells[3] === '0',
     `Late first-week response replaced the second week's summary: ${secondWeekCells.join('|')}`)
   await page.unroute('**/api/v1/reports/summary*', delayedFirstWeekRoute)
   cases.push('第一周汇总响应延迟时切换到第二周；旧响应晚到不覆盖当前周汇总')
@@ -307,10 +305,10 @@ async (page) => {
   await page.goto(base + '/reports/weekly-summary')
   await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
   await submittedWeekSummary
-  const updatedAttendanceRow = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
+  const updatedAttendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await updatedAttendanceRow.waitFor()
   const updatedCells = await updatedAttendanceRow.getByRole('cell').allInnerTexts()
-  check(updatedCells[2] === '2' && updatedCells[6] === '2' && updatedCells[7] === '3',
+  check(updatedCells[1] === '3' && updatedCells[5] === '3' && updatedCells[6] === '5',
     `The summary page did not include the newly submitted and confirmed record: ${updatedCells.join('|')}`)
   await page.getByRole('button', { name: '确认数据并生成草稿', exact: true }).waitFor()
   cases.push('真实提交并确认一个部门批次后重载汇总页；页面显示新增确认批次和当前修订记录数')
@@ -352,7 +350,7 @@ async (page) => {
   check((await page.locator('.weekly-report-stage-actions').evaluate(element => getComputedStyle(element).position)) === 'fixed',
     'Draft stage actions are not fixed to the viewport')
   await page.keyboard.press('Escape')
-  cases.push('草稿按部门/类型打开本版冻结明细，阶段操作栏固定在视口底部，生成 Word/Excel 控件保留为禁用占位')
+  cases.push('草稿按检查类型打开本版冻结明细，阶段操作栏固定在视口底部，生成 Word/Excel 控件保留为禁用占位')
 
   const draftArchiveResponsePromise = page.waitForResponse(response => response.url().includes('/api/v1/reports/archive?'))
   await page.getByRole('link', { name: '通报归档', exact: true }).click()
@@ -417,7 +415,7 @@ async (page) => {
   check(finalDetailResponse.status() === 200 && finalizedDetails.items.length > 0,
     `Final category detail did not return frozen records: ${JSON.stringify(finalizedDetails)}`)
   await page.keyboard.press('Escape')
-  cases.push('定稿按部门/类型仍可查看同一冻结版本的完整明细；数据定稿不依赖 Word/Excel 文件')
+  cases.push('定稿按检查类型仍可查看同一冻结版本的完整明细；数据定稿不依赖 Word/Excel 文件')
 
   const archiveResponsePromise = page.waitForResponse(response => response.url().includes('/api/v1/reports/archive?'))
   await page.getByRole('link', { name: '通报归档', exact: true }).click()

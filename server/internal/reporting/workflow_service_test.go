@@ -28,12 +28,12 @@ type reportWorkflowRepositoryStub struct {
 	transitionErr    error
 	correctionResult ReportCorrectionResult
 	correctionErr    error
+	correctionInput  AddReportCorrectionInput
+	correctionRules  []permission.EffectivePermission
 	adjustmentResult ReportAdjustmentResult
 	adjustmentErr    error
 	adjustmentInput  AddReportAdjustmentInput
 	adjustmentRules  []permission.EffectivePermission
-	decisionState    ReportState
-	decisionErr      error
 	workflow         ReportWorkflow
 	workflowErr      error
 }
@@ -42,8 +42,9 @@ func (r *reportWorkflowRepositoryStub) GetReportWorkflow(context.Context, string
 	return r.workflow, r.workflowErr
 }
 
-func (r *reportWorkflowRepositoryStub) AddReportCorrection(context.Context, string, string, AddReportCorrectionInput,
-	[]permission.EffectivePermission, audit.Metadata) (ReportCorrectionResult, error) {
+func (r *reportWorkflowRepositoryStub) AddReportCorrection(_ context.Context, _, _ string, input AddReportCorrectionInput,
+	permissions []permission.EffectivePermission, _ audit.Metadata) (ReportCorrectionResult, error) {
+	r.correctionInput, r.correctionRules = input, permissions
 	return r.correctionResult, r.correctionErr
 }
 
@@ -51,11 +52,6 @@ func (r *reportWorkflowRepositoryStub) AddReportAdjustment(_ context.Context, _,
 	permissions []permission.EffectivePermission, _ audit.Metadata) (ReportAdjustmentResult, error) {
 	r.adjustmentInput, r.adjustmentRules = input, permissions
 	return r.adjustmentResult, r.adjustmentErr
-}
-
-func (r *reportWorkflowRepositoryStub) DecideReportCorrection(context.Context, string, string, DecideReportCorrectionInput,
-	[]permission.EffectivePermission, audit.Metadata) (ReportState, error) {
-	return r.decisionState, r.decisionErr
 }
 
 func (r *reportWorkflowRepositoryStub) CreateReportDraft(_ context.Context, command CreateReportDraftCommand) (ReportDraft, error) {
@@ -143,26 +139,25 @@ func TestGenerateDraftForceRequiresReasonAndScopedForcePermission(t *testing.T) 
 
 func TestValidateReportCorrectionValues(t *testing.T) {
 	tests := []struct {
-		name        string
-		field       string
-		value       string
-		factChanged bool
-		wantErr     bool
+		name    string
+		field   string
+		value   string
+		wantErr bool
 	}{
 		{name: "report note", field: "details.remark", value: `"已核对说明"`},
-		{name: "confirmed factual text", field: "studentName", value: `"王同学"`, factChanged: true},
-		{name: "confirmed numeric detail", field: "details.absenceHours", value: `2`, factChanged: true},
-		{name: "confirmed integer detail", field: "details.absenceCount", value: `1`, factChanged: true},
-		{name: "reject changed name without reconfirmation", field: "studentName", value: `"王同学"`, wantErr: true},
-		{name: "reject wrong field type", field: "studentName", value: `2`, factChanged: true, wantErr: true},
-		{name: "reject zero event hours", field: "details.absenceHours", value: `0`, factChanged: true, wantErr: true},
-		{name: "reject fractional absence count", field: "details.absenceCount", value: `1.5`, factChanged: true, wantErr: true},
-		{name: "reject multiple JSON values", field: "details.absenceHours", value: `2 3`, factChanged: true, wantErr: true},
-		{name: "reject unknown field", field: "internalId", value: `"x"`, factChanged: true, wantErr: true},
+		{name: "factual text applies without department confirmation", field: "studentName", value: `"王同学"`},
+		{name: "numeric detail", field: "details.absenceHours", value: `2`},
+		{name: "integer absence detail", field: "details.absenceCount", value: `1`},
+		{name: "penalty count", field: "details.penaltyHours", value: `2`},
+		{name: "reject wrong field type", field: "studentName", value: `2`, wantErr: true},
+		{name: "reject zero event hours", field: "details.absenceHours", value: `0`, wantErr: true},
+		{name: "reject fractional absence count", field: "details.absenceCount", value: `1.5`, wantErr: true},
+		{name: "reject multiple JSON values", field: "details.absenceHours", value: `2 3`, wantErr: true},
+		{name: "reject unknown field", field: "internalId", value: `"x"`, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := validateCorrectionValue(test.field, []byte(test.value), test.factChanged)
+			_, err := validateCorrectionValue(test.field, []byte(test.value))
 			if test.wantErr && !errors.Is(err, ErrInvalidReportCorrection) {
 				t.Fatalf("validation error = %v; want invalid correction", err)
 			}
@@ -170,6 +165,67 @@ func TestValidateReportCorrectionValues(t *testing.T) {
 				t.Fatalf("valid correction rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestReportCorrectionFieldsFollowInspectionType(t *testing.T) {
+	tests := []struct {
+		name, typeCode, field string
+		want                  bool
+	}{
+		{name: "attendance count", typeCode: "ATTENDANCE_RATE", field: "details.penaltyHours", want: true},
+		{name: "attendance course", typeCode: "ATTENDANCE_RATE", field: "currentCourseName", want: true},
+		{name: "hygiene result", typeCode: "DORMITORY_HYGIENE", field: "details.result", want: true},
+		{name: "late return dormitory", typeCode: "LATE_RETURN", field: "currentDormitoryName", want: true},
+		{name: "attendance cannot edit hygiene result", typeCode: "ATTENDANCE_RATE", field: "details.result"},
+		{name: "hygiene cannot edit student", typeCode: "DORMITORY_HYGIENE", field: "studentName"},
+		{name: "unknown type is denied", typeCode: "UNKNOWN", field: "studentName"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ReportCorrectionFieldAllowed(test.typeCode, test.field); got != test.want {
+				t.Fatalf("field allowed = %t; want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReportCorrectionValuesFollowInspectionType(t *testing.T) {
+	if !ReportCorrectionValueAllowed("ATTENDANCE_RATE", "details.penaltyHours", []byte(`2`)) {
+		t.Fatal("integer attendance penalty count should be allowed")
+	}
+	if ReportCorrectionValueAllowed("ATTENDANCE_RATE", "details.penaltyHours", []byte(`1.5`)) {
+		t.Fatal("fractional attendance penalty count should be rejected")
+	}
+	if !ReportCorrectionValueAllowed("UNATTENDED_CLASSROOM", "details.penaltyHours", []byte(`1.5`)) {
+		t.Fatal("fractional unattended-classroom penalty hours should remain valid")
+	}
+}
+
+func TestAddReportCorrectionValidatesOneAtomicMultiFieldEdit(t *testing.T) {
+	reportID := "a0000000-0000-0000-0000-000000000009"
+	correct := permission.EffectivePermission{Action: permission.ActionReportCorrect, Effect: permission.EffectAllow}
+	repository := &reportWorkflowRepositoryStub{reportingRepositoryStub: &reportingRepositoryStub{},
+		correctionResult: ReportCorrectionResult{CorrectionID: "correction-1", Report: ReportState{ID: reportID, VersionNo: 2}}}
+	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{correct}}})
+	input := AddReportCorrectionInput{RowVersion: 1, RecordID: "a0000000-0000-0000-0000-000000000014", Reason: "依据现场证据核对",
+		Changes: []ReportCorrectionChange{
+			{Field: "studentName", AfterValue: []byte(`"王同学"`)},
+			{Field: "details.date", AfterValue: []byte(`"2026-03-16"`)},
+		}}
+	actual, err := service.AddReportCorrection(context.Background(), reportTestActor, reportID, input, audit.Metadata{})
+	if err != nil || actual.CorrectionID != "correction-1" || len(repository.correctionInput.Changes) != 2 ||
+		len(repository.correctionRules) != 1 || repository.correctionRules[0].Action != permission.ActionReportCorrect {
+		t.Fatalf("authorized multi-field correction = %+v, input=%+v rules=%+v err=%v", actual, repository.correctionInput, repository.correctionRules, err)
+	}
+
+	input.Changes = append(input.Changes, input.Changes[0])
+	if _, err := service.AddReportCorrection(context.Background(), reportTestActor, reportID, input, audit.Metadata{}); !errors.Is(err, ErrInvalidReportCorrection) {
+		t.Fatalf("duplicate changed field error = %v", err)
+	}
+	input.Changes = []ReportCorrectionChange{{Field: "internalId", AfterValue: []byte(`"hidden"`)}}
+	if _, err := service.AddReportCorrection(context.Background(), reportTestActor, reportID, input, audit.Metadata{}); !errors.Is(err, ErrInvalidReportCorrection) {
+		t.Fatalf("invalid value for type-agnostic field validation error = %v", err)
 	}
 }
 

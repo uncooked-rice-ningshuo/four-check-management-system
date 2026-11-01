@@ -16,10 +16,6 @@ const reviewActions: Record<string, string> = {
   FINALIZED: '确认定稿', PUBLISHED: '已发布', ARCHIVED: '已归档',
 }
 
-const reconfirmationStatuses: Record<string, string> = {
-  NOT_REQUIRED: '无需部门重确认', REQUIRED: '待部门重确认', CONFIRMED: '部门已确认',
-}
-
 const correctionFieldLabels: Record<string, string> = {
   studentNumber: '学号', studentName: '姓名', className: '班级', grade: '年级',
   currentDormitoryName: '宿舍', currentCourseName: '课程', currentClassroomName: '教室',
@@ -35,6 +31,5 @@ const labelFor = (labels: Record<string, string>, value: string, fallback: strin
 export const reportSourceStatusLabel = (value: string) => labelFor(sourceStatuses, value, '未知来源状态')
 export const reportStatusLabel = (value: string) => labelFor(reportStatuses, value, '未知通报状态')
 export const reportReviewActionLabel = (value: string) => labelFor(reviewActions, value, '未知操作')
-export const reportReconfirmationLabel = (value: string) => labelFor(reconfirmationStatuses, value, '未知确认状态')
 export const reportCorrectionFieldLabel = (value: string) => labelFor(correctionFieldLabels, value, '未知修正字段')
 export const inspectionResultLabel = (value: string) => labelFor(inspectionResults, value, '未知检查结果')

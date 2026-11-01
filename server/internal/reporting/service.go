@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/inspection"
@@ -34,8 +35,6 @@ var (
 	ErrInvalidReportCorrection     = errors.New("invalid weekly report correction")
 	ErrInvalidReportAdjustment     = errors.New("invalid weekly report adjustment")
 	ErrReportCorrectionNotFound    = errors.New("weekly report correction not found")
-	ErrReportCorrectionDecided     = errors.New("weekly report correction already decided")
-	ErrReportReconfirmationPending = errors.New("weekly report has pending department reconfirmation")
 	ErrReportSourceChanged         = errors.New("weekly report source data changed")
 )
 
@@ -86,7 +85,6 @@ type reportWorkflowRepository interface {
 	TransitionReport(context.Context, string, string, string, ReportTransitionInput, []permission.EffectivePermission, audit.Metadata) (ReportState, error)
 	AddReportCorrection(context.Context, string, string, AddReportCorrectionInput, []permission.EffectivePermission, audit.Metadata) (ReportCorrectionResult, error)
 	AddReportAdjustment(context.Context, string, string, AddReportAdjustmentInput, []permission.EffectivePermission, audit.Metadata) (ReportAdjustmentResult, error)
-	DecideReportCorrection(context.Context, string, string, DecideReportCorrectionInput, []permission.EffectivePermission, audit.Metadata) (ReportState, error)
 }
 
 type reportArchiveRepository interface {
@@ -99,6 +97,10 @@ type reportArchiveWorkflowRepository interface {
 
 type reportVersionRecordsRepository interface {
 	ListReportVersionRecords(context.Context, string, string, int, ReportVersionRecordsQuery, []permission.EffectivePermission) (RecordPage, error)
+}
+
+type reportSourceDetailsRepository interface {
+	ReportSourceDetails(context.Context, []string) (map[string]RecordSourceDetails, error)
 }
 
 type Service struct {
@@ -405,6 +407,20 @@ func (s *Service) ReportVersionRecords(ctx context.Context, accountID, semesterI
 	}
 	query.DepartmentID = strings.TrimSpace(query.DepartmentID)
 	query.InspectionTypeID = strings.TrimSpace(query.InspectionTypeID)
+	for _, filter := range []struct {
+		value *string
+		limit int
+	}{
+		{value: &query.StudentNumber, limit: 32},
+		{value: &query.StudentName, limit: 64},
+		{value: &query.ClassName, limit: 96},
+		{value: &query.Grade, limit: 16},
+	} {
+		*filter.value = strings.TrimSpace(*filter.value)
+		if utf8.RuneCountInString(*filter.value) > filter.limit {
+			return RecordPage{}, ErrInvalidRecordsQuery
+		}
+	}
 	if query.InspectionTypeID != "" {
 		inspectionTypeID, parseErr := uuid.Parse(query.InspectionTypeID)
 		if parseErr != nil {
@@ -415,7 +431,7 @@ func (s *Service) ReportVersionRecords(ctx context.Context, accountID, semesterI
 			if query.DepartmentID != "" {
 				return RecordPage{}, ErrInvalidRecordsQuery
 			}
-		} else {
+		} else if query.DepartmentID != "" {
 			departmentID, parseErr := uuid.Parse(query.DepartmentID)
 			if parseErr != nil {
 				return RecordPage{}, ErrInvalidRecordsQuery
@@ -546,7 +562,7 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 		if query.DepartmentID != "" {
 			return RecordPage{}, ErrInvalidRecordsQuery
 		}
-	} else {
+	} else if query.DepartmentID != "" {
 		id, err := uuid.Parse(query.DepartmentID)
 		if err != nil {
 			return RecordPage{}, ErrInvalidRecordsQuery
@@ -572,7 +588,7 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 	}
 	visibleCell := false
 	for _, row := range visibleSummary.Rows {
-		if row.DepartmentID == query.DepartmentID && row.CollegeLevel == query.CollegeLevel && row.InspectionTypeID == query.InspectionTypeID {
+		if row.InspectionTypeID == query.InspectionTypeID && (query.DepartmentID == "" && !query.CollegeLevel || row.DepartmentID == query.DepartmentID && row.CollegeLevel == query.CollegeLevel) {
 			visibleCell = true
 			break
 		}
@@ -585,8 +601,33 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 		return RecordPage{}, err
 	}
 	page := RecordPage{Items: make([]Record, 0, len(records)), Total: total, Page: query.Page, PageSize: query.PageSize}
+	var sources map[string]RecordSourceDetails
+	if sourceRepository, ok := s.repository.(reportSourceDetailsRepository); ok && len(records) > 0 {
+		ids := make([]string, len(records))
+		for index, record := range records {
+			ids[index] = record.ID
+		}
+		sources, err = sourceRepository.ReportSourceDetails(ctx, ids)
+		if err != nil {
+			return RecordPage{}, err
+		}
+	}
 	for _, record := range records {
-		page.Items = append(page.Items, ReportRecordFromInspection(record))
+		projected := ReportRecordFromInspection(record)
+		for _, row := range visibleSummary.Rows {
+			if row.InspectionTypeID == record.InspectionTypeID && row.DepartmentID == record.DepartmentID {
+				projected.SourceDepartmentName = row.DepartmentName
+				break
+			}
+		}
+		if source, ok := sources[record.ID]; ok {
+			projected.SourceSubmissionID = source.SubmissionID
+			projected.SourceRevisionNo = source.RevisionNo
+			projected.SourceDepartmentName = source.DepartmentName
+			projected.SubmittedByName = source.SubmittedBy
+			projected.SubmittedAt = &source.SubmittedAt
+		}
+		page.Items = append(page.Items, projected)
 	}
 	return page, nil
 }
@@ -596,7 +637,7 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 func ReportRecordFromInspection(record inspection.InspectionRecord) Record {
 	return Record{
 		ID: record.ID, RowVersion: record.RowVersion, StudentNumber: record.StudentNumber, StudentName: record.StudentName,
-		ClassName: record.ClassName, Grade: record.Grade, TypeCode: record.TypeCode,
+		ClassName: record.ClassName, Grade: record.Grade, TypeCode: record.TypeCode, Source: record.Source,
 		Details:                reportRecordDetails(record.Details),
 		CurrentDormitoryName:   record.CurrentDormitoryName,
 		CurrentCourseName:      record.CurrentCourseName,
@@ -784,12 +825,23 @@ func (s *Service) AddReportCorrection(ctx context.Context, accountID, reportID s
 	}
 	input.RecordID = strings.TrimSpace(input.RecordID)
 	input.Reason = strings.TrimSpace(input.Reason)
-	input.Field = strings.TrimSpace(input.Field)
-	if len([]rune(input.Reason)) < 5 || len([]rune(input.Reason)) > 500 || len(input.AfterValue) == 0 || len(input.AfterValue) > 4096 {
+	if len([]rune(input.Reason)) < 5 || len([]rune(input.Reason)) > 500 || len(input.Changes) == 0 || len(input.Changes) > 24 {
 		return ReportCorrectionResult{}, ErrInvalidReportCorrection
 	}
-	if _, err := validateCorrectionValue(input.Field, input.AfterValue, input.FactChanged); err != nil {
-		return ReportCorrectionResult{}, ErrInvalidReportCorrection
+	seenFields := make(map[string]struct{}, len(input.Changes))
+	for index := range input.Changes {
+		input.Changes[index].Field = strings.TrimSpace(input.Changes[index].Field)
+		change := input.Changes[index]
+		if len(change.AfterValue) == 0 || len(change.AfterValue) > 4096 {
+			return ReportCorrectionResult{}, ErrInvalidReportCorrection
+		}
+		if _, duplicate := seenFields[change.Field]; duplicate {
+			return ReportCorrectionResult{}, ErrInvalidReportCorrection
+		}
+		seenFields[change.Field] = struct{}{}
+		if _, err := validateCorrectionValue(change.Field, change.AfterValue); err != nil {
+			return ReportCorrectionResult{}, ErrInvalidReportCorrection
+		}
 	}
 	repository, ok := s.repository.(reportWorkflowRepository)
 	if !ok {
@@ -847,34 +899,9 @@ func (s *Service) AddReportAdjustment(ctx context.Context, accountID, reportID s
 	return repository.AddReportAdjustment(ctx, canonicalID, accountID, input, correctionPermissions, metadata)
 }
 
-func (s *Service) DecideReportCorrection(ctx context.Context, accountID, correctionID string, input DecideReportCorrectionInput, metadata audit.Metadata) (ReportState, error) {
-	canonicalID, err := canonicalUUID(correctionID)
-	if err != nil || input.RowVersion < 1 || (input.Decision != "CONFIRMED" && input.Decision != "REJECTED") || len([]rune(input.Comment)) > 500 {
-		return ReportState{}, ErrInvalidReportCorrection
-	}
-	if input.Decision == "REJECTED" && len([]rune(strings.TrimSpace(input.Comment))) < 5 {
-		return ReportState{}, ErrInvalidReportCorrection
-	}
-	repository, ok := s.repository.(reportWorkflowRepository)
-	if !ok {
-		return ReportState{}, errors.New("weekly report workflow repository unavailable")
-	}
-	effective, err := s.permissions.Effective(ctx, accountID)
-	if err != nil {
-		return ReportState{}, err
-	}
-	reviewPermissions := actionPermissions(effective.Permissions, permission.ActionInspectionReview)
-	if !hasUsableReportGrant(reviewPermissions) {
-		return ReportState{}, ErrForbidden
-	}
-	metadata.ActorID = accountID
-	metadata.Reason = strings.TrimSpace(input.Comment)
-	return repository.DecideReportCorrection(ctx, canonicalID, accountID, input, reviewPermissions, metadata)
-}
-
-func validateCorrectionValue(field string, raw json.RawMessage, factChanged bool) ([]string, error) {
+func validateCorrectionValue(field string, raw json.RawMessage) ([]string, error) {
 	path, ok := ReportCorrectionFieldPath(field)
-	if !ok || (field != "details.remark" && !factChanged) {
+	if !ok {
 		return nil, ErrInvalidReportCorrection
 	}
 	stringLimits := map[string]int{
@@ -923,7 +950,7 @@ func validateCorrectionValue(field string, raw json.RawMessage, factChanged bool
 	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) || number <= 0 {
 		return nil, ErrInvalidReportCorrection
 	}
-	if field == "details.absenceCount" {
+	if field == "details.absenceCount" || field == "details.penaltyCount" {
 		integer, parseErr := strconv.Atoi(value.String())
 		if parseErr != nil || integer < 1 {
 			return nil, ErrInvalidReportCorrection
@@ -969,7 +996,7 @@ func reportRecordDetails(details inspection.InspectionDetails) RecordDetails {
 	case *inspection.UnattendedClassroomDetails:
 		return courseAbsenceRecordDetails(item.CourseAbsenceDetails)
 	case *inspection.EveningSelfStudyDetails:
-		return RecordDetails{Date: item.Date, Time: item.Time, Period: item.Period, PenaltyCount: item.PenaltyCount, Remark: item.Remark}
+		return RecordDetails{Date: item.Date, Time: item.Time, Period: item.Period, PenaltyMultiplier: item.PenaltyMultiplier, PenaltyCount: item.PenaltyCount, Remark: item.Remark}
 	case *inspection.MorningAttendanceDetails:
 		return RecordDetails{Date: item.Date, AbsenceCount: &item.AbsenceCount, Remark: item.Remark}
 	case *inspection.LateReturnDetails:
@@ -988,7 +1015,7 @@ func reportRecordDetails(details inspection.InspectionDetails) RecordDetails {
 func courseAbsenceRecordDetails(details inspection.CourseAbsenceDetails) RecordDetails {
 	return RecordDetails{
 		Date: details.Date, Time: details.Time, Period: details.Period,
-		AbsenceHours: &details.AbsenceHours, PenaltyHours: details.PenaltyHours, Remark: details.Remark,
+		AbsenceHours: &details.AbsenceHours, PenaltyMultiplier: details.PenaltyMultiplier, PenaltyHours: details.PenaltyHours, Remark: details.Remark,
 	}
 }
 

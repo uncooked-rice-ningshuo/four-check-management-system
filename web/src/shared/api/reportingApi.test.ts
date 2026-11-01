@@ -134,7 +134,6 @@ it('parses the report workflow and draft response contracts independently', asyn
       dataStatus: 'NO_CONFIRMED_DATA',
     }],
     incompleteCells: [],
-    pendingDepartmentReconfirmationCount: 0,
     corrections: [],
     generatedAt: '2026-03-10T00:00:00Z',
   }
@@ -160,19 +159,48 @@ it('parses the report workflow and draft response contracts independently', asyn
   expect(request.mock.calls[2][0]).toBe('/reports/drafts')
 })
 
+it('requires before and after values in correction audit entries without department decisions', async () => {
+  const correction = {
+    id: 'correction-1', versionNo: 2, recordId: 'record-1', field: 'studentName', reason: '依据现场证据核对',
+    beforeValue: '旧姓名', afterValue: '新姓名', correctedBy: 'office-user', correctedAt: '2026-03-16T08:00:00Z',
+  }
+  const workflow = {
+    report: null,
+    versions: [],
+    reviews: [],
+    corrections: [correction],
+  }
+  request.mockResolvedValueOnce(workflow)
+  await expect(reportingApi.workflow('semester-1', 'week-2')).resolves.toEqual(workflow)
+
+  request.mockResolvedValueOnce({ ...workflow, corrections: [{ ...correction, afterValue: undefined }] })
+  await expect(reportingApi.workflow('semester-1', 'week-2')).rejects.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' })
+})
+
 it('reads paginated record values from the selected immutable department/type report version', async () => {
   const record = {
     id: 'record-1', studentNumber: '20260001', studentName: '测试学生', className: '计科一班', grade: '2026级',
-    typeCode: 'ATTENDANCE_RATE', details: { remark: '已冻结的备注' }, currentDormitoryName: '',
+    typeCode: 'ATTENDANCE_RATE', source: 'EXCEL', details: { remark: '已冻结的备注' }, currentDormitoryName: '',
     currentCourseName: '离散数学', currentClassroomName: 'A101',
   }
-  request.mockResolvedValueOnce({ items: [record], total: 1, page: 2, pageSize: 10 })
+  const filterOptions = { studentNumbers: ['20260001'], studentNames: ['测试学生'], classNames: ['计科一班'], grades: ['2026级'] }
+  request.mockResolvedValueOnce({ items: [record], total: 1, page: 2, pageSize: 10, filterOptions })
   await expect(reportingApi.versionRecords({
     semesterId: 'semester-1', weekId: 'week-2', versionNo: 3,
-    departmentId: 'department-1', collegeLevel: false, inspectionTypeId: 'type-1', page: 2, pageSize: 10,
+    departmentId: 'department-1', collegeLevel: false, inspectionTypeId: 'type-1',
+    studentNumber: '20260001', studentName: '测试学生', className: '计科一班', grade: '2026级', page: 2, pageSize: 10,
   }))
-    .resolves.toEqual({ items: [record], total: 1, page: 2, pageSize: 10 })
-  expect(request.mock.calls[0][0]).toBe('/reports/workflow/semester-1/week-2/versions/3/records?page=2&pageSize=10&inspectionTypeId=type-1&departmentId=department-1&collegeLevel=false')
+    .resolves.toEqual({ items: [record], total: 1, page: 2, pageSize: 10, filterOptions })
+  expect(request.mock.calls[0][0]).toBe('/reports/workflow/semester-1/week-2/versions/3/records?page=2&pageSize=10&inspectionTypeId=type-1&departmentId=department-1&studentNumber=20260001&studentName=%E6%B5%8B%E8%AF%95%E5%AD%A6%E7%94%9F&className=%E8%AE%A1%E7%A7%91%E4%B8%80%E7%8F%AD&grade=2026%E7%BA%A7')
+
+  request.mockResolvedValueOnce({ items: [record], total: 1, page: 2, pageSize: 10 })
+  await expect(reportingApi.versionRecords({ semesterId: 'semester-1', weekId: 'week-2', versionNo: 3, page: 2, pageSize: 10 }))
+    .resolves.toMatchObject({ items: [record], total: 1 })
+
+  request.mockResolvedValueOnce({ items: [record], total: 1, page: 1, pageSize: 20,
+    filterOptions: { studentNumbers: ['20260001'], studentNames: [7], classNames: [], grades: [] } })
+  await expect(reportingApi.versionRecords({ semesterId: 'semester-1', weekId: 'week-2', versionNo: 3, page: 1, pageSize: 20 }))
+    .rejects.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' })
 })
 
 it('appends a version adjustment without overwriting the original report snapshot', async () => {

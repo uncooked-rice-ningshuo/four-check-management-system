@@ -1,34 +1,43 @@
-import { useState } from 'react'
-import { inspectionResultLabel, reportCorrectionFieldLabel, reportReconfirmationLabel, reportReviewActionLabel, reportSourceStatusLabel, reportStatusLabel } from '../model/labels'
-import { Alert, Button, Checkbox, Descriptions, Drawer, Input, Modal, Popconfirm, Select, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd'
+import { useEffect, useState } from 'react'
+import { inspectionResultLabel, reportCorrectionFieldLabel, reportReviewActionLabel, reportStatusLabel } from '../model/labels'
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiError } from '../../../shared/api/httpClient'
 import type { EffectivePermission } from '../../../entities/permission/model/permission'
 import type { ReportAdjustmentSummary, ReportCorrectionLog, ReportCountRow, ReportReview, ReportTransitionAction, ReportVersion, ReportingPeriod, ReportingRecord, ReportingSummaryRow } from '../../../entities/reporting/model/reporting'
 import { useAddReportAdjustment, useAddReportCorrection, useGenerateReportDraft, useReportTransition, useReportVersionRecords, useReportWorkflow } from '../model/queries'
+import { reportRecordColumns, reportRecordTableWidth, reportRecordTypeCodeForName, reportRecordUsesPersonFilters } from './ReportRecordTable'
+import { ReportRecordSnapshotCard } from './ReportRecordSnapshotCard'
+import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from './ReportVersionRecordFilters'
+import { ReportVersionSnapshots } from './ReportVersionSnapshots'
+import { groupVersionRows } from '../model/groupReportRows'
 
 const correctionFields = [
-  { value: 'studentNumber', label: '学号', numeric: false, defaultFactChange: true },
-  { value: 'studentName', label: '姓名', numeric: false, defaultFactChange: true },
-  { value: 'className', label: '班级', numeric: false, defaultFactChange: true },
-  { value: 'grade', label: '年级', numeric: false, defaultFactChange: true },
-  { value: 'currentDormitoryName', label: '宿舍', numeric: false, defaultFactChange: true },
-  { value: 'currentCourseName', label: '课程', numeric: false, defaultFactChange: true },
-  { value: 'currentClassroomName', label: '教室', numeric: false, defaultFactChange: true },
-  { value: 'currentAreaName', label: '检查区域', numeric: false, defaultFactChange: true },
-  { value: 'currentReasonLabel', label: '原因类别', numeric: false, defaultFactChange: true },
-  { value: 'details.date', label: '检查日期', numeric: false, defaultFactChange: true },
-  { value: 'details.time', label: '发生时间', numeric: false, defaultFactChange: true },
-  { value: 'details.period', label: '节次', numeric: false, defaultFactChange: true },
-  { value: 'details.round', label: '检查轮次', numeric: false, defaultFactChange: true },
-  { value: 'details.absenceHours', label: '缺课数量', numeric: true, defaultFactChange: true },
-  { value: 'details.penaltyHours', label: '违纪计入数量', numeric: true, defaultFactChange: true },
-  { value: 'details.absenceCount', label: '缺勤次数', numeric: true, defaultFactChange: true },
-  { value: 'details.result', label: '检查结果', numeric: false, defaultFactChange: true },
-  { value: 'details.reasonCode', label: '原因代码', numeric: false, defaultFactChange: true },
-  { value: 'details.description', label: '情况说明', numeric: false, defaultFactChange: true },
-  { value: 'details.remark', label: '备注', numeric: false, defaultFactChange: false },
+  { value: 'studentNumber', label: '学号', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN'] },
+  { value: 'studentName', label: '姓名', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN'] },
+  { value: 'className', label: '班级', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN'] },
+  { value: 'grade', label: '年级', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN'] },
+  { value: 'currentDormitoryName', label: '宿舍', numeric: false, types: ['LATE_RETURN', 'DORMITORY_HYGIENE'] },
+  { value: 'currentCourseName', label: '课程', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM'] },
+  { value: 'currentClassroomName', label: '教室', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'CLASSROOM_HYGIENE'] },
+  { value: 'currentAreaName', label: '检查区域', numeric: false, types: ['CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.date', label: '检查日期', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN', 'DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.time', label: '发生时间', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'LATE_RETURN', 'DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.period', label: '节次', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY'] },
+  { value: 'details.round', label: '检查轮次', numeric: false, types: ['DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.absenceHours', label: '缺课学时', numeric: true, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM'] },
+  { value: 'details.penaltyHours', label: '违纪计入学时', numeric: true, types: ['UNATTENDED_CLASSROOM'] },
+  { value: 'details.penaltyHours', label: '违纪计入次数', numeric: true, types: ['ATTENDANCE_RATE'] },
+  { value: 'details.penaltyCount', label: '违纪计入次数', numeric: true, types: ['EVENING_SELF_STUDY'] },
+  { value: 'details.absenceCount', label: '缺勤次数', numeric: true, types: ['MORNING_ATTENDANCE'] },
+  { value: 'details.result', label: '检查结果', numeric: false, types: ['DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.description', label: '情况说明', numeric: false, types: ['DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
+  { value: 'details.remark', label: '备注', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN', 'DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE'] },
 ] as const
+
+function correctionFieldsFor(record: ReportingRecord) {
+  return correctionFields.filter(field => (field.types as readonly string[]).includes(record.typeCode))
+}
 
 function recordFieldValue(record: ReportingRecord, field: string): string {
   const value = field.startsWith('details.')
@@ -37,24 +46,40 @@ function recordFieldValue(record: ReportingRecord, field: string): string {
   return value === undefined || value === null ? '' : String(value)
 }
 
-function displayCorrectionValue(record: ReportingRecord, field: string): string {
-  const value = recordFieldValue(record, field)
-  if (!value) return '空'
-  if (field === 'details.result') return inspectionResultLabel(value)
-  if (field === 'details.reasonCode') return record.currentReasonLabel || '原因标签不可用'
-  return value
+function correctionChangesFor(record: ReportingRecord, values: Record<string, string>) {
+  const changes: { field: string; afterValue: string | number }[] = []
+  const invalidFields: string[] = []
+  for (const field of correctionFieldsFor(record)) {
+    const value = values[field.value] ?? ''
+    const originalValue = recordFieldValue(record, field.value)
+    if (value === originalValue) continue
+    if (field.numeric) {
+      const number = Number(value)
+      const mustBeInteger = field.value === 'details.penaltyCount' || field.value === 'details.absenceCount'
+        || (record.typeCode === 'ATTENDANCE_RATE' && field.value === 'details.penaltyHours')
+      if (!value.trim() || !Number.isFinite(number) || number <= 0 || (mustBeInteger && !Number.isInteger(number))) {
+        invalidFields.push(field.label)
+        continue
+      }
+      if (number === Number(originalValue)) continue
+      changes.push({ field: field.value, afterValue: number })
+      continue
+    }
+    const text = value.trim()
+    if (!text && field.value !== 'details.remark') {
+      invalidFields.push(field.label)
+      continue
+    }
+    if (text === originalValue) continue
+    changes.push({ field: field.value, afterValue: text })
+  }
+  return { changes, invalidFields }
 }
 
 function recordPeople(record: ReportingRecord) {
   return [record.studentName, ...(record.responsibleStudents ?? []).map(item => item.label),
     ...(record.responsibleClasses ?? []).map(item => item.label), ...(record.responsibleDormitories ?? []).map(item => item.label)]
     .filter(Boolean).join('、') || '—'
-}
-
-function recordSummary(record: ReportingRecord) {
-  const values = [record.details.date, record.details.time, record.details.period, record.details.round,
-    record.details.description, record.details.remark, record.currentReasonLabel].filter(Boolean)
-  return values.join(' · ') || '—'
 }
 
 const scopeFields = ['academicYearId', 'semesterId', 'weekId', 'inspectionTypeId'] as const
@@ -84,6 +109,7 @@ function displayTime(value: string) {
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === 'INVALID_RESPONSE') return error.message
+    if (error.code === 'INVALID_REPORT_CORRECTION') return '修正字段或值无效，请检查后重试。'
     if (error.code === 'REPORT_INCOMPLETE') return '存在未完成的应交单元，当前不能生成通报。'
     if (error.code === 'REPORT_VERSION_CONFLICT') return '通报已被其他操作更新，请刷新后重试。'
     if (error.code === 'REPORT_SOURCE_CHANGED') return '源记录已变化，请重新生成版本后再提交。'
@@ -104,6 +130,7 @@ export function WeeklyReportWorkflowPanel({
   stage?: 'source' | 'draft' | 'final'
   onStageChange?: (stage: number) => void
 }) {
+  const [workflowDrawerWidth, setWorkflowDrawerWidth] = useState(1040)
   const query = { semesterId: period.semesterId, weekId: period.weekId }
   const workflowQuery = useReportWorkflow(query.semesterId, query.weekId, true)
   const generate = useGenerateReportDraft(query)
@@ -113,16 +140,23 @@ export function WeeklyReportWorkflowPanel({
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnComment, setReturnComment] = useState('')
   const [correctionRecord, setCorrectionRecord] = useState<ReportingRecord | null>(null)
-  const [correctionField, setCorrectionField] = useState<string>('details.remark')
-  const [correctionValue, setCorrectionValue] = useState('')
+  const [correctionValues, setCorrectionValues] = useState<Record<string, string>>({})
   const [correctionReason, setCorrectionReason] = useState('')
-  const [factChanged, setFactChanged] = useState(false)
   const [adjustmentRecord, setAdjustmentRecord] = useState<ReportingRecord | null>(null)
   const [adjustmentOperation, setAdjustmentOperation] = useState<'INCLUDE' | 'EXCLUDE'>('EXCLUDE')
   const [adjustmentReason, setAdjustmentReason] = useState('')
   const [selectedReportCell, setSelectedReportCell] = useState<ReportCountRow | null>(null)
+  const [recordPreview, setRecordPreview] = useState<{ key: string; record: ReportingRecord } | null>(null)
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(20)
+  const [recordFilters, setRecordFilters] = useState<ReportVersionRecordFiltersValue>({})
+  const [expandedVersionKeys, setExpandedVersionKeys] = useState<string[]>([])
+  useEffect(() => {
+    const updateWorkflowDrawerWidth = () => setWorkflowDrawerWidth(Math.min(1040, window.innerWidth))
+    updateWorkflowDrawerWidth()
+    window.addEventListener('resize', updateWorkflowDrawerWidth)
+    return () => window.removeEventListener('resize', updateWorkflowDrawerWidth)
+  }, [])
   const workflow = workflowQuery.isError ? undefined : workflowQuery.data
   const report = workflow?.report ?? null
   const currentVersion = workflow?.versions.find(item => item.versionNo === report?.versionNo)
@@ -148,20 +182,26 @@ export function WeeklyReportWorkflowPanel({
     zeroRecordReturnedBatchCount: 0,
     zeroRecordConfirmedBatchCount: row.confirmedZeroReceiptCount,
   })) ?? []
+  const displayRows = groupVersionRows(currentVersion?.content.rows ?? [])
   const canGenerate = permissionCoversRows(permissions, 'REPORT_GENERATE', period, summaryRows)
   const canSubmit = permissionCoversRows(permissions, 'REPORT_GENERATE', period, reportRows)
   const canReview = permissionCoversRows(permissions, 'REPORT_REVIEW', period, reportRows)
   const canReturn = permissionCoversRows(permissions, 'REPORT_RETURN', period, reportRows)
   const canCorrect = permissionCoversRows(permissions, 'REPORT_CORRECT', period, reportRows)
+  const recordCellKey = selectedReportCell
+    ? [period.weekId, currentVersion?.versionNo ?? 0, selectedReportCell.inspectionTypeId].join(':')
+    : ''
   const versionRecordsQuery = useReportVersionRecords({
     semesterId: period.semesterId, weekId: period.weekId, versionNo: currentVersion?.versionNo ?? 0,
     ...(selectedReportCell ? {
-      departmentId: selectedReportCell.departmentId,
-      collegeLevel: selectedReportCell.collegeLevel,
       inspectionTypeId: selectedReportCell.inspectionTypeId,
     } : {}),
+    ...recordFilters,
     page: recordPage, pageSize: recordPageSize,
   }, stage !== 'source' && Boolean(currentVersion && selectedReportCell), onAccessDenied)
+  const detailRecordTypeCode = versionRecordsQuery.data?.items[0]?.typeCode
+    ?? reportRecordTypeCodeForName(selectedReportCell?.inspectionType)
+  const visibleRecordPreview = recordPreview?.key === recordCellKey ? recordPreview.record : null
   const canEditCurrentVersion = ['DRAFT', 'RETURNED', 'FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report?.status ?? '')
 
   const createDraft = () => generate.mutate({
@@ -176,26 +216,40 @@ export function WeeklyReportWorkflowPanel({
     })
   }
 
+  const toggleVersionDetails = (version: ReportVersion) => {
+    setExpandedVersionKeys(current => current.includes(version.id)
+      ? current.filter(key => key !== version.id)
+      : [...current, version.id])
+  }
+
+  const showVersionDetails = (versionNo: number) => {
+    const version = workflow?.versions.find(item => item.versionNo === versionNo)
+    if (version && !expandedVersionKeys.includes(version.id)) {
+      setExpandedVersionKeys(current => current.includes(version.id) ? current : [...current, version.id])
+    }
+  }
+
   const openCorrection = (record: ReportingRecord) => {
-    const defaultField = 'details.remark'
     setCorrectionRecord(record)
-    setCorrectionField(defaultField)
-    setCorrectionValue(recordFieldValue(record, defaultField))
+    setCorrectionValues(Object.fromEntries(correctionFieldsFor(record).map(field => [field.value, recordFieldValue(record, field.value)])))
     setCorrectionReason('')
-    setFactChanged(false)
   }
 
   const saveCorrection = () => {
     if (!report || !correctionRecord) return
-    const field = correctionFields.find(item => item.value === correctionField)
-    if (!field) return
-    const numericValue = Number(correctionValue)
-    const afterValue: string | number = field.numeric ? numericValue : correctionValue.trim()
-    if ((field.numeric && (!Number.isFinite(numericValue) || numericValue <= 0)) || (!field.numeric && !afterValue && correctionField !== 'details.remark') || correctionReason.trim().length < 5) return
+    const { changes, invalidFields } = correctionChangesFor(correctionRecord, correctionValues)
+    if (changes.length === 0 || invalidFields.length > 0 || correctionReason.trim().length < 5) return
     addCorrection.mutate({ reportId: report.id, body: {
-      rowVersion: report.rowVersion, recordId: correctionRecord.id, field: correctionField,
-      afterValue, reason: correctionReason.trim(), factChanged,
-    } }, { onSuccess: () => { setCorrectionRecord(null); setCorrectionReason(''); setCorrectionValue(''); onStageChange?.(1) } })
+      rowVersion: report.rowVersion, recordId: correctionRecord.id, changes, reason: correctionReason.trim(),
+    } }, { onSuccess: () => {
+      setCorrectionRecord(null)
+      setCorrectionReason('')
+      setCorrectionValues({})
+      // A correction creates a new immutable snapshot; old filters may no longer match the corrected values.
+      setRecordFilters({})
+      setRecordPage(1)
+      onStageChange?.(1)
+    } })
   }
 
   const openAdjustment = (record: ReportingRecord, operation: 'INCLUDE' | 'EXCLUDE') => {
@@ -225,29 +279,38 @@ export function WeeklyReportWorkflowPanel({
     { title: '未完成应交项', key: 'incomplete', align: 'right', render: (_value, item) => item.content.incompleteCells.length },
     { title: '生成时间', key: 'createdAt', render: (_value, item) => displayTime(item.createdAt) },
     { title: '范围', key: 'scope', render: (_value, item) => item.content.scopeLimited ? <Tag color="orange">授权范围版本</Tag> : <Tag>完整可见范围</Tag> },
+    { title: '数据明细', key: 'snapshot', width: 120, align: 'right', render: (_value, item) => <Button type="link" size="small"
+      aria-expanded={expandedVersionKeys.includes(item.id)} onClick={() => toggleVersionDetails(item)}>
+      {expandedVersionKeys.includes(item.id) ? '收起明细' : '查看明细'}
+    </Button> },
   ]
   const reportRowColumns: ColumnsType<ReportCountRow> = [
-    { title: '范围', key: 'scope', width: 80, render: (_value, row) => row.collegeLevel ? '校级' : row.departmentName },
     { title: '检查类型', dataIndex: 'inspectionType', width: 115 },
     { title: '本版记录数', dataIndex: 'recordCount', align: 'right' },
     { title: '已确认零记录回执', dataIndex: 'confirmedZeroReceiptCount', align: 'right' },
-    { title: '来源状态', dataIndex: 'dataStatus', render: reportSourceStatusLabel },
     { title: '记录', key: 'detail', align: 'right', width: 72, fixed: 'right', render: (_value, row) =>
-      <Button type="link" size="small" aria-label="查看明细" onClick={() => { setSelectedReportCell(row); setRecordPage(1) }}>明细</Button> },
+      <Button type="link" size="small" aria-label="查看明细" onClick={() => {
+        setRecordPreview(null)
+        setSelectedReportCell(row)
+        setRecordFilters({})
+        setRecordPage(1)
+      }}>明细</Button> },
   ]
   const correctionColumns: ColumnsType<ReportCorrectionLog> = [
-    { title: '版本', dataIndex: 'versionNo', width: 70, render: value => `V${value}` },
-    { title: '修正字段', dataIndex: 'field', width: 190, render: reportCorrectionFieldLabel },
-    { title: '修正原因', dataIndex: 'reason' },
-    { title: '业务事实', dataIndex: 'factChanged', width: 100, render: value => value ? '已标记变化' : '通报文字修正' },
-    { title: '部门确认', dataIndex: 'reconfirmationStatus', width: 145, render: reportReconfirmationLabel },
-    { title: '修正时间', dataIndex: 'correctedAt', width: 165, render: value => displayTime(value) },
+    { title: '版本', dataIndex: 'versionNo', width: 130, render: value => <Button type="link" size="small"
+      aria-label={`查看 V${value} 数据明细`} onClick={() => showVersionDetails(value)}>V{value} · 数据明细</Button> },
+    { title: '修改内容', dataIndex: 'field', width: 190, render: reportCorrectionFieldLabel },
+    { title: '原值', dataIndex: 'beforeValue', width: 140, render: value => value === null || value === '' ? '（空）' : String(value) },
+    { title: '修正后', dataIndex: 'afterValue', width: 140, render: value => String(value) },
+    { title: '处理说明', dataIndex: 'reason' },
+    { title: '处理时间', dataIndex: 'correctedAt', width: 165, render: value => displayTime(value) },
   ]
   const detailColumns: ColumnsType<ReportingRecord> = [
-    { title: '学生 / 责任对象', key: 'people', width: 180, render: (_value, record) => recordPeople(record) },
-    { title: '班级', dataIndex: 'className', width: 130, render: value => value || '—' },
-    { title: '记录内容', key: 'summary', render: (_value, record) => recordSummary(record) },
-    { title: '本版处理', key: 'actions', width: 170, render: (_value, record) => stage === 'draft' && canEditCurrentVersion && canCorrect
+    ...reportRecordColumns(detailRecordTypeCode),
+    { title: '提交归属', key: 'sourceUnit', width: 130, render: (_value, record) => record.sourceDepartmentName || '历史归属不可用' },
+    { title: '记录明细', key: 'view', width: 96, fixed: 'right', render: (_value, record) =>
+      <Button type="link" size="small" onClick={() => setRecordPreview({ key: recordCellKey, record })}>查看</Button> },
+    { title: '本版处理', key: 'actions', width: 150, fixed: 'right', render: (_value, record) => stage === 'draft' && canEditCurrentVersion && canCorrect
       ? <Space size={4}>
         <Button type="link" onClick={() => openCorrection(record)}>修正</Button>
         <Button type="link" danger onClick={() => openAdjustment(record, 'EXCLUDE')}>排除</Button>
@@ -258,6 +321,7 @@ export function WeeklyReportWorkflowPanel({
   const latestReturn = report?.status === 'RETURNED' ? [...reviews].reverse().find(item => item.action === 'RETURNED' && item.comment) : undefined
 
   const finalized = report !== null && ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report.status)
+  const correctionValidation = correctionRecord ? correctionChangesFor(correctionRecord, correctionValues) : { changes: [], invalidFields: [] }
   const outputControls = (kind: 'draft' | 'final') => <Space wrap>
     <Tooltip title="后续开放；生成结果将关联当前版本。"><span><Button disabled>{kind === 'final' ? '生成定稿 Word' : '生成草稿 Word'}</Button></span></Tooltip>
     <Tooltip title="后续开放；生成结果将关联当前版本。"><span><Button disabled>{kind === 'final' ? '生成定稿 Excel' : '生成草稿 Excel'}</Button></span></Tooltip>
@@ -294,9 +358,8 @@ export function WeeklyReportWorkflowPanel({
       {transition.isError && <Alert type="error" showIcon title={errorMessage(transition.error)} />}
       {addAdjustment.isError && <Alert type="error" showIcon title={errorMessage(addAdjustment.error)} />}
       {latestReturn && <Alert type="warning" showIcon title={`退回原因：${latestReturn.comment}`} />}
-      {stage === 'draft' && currentVersion?.content.pendingDepartmentReconfirmationCount ? <Alert type="warning" showIcon title={`${currentVersion.content.pendingDepartmentReconfirmationCount} 条事实修正等待部门重新确认，暂不能提交`} /> : null}
-      {currentVersion && <section aria-label="按部门和检查类型分类">
-        <Table<ReportCountRow> rowKey={row => `${row.collegeLevel ? 'college' : row.departmentId}:${row.inspectionTypeId}`} size="small" pagination={false} columns={reportRowColumns} dataSource={currentVersion.content.rows} scroll={{ x: 760 }} />
+      {currentVersion && <section aria-label="按检查类型分类">
+        <Table<ReportCountRow> rowKey="inspectionTypeId" size="small" pagination={false} columns={reportRowColumns} dataSource={displayRows} scroll={{ x: 760 }} />
       </section>}
       {stage === 'draft' && <>
         {excludedRecords.length > 0 && <>
@@ -314,7 +377,15 @@ export function WeeklyReportWorkflowPanel({
       <details className="weekly-report-history">
         <summary>版本与操作记录</summary>
         <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-          <Table<ReportVersion> rowKey="id" size="small" pagination={false} columns={versionColumns} dataSource={workflow.versions} scroll={{ x: 720 }} />
+          <Table<ReportVersion> rowKey="id" size="small" pagination={false} columns={versionColumns} dataSource={workflow.versions} scroll={{ x: 850 }}
+            expandable={{ showExpandColumn: false, expandedRowKeys: expandedVersionKeys, expandedRowRender: version => <ReportVersionSnapshots
+              period={period}
+              version={version}
+              onAccessDenied={onAccessDenied}
+              editable={stage === 'draft' && canEditCurrentVersion && version.versionNo === currentVersion?.versionNo && canCorrect}
+              onCorrect={openCorrection}
+              onExclude={record => openAdjustment(record, 'EXCLUDE')}
+            /> }} />
           {reviews.length > 0 && <>
             <Typography.Text strong>审核与状态记录</Typography.Text>
             <Timeline items={reviews.map(item => ({ content: <span>{reportReviewActionLabel(item.action)} · V{item.versionNo} · {displayTime(item.createdAt)}{item.comment ? ` · ${item.comment}` : ''}</span> }))} />
@@ -326,30 +397,30 @@ export function WeeklyReportWorkflowPanel({
         </Space>
       </details>
     </Space>}
-    <Drawer title={selectedReportCell ? `${selectedReportCell.departmentName} · ${selectedReportCell.inspectionType} · V${currentVersion?.versionNo ?? ''}` : '本版记录明细'} open={Boolean(selectedReportCell)}
-      size={1040} onClose={() => setSelectedReportCell(null)} destroyOnHidden>
+    <Drawer rootClassName="weekly-report-record-drawer" classNames={{ wrapper: 'weekly-report-record-drawer-wrapper' }}
+      title={selectedReportCell ? `${selectedReportCell.inspectionType} · V${currentVersion?.versionNo ?? ''}` : '本版记录明细'} open={Boolean(selectedReportCell)}
+      size={workflowDrawerWidth} onClose={() => { setSelectedReportCell(null); setRecordPreview(null) }} destroyOnHidden>
       {selectedReportCell && <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
         {versionRecordsQuery.isError && <Alert type="error" showIcon title="记录明细加载失败" action={<Button onClick={() => void versionRecordsQuery.refetch()}>重试</Button>} />}
         {stage === 'draft' && <Typography.Text type="secondary">明细来自当前版本冻结快照；修正、排除和恢复纳入都会生成新版本。</Typography.Text>}
         {!canCorrect && stage === 'draft' && <Typography.Text type="secondary">当前账号没有通报修正权限，记录仅供查看。</Typography.Text>}
-        <Table<ReportingRecord> rowKey="id" size="small" columns={detailColumns} dataSource={versionRecordsQuery.data?.items ?? []}
+        {reportRecordUsesPersonFilters(detailRecordTypeCode) && <ReportVersionRecordFilters key={`${currentVersion?.versionNo ?? 0}:${selectedReportCell.inspectionTypeId}`}
+          filterOptions={versionRecordsQuery.data?.filterOptions}
+          onApply={filters => { setRecordFilters(filters); setRecordPage(1) }} />}
+        <Table<ReportingRecord> className="report-record-table" rowKey="id" size="middle" columns={detailColumns} dataSource={versionRecordsQuery.data?.items ?? []}
           loading={versionRecordsQuery.isPending || versionRecordsQuery.isFetching}
-          locale={{ emptyText: versionRecordsQuery.isError ? '记录明细加载失败' : '该分类下没有本版记录' }}
-          expandable={{ expandedRowRender: record => <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
-            <Descriptions.Item label="学号">{record.studentNumber || '—'}</Descriptions.Item>
-            <Descriptions.Item label="年级">{record.grade || '—'}</Descriptions.Item>
-            <Descriptions.Item label="检查日期">{record.details.date || '—'}</Descriptions.Item>
-            <Descriptions.Item label="发生时间">{record.details.time || '—'}</Descriptions.Item>
-            <Descriptions.Item label="课程 / 宿舍">{[record.currentCourseName, record.currentDormitoryName].filter(Boolean).join(' / ') || '—'}</Descriptions.Item>
-            <Descriptions.Item label="情况说明">{record.details.description || record.details.remark || '—'}</Descriptions.Item>
-          </Descriptions> }}
-          scroll={{ x: 760 }} pagination={{ current: recordPage, pageSize: recordPageSize,
+          locale={{ emptyText: versionRecordsQuery.isError ? '记录明细加载失败' : Object.values(recordFilters).some(Boolean) ? '没有符合筛选条件的本版记录' : '该分类下没有本版记录' }}
+          scroll={{ x: reportRecordTableWidth(detailColumns) }} pagination={{ current: recordPage, pageSize: recordPageSize,
             total: versionRecordsQuery.data?.total ?? 0, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100],
             showTotal: total => `共 ${total} 条本版记录`, onChange: (page, pageSize) => {
               if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) } else setRecordPage(page)
             } }} />
       </Space>}
     </Drawer>
+    <Modal className="report-record-detail-modal" title="记录明细" width={960} open={Boolean(visibleRecordPreview)} footer={null}
+      onCancel={() => setRecordPreview(null)} destroyOnHidden>
+      {visibleRecordPreview && <ReportRecordSnapshotCard record={visibleRecordPreview} versionNo={currentVersion?.versionNo ?? 1} title={`V${currentVersion?.versionNo ?? 1} · 记录快照`} />}
+    </Modal>
     <div className="weekly-report-stage-actions" role="region" aria-label="当前阶段操作">
       <div className="weekly-report-stage-actions-inner">
         {stage === 'source' && workflow && !report && canGenerate && <Button type="primary" loading={generate.isPending} onClick={createDraft}>确认数据并生成草稿</Button>}
@@ -360,7 +431,7 @@ export function WeeklyReportWorkflowPanel({
           {(report.status === 'DRAFT' || report.status === 'RETURNED') && canGenerate && <Popconfirm title="读取最新已确认来源并生成新版本？" description="本版手工修正和排除项不会自动沿用，旧版本仍保留。" okText="生成新版本" cancelText="取消" onConfirm={createDraft}>
             <Button loading={generate.isPending}>读取最新数据</Button>
           </Popconfirm>}
-          {(report.status === 'DRAFT' || report.status === 'RETURNED') && canSubmit && currentVersion?.content.pendingDepartmentReconfirmationCount === 0 && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('submit')}>草稿无误，进入定稿确认</Button>}
+          {(report.status === 'DRAFT' || report.status === 'RETURNED') && canSubmit && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('submit')}>草稿无误，进入定稿确认</Button>}
           {outputControls('draft')}
         </Space>}
         {stage === 'final' && report && <Space wrap>
@@ -372,34 +443,54 @@ export function WeeklyReportWorkflowPanel({
         </Space>}
       </div>
     </div>
-    <Modal title={correctionRecord ? `修正 V${currentVersion?.versionNo ?? ''} 中的记录` : '修正通报记录'} open={Boolean(correctionRecord)}
-      okText="保存为新版本" cancelText="取消" confirmLoading={addCorrection.isPending}
-      okButtonProps={{ disabled: !correctionValue.trim() && correctionField !== 'details.remark' || correctionReason.trim().length < 5 }}
+    <Modal className="report-correction-modal" width={960} title={correctionRecord ? `编辑 V${currentVersion?.versionNo ?? ''} 通报记录` : '编辑通报记录'} open={Boolean(correctionRecord)}
+      okText="保存修改并生成新版本" cancelText="取消" confirmLoading={addCorrection.isPending}
+      okButtonProps={{ disabled: !correctionRecord || correctionReason.trim().length < 5 || correctionValidation.changes.length === 0 || correctionValidation.invalidFields.length > 0 }}
       onCancel={() => setCorrectionRecord(null)} onOk={saveCorrection} destroyOnHidden>
-      {correctionRecord && <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-        <Typography.Text>{recordPeople(correctionRecord)} · {correctionRecord.className || '未标注班级'} <Tooltip title={`当前值：${displayCorrectionValue(correctionRecord, correctionField)}`}><span style={{ cursor: 'help' }}>ⓘ</span></Tooltip></Typography.Text>
-        <label>修正字段
-          <Select aria-label="修正字段" virtual={false} style={{ display: 'block', marginTop: 6 }} value={correctionField} options={correctionFields.map(item => ({ value: item.value, label: correctionRecord?.typeCode === 'ATTENDANCE_RATE' && item.value === 'details.absenceHours' ? '缺课节次数' : correctionRecord?.typeCode === 'ATTENDANCE_RATE' && item.value === 'details.penaltyHours' ? '违纪计入次数' : item.label }))}
-            onChange={value => {
-              const field = correctionFields.find(item => item.value === value)
-              setCorrectionField(value)
-              setCorrectionValue(recordFieldValue(correctionRecord, value))
-              setFactChanged(field?.defaultFactChange ?? true)
-            }} />
-        </label>
-        <label>修正后的值
-          {correctionField === 'details.result' ? <Select aria-label="修正后的值" style={{ display: 'block', marginTop: 6 }} value={correctionValue || undefined}
-            options={[...(!correctionValue || ['EXCELLENT', 'QUALIFIED', 'UNQUALIFIED'].includes(correctionValue) ? [] : [{ value: correctionValue, label: '未知检查结果', disabled: true }]), ...['EXCELLENT', 'QUALIFIED', 'UNQUALIFIED'].map(value => ({ value, label: inspectionResultLabel(value) }))]} onChange={setCorrectionValue} /> :
-          <Input aria-label="修正后的值" style={{ display: 'block', marginTop: 6 }} value={correctionValue}
-            placeholder={correctionFields.find(item => item.value === correctionField)?.numeric ? '请输入大于 0 的数字' : '请输入修正后的内容'}
-            onChange={event => setCorrectionValue(event.target.value)} />}
-        </label>
-        <label>修正原因
-          <Input.TextArea aria-label="修正原因" rows={3} maxLength={500} showCount value={correctionReason} onChange={event => setCorrectionReason(event.target.value)} />
-        </label>
-        <Checkbox checked={factChanged} onChange={event => setFactChanged(event.target.checked)}>这项修改改变了业务事实，需要来源部门重新确认</Checkbox>
-        {addCorrection.isError && <Alert type="error" showIcon title="修正未保存" description={errorMessage(addCorrection.error)} />}
-      </Space>}
+      {correctionRecord && <div className="report-correction-form">
+        <section className="report-correction-snapshot" aria-label="当前版本记录快照">
+          <ReportRecordSnapshotCard record={correctionRecord} versionNo={currentVersion?.versionNo ?? 1} />
+        </section>
+        <Form layout="vertical" className="report-correction-fields-form" colon={false}>
+          <section aria-labelledby="report-correction-fields-title">
+            <Typography.Text id="report-correction-fields-title" strong>修正字段</Typography.Text>
+            <div className="report-correction-field-grid">
+              {correctionFieldsFor(correctionRecord).map(field => {
+                const fieldLabel = correctionRecord.typeCode === 'ATTENDANCE_RATE' && field.value === 'details.absenceHours' ? '缺课节次数' : field.label
+                const multiline = field.value === 'details.description' || field.value === 'details.remark'
+                const value = correctionValues[field.value] ?? ''
+                const integerValue = field.value === 'details.penaltyCount' || field.value === 'details.absenceCount'
+                  || (correctionRecord.typeCode === 'ATTENDANCE_RATE' && field.value === 'details.penaltyHours')
+                const numericValue = field.numeric && value !== '' ? Number(value) : null
+                const updateValue = (nextValue: string) => setCorrectionValues(current => ({ ...current, [field.value]: nextValue }))
+                return <Form.Item key={field.value} label={fieldLabel}
+                  className={`report-correction-field${multiline ? ' report-correction-field--wide' : ''}`}>
+                  {field.value === 'details.result' ? <Select aria-label={fieldLabel} value={value || undefined}
+                    options={['EXCELLENT', 'QUALIFIED', 'UNQUALIFIED'].map(option => ({ value: option, label: inspectionResultLabel(option) }))}
+                    onChange={updateValue} /> : multiline
+                    ? <Input.TextArea aria-label={fieldLabel} rows={2} value={value}
+                      onChange={event => updateValue(event.target.value)} /> : field.numeric
+                      ? <InputNumber aria-label={fieldLabel} min={0} precision={integerValue ? 0 : undefined} step={integerValue ? 1 : 0.1}
+                        style={{ width: '100%' }} value={Number.isFinite(numericValue) ? numericValue : null}
+                        onChange={nextValue => updateValue(nextValue === null ? '' : String(nextValue))} /> : field.value === 'details.date'
+                        ? <Input aria-label={fieldLabel} inputMode="numeric" placeholder="YYYY-MM-DD" value={value}
+                          onChange={event => updateValue(event.target.value)} />
+                        : field.value === 'details.time'
+                          ? <Input aria-label={fieldLabel} inputMode="numeric" placeholder="HH:mm:ss" value={value}
+                            onChange={event => updateValue(event.target.value)} />
+                          : <Input aria-label={fieldLabel} value={value} onChange={event => updateValue(event.target.value)} />}
+                </Form.Item>
+              })}
+            </div>
+          </section>
+          {correctionValidation.invalidFields.length > 0 && <Alert type="warning" showIcon title={`请修正无效字段：${correctionValidation.invalidFields.join('、')}`} />}
+          <Form.Item label="处理说明（审计留痕）" className="report-correction-reason">
+            <Input.TextArea aria-label="处理说明" rows={3} maxLength={500} showCount value={correctionReason} onChange={event => setCorrectionReason(event.target.value)} />
+          </Form.Item>
+          <Typography.Text type="secondary">处理说明至少填写 5 个字；每个修改值会保存在新版本和修正审计中。</Typography.Text>
+          {addCorrection.isError && <Alert type="error" showIcon title="修正未保存" description={errorMessage(addCorrection.error)} />}
+        </Form>
+      </div>}
     </Modal>
     <Modal title={adjustmentOperation === 'EXCLUDE' ? '从本版排除记录' : '恢复纳入本版'} open={Boolean(adjustmentRecord)}
       okText={adjustmentOperation === 'EXCLUDE' ? '排除并生成新版本' : '恢复并生成新版本'} cancelText="取消" confirmLoading={addAdjustment.isPending}

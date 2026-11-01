@@ -209,24 +209,6 @@ func (h *handler) addReportAdjustment(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
-func (h *handler) decideReportCorrection(c *gin.Context) {
-	account, ok := h.reportActor(c)
-	if !ok {
-		return
-	}
-	var input reporting.DecideReportCorrectionInput
-	if c.ShouldBindJSON(&input) != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_REPORT_CORRECTION", "部门确认参数无效")
-		return
-	}
-	result, err := h.reporting.DecideReportCorrection(c, account.ID, c.Param("id"), input, requestMetadata(c, input.Comment))
-	if err != nil {
-		h.writeReportError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
 func (h *handler) reportActor(c *gin.Context) (account auth.Account, ok bool) {
 	account, ok = h.currentAccount(c)
 	if !ok {
@@ -267,11 +249,7 @@ func (h *handler) writeReportError(c *gin.Context, err error) {
 	case errors.Is(err, reporting.ErrInvalidReportAdjustment):
 		writeError(c, http.StatusBadRequest, "INVALID_REPORT_ADJUSTMENT", "通报数据调整参数无效")
 	case errors.Is(err, reporting.ErrReportCorrectionNotFound):
-		writeError(c, http.StatusNotFound, "REPORT_CORRECTION_NOT_FOUND", "未找到待确认的通报修正")
-	case errors.Is(err, reporting.ErrReportCorrectionDecided):
-		writeError(c, http.StatusConflict, "REPORT_CORRECTION_ALREADY_DECIDED", "该通报修正已处理")
-	case errors.Is(err, reporting.ErrReportReconfirmationPending):
-		writeError(c, http.StatusConflict, "REPORT_RECONFIRMATION_PENDING", "存在待部门重新确认的事实修正，当前不能提交审核")
+		writeError(c, http.StatusNotFound, "REPORT_CORRECTION_NOT_FOUND", "未找到通报修正记录")
 	case errors.Is(err, reporting.ErrReportSourceChanged):
 		writeError(c, http.StatusConflict, "REPORT_SOURCE_CHANGED", "确认数据在通报生成后发生变化，请重新生成新版本")
 	case errors.Is(err, reporting.ErrInvalidPeriod):

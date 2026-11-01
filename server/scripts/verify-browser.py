@@ -541,7 +541,7 @@ SET enabled=true,can_enter=true,can_view=true,can_review=true;
             report['status'] = 'passed'
             raise SystemExit(0)
 
-        if os.environ.get('BROWSER_SUITE') == 'weekly-report-summary':
+        if os.environ.get('BROWSER_SUITE') in ('weekly-report-summary', 'weekly-report-correction'):
             actor = run(sql_command('-tAc', "SELECT id FROM accounts WHERE login_name='browser-admin'"), text=True).stdout.strip()
             actor = str(uuid.UUID(actor))
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
@@ -625,7 +625,9 @@ VALUES
             # number to 3; restore this report fixture's current week to 1.
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=b"UPDATE semester_weeks SET week_no=1 WHERE id='b0000000-0000-0000-0000-000000000003';")
             browser_suite('weekly-report-summary')
-            browser_suite('weekly-report-roles')
+            if os.environ.get('BROWSER_SUITE') == 'weekly-report-summary':
+                browser_suite('weekly-report-roles')
+            browser_suite('weekly-report-correction')
             report['status'] = 'passed'
             raise SystemExit(0)
 

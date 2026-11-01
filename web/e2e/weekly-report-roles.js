@@ -153,18 +153,14 @@ async (page) => {
     await openReportFromNavigation()
     await page.locator('.weekly-report-period-select').getByText(/第 1 周/).waitFor()
     await page.getByRole('button', { name: /确认来源数据/ }).click()
-    await page.getByRole('heading', { name: '部门与校级批次汇总', exact: true }).waitFor()
-    const departmentRow = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
-    await departmentRow.waitFor()
-    const departmentCells = await departmentRow.getByRole('cell').allInnerTexts()
-    const collegeRow = page.locator('tr[data-row-key="college:type:30000000-0000-0000-0000-000000000001"]')
-    await collegeRow.waitFor()
-    const collegeCells = await collegeRow.getByRole('cell').allInnerTexts()
-    check(departmentCells[2] === '2' && departmentCells[6] === '2' && departmentCells[7] === '3', `${loginName} saw an unexpected department summary: ${departmentCells.join('|')}`)
-    check(collegeCells[2] === '1' && collegeCells[6] === '1' && collegeCells[7] === '2', `${loginName} saw an unexpected college summary: ${collegeCells.join('|')}`)
+    await page.getByRole('heading', { name: '按检查类型汇总', exact: true }).waitFor()
+    const typeRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
+    await typeRow.waitFor()
+    const typeCells = await typeRow.getByRole('cell').allInnerTexts()
+    check(typeCells[1] === '3' && typeCells[5] === '3' && typeCells[6] === '5', `${loginName} saw an unexpected type summary: ${typeCells.join('|')}`)
     await logout()
   }
-  cases.push('办公室部长和副部长均能从页面入口查看部门与校级周汇总')
+  cases.push('办公室部长和副部长均能从页面入口查看跨来源的检查类型周汇总')
 
   const scopedToken = await login(fixture.reportingRoleUsers.scopedAdmin)
   const scopedPeriods = await page.request.get(`${base}/api/v1/reports/periods`, {
@@ -176,15 +172,12 @@ async (page) => {
   await page.locator('.weekly-report-period-select').getByText(/第 1 周/).waitFor()
   await page.getByText('当前账号无权查看完整通报版本', { exact: true }).waitFor()
   await page.getByRole('button', { name: /确认来源数据/ }).click()
-  await page.getByRole('heading', { name: '部门与校级批次汇总', exact: true }).waitFor()
-  const scopedRows = page.locator('tr[data-row-key="department:10000000-0000-0000-0000-000000000002:type:30000000-0000-0000-0000-000000000001"]')
-  await scopedRows.waitFor()
-  const scopedCells = await scopedRows.getByRole('cell').allInnerTexts()
-  check(scopedCells[2] === '2' && scopedCells[6] === '2' && scopedCells[7] === '3', `Scoped report admin saw an unexpected department summary: ${scopedCells.join('|')}`)
-  const scopedCollegeRow = page.locator('tr[data-row-key="college:type:30000000-0000-0000-0000-000000000001"]')
-  const scopedCollegeCells = await scopedCollegeRow.getByRole('cell').allInnerTexts()
-  check(scopedCollegeCells[2] === '1' && scopedCollegeCells[6] === '1' && scopedCollegeCells[7] === '2',
-    `Inspection-type permission should apply across department boundaries, including the college cell: ${scopedCollegeCells.join('|')}`)
+  await page.getByRole('heading', { name: '按检查类型汇总', exact: true }).waitFor()
+  const scopedRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
+  await scopedRow.waitFor()
+  const scopedCells = await scopedRow.getByRole('cell').allInnerTexts()
+  check(scopedCells[1] === '3' && scopedCells[5] === '3' && scopedCells[6] === '5',
+    `Inspection-type permission should cover authorized department and college records: ${scopedCells.join('|')}`)
   check(await page.getByRole('link', { name: '通报归档', exact: true }).count() === 0,
     'REPORT_VIEW alone must not expose the ARCHIVE_VIEW navigation item')
   const archiveRequest = await page.request.get(`${base}/api/v1/reports/archive?page=1&pageSize=20`, {

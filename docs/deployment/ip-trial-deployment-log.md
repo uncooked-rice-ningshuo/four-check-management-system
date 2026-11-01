@@ -1,12 +1,35 @@
 # 腾讯云 IP 试运行部署与迁移记录
 
+## 独立 VMware 环境重建（2026-10-31）
+
+- 用户确认目标为独立 VMware 服务器，与下方腾讯云记录不是同一环境。基于提交 `859eddc` 的离线 API/Web 镜像重建六个容器，保留原 PostgreSQL 和 MinIO 数据卷；数据库迁移账本登记 031–035。四个常驻服务均 healthy，入口 ready 返回 200。
+- 停写后备份数据库、MinIO 数据和部署配置；文件校验通过，数据库和 MinIO 在隔离容器恢复并启动，031–035 在数据库副本执行成功。用户确认复制到独立位置，未提供该副本校验回执。恢复后的对象下载未验证。
+- 迁移前备份与现库的账号、学生、检查记录和文件数量一致，分别为 1、0、0、0；数量一致不代表字段或全部业务数据完整性已验收。原账号登录、角色和模板/文件下载待确认，当前文件数为 0。
+- Web Docker 全量测试 446 项通过、2 项超时；相关文件单独 6 项通过，用户要求不继续全量测试，原生前端生产构建通过。Go vet 通过；Go 全量测试补齐归档缺失的根 Compose 文件后通过，部分结果使用缓存。未声称阶段总验收通过。
+- 部署后飞书同步待必要业务冒烟核验完成后执行；不将本机或腾讯云的历史验收作为该服务器验收。
+
 本文件记录腾讯云 IP 试运行的部署版本、迁移账本、操作结果和待解决问题。目标环境的输出由用户从服务器提供；没有服务器终端证据的状态明确标为未核验。不要在这里保存 .env、密码、Token 或个人数据。
 
 服务器部署通过技术核验后，固定执行[部署成功后的飞书同步流程](post-deployment-feishu-sync.md)：追加指定 Wiki 记录，向“日常管理系统 leader”群发送《功能更新说明》，并在本日志留下同步回执。尚未完成的业务/角色验收必须如实注明。
 
 ## 当前状态
 
-更新时间：2026-10-25。腾讯云事实仅依据用户粘贴的终端输出；本轮未连接服务器。下文“当前状态”覆盖相互冲突的早期结论；后面的按日操作记录保留为历史证据。
+更新时间：2026-10-31。本轮未连接腾讯云；运行状态仍依据用户 2026-10-25 提供的最新终端回执，执行更新前以脚本对现有服务器的只读预检为准。后面的按日操作记录保留为历史证据。
+
+## 当前部署与待执行更新（截至 2026-11-01）
+
+- **目标**：本对话已有腾讯云服务器 `/opt/four-check/ip-trial`，Compose 项目 `four-check-ip-trial`，直接访问 8088。以下计划是原地从 r4 更新，不创建新服务器、不重建数据库/MinIO、不改 1Panel 的 MySQL。
+- **目标基线证据**：用户最近提供的服务器回执显示 API/Web 为 `ip-trial-20261025-r4`，PostgreSQL、MinIO、API、Web 均 `running/healthy`，迁移账本精确到 `030_evening_self_study.sql`（同时保留两个不同的 028 文件名）。这是历史回执；上传前脚本会重新核对，不匹配时停止。
+- **候选包**：原 [r5 更新包](../../output/releases/upgrade-20261031-r5/four-check-update-20261031-r5.tar)（已被 r5a 替代，不要再执行其中脚本）；r5a 完整包最新归档为 77,977,600 字节、SHA256 `133c8b89e4f587c3f2ad707bac01a841037cb3f34c054fe522ac23b1752e8a54`，见[更新包](../../output/releases/upgrade-20261031-r5a/four-check-update-20261031-r5a.tar)、[SHA256 文件](../../output/releases/upgrade-20261031-r5a/four-check-update-20261031-r5a.tar.sha256)和[操作说明](../../output/releases/upgrade-20261031-r5a/release/UPDATE.md)。用户已在服务器导入此前 checksum `9f4dda...` 对应的 r5a 镜像；为避免再次上传约 74 MiB 镜像，当前提供[软删除预检修正补丁](../../output/releases/upgrade-20261031-r5a-soft-delete-fix/four-check-r5a-soft-delete-fix.tar)（30,720 字节；SHA256 `bc57eeef24a41e6cf155fe7232f80fe87b8310b715a586ade6b24ee3b100a5b5`）和[补丁说明](../../output/releases/upgrade-20261031-r5a-soft-delete-fix/PATCH.md)。补丁更新已有 r5a release 内的脚本、说明和 `SHA256SUMS`，不替换镜像。
+- **功能范围**：周通报版本、审核/修正/归档及零记录回执快照；到课率和晚自习的违纪计数口径。代码、集成与前端验证已通过，但目标服务器仍未更新，所以这些功能目前尚未部署。
+- **执行门槛**：目标仍是原地从 r4 更新到 r5a；使用服务器现有目录 `/opt/four-check/updates/20261031-r5a/release`。包内 SHA256、Compose/数据卷/迁移基线等须由只读预检重新核对，全部通过后才可执行 `python3 upgrade-r5.py --apply`。
+- **预检回执（2026-10-31）**：用户首次运行 `python3 upgrade-r5.py` 时，在 API 镜像核对处停止，提示 `four-check-api:ip-trial-20261031-r5` 缺失或 ID/架构不符。该路径属于只读预检；目前没有证据显示执行过 `--apply`，因此本次未开始备份、停服务或迁移。下一步应在服务器复核包内 `SHA256SUMS`，从当前 release 目录执行 `docker load -i images.tar`，核对 API/Web 镜像 ID 与 `image-manifest.txt` 后再重跑预检。
+- **镜像 ID 根因与 r5a 修正**：用户随后提供 SHA256 全部 `OK`、`docker load` 两个标签均成功的回执；服务器 API ID 为 `sha256:f395f45d4482910c3e7fe40c5c826f8435a069fea54af97a34771c80e5141613`，Web ID 为 `sha256:167b180292d98899696d81bf595cc430d83122f83a8657bc32b8520c4f49db2b`，均 `linux/amd64`。这两个 ID 与 `images.tar` 内 Docker manifest 的 config digest 完全一致；原脚本却只接受 Docker 29 构建机 inspect 的另一组 engine-specific ID，因此误拦。r5a 增加归档 config digest 与 RootFS layer digest 校验；应上传到新目录 `/opt/four-check/updates/20261031-r5a` 使用，不覆盖旧目录。服务器此前运行的 r5 预检仍只读停止，未执行 `--apply`。
+- **旧晚自习记录重置（2026-11-01，已执行）**：用户确认重置关联测试数据。先前只读清点为 1 条 `CONFIRMED` MANUAL 记录、所属确认提交 1 条记录/1 条修订快照、无导入行或批次、3 条关联审计记录。数据库自定义格式备份 `/opt/four-check/backups/before-r5-evening-submission-reset-20261031.dump` 已由 `pg_restore --list` 验证，SHA-256 为 `5b854a8afb3fd7c42e90a206dabeded6ee1d22ab1a32163180941a31b9a617b0`。用户执行有前置断言和事务回滚保护的重置 SQL，回执显示删除 1 条记录、1 条修订、1 条提交；审计新增 1 条重置记录，旧审计保留；后置检查通过并 `COMMIT`。这项是测试数据重置，不是 r5 部署。
+- **r5a 镜像缺失（2026-11-01，当前阻塞）**：重置后磁盘为 50G 总量、33G 已用、15G 可用（69%）。只读预检仍失败在镜像检查；用户用 Docker 27.5.1 复核时，`--platform` 报不支持（脚本本应回退），普通 `docker image inspect` 对 API/Web 两个 r5 标签均返回 `No such image`。因此当前 Docker daemon 中没有 r5 镜像，`--apply` 尚未执行，服务和数据库迁移未改变。下一步在 release 目录重新校验 `SHA256SUMS`、执行 `docker load -i images.tar`、确认两个 r5 标签与 `linux/amd64` 后重跑只读预检。
+- **已知功能边界**：迁移 035 为兼容旧记录保留 `penalty_count=NULL`；当前晚自习 API 契约需要 1 或 2，故包会先阻止带旧记录的更新。已发布的到课率模板仍为 v1 旧表头；本次不改模板，也不运行现有 `publish-attendance-template --apply`。若需发布新表头，应另行实现/验证模板 v2。
+- **飞书同步状态（2026-11-01）**：r5 仍未部署，故只发送了明确标注“尚未部署”的更新预告，未发布部署成功说明。`lark-cli` 已只读解析确认指定 Wiki“发布更新记录”可访问；bot 身份有效，但群搜索/成员读取缺少应用权限，user 群搜索缺少 `im:chat:read`。首次真实发送因机器人不在群中返回 `230002`；用户将“宁硕的飞书 CLI”加入目标群后，重试成功。群 ID `oc_cb0934e9c7dd0f5c9741ab43595266b3`，预告消息 ID `om_x100b615b0608e0acb0ffb1b7d6d2ce1`，发送时间 `2026-11-01 16:13:00`。Wiki 尚未改动。r5 技术部署成功后仍须按[部署成功后的飞书同步流程](post-deployment-feishu-sync.md)更新 Wiki 并发送正式功能说明，标明待验收项。
+- **完成后的固定同步**：更新成功后确认 API/Web 标签 r5、迁移账本至 035、四服务健康和就绪 HTTP 200，再做必要业务/角色冒烟。随后更新指定 Wiki，并向“日常管理系统 leader”群发送《功能更新说明》；未验收功能须明确标注。当前尚未部署，暂不记录飞书同步成功。
 
 已建立每周跟进，检查关联任务中的新迁移证据并同步本日志与项目状态；只做记录和状态跟进，不会自动连接或修改生产环境。状态无变化时不通知。
 

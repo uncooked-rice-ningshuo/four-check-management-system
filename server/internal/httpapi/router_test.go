@@ -202,9 +202,6 @@ func (r *masterRepository) UpdateMasterData(_ context.Context, _ string, record 
 func (r *masterRepository) ListMasterDataChanges(context.Context, string, string) ([]masterdata.Change, error) {
 	return nil, nil
 }
-func (r *masterRepository) HygieneAreaInspectionScope(context.Context, string, string) (string, error) {
-	return "30000000-0000-0000-0000-000000000003", nil
-}
 
 type dictionaryRepository struct {
 	types []dictionary.Type
@@ -570,34 +567,11 @@ func TestSystemAdminCanManageMasterDataButMemberCannot(t *testing.T) {
 }
 
 func TestHygieneAreaTypeScopedMasterDataGrantDoesNotOpenGeneralCatalog(t *testing.T) {
-	repository := &accounts{values: map[string]auth.Account{}}
-	svc := auth.NewService(repository, &sessions{map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
-	_, _ = svc.Register(context.Background(), auth.RegisterInput{StudentNo: "area-member", Name: "area-member", Password: "Password123", RequestedDepartmentID: "department-1", RequestedOrgRoleID: "role-1"})
-	account := repository.values["area-member"]
-	account.Status = auth.StatusActive
-	repository.values["area-member"] = account
-	tokens, _ := svc.Login(context.Background(), "area-member", "Password123")
-	departmentID := "10000000-0000-0000-0000-000000000002"
-	typeID := "30000000-0000-0000-0000-000000000003"
-	permissionRepo := &permissionRepository{profile: permission.AccessProfile{SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{{Action: permission.ActionMasterDataManage, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentID, InspectionTypeID: typeID}, Enabled: true}}}}
-	router := NewRouter(svc, false, AdminServices{Permission: permission.NewService(permissionRepo), MasterData: masterdata.NewService(&masterRepository{records: map[string]masterdata.Record{}})})
-	areaURL := "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=" + departmentID
-	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusOK {
-		t.Fatalf("scoped area listing status=%d body=%s", response.Code, response.Body.String())
-	}
-	for _, path := range []string{"/api/v1/admin/master-data/faculties", "/api/v1/admin/hygiene-areas/faculties?departmentId=" + departmentID} {
-		response := performJSON(router, http.MethodGet, path, nil, tokens.AccessToken)
-		if response.Code == http.StatusOK {
-			t.Fatalf("scope leaked to %s", path)
+	router := NewRouter(nil, false, AdminServices{})
+	for _, path := range []string{"/api/v1/admin/hygiene-areas/options", "/api/v1/admin/hygiene-areas/classroom-hygiene-areas"} {
+		if response := performJSON(router, http.MethodGet, path, nil, ""); response.Code != http.StatusNotFound {
+			t.Fatalf("retired hygiene area endpoint %s status=%d", path, response.Code)
 		}
-	}
-	otherDepartmentAreaURL := "/api/v1/admin/hygiene-areas/classroom-hygiene-areas?departmentId=10000000-0000-0000-0000-000000000004"
-	if response := performJSON(router, http.MethodGet, otherDepartmentAreaURL, nil, tokens.AccessToken); response.Code != http.StatusOK {
-		t.Fatalf("type-wide area access status=%d body=%s", response.Code, response.Body.String())
-	}
-	permissionRepo.profile.Rules = append(permissionRepo.profile.Rules, permission.Rule{Action: permission.ActionMasterDataManage, Effect: permission.EffectDeny, Scope: permission.Scope{InspectionTypeID: typeID}, Enabled: true})
-	if response := performJSON(router, http.MethodGet, areaURL, nil, tokens.AccessToken); response.Code != http.StatusForbidden {
-		t.Fatalf("DENY did not override scoped grant: %d %s", response.Code, response.Body.String())
 	}
 }
 

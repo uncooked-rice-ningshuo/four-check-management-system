@@ -54,19 +54,19 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 	}
 	args := []any{result.InspectionTypeID, owner}
 	// Candidate creation scopes require enabled calendars, mappings and classes.
-	candidates := `SELECT c.id AS id,c.id AS class_id,g.name AS grade_snapshot,w.semester_id,w.id AS week_id,ds.inspection_type_id,ds.department_id,$2::uuid AS created_by
+	candidates := `SELECT c.id AS id,c.id AS class_id,g.name AS grade_snapshot,w.semester_id,w.id AS week_id,ds.inspection_type_id,ds.department_id,'DEPARTMENT'::varchar AS attribution_mode,$2::uuid AS created_by
  FROM semester_weeks w JOIN semesters s ON s.id=w.semester_id JOIN academic_years y ON y.id=s.academic_year_id
  CROSS JOIN classes c JOIN grades g ON g.id=c.grade_id
  CROSS JOIN department_inspection_scopes ds JOIN departments d ON d.id=ds.department_id
  WHERE w.enabled AND s.enabled AND y.enabled AND c.enabled AND g.enabled AND d.enabled AND ds.enabled AND ds.can_enter AND ds.inspection_type_id=$1::uuid`
-	candidates += ` UNION ALL SELECT c.id,c.id,g.name,w.semester_id,w.id,$1::uuid,NULL::uuid,$2::uuid
+	candidates += ` UNION ALL SELECT c.id,c.id,g.name,w.semester_id,w.id,$1::uuid,NULL::uuid,'COLLEGE'::varchar,$2::uuid
  FROM semester_weeks w JOIN semesters s ON s.id=w.semester_id JOIN academic_years y ON y.id=s.academic_year_id
  CROSS JOIN classes c JOIN grades g ON g.id=c.grade_id
  WHERE w.enabled AND s.enabled AND y.enabled AND c.enabled AND g.enabled`
 	if q.Purpose == "view" {
-		candidates += ` UNION ALL SELECT id,class_id,grade_snapshot,semester_id,week_id,inspection_type_id,department_id,created_by FROM inspection_records WHERE inspection_type_id=$1::uuid AND deleted_at IS NULL AND class_id IS NOT NULL`
+		candidates += ` UNION ALL SELECT id,class_id,grade_snapshot,semester_id,week_id,inspection_type_id,department_id,attribution_mode,created_by FROM inspection_records WHERE inspection_type_id=$1::uuid AND deleted_at IS NULL AND class_id IS NOT NULL`
 		if q.TypeCode == inspection.InspectionTypeDormitoryHygiene || q.TypeCode == inspection.InspectionTypeClassroomHygiene || q.TypeCode == inspection.InspectionTypePublicDormitoryHygiene {
-			candidates += ` UNION ALL SELECT ir.id,rc.class_id,rc.grade_snapshot,ir.semester_id,ir.week_id,ir.inspection_type_id,ir.department_id,ir.created_by
+			candidates += ` UNION ALL SELECT ir.id,rc.class_id,rc.grade_snapshot,ir.semester_id,ir.week_id,ir.inspection_type_id,ir.department_id,ir.attribution_mode,ir.created_by
  FROM inspection_records ir JOIN inspection_responsibility_classes rc ON rc.record_id=ir.id
  WHERE ir.inspection_type_id=$1::uuid AND ir.deleted_at IS NULL`
 		}

@@ -33,28 +33,30 @@ func (f *manualFixture) Effective(context.Context, string) (permission.Effective
 	return f.rules, nil
 }
 func (f *manualFixture) List(context.Context) (academic.Calendar, error) {
-	return academic.Calendar{AcademicYears: []academic.AcademicYear{{ID: "year", Enabled: true}}, Semesters: []academic.Semester{{ID: "semester", AcademicYearID: "year", Enabled: true}}, Weeks: []academic.Week{{ID: "week", SemesterID: "semester", Enabled: true, StartDate: time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)}}}, nil
+	return academic.Calendar{AcademicYears: []academic.AcademicYear{{ID: "60000000-0000-4000-8000-000000000001", Enabled: true}}, Semesters: []academic.Semester{{ID: "60000000-0000-4000-8000-000000000002", AcademicYearID: "60000000-0000-4000-8000-000000000001", Enabled: true}}, Weeks: []academic.Week{{ID: "60000000-0000-4000-8000-000000000003", SemesterID: "60000000-0000-4000-8000-000000000002", Enabled: true, StartDate: time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)}}}, nil
 }
 func (f *manualFixture) ListCatalogs(context.Context, bool) (organization.Catalogs, error) {
-	return organization.Catalogs{Departments: []organization.Department{{ID: "department", Enabled: true}}, InspectionTypes: []organization.InspectionType{{ID: "type", Code: InspectionTypeAttendance, Enabled: true}}}, nil
+	return organization.Catalogs{Departments: []organization.Department{{ID: "60000000-0000-4000-8000-000000000004", Enabled: true}}, InspectionTypes: []organization.InspectionType{{ID: "60000000-0000-4000-8000-000000000005", Code: InspectionTypeAttendance, Enabled: true}}}, nil
 }
 func (f *manualFixture) ListScopes(context.Context) ([]organization.DepartmentInspectionScope, error) {
-	return []organization.DepartmentInspectionScope{{DepartmentID: "department", InspectionTypeID: "type", Enabled: true, CanEnter: true}}, nil
+	return []organization.DepartmentInspectionScope{{DepartmentID: "60000000-0000-4000-8000-000000000004", InspectionTypeID: "60000000-0000-4000-8000-000000000005", Enabled: true, CanEnter: true}}, nil
 }
 func TestManualAttendanceCreatesAuditedDraftAndRejectsDeniedScope(t *testing.T) {
-	f := &manualFixture{record: AttendanceRecord{ID: "record", ClassID: "class", GradeSnapshot: "2024", Source: RecordSourceExcel}}
+	f := &manualFixture{record: AttendanceRecord{ID: "record", ClassID: "60000000-0000-4000-8000-000000000006", GradeSnapshot: "2024", Source: RecordSourceExcel}}
 	s := NewManualService(f, f, f, f, f)
-	input := ManualAttendanceInput{SemesterID: "semester", WeekID: "week", DepartmentID: "department", InspectionTypeID: "type", ClassID: "class", CourseID: "course", Grade: "2024"}
+	input := ManualAttendanceInput{SemesterID: "60000000-0000-4000-8000-000000000002", WeekID: "60000000-0000-4000-8000-000000000003", DepartmentID: "60000000-0000-4000-8000-000000000004", InspectionTypeID: "60000000-0000-4000-8000-000000000005", ClassID: "60000000-0000-4000-8000-000000000006", CourseID: "60000000-0000-4000-8000-000000000007", Grade: "2024"}
 	actor := ManualActor{ID: "actor", IsSuperAdmin: true}
-	got, err := s.Create(context.Background(), actor, input, audit.Metadata{})
-	if err != nil || got.Source != RecordSourceManual || got.Status != RecordStatusDraft || got.CreatedBy != "actor" || f.saved != 1 {
+	adminInput := input
+	adminInput.DepartmentID = ""
+	got, err := s.Create(context.Background(), actor, adminInput, audit.Metadata{})
+	if err != nil || got.Source != RecordSourceManual || got.Status != RecordStatusDraft || got.CreatedBy != "actor" || got.AttributionMode != AttributionModeAdministrator || f.saved != 1 {
 		t.Fatalf("record=%+v err=%v saved=%d", got, err, f.saved)
 	}
 	actor.IsSuperAdmin = false
 	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); !errors.Is(err, ErrScopeMismatch) || f.saved != 1 {
 		t.Fatalf("denied err=%v saved=%d", err, f.saved)
 	}
-	f.rules = permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{ClassID: "class"}}}}
+	f.rules = permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{ClassID: "60000000-0000-4000-8000-000000000006"}}}}
 	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,5 +64,16 @@ func TestManualAttendanceCreatesAuditedDraftAndRejectsDeniedScope(t *testing.T) 
 	f.rules.Permissions = append(f.rules.Permissions, permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Scope: permission.Scope{Grade: "2025"}})
 	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); !errors.Is(err, ErrScopeMismatch) {
 		t.Fatalf("actual grade deny=%v", err)
+	}
+}
+
+func TestSuperAdminCannotChooseDepartmentWhenCreatingInspection(t *testing.T) {
+	input := InspectionInput{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, DepartmentID: detailID}
+	if err := resolveInspectionAttribution(ManualActor{ID: detailID, IsSuperAdmin: true}, &input); !errors.Is(err, ErrScopeMismatch) {
+		t.Fatalf("super administrator selected a target department: %v", err)
+	}
+	input.DepartmentID = ""
+	if err := resolveInspectionAttribution(ManualActor{ID: detailID, IsSuperAdmin: true}, &input); err != nil || input.AttributionMode != AttributionModeAdministrator {
+		t.Fatalf("super administrator without a department must use independent attribution: %+v %v", input, err)
 	}
 }

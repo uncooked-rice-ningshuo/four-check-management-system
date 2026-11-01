@@ -24,7 +24,7 @@ func TestEveningSelfStudyTemplateContainsOnlyAbsenceEventFields(t *testing.T) {
 	expected := []TemplateField{
 		{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"},
 		{Code: "class_name", Header: "班级"}, {Code: "classroom_code", Header: "教室"},
-		{Code: "absence_date", Header: "缺勤日期"}, {Code: "absence_time", Header: "检查时间"},
+		{Code: "absence_date", Header: "缺勤日期"},
 		{Code: "remark", Header: "备注"},
 	}
 	if err != nil || parsed.TemplateCode != "EVENING_SELF_STUDY_IMPORT" || parsed.TemplateVersion != 1 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
@@ -42,7 +42,7 @@ func TestEveningSelfStudyTemplateContainsOnlyAbsenceEventFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	row := []any{"S20260001", "测试学生甲", "示例班级A", "A101", "2026-06-17", "20:15", "晚自习缺勤"}
+	row := []any{"S20260001", "测试学生甲", "示例班级A", "A101", "2026-06-17", "晚自习缺勤"}
 	if err := book.SetSheetRow("晚自习导入", "A5", &row); err != nil {
 		t.Fatal(err)
 	}

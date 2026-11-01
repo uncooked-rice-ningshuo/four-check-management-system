@@ -18,7 +18,7 @@ func TestLateReturnTemplateUsesStudentEventFields(t *testing.T) {
 	}
 	parser := NewLateReturnXLSXParser(16 << 20)
 	parsed, err := parser.Parse("late-return.xlsx", content)
-	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "晚归日期"}, {Code: "inspection_time", Header: "晚归时间"}, {Code: "dormitory_name", Header: "宿舍完整名称"}, {Code: "remark", Header: "备注"}}
+	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "晚归日期"}, {Code: "dormitory_name", Header: "宿舍完整名称"}, {Code: "remark", Header: "备注"}}
 	if err != nil || parsed.TemplateCode != "LATE_RETURN_IMPORT" || parsed.TemplateVersion != 1 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
 		t.Fatalf("invalid template %+v %v", parsed, err)
 	}
@@ -27,7 +27,7 @@ func TestLateReturnTemplateUsesStudentEventFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	row := []any{"000001", "虚构学生", "示例班", "2026-10-01", "23:05:00", "示例校区 示例楼 101", "单次晚归"}
+	row := []any{"000001", "虚构学生", "示例班", "2026-10-01", "示例校区 示例楼 101", "单次晚归"}
 	if err = book.SetSheetRow("晚归导入", "A5", &row); err != nil {
 		t.Fatal(err)
 	}

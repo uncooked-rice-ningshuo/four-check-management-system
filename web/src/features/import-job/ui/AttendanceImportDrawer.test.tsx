@@ -26,7 +26,7 @@ const context = { semesterId: 'semester-1', weekId: 'week-1', inspectionTypeId: 
 const scopeOptions = { inspectionType: { id: context.inspectionTypeId, name: '到课率' }, semesters: [{ id: context.semesterId, name: '2026-2027 学年上学期' }], weeks: [{ id: context.weekId, semesterId: context.semesterId, weekNo: 1 }] }
 const batch = (overrides: Partial<ImportBatch> = {}): ImportBatch => ({
   id: 'batch-1', inspectionTypeId: context.inspectionTypeId, semesterId: context.semesterId, weekId: context.weekId,
-  departmentId: context.departmentId, templateId: 'template-1', templateVersion: 3, status: 'PREVIEW_READY',
+  departmentId: context.departmentId, attributionMode: 'DEPARTMENT', templateId: 'template-1', templateVersion: 3, status: 'PREVIEW_READY',
   totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 0, version: 3, ...overrides,
 })
 const row = (overrides: Partial<ImportRow> = {}): ImportRow => ({
@@ -55,7 +55,7 @@ describe('AttendanceImportDrawer', () => {
     render(<MemoryRouter><AttendanceImportDrawer open context={{...context,departmentId:'other-department'}} memberDepartmentId="department-study" scopeOptions={scopeOptions} departments={[{id:'department-study',name:'学习部'}]} onBatchIdChange={vi.fn()} onClose={vi.fn()}/></MemoryRouter>)
     expect(templateQuery.mock.lastCall?.[0]).toMatchObject({departmentId:'department-study'})
     expect(screen.getByRole('combobox',{name:'导入目标部门'})).toBeDisabled()
-    expect(screen.getByText('导入归属部门')).toBeInTheDocument()
+    expect(screen.getByText('归属范围')).toBeInTheDocument()
   })
 
   it('blocks a member import when their home department is outside the authorized destination options', () => {
@@ -215,7 +215,7 @@ describe('AttendanceImportDrawer', () => {
 	expect(summary).toHaveTextContent('检查类型到课率')
 	expect(summary).toHaveTextContent('学期2026-2027 学年上学期')
 	expect(summary).toHaveTextContent('周次第 1 周')
-	expect(summary).toHaveTextContent('目标部门学习部')
+	expect(summary).toHaveTextContent('归属范围学习部')
 	expect(summary).not.toHaveTextContent('type-attendance')
 	expect(summary).not.toHaveTextContent('semester-1')
 	expect(summary).not.toHaveTextContent('week-1')

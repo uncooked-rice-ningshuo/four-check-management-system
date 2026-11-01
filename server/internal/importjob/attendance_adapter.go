@@ -39,13 +39,25 @@ type AttendanceImportScope struct {
 	SemesterID       string
 	WeekID           string
 	DepartmentID     string
+	AttributionMode  string
 	ClassID          string
 	Grade            string
 	ImportBatchID    string
 	CreatedBy        string
 	WeekStart        time.Time
 	WeekEnd          time.Time
+	PlannedDates     []string
 	Location         *time.Location
+}
+
+func attributionModeForScope(scope AttendanceImportScope) string {
+	if scope.AttributionMode != "" {
+		return scope.AttributionMode
+	}
+	if scope.DepartmentID != "" {
+		return inspection.AttributionModeDepartment
+	}
+	return inspection.AttributionModeCollege
 }
 
 type AttendanceReferenceLookup struct {
@@ -88,6 +100,7 @@ type AttendanceReferences struct {
 type AttendanceReferenceRepository interface {
 	LoadAttendanceReferences(context.Context, AttendanceReferenceLookup) (AttendanceReferences, error)
 	FindExistingAttendanceKeys(context.Context, AttendanceImportScope, []string) (map[string]struct{}, error)
+	FindExistingDailyInspectionDuplicates(context.Context, AttendanceImportScope, []InspectionDuplicateCandidate) (map[string]struct{}, error)
 }
 
 type AttendanceValidationRow struct {
@@ -128,20 +141,34 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 	}
 	result := AttendanceValidationResult{Rows: make([]AttendanceValidationRow, 0, len(rows))}
 	keys := make([]string, 0, len(rows))
+	dailyCandidates := make([]InspectionDuplicateCandidate, 0, len(rows))
 	seen := make(map[string]int, len(rows))
 	for _, row := range rows {
 		validated := a.validateRow(scope, references, row)
 		if len(validated.Errors) == 0 {
 			if firstRow, exists := seen[validated.Record.DedupKey]; exists {
-				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与本文件第 %d 行重复", row.RowNo, firstRow), "核对两行的学生、课程、检查日期时间和节次，保留正确的一行"))
+				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与本文件第 %d 行重复", row.RowNo, firstRow), "核对学生、日期和规范化节次，保留正确的一行"))
 			} else {
 				seen[validated.Record.DedupKey] = row.RowNo
-				keys = append(keys, validated.Record.DedupKey)
+				if scope.TypeCode == inspection.InspectionTypeAttendance {
+					first, last, _ := inspection.ParseCoursePeriod(validated.Record.PeriodText)
+					dailyCandidates = append(dailyCandidates, InspectionDuplicateCandidate{
+						Key: validated.Record.DedupKey, ClassID: validated.Record.ClassID, StudentID: validated.Record.StudentID,
+						Date: validated.Record.OccurredAt.In(chinaStandardTime).Format("2006-01-02"), PeriodStart: first, PeriodEnd: last,
+					})
+				} else {
+					keys = append(keys, validated.Record.DedupKey)
+				}
 			}
 		}
 		result.Rows = append(result.Rows, validated)
 	}
-	existing, err := a.repository.FindExistingAttendanceKeys(ctx, scope, uniqueStrings(keys))
+	var existing map[string]struct{}
+	if scope.TypeCode == inspection.InspectionTypeAttendance {
+		existing, err = a.repository.FindExistingDailyInspectionDuplicates(ctx, scope, dailyCandidates)
+	} else {
+		existing, err = a.repository.FindExistingAttendanceKeys(ctx, scope, uniqueStrings(keys))
+	}
 	if err != nil {
 		return AttendanceValidationResult{}, fmt.Errorf("find existing attendance keys: %w", err)
 	}
@@ -149,7 +176,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 		row := &result.Rows[index]
 		if row.Record.DedupKey != "" {
 			if _, exists := existing[row.Record.DedupKey]; exists {
-				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有%s记录重复", row.RowNo, recordLabel), "按本行学生、课程、检查日期时间和节次核对有权查看的记录；需修正时使用编辑，不要重复导入"))
+				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有%s记录重复", row.RowNo, recordLabel), "按学生、班级、日期和规范化节次核对有权查看的记录；需修正时编辑原记录，不要重复导入"))
 			}
 		}
 		if len(row.Errors) == 0 {

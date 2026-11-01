@@ -4,15 +4,16 @@ export type { ContextOptions, InspectionOption, InspectionQuery } from './inspec
 
 /** Transport contracts for course-based inspection endpoints. */
 export type CourseDetails = { classId: string; studentId: string; courseId: string; classroomId: string; date: string; time: string; period: string; absenceHours: number; remark: string; penaltyMultiplier?: 1 | 2 | null; penaltyHours?: number | null }
-export type CourseRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; details: Omit<CourseDetails, 'penaltyMultiplier' | 'penaltyHours'> }
+export type CourseRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'; details: Omit<CourseDetails, 'penaltyMultiplier' | 'penaltyHours'> }
 export type CourseRecordDTO = Omit<CourseRecordInput, 'details'> & { details: CourseDetails } & {
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
- currentCourseName: string; currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; importBatchId?: string; canEdit: boolean
+ currentCourseName: string; currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; importBatchId?: string; canEdit: boolean
 }
 export type InspectionOptionPage = { items: InspectionOption[]; total: number; page: number; pageSize: number }
 function record(value: unknown): CourseRecordDTO {
  if (!object(value) || !object(value.details)) throw badResponse()
- for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentCourseName','currentClassroomName','status','source','createdBy']) if (typeof value[key] !== 'string') throw badResponse()
+ if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
+ for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentCourseName','currentClassroomName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
  for (const key of ['classId','studentId','courseId','classroomId','date','time','period']) if (typeof value.details[key] !== 'string') throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()
  for (const key of ['penaltyMultiplier','penaltyHours']) if (value.details[key] !== undefined && value.details[key] !== null && typeof value.details[key] !== 'number') throw badResponse()

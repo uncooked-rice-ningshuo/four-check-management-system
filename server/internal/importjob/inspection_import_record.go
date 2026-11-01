@@ -13,6 +13,19 @@ type InspectionImportRecord struct {
 	CreatedBy     string                          `json:"createdBy"`
 	ImportBatchID string                          `json:"importBatchId"`
 	DedupKey      string                          `json:"-"`
+	Duplicate     *InspectionDuplicateCandidate   `json:"-"`
+}
+
+// InspectionDuplicateCandidate carries only normalized identity fields used to
+// match existing records during import preview; it contains no display data.
+type InspectionDuplicateCandidate struct {
+	Key         string `json:"key"`
+	ClassID     string `json:"class_id"`
+	StudentID   string `json:"student_id"`
+	ObjectID    string `json:"object_id,omitempty"`
+	Date        string `json:"date"`
+	PeriodStart int    `json:"period_start,omitempty"`
+	PeriodEnd   int    `json:"period_end,omitempty"`
 }
 
 // InspectionValidationRow preserves source row numbers for precise corrections.

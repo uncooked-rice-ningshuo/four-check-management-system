@@ -99,7 +99,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 			var allowed bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id WHERE ir.id=$1 AND ir.submission_id=$2
- AND ir.deleted_at IS NULL AND `+guard+`)`, args...).Scan(&allowed); err != nil {
+ AND ir.deleted_at IS NULL AND ir.attribution_mode<>'ADMINISTRATOR' AND `+guard+`)`, args...).Scan(&allowed); err != nil {
 				return workflow.Submission{}, err
 			}
 			if !allowed {
@@ -121,7 +121,11 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
 	jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
- 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh))
+	 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh),
+	 'classroomHygieneDetails',to_jsonb(ch),'publicDormitoryHygieneDetails',to_jsonb(pdh),
+	 'responsibleClasses',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rc.class_id,'label',rc.class_name_snapshot,'grade',rc.grade_snapshot) ORDER BY rc.class_name_snapshot) FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id),'[]'::jsonb),
+	 'responsibleStudents',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rs.student_id,'label',rs.student_name_snapshot,'studentNumber',rs.student_no_snapshot) ORDER BY rs.student_name_snapshot) FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id),'[]'::jsonb),
+	 'responsibleDormitories',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rd.dormitory_id,'label',concat(db.name,' ',d.room_no)) ORDER BY db.name,d.room_no) FROM inspection_responsibility_dormitories rd JOIN dormitories d ON d.id=rd.dormitory_id JOIN dormitory_buildings db ON db.id=d.dormitory_building_id WHERE rd.record_id=ir.id),'[]'::jsonb))
  FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id
  LEFT JOIN attendance_details ad ON ad.record_id=ir.id
@@ -129,9 +133,11 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
  LEFT JOIN morning_exercise_details md ON md.record_id=ir.id
  LEFT JOIN late_return_details ld ON ld.record_id=ir.id
  LEFT JOIN dorm_hygiene_details dh ON dh.record_id=ir.id
+	 LEFT JOIN classroom_hygiene_details ch ON ch.record_id=ir.id
+	 LEFT JOIN public_dormitory_hygiene_details pdh ON pdh.record_id=ir.id
  WHERE ir.id=$1 AND ir.semester_id=$2 AND ir.week_id=$3 AND ir.department_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid AND ir.inspection_type_id=$5
    AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL
-   AND ir.deleted_at IS NULL AND `+guard+` FOR UPDATE OF ir`, args...).Scan(&version, &snapshot)
+   AND ir.deleted_at IS NULL AND ir.attribution_mode<>'ADMINISTRATOR' AND `+guard+` FOR UPDATE OF ir`, args...).Scan(&version, &snapshot)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return workflow.Submission{}, workflow.ErrRecordUnavailable
 		}
@@ -148,7 +154,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	for _, record := range command.Records {
 		tag, err := tx.Exec(ctx, `UPDATE inspection_records SET status='PENDING_REVIEW',submission_id=$1,
  row_version=row_version+1,updated_at=now() WHERE id=$2 AND row_version=$3 AND status='DRAFT'
- AND submission_id IS NULL AND locked_by_report_id IS NULL AND deleted_at IS NULL`, id, record.ID, record.Version)
+ AND submission_id IS NULL AND locked_by_report_id IS NULL AND deleted_at IS NULL AND attribution_mode<>'ADMINISTRATOR'`, id, record.ID, record.Version)
 		if err != nil {
 			return workflow.Submission{}, err
 		}
@@ -199,6 +205,7 @@ func activeSubmissionType(code string) bool {
 	switch code {
 	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended, inspection.InspectionTypeEveningSelfStudy,
 		inspection.InspectionTypeMorning, inspection.InspectionTypeDormitoryHygiene,
+		inspection.InspectionTypeClassroomHygiene, inspection.InspectionTypePublicDormitoryHygiene,
 		inspection.InspectionTypeLateReturn:
 		return true
 	default:
@@ -376,7 +383,11 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
  jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
- 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh))
+	 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh),
+	 'classroomHygieneDetails',to_jsonb(ch),'publicDormitoryHygieneDetails',to_jsonb(pdh),
+	 'responsibleClasses',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rc.class_id,'label',rc.class_name_snapshot,'grade',rc.grade_snapshot) ORDER BY rc.class_name_snapshot) FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id),'[]'::jsonb),
+	 'responsibleStudents',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rs.student_id,'label',rs.student_name_snapshot,'studentNumber',rs.student_no_snapshot) ORDER BY rs.student_name_snapshot) FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id),'[]'::jsonb),
+	 'responsibleDormitories',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rd.dormitory_id,'label',concat(db.name,' ',d.room_no)) ORDER BY db.name,d.room_no) FROM inspection_responsibility_dormitories rd JOIN dormitories d ON d.id=rd.dormitory_id JOIN dormitory_buildings db ON db.id=d.dormitory_building_id WHERE rd.record_id=ir.id),'[]'::jsonb))
  FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id
  LEFT JOIN attendance_details ad ON ad.record_id=ir.id
@@ -384,6 +395,8 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
  LEFT JOIN morning_exercise_details md ON md.record_id=ir.id
  LEFT JOIN late_return_details ld ON ld.record_id=ir.id
  LEFT JOIN dorm_hygiene_details dh ON dh.record_id=ir.id
+ LEFT JOIN classroom_hygiene_details ch ON ch.record_id=ir.id
+ LEFT JOIN public_dormitory_hygiene_details pdh ON pdh.record_id=ir.id
  WHERE ir.id=$1 AND ir.submission_id=$2 AND ir.status=$3 AND ir.deleted_at IS NULL
  AND ir.locked_by_report_id IS NULL AND `+guard+` FOR UPDATE OF ir`, args...).Scan(&version, &snapshot)
 		if errors.Is(err, pgx.ErrNoRows) {

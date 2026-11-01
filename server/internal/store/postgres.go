@@ -54,6 +54,7 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.dorm_hygiene_details') IS NOT NULL
 		AND to_regclass('public.classroom_hygiene_details') IS NOT NULL
 		AND to_regclass('public.public_dormitory_hygiene_details') IS NOT NULL
+		AND to_regclass('public.morning_attendance_week_schedules') IS NOT NULL
 		AND to_regclass('public.department_submissions') IS NOT NULL
 		AND to_regclass('public.department_submission_revisions') IS NOT NULL
 		AND to_regclass('public.weekly_report_obligations') IS NOT NULL
@@ -76,6 +77,8 @@ func (p *Postgres) Ready(ctx context.Context) error {
 			AND tgname='weekly_report_version_adjustments_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submissions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submission_revisions' AND column_name='submission_kind')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='inspection_records' AND column_name='attribution_mode')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='import_batches' AND column_name='attribution_mode')
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='files' AND column_name='object_removed_at')`).Scan(&ready)
 	if err != nil {
@@ -1014,21 +1017,6 @@ func (p *Postgres) MasterDataExists(ctx context.Context, kind, id string) (bool,
 	return exists, err
 }
 
-func (p *Postgres) HygieneAreaInspectionScope(ctx context.Context, kind, departmentID string) (string, error) {
-	code := "CLASSROOM_HYGIENE"
-	if kind == masterdata.KindPublicDormitoryHygieneArea {
-		code = "PUBLIC_DORMITORY_HYGIENE"
-	}
-	var inspectionTypeID string
-	err := p.Pool.QueryRow(ctx, `SELECT it.id FROM department_inspection_scopes ds
- JOIN inspection_types it ON it.id=ds.inspection_type_id JOIN departments d ON d.id=ds.department_id
- WHERE ds.department_id=$1 AND it.code=$2 AND ds.enabled AND it.enabled AND d.enabled`, departmentID, code).Scan(&inspectionTypeID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", masterdata.ErrInvalidRelation
-	}
-	return inspectionTypeID, err
-}
-
 func (p *Postgres) CreateMasterData(ctx context.Context, actorID string, value masterdata.Record, mutation audit.Mutation) (masterdata.Record, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		if err := insertMasterRecord(ctx, tx, value); err != nil {
@@ -1470,12 +1458,12 @@ func (p *Postgres) ListAttendance(ctx context.Context, query inspection.Attendan
 	for rows.Next() {
 		var record inspection.AttendanceRecord
 		if err := rows.Scan(
-			&record.ID, &record.InspectionTypeID, &record.SemesterID, &record.WeekID, &record.DepartmentID,
+			&record.ID, &record.InspectionTypeID, &record.SemesterID, &record.WeekID, &record.DepartmentID, &record.AttributionMode,
 			&record.StudentID, &record.StudentNoSnapshot, &record.StudentNameSnapshot, &record.ClassID,
 			&record.ClassNameSnapshot, &record.GradeSnapshot, &record.CourseID, &record.CourseName,
 			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours, &record.PenaltyMultiplier, &record.PenaltyHours,
 			&record.PeriodText, &record.Remark, &record.Source, &record.Status, &record.ImportBatchID,
-			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.CreatedAt, &record.UpdatedAt,
+			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.SubmitterName, &record.CreatedAt, &record.UpdatedAt,
 		); err != nil {
 			return inspection.AttendancePage{}, err
 		}
@@ -1494,6 +1482,7 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		JOIN courses c ON c.id = ad.course_id
 		LEFT JOIN classrooms cr ON cr.id = ad.classroom_id
 		LEFT JOIN teaching_buildings tb ON tb.id = cr.teaching_building_id
+		LEFT JOIN accounts submitter ON submitter.id = ir.created_by
 		WHERE ir.semester_id = $1::uuid
 		  AND ir.week_id = $2::uuid
 		  AND ir.inspection_type_id = $3::uuid
@@ -1507,15 +1496,16 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		       OR ir.student_name_snapshot ILIKE '%' || $7 || '%')
 		  AND ($8::text = '' OR ir.status = $8)
 		  AND ($9::text = '' OR ir.source = $9)
+		  AND ($11::boolean OR ir.attribution_mode<>'ADMINISTRATOR' OR ir.created_by=NULLIF($12,'')::uuid)
 		  AND ir.deleted_at IS NULL`
 	countSQL := `SELECT count(*)` + where
-	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),
+	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
 		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
 		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
 		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
 		ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,
 		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
-		ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
+		COALESCE(submitter.name,'账号不可用'),ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $13 OFFSET $14`
 	departmentIDs := query.DepartmentIDs
 	if departmentIDs == nil {
 		departmentIDs = make([]string, 0)
@@ -1523,6 +1513,7 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 	countArgs := []any{
 		query.SemesterID, query.WeekID, query.InspectionTypeID, query.DepartmentID,
 		query.ClassID, query.Grade, query.Keyword, query.Status, query.Source, departmentIDs,
+		query.AllowAllAdministratorRecords, query.ActorID,
 	}
 	listArgs := append(append([]any{}, countArgs...), query.PageSize, (query.Page-1)*query.PageSize)
 	return countSQL, countArgs, listSQL, listArgs, nil
@@ -1713,10 +1704,10 @@ func (p *Postgres) CreateImportBatch(ctx context.Context, batch importjob.Batch)
 		return storage.ErrFileUnavailable
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO import_batches(
-		id,inspection_type_id,semester_id,week_id,department_id,class_id,grade,original_file_id,template_id,template_version,
+		id,inspection_type_id,semester_id,week_id,department_id,attribution_mode,class_id,grade,original_file_id,template_id,template_version,
 		status,total_rows,valid_rows,invalid_rows,imported_rows,version,created_by,created_at,updated_at
-	) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8,$9,$10,$11,0,0,0,0,$12,$13,$14,$15)`,
-		batch.ID, batch.InspectionTypeID, batch.SemesterID, batch.WeekID, batch.DepartmentID, batch.ClassID, batch.Grade, batch.OriginalFileID,
+	) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6,NULLIF($7,'')::uuid,$8,$9,$10,$11,$12,0,0,0,0,$13,$14,$15,$16)`,
+		batch.ID, batch.InspectionTypeID, batch.SemesterID, batch.WeekID, batch.DepartmentID, batch.AttributionMode, batch.ClassID, batch.Grade, batch.OriginalFileID,
 		batch.TemplateID, batch.TemplateVersion, batch.Status, batch.Version, batch.CreatedBy, batch.CreatedAt, batch.UpdatedAt)
 	if err != nil {
 		return err
@@ -1849,7 +1840,7 @@ func (p *Postgres) ReplaceImportPreview(ctx context.Context, batch importjob.Bat
 	return batch, nil
 }
 
-const importBatchSelect = `SELECT b.id,b.inspection_type_id,b.semester_id,b.week_id,COALESCE(b.department_id::text,''),COALESCE(b.class_id::text,''),b.grade,b.original_file_id,
+const importBatchSelect = `SELECT b.id,b.inspection_type_id,b.semester_id,b.week_id,COALESCE(b.department_id::text,''),b.attribution_mode,COALESCE(b.class_id::text,''),b.grade,b.original_file_id,
 	b.template_id,b.template_version,b.status,b.total_rows,b.valid_rows,b.invalid_rows,b.imported_rows,b.version,
 	COALESCE(b.confirm_idempotency_key,''),b.failure_code,b.failure_message,b.created_by,b.created_at,b.updated_at,
 	COALESCE(b.confirmed_at,'epoch'::timestamptz),COALESCE(b.cancelled_at,'epoch'::timestamptz),w.start_date,w.end_date,it.code,t.code
@@ -1863,7 +1854,7 @@ type importBatchScanner interface {
 func scanImportBatch(row importBatchScanner) (importjob.Batch, error) {
 	var batch importjob.Batch
 	err := row.Scan(
-		&batch.ID, &batch.InspectionTypeID, &batch.SemesterID, &batch.WeekID, &batch.DepartmentID, &batch.ClassID, &batch.Grade, &batch.OriginalFileID,
+		&batch.ID, &batch.InspectionTypeID, &batch.SemesterID, &batch.WeekID, &batch.DepartmentID, &batch.AttributionMode, &batch.ClassID, &batch.Grade, &batch.OriginalFileID,
 		&batch.TemplateID, &batch.TemplateVersion, &batch.Status, &batch.TotalRows, &batch.ValidRows, &batch.InvalidRows,
 		&batch.ImportedRows, &batch.Version, &batch.ConfirmIdempotencyKey, &batch.FailureCode, &batch.FailureMessage,
 		&batch.CreatedBy, &batch.CreatedAt, &batch.UpdatedAt, &batch.ConfirmedAt, &batch.CancelledAt, &batch.WeekStart, &batch.WeekEnd, &batch.TypeCode, &batch.TemplateCode,
@@ -1997,13 +1988,16 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 			continue
 		}
 		record := row.record
+		periodStart, periodEnd := dedupPeriodBounds(record.PeriodText)
 		if _, err := tx.Exec(ctx, `INSERT INTO inspection_records(
-			id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,
-			class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,source,status,import_batch_id,dedup_key,row_version,created_by
-		) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7,$8,NULLIF($9,'')::uuid,$10,$11,$12,1,$13,$14,$15,$16,$17,$18,$19)`,
-			record.ID, record.InspectionTypeID, record.SemesterID, record.WeekID, record.DepartmentID, record.StudentID,
+			id,inspection_type_id,semester_id,week_id,department_id,attribution_mode,student_id,student_no_snapshot,student_name_snapshot,
+			class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,remark,source,status,import_batch_id,dedup_key,row_version,created_by,
+			contract_version,dedup_class_id,dedup_student_id,dedup_date,dedup_period_start,dedup_period_end
+		) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6,NULLIF($7,'')::uuid,$8,$9,NULLIF($10,'')::uuid,$11,$12,$13,1,$14,$15,$16,$17,$18,$19,$20,2,NULLIF($10,'')::uuid,NULLIF($7,'')::uuid,($13::timestamptz AT TIME ZONE 'Asia/Shanghai')::date,$21,$22)`,
+			record.ID, record.InspectionTypeID, record.SemesterID, record.WeekID, record.DepartmentID, input.Scope.AttributionMode, record.StudentID,
 			record.StudentNoSnapshot, record.StudentNameSnapshot, record.ClassID, record.ClassNameSnapshot, record.GradeSnapshot,
-			record.OccurredAt, record.Remark, record.Source, record.Status, input.BatchID, record.DedupKey, record.RowVersion, record.CreatedBy); err != nil {
+			record.OccurredAt, record.Remark, record.Source, record.Status, input.BatchID, record.DedupKey, record.RowVersion, record.CreatedBy,
+			periodStart, periodEnd); err != nil {
 			if errors.Is(inspectionDBError(err), inspection.ErrAttendanceDuplicate) {
 				return importjob.ConfirmResult{}, inspection.ErrAttendanceDuplicate
 			}
@@ -2042,7 +2036,7 @@ func confirmationAuditEntry(input importjob.ConfirmBatchInput, templateVersion, 
 		After: map[string]any{
 			"status": importjob.BatchStatusConfirmed, "importedRows": importedRows, "templateVersion": templateVersion,
 			"semesterId": input.Scope.SemesterID, "weekId": input.Scope.WeekID,
-			"inspectionTypeId": input.Scope.InspectionTypeID, "departmentId": input.Scope.DepartmentID,
+			"inspectionTypeId": input.Scope.InspectionTypeID, "departmentId": input.Scope.DepartmentID, "attributionMode": input.Scope.AttributionMode,
 		},
 	}
 }

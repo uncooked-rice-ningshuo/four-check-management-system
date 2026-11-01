@@ -3,23 +3,25 @@ import { allOptions, badResponse, object, queryString, type ContextOptions, type
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 export type EveningSelfStudyDetails = {
- classId: string; studentId: string; classroomId: string; date: string; time: string
+ classId: string; studentId: string; classroomId: string; date: string; time?: string
  period: '9-10'; penaltyMultiplier?: 1 | 2 | null; penaltyCount: number; remark: string
 }
 export type EveningSelfStudyRecordInput = {
- semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string
- details: Pick<EveningSelfStudyDetails, 'classId' | 'studentId' | 'classroomId' | 'date' | 'time' | 'remark'>
+ semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'
+ details: Pick<EveningSelfStudyDetails, 'classId' | 'studentId' | 'classroomId' | 'date' | 'remark'>
 }
 export type EveningSelfStudyRecordDTO = EveningSelfStudyRecordInput & {
  id: string; typeCode: 'EVENING_SELF_STUDY'; studentNumber: string; studentName: string; className: string; grade: string
- currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; importBatchId?: string; canEdit: boolean
+ currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; importBatchId?: string; canEdit: boolean
  details: EveningSelfStudyDetails
 }
 
 function record(value: unknown): EveningSelfStudyRecordDTO {
  if (!object(value) || !object(value.details)) throw badResponse()
- for (const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentClassroomName','status','source','createdBy']) if (typeof value[key] !== 'string') throw badResponse()
- for (const key of ['classId','studentId','classroomId','date','time']) if (typeof value.details[key] !== 'string') throw badResponse()
+ if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
+ for (const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentClassroomName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
+ for (const key of ['classId','studentId','classroomId','date']) if (typeof value.details[key] !== 'string') throw badResponse()
+ if(value.details.time!==undefined&&typeof value.details.time!=='string')throw badResponse()
  if (value.typeCode !== 'EVENING_SELF_STUDY' || value.details.period !== '9-10' || (value.details.penaltyCount !== 1 && value.details.penaltyCount !== 2) || value.details.penaltyCount !== value.details.penaltyMultiplier) throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()
  for (const key of ['penaltyMultiplier']) if (value.details[key] !== undefined && value.details[key] !== null && typeof value.details[key] !== 'number') throw badResponse()

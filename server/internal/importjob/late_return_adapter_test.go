@@ -23,14 +23,13 @@ func lateReturnScope() AttendanceImportScope {
 }
 func lateReturnRow(n int) ParsedRow {
 	r := morningRow(n)
-	r.Values["inspection_time"] = "23:05"
 	r.Values["dormitory_name"] = "示例区 示例楼 101"
 	return r
 }
 func lateReturnRepository() *lateReturnReferences {
 	return &lateReturnReferences{fakeAttendanceReferenceRepository: fakeAttendanceReferenceRepository{references: morningRefs()}, dorms: map[string]LateReturnDormitoryReference{"c0000000-0000-0000-0000-000000000001": {ID: "c0000000-0000-0000-0000-000000000003", Name: "示例区 示例楼 101"}}}
 }
-func TestLateReturnAdapterUsesStudentEventAndCurrentDormitory(t *testing.T) {
+func TestLateReturnAdapterUsesStudentDayAndCurrentDormitory(t *testing.T) {
 	repo := lateReturnRepository()
 	adapter := NewLateReturnAdapter(repo)
 	result, err := adapter.Validate(context.Background(), lateReturnScope(), []ParsedRow{lateReturnRow(5), lateReturnRow(6)})
@@ -39,7 +38,7 @@ func TestLateReturnAdapterUsesStudentEventAndCurrentDormitory(t *testing.T) {
 	}
 	r := result.Rows[0].Record
 	parsed, issues := inspection.ValidateDetails(inspection.InspectionTypeLateReturn, inspection.DetailContext{SemesterID: r.Input.SemesterID, WeekID: r.Input.WeekID, InspectionTypeID: r.Input.InspectionTypeID, WeekStart: "2026-10-01", WeekEnd: "2026-10-07"}, r.Input.Details)
-	if len(issues) != 0 || parsed.ViolationCount != 1 || parsed.OccurredAt.Format("15:04:05") != "23:05:00" {
+	if len(issues) != 0 || parsed.ViolationCount != 1 || parsed.OccurrenceKind != inspection.OccurrenceDate || !parsed.OccurredAt.IsZero() {
 		t.Fatal(parsed, issues)
 	}
 	repo.existing = map[string]struct{}{r.DedupKey: {}}
@@ -53,7 +52,7 @@ func TestLateReturnAdapterRejectsInvalidTimeScopeAndDormitory(t *testing.T) {
 		field, value string
 		code         ErrorCode
 	}{
-		{"inspection_time", "", ErrorRequiredField}, {"inspection_time", "25:00", ErrorInvalidTime}, {"inspection_date", "2026-10-08", ErrorOccurredOutsideWeek}, {"dormitory_name", "另一区 示例楼 101", ErrorReferenceMismatch}, {"student_name", "他人", ErrorReferenceMismatch}, {"student_no", "unknown", ErrorReferenceNotFound},
+		{"inspection_date", "2026-10-08", ErrorOccurredOutsideWeek}, {"dormitory_name", "另一区 示例楼 101", ErrorReferenceMismatch}, {"student_name", "他人", ErrorReferenceMismatch}, {"student_no", "unknown", ErrorReferenceNotFound},
 	} {
 		t.Run(test.field+test.value, func(t *testing.T) {
 			row := lateReturnRow(5)

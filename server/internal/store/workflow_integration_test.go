@@ -81,14 +81,14 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE inspection_records SET class_id=$1,grade_snapshot='2026',
+	if _, err = pool.Exec(ctx, `UPDATE inspection_records SET class_id=$1,grade_snapshot='2026',attribution_mode='DEPARTMENT',
  student_id='a0000000-0000-0000-0000-000000000007',student_no_snapshot='S-FIXTURE',
  student_name_snapshot='Synthetic student',class_name_snapshot='Fixture class' WHERE id=$2`, class, first); err != nil {
 		t.Fatal(err)
 	}
 	for _, record := range []struct {
 		id, key, offset string
-	}{{second, "b", "1 hour"}, {third, "c", "2 hours"}} {
+	}{{second, "b", "1 day"}, {third, "c", "2 days"}} {
 		_, err = pool.Exec(ctx, `INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,department_id,student_id,
  student_no_snapshot,student_name_snapshot,class_id,class_name_snapshot,grade_snapshot,occurred_at,
  violation_count,remark,source,dedup_key,created_by)
@@ -334,6 +334,10 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		{"MORNING_ATTENDANCE", `INSERT INTO morning_exercise_details(record_id) VALUES($1)`, "morningDetails"},
 		{"DORMITORY_HYGIENE", `INSERT INTO dorm_hygiene_details(record_id,dormitory_id,result)
  VALUES($1,'a0000000-0000-0000-0000-000000000012','QUALIFIED')`, "dormitoryHygieneDetails"},
+		{"CLASSROOM_HYGIENE", `INSERT INTO classroom_hygiene_details(record_id,classroom_id,result)
+ VALUES($1,'a0000000-0000-0000-0000-000000000009','QUALIFIED')`, "classroomHygieneDetails"},
+		{"PUBLIC_DORMITORY_HYGIENE", `INSERT INTO public_dormitory_hygiene_details(record_id,result)
+ VALUES($1,'QUALIFIED')`, "publicDormitoryHygieneDetails"},
 		{"LATE_RETURN", `INSERT INTO late_return_details(record_id,dormitory_id)
  VALUES($1,'a0000000-0000-0000-0000-000000000012')`, "lateReturnDetails"},
 	} {
@@ -342,6 +346,10 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT id FROM inspection_types WHERE code=$1`, item.code).Scan(&otherTypeID); err != nil {
 			t.Fatal(err)
 		}
+		if item.code == "CLASSROOM_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" {
+			reviewPermissions.rules = append(reviewPermissions.rules, permission.EffectivePermission{Action: permission.ActionInspectionReview,
+				Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: department, InspectionTypeID: otherTypeID, ClassID: class}})
+		}
 		if _, err := pool.Exec(ctx, `INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter)
  VALUES($1,$2,true,true) ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true`, department, otherTypeID); err != nil {
 			t.Fatal(err)
@@ -349,20 +357,22 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		var occurredAt any = "2026-09-02 08:00+08"
 		var inspectionDate any
 		kind, violations := "TIME", 1
-		if item.code == "MORNING_ATTENDANCE" {
+		if item.code == "MORNING_ATTENDANCE" || item.code == "DORMITORY_HYGIENE" || item.code == "CLASSROOM_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" {
 			occurredAt, inspectionDate, kind = nil, "2026-09-02", "DATE"
 		}
-		if item.code == "DORMITORY_HYGIENE" {
+		contractVersion := int16(1)
+		if item.code == "DORMITORY_HYGIENE" || item.code == "CLASSROOM_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" {
 			violations = 0
+			contractVersion = 2
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,department_id,
- occurred_at,occurrence_kind,inspection_date,violation_count,source,dedup_key,created_by)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL',repeat($10,64),$11)`,
+	 occurred_at,occurrence_kind,inspection_date,contract_version,violation_count,source,dedup_key,created_by)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'MANUAL',repeat($11,64),$12)`,
 			recordID, otherTypeID, scope.SemesterID, scope.WeekID, department, occurredAt, kind,
-			inspectionDate, violations, fmt.Sprint(index+3), account); err != nil {
+			inspectionDate, contractVersion, violations, fmt.Sprint(index+3), account); err != nil {
 			t.Fatal(err)
 		}
-		if item.code == "DORMITORY_HYGIENE" {
+		if item.code == "DORMITORY_HYGIENE" || item.code == "CLASSROOM_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" {
 			tx, err := pool.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -370,6 +380,14 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 			if _, err = tx.Exec(ctx, item.detailSQL, recordID); err == nil {
 				_, err = tx.Exec(ctx, `INSERT INTO inspection_responsibility_classes(record_id,class_id,class_name_snapshot,grade_snapshot)
  VALUES($1,$2,'Fixture class','2026')`, recordID, class)
+			}
+			if err == nil {
+				_, err = tx.Exec(ctx, `INSERT INTO inspection_responsibility_students(record_id,student_id,class_id,student_no_snapshot,student_name_snapshot)
+ VALUES($1,'a0000000-0000-0000-0000-000000000007',$2,'S-FIXTURE','Synthetic student')`, recordID, class)
+			}
+			if err == nil && item.code == "PUBLIC_DORMITORY_HYGIENE" {
+				_, err = tx.Exec(ctx, `INSERT INTO inspection_responsibility_dormitories(record_id,dormitory_id)
+ VALUES($1,'a0000000-0000-0000-0000-000000000012')`, recordID)
 			}
 			if err == nil {
 				err = tx.Commit(ctx)
@@ -394,6 +412,17 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT records_snapshot->0->$2::text IS NOT NULL
  FROM department_submission_revisions WHERE submission_id=$1 AND revision_no=1`, batch.ID, item.snapshotKey).Scan(&hasDetail); err != nil || !hasDetail {
 			t.Fatalf("snapshot %s detail: %v %v", item.code, hasDetail, err)
+		}
+		if item.code == "CLASSROOM_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" {
+			var responsibleStudent string
+			if err := pool.QueryRow(ctx, `SELECT records_snapshot->0->'responsibleStudents'->0->>'label'
+ FROM department_submission_revisions WHERE submission_id=$1 AND revision_no=1`, batch.ID).Scan(&responsibleStudent); err != nil || responsibleStudent != "Synthetic student" {
+				t.Fatalf("snapshot %s responsible student %q: %v", item.code, responsibleStudent, err)
+			}
+			confirmed, err := reviewService.Decide(ctx, reviewActor, batch.ID, workflow.Confirm, workflow.DecisionInput{Version: 1}, audit.Metadata{})
+			if err != nil || confirmed.Status != workflow.Confirmed || len(confirmed.Records) != 1 || confirmed.Records[0].Status != "CONFIRMED" {
+				t.Fatalf("review %s: %+v %v", item.code, confirmed, err)
+			}
 		}
 	}
 	const concurrentRecord = "d0000000-0000-0000-0000-000000000001"

@@ -8,28 +8,30 @@ const record = {
   id: 'record', typeCode: 'PUBLIC_DORMITORY_HYGIENE', semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: 'department',
   currentAreaName: '一区 一栋 / 一层 / 走廊', currentReasonLabel: '地面', responsibleClasses: [{ id: 'class', label: '班级' }],
   responsibleStudents: [{ id: 'student', label: '学生' }], responsibleDormitories: [{ id: 'room', label: '一区 一栋 101' }],
-  status: 'DRAFT', source: 'MANUAL', createdBy: 'actor', rowVersion: 1, canEdit: true,
+  status: 'DRAFT', source: 'MANUAL', createdBy: 'actor', submitterName: '提交人', rowVersion: 1, canEdit: true,
   details: { areaId: 'area', date: '2026-10-04', round: '首次', result: 'UNQUALIFIED', responsibleClassIds: ['class'], responsibleStudentIds: ['student'], responsibleDormitoryIds: ['room'], reasonCode: 'FLOOR' },
 }
-it('uses the public hygiene context and loads every scoped area/room option page', async () => {
+it('uses the public hygiene context and loads every scoped responsibility dormitory option page', async () => {
   request.mockResolvedValueOnce({ items: [{ id: 'room-1', label: '一区 一栋 101' }], total: 2, page: 1, pageSize: 200 })
   request.mockResolvedValueOnce({ items: [{ id: 'room-2', label: '一区 一栋 102' }], total: 2, page: 2, pageSize: 200 })
-  expect((await publicDormitoryHygieneApi.entryOptions({ kind: 'responsible-dormitories', areaId: 'area', classId: 'class', departmentId: 'department' })).map(item => item.id)).toEqual(['room-1', 'room-2'])
-  expect(request.mock.calls[1][0]).toContain('areaId=area')
+  expect((await publicDormitoryHygieneApi.entryOptions({ kind: 'responsible-dormitories', classId: 'class', departmentId: 'department' })).map(item => item.id)).toEqual(['room-1', 'room-2'])
+  expect(request.mock.calls[1][0]).toContain('classId=class')
   expect(request.mock.calls[1][0]).toContain('page=2')
   request.mockResolvedValueOnce({ items: [], total: 0, page: 1, pageSize: 200, inspectionTypeId: 'type' })
   await publicDormitoryHygieneApi.contextOptions({ purpose: 'view', kind: 'semesters' })
   expect(request.mock.calls[2][0]).toContain('typeCode=PUBLIC_DORMITORY_HYGIENE')
 })
-it('requires area and class labels and preserves optional responsibility names', async () => {
+it('requires class labels and accepts legacy area labels as optional history', async () => {
   request.mockResolvedValueOnce(record)
   const loaded = await publicDormitoryHygieneApi.detail('record')
   expect(loaded.currentAreaName).toBe(record.currentAreaName)
   expect(loaded.responsibleDormitories[0].label).toBe('一区 一栋 101')
-  for (const field of ['responsibleClasses', 'currentAreaName']) {
+  for (const field of ['responsibleClasses']) {
     request.mockResolvedValueOnce({ ...record, [field]: undefined })
     await expect(publicDormitoryHygieneApi.detail('record')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
   }
+  request.mockResolvedValueOnce({ ...record, currentAreaName: undefined })
+  expect((await publicDormitoryHygieneApi.detail('record')).currentAreaName).toBeUndefined()
   request.mockResolvedValueOnce({ ...record, responsibleDormitories: undefined, responsibleStudents: undefined, details: { ...record.details, responsibleDormitoryIds: undefined, responsibleStudentIds: undefined } })
   expect((await publicDormitoryHygieneApi.detail('record')).responsibleDormitories).toEqual([])
 })

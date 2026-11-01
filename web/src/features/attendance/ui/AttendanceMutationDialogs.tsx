@@ -5,8 +5,8 @@ import { useDeleteAttendance } from '../hooks/useAttendanceMutations'
 import { CourseRecordPanel } from '../../course-inspection/ui/CourseRecordPanels'
 import { ApiError } from '../../../shared/api/httpClient'
 
-type Props = { editId?: string; deleting: AttendanceRecord[]; memberDepartmentId?: string; onClose: () => void }
-export function AttendanceMutationDialogs({ editId, deleting, memberDepartmentId, onClose }: Props) {
+type Props = { editId?: string; deleting: AttendanceRecord[]; memberDepartmentId?: string; isSuperAdmin?: boolean; onClose: () => void }
+export function AttendanceMutationDialogs({ editId, deleting, memberDepartmentId, isSuperAdmin=false, onClose }: Props) {
   const remove = useDeleteAttendance()
   const [form] = Form.useForm<{ reason: string }>()
   const [error, setError] = useState('')
@@ -25,7 +25,7 @@ export function AttendanceMutationDialogs({ editId, deleting, memberDepartmentId
     } finally { busy.current = false }
   }
   return <>
-    {editId && <CourseRecordPanel id={editId} mode="edit" typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={memberDepartmentId} onClose={onClose} />}
+    {editId && <CourseRecordPanel id={editId} mode="edit" typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} onClose={onClose} />}
     {deleting.length > 0 && <Modal open title={`确认删除 ${deleting.length} 条到课率草稿？`} okText="确认删除" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={remove.isPending} closable={!remove.isPending} maskClosable={!remove.isPending} cancelButtonProps={{ disabled: remove.isPending }} onCancel={() => { if (!busy.current) onClose() }} onOk={() => void confirm()}>
       <p>将软删除所选草稿并保留审计记录。任一记录已提交、锁定、越权或版本变化时，整批不会删除。</p>
       {error && <Alert type="error" showIcon title={error} />}

@@ -1,11 +1,12 @@
 import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Spin } from 'antd'
 import { useState } from 'react'
 import type { MorningAttendanceRecord } from '../../../entities/inspection/model/morningAttendanceRecord'
+import { attributionLabel } from '../../../entities/inspection/model/inspectionScope'
 import { ApiError } from '../../../shared/api/httpClient'
 import { useMorningAttendanceDelete, useMorningAttendanceRecord, useInspectionContext } from '../model/queries'
 import { MorningAttendanceDrawer } from './MorningAttendanceDrawer'
 
-export function MorningAttendancePanel({id,mode,onClose,memberDepartmentId}:{id:string;mode:'detail'|'edit';onClose:()=>void;memberDepartmentId?:string}) {
+export function MorningAttendancePanel({id,mode,onClose,memberDepartmentId,isSuperAdmin=false}:{id:string;mode:'detail'|'edit';onClose:()=>void;memberDepartmentId?:string;isSuperAdmin?:boolean}) {
  const query=useMorningAttendanceRecord(id)
  const record=query.data
  const semesters=useInspectionContext({purpose:'view',kind:'semesters'})
@@ -16,13 +17,14 @@ export function MorningAttendancePanel({id,mode,onClose,memberDepartmentId}:{id:
  if(query.isError) return <Drawer open title="早锻炼/早签记录" onClose={onClose}><Alert type="error" title="记录加载失败或无权访问。" action={<Button onClick={()=>void query.refetch()}>重试</Button>}/></Drawer>
  if(!record) return <Drawer open title="早锻炼/早签记录" onClose={onClose}><Spin/></Drawer>
  if(record.typeCode!=='MORNING_ATTENDANCE')return <Drawer open title="早锻炼/早签记录" onClose={onClose}><Alert type="error" title="记录类型不匹配。"/></Drawer>
- if(mode==='edit')return record.canEdit?<MorningAttendanceDrawer editing={record} memberDepartmentId={memberDepartmentId} inspectionTypeId={record.inspectionTypeId} onClose={onClose}/>:<Drawer open title="早锻炼/早签记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
+ if(mode==='edit')return record.canEdit?<MorningAttendanceDrawer editing={record} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} inspectionTypeId={record.inspectionTypeId} onClose={onClose}/>:<Drawer open title="早锻炼/早签记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
  return <Drawer open title="早锻炼/早签详情" size={640} onClose={onClose}>{scopeError&&<Alert type="warning" title="范围名称加载失败，请关闭后重试。"/>}<Descriptions column={1} items={[
  {key:'semester',label:'学期',children:label(semesters.data?.items,record.semesterId)},
  {key:'week',label:'周次',children:label(weeks.data?.items,record.weekId)},
- {key:'department',label:'部门',children:label(departments.data?.items,record.departmentId)},
+ {key:'attribution',label:'记录归属',children:attributionLabel(record.attributionMode,record.departmentId,label(departments.data?.items,record.departmentId))},
  {key:'status',label:'数据状态',children:({DRAFT:'草稿',PENDING_REVIEW:'待审核',RETURNED:'已退回',CONFIRMED:'已确认',LOCKED:'已锁定'} as Record<string,string>)[record.status]??record.status},
  {key:'source',label:'数据来源',children:({MANUAL:'手工录入',EXCEL:'Excel 导入',REPORT_CORRECTION:'通报修正',MIGRATION:'历史迁移'} as Record<string,string>)[record.source]??record.source},
+ {key:'submitter',label:'提交人',children:record.submitterName||'账号不可用'},
  {key:'student',label:'学生',children:`${record.studentName}（${record.studentNumber}）`},
  {key:'class',label:'班级',children:record.className},{key:'grade',label:'年级',children:record.grade},
  {key:'date',label:'检查日期',children:record.details.date},

@@ -26,11 +26,9 @@ describe('inspection field catalog', () => {
   expect(getInspectionDefinition('CLASSROOM_HYGIENE').availableActions).toEqual(['CREATE','LIST','EDIT','SOFT_DELETE','BATCH_DELETE','IMPORT'])
   expect(getInspectionDefinition('DORMITORY_HYGIENE').availableActions).toEqual(['CREATE','LIST','EDIT','SOFT_DELETE','BATCH_DELETE','IMPORT'])
  })
- it('keeps the two other verified hygiene pages manual-only',()=>{
-  for(const code of ['PUBLIC_DORMITORY_HYGIENE'] as const){
-   expect(getInspectionDefinition(code).availableActions).toEqual(['CREATE','LIST','EDIT','SOFT_DELETE','BATCH_DELETE'])
-   expect(getInspectionDefinition(code).templateStatus).toBe('PLANNED')
-  }
+ it('exposes the public dormitory hygiene import capability',()=>{
+  expect(getInspectionDefinition('PUBLIC_DORMITORY_HYGIENE').availableActions).toEqual(['CREATE','LIST','EDIT','SOFT_DELETE','BATCH_DELETE','IMPORT'])
+  expect(getInspectionDefinition('PUBLIC_DORMITORY_HYGIENE').templateStatus).toBe('ACTIVE')
  })
  it('rejects unknown types with a stable validation code', () => {
   expect(()=>getInspectionDefinition('UNKNOWN')).toThrow('VALIDATION_FAILED')

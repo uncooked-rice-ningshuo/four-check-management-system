@@ -15,7 +15,7 @@ it('requires published template identity and a positive integer version', async 
 })
 it('uploads the independently chosen scope and template through the common HTTP client', async () => {
   const file = new File(['fixture'], 'unattended.xlsx')
-  vi.mocked(apiRequest).mockResolvedValueOnce({ ...scope, id: 'batch', templateId: 'template', templateVersion: 1, version: 3, status: 'PREVIEW_READY', totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 0 })
+  vi.mocked(apiRequest).mockResolvedValueOnce({ ...scope, attributionMode: 'DEPARTMENT', id: 'batch', templateId: 'template', templateVersion: 1, version: 3, status: 'PREVIEW_READY', totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 0 })
   await courseImportApi.uploadAttendance(scope, file, { id: 'template', version: 1 })
   const [path, options] = vi.mocked(apiRequest).mock.calls[0]
   expect(path).toBe('/imports/course-records')

@@ -3,7 +3,7 @@ import { useCurrentAcademicWeek } from '../../attendance/hooks/useAttendancePerm
 import { useInspectionContext } from '../model/queries'
 import { EveningSelfStudyDrawer } from './EveningSelfStudyDrawer'
 
-export function EveningSelfStudyCreatePanel({ inspectionTypeId, memberDepartmentId, onClose }: { inspectionTypeId: string; memberDepartmentId?: string; onClose: () => void }) {
+export function EveningSelfStudyCreatePanel({ inspectionTypeId, memberDepartmentId, isSuperAdmin=false, onClose }: { inspectionTypeId: string; memberDepartmentId?: string; isSuperAdmin?:boolean; onClose: () => void }) {
  const current = useCurrentAcademicWeek()
  const semesters = useInspectionContext({ purpose: 'entry', kind: 'semesters' })
  const candidate = current.data?.week
@@ -13,5 +13,5 @@ export function EveningSelfStudyCreatePanel({ inspectionTypeId, memberDepartment
  if (queries.some(query => query.isError)) return <Drawer open title="新增晚自习缺勤记录" onClose={onClose}><Alert type="error" title="录入上下文加载失败，请重试。" action={<Button onClick={() => queries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} /></Drawer>
  if (queries.some(query => query.isLoading)) return <Drawer open title="新增晚自习缺勤记录" onClose={onClose}><Spin /></Drawer>
  const weekId = weeks.data?.items.some(item => item.id === candidate?.id) ? candidate?.id : undefined
- return <EveningSelfStudyDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} onClose={onClose} />
+ return <EveningSelfStudyDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} onClose={onClose} />
 }

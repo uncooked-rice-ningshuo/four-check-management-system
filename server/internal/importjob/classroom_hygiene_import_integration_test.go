@@ -36,17 +36,13 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	areaID, buildingID, classroomID, otherRoomID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	buildingID, classroomID, otherRoomID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	exec(`INSERT INTO teaching_buildings(id,name) VALUES($1,'隔离教室楼')`, buildingID)
 	exec(`INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES($1,$2,'101'),($3,$2,'102')`, classroomID, buildingID, otherRoomID)
-	exec(`INSERT INTO classroom_hygiene_areas(id,classroom_id,name) VALUES($1,$2,'前排'),($3,$4,'前排')`, areaID, classroomID, uuid.NewString(), otherRoomID)
 	var typeID, departmentID string
 	if err = db.Pool.QueryRow(ctx, `SELECT i.id,ds.department_id FROM inspection_types i JOIN department_inspection_scopes ds ON ds.inspection_type_id=i.id WHERE i.code='CLASSROOM_HYGIENE' AND ds.enabled AND ds.can_enter ORDER BY ds.department_id LIMIT 1`).Scan(&typeID, &departmentID); err != nil {
 		t.Fatal(err)
 	}
-	reasonID := uuid.NewString()
-	exec(`INSERT INTO dictionary_types(id,code,name) VALUES($1,'CLASSROOM_HYGIENE_REASON','隔离教室卫生原因') ON CONFLICT(code) DO NOTHING`, uuid.NewString())
-	exec(`INSERT INTO dictionary_items(id,type_id,value,label) SELECT $1,id,'ISOLATED_REASON','隔离原因' FROM dictionary_types WHERE code='CLASSROOM_HYGIENE_REASON'`, reasonID)
 	original, err := importjob.NewAttendanceXLSXParser(16<<20).Parse("source.xlsx", fixture.workbook)
 	if err != nil {
 		t.Fatal(err)
@@ -67,11 +63,7 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 	}
 	defer book.Close()
 	for i := 0; i < 2; i++ {
-		outcome, round, eventTime, people, reason := "优秀", "首轮", "", "", ""
-		if i == 1 {
-			outcome, round, eventTime, people, reason = "不合格", "", "09:05:00", strings.Join(students, ";"), "隔离原因"
-		}
-		row := []any{"隔离教室楼 101", "前排", original.Rows[0].Values["absence_date"], eventTime, round, outcome, strings.Join(classes, ";"), people, reason, "隔离检查", ""}
+		row := []any{"隔离教室楼 10" + string(rune('1'+i)), original.Rows[i].Values["absence_date"], "合格", classes[i], students[i], "", "隔离检查"}
 		cell, _ := excelize.CoordinatesToCellName(1, i+5)
 		if err = book.SetSheetRow("教室卫生导入", cell, &row); err != nil {
 			t.Fatal(err)
@@ -102,10 +94,10 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 	if err != nil || len(rows.Items) != 2 || rows.Items[0].NormalizedInspection == nil {
 		t.Fatal(rows, err)
 	}
-	if len(rows.Items[0].NormalizedInspection.References.Classes) != 2 || len(rows.Items[0].NormalizedInspection.References.Students) != 0 || len(rows.Items[1].NormalizedInspection.References.Students) != 2 {
-		t.Fatal("multi-responsibility preview lost")
+	if len(rows.Items[0].NormalizedInspection.References.Classes) != 1 || len(rows.Items[0].NormalizedInspection.References.Students) != 1 || len(rows.Items[1].NormalizedInspection.References.Students) != 1 {
+		t.Fatal("single responsibility preview lost")
 	}
-	t.Run("area parent and responsibility scope", func(t *testing.T) {
+	t.Run("classroom and responsibility scope", func(t *testing.T) {
 		parser, err := importjob.NewInspectionXLSXParser(inspection.InspectionTypeClassroomHygiene, 16<<20)
 		if err != nil {
 			t.Fatal(err)
@@ -115,19 +107,15 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		scope := importjob.AttendanceImportScope{TypeCode: inspection.InspectionTypeClassroomHygiene, SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID, DepartmentID: departmentID, WeekStart: batch.WeekStart, WeekEnd: batch.WeekEnd, CreatedBy: fixture.accountID, ImportBatchID: batch.ID}
-		objects, err := db.LoadHygieneImportObjects(ctx, importjob.HygieneImportLookup{TypeCode: scope.TypeCode, ClassroomNames: []string{"隔离教室楼 101", "隔离教室楼 102"}, AreaNames: []string{"前排"}})
-		if err != nil || len(objects.Areas["前排"]) != 2 {
-			t.Fatal("area identity collapsed", objects, err)
-		}
-		exec(`UPDATE classroom_hygiene_areas SET enabled=false WHERE id=$1`, areaID)
+		exec(`UPDATE classrooms SET enabled=false WHERE id=$1`, classroomID)
 		checked, err := importjob.NewClassroomHygieneAdapter(db).Validate(ctx, scope, parsed.Rows)
-		if err != nil || checked.InvalidCount != 2 {
-			t.Fatal("other room area accepted", checked, err)
+		if err != nil || checked.InvalidCount != 1 {
+			t.Fatal("disabled classroom accepted", checked, err)
 		}
-		exec(`UPDATE classroom_hygiene_areas SET enabled=true WHERE id=$1`, areaID)
+		exec(`UPDATE classrooms SET enabled=true WHERE id=$1`, classroomID)
 		scope.ClassID = rows.Items[0].NormalizedInspection.References.Classes[0].ID
 		checked, err = importjob.NewClassroomHygieneAdapter(db).Validate(ctx, scope, parsed.Rows)
-		if err != nil || checked.InvalidCount != 2 {
+		if err != nil || checked.InvalidCount != 1 {
 			t.Fatal("responsibility scope escaped", checked, err)
 		}
 	})
@@ -139,30 +127,14 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 			t.Fatal("partial write", count, err)
 		}
 	}
-	exec(`UPDATE classroom_hygiene_areas SET enabled=false WHERE id=$1`, areaID)
+	exec(`UPDATE classrooms SET enabled=false WHERE id=$1`, classroomID)
 	if _, err = service.ConfirmBatch(ctx, input); !errors.Is(err, importjob.ErrPreviewStale) {
 		t.Fatal("disabled area accepted", err)
 	}
 	assertEmpty()
-	exec(`UPDATE classroom_hygiene_areas SET enabled=true,name='另一区域',classroom_id=$2 WHERE id=$1`, areaID, otherRoomID)
-	if _, err = service.ConfirmBatch(ctx, input); !errors.Is(err, importjob.ErrPreviewStale) {
-		t.Fatal("reparented area accepted", err)
-	}
-	assertEmpty()
-	exec(`UPDATE classroom_hygiene_areas SET name='前排',classroom_id=$2 WHERE id=$1`, areaID, classroomID)
-	exec(`UPDATE dictionary_items SET enabled=false WHERE id=$1`, reasonID)
-	if _, err = service.ConfirmBatch(ctx, input); !errors.Is(err, importjob.ErrPreviewStale) {
-		t.Fatal("disabled reason accepted", err)
-	}
-	assertEmpty()
-	exec(`UPDATE dictionary_items SET enabled=true WHERE id=$1`, reasonID)
+	exec(`UPDATE classrooms SET enabled=true WHERE id=$1`, classroomID)
 	student := rows.Items[1].NormalizedInspection.References.Students[0]
-	otherClass := rows.Items[1].NormalizedInspection.References.Classes[0].ID
-	for _, class := range rows.Items[1].NormalizedInspection.References.Classes {
-		if class.ID != student.ClassID {
-			otherClass = class.ID
-		}
-	}
+	otherClass := rows.Items[0].NormalizedInspection.References.Classes[0].ID
 	exec(`UPDATE students SET class_id=$2 WHERE id=$1`, student.ID, otherClass)
 	if _, err = service.ConfirmBatch(ctx, input); !errors.Is(err, importjob.ErrPreviewStale) {
 		t.Fatal("student reassignment accepted", err)
@@ -174,10 +146,10 @@ func TestClassroomHygieneImportPostgres(t *testing.T) {
 		t.Fatal("object confirm", confirmed, err)
 	}
 	var records, responsibilities, people int
-	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM inspection_records r JOIN classroom_hygiene_details d ON d.record_id=r.id WHERE r.import_batch_id=$1 AND ((r.occurrence_kind='ROUND' AND r.occurred_at IS NULL) OR (r.occurrence_kind='TIME' AND (r.occurred_at AT TIME ZONE 'Asia/Shanghai')::time='09:05:00'::time)) AND d.classroom_id=$2 AND d.area_id=$3 AND r.source='EXCEL' AND r.status='DRAFT' AND ((d.result='EXCELLENT' AND r.violation_count=0) OR (d.result='UNQUALIFIED' AND r.violation_count=1))`, batch.ID, classroomID, areaID).Scan(&records); err != nil || records != 2 {
+	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM inspection_records r JOIN classroom_hygiene_details d ON d.record_id=r.id WHERE r.import_batch_id=$1 AND r.occurrence_kind='DATE' AND r.occurred_at IS NULL AND d.area_id IS NULL AND r.source='EXCEL' AND r.status='DRAFT' AND ((d.result='QUALIFIED' AND r.violation_count=0))`, batch.ID).Scan(&records); err != nil || records != 2 {
 		t.Fatal("object semantics", records, err)
 	}
-	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM inspection_responsibility_classes c JOIN inspection_records r ON r.id=c.record_id WHERE r.import_batch_id=$1`, batch.ID).Scan(&responsibilities); err != nil || responsibilities != 4 {
+	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM inspection_responsibility_classes c JOIN inspection_records r ON r.id=c.record_id WHERE r.import_batch_id=$1`, batch.ID).Scan(&responsibilities); err != nil || responsibilities != 2 {
 		t.Fatal("class links", responsibilities, err)
 	}
 	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM inspection_responsibility_students s JOIN inspection_records r ON r.id=s.record_id WHERE r.import_batch_id=$1`, batch.ID).Scan(&people); err != nil || people != 2 {

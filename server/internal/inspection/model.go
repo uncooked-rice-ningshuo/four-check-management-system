@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,7 @@ type AttendanceInput struct {
 	SemesterID          string
 	WeekID              string
 	DepartmentID        string
+	AttributionMode     string
 	StudentID           string
 	StudentNoSnapshot   string
 	StudentNameSnapshot string
@@ -75,6 +77,7 @@ type AttendanceRecord struct {
 	SemesterID          string    `json:"semesterId"`
 	WeekID              string    `json:"weekId"`
 	DepartmentID        string    `json:"departmentId"`
+	AttributionMode     string    `json:"attributionMode"`
 	StudentID           string    `json:"studentId"`
 	StudentNoSnapshot   string    `json:"studentNo"`
 	StudentNameSnapshot string    `json:"studentName"`
@@ -97,6 +100,7 @@ type AttendanceRecord struct {
 	DedupKey            string    `json:"-"`
 	RowVersion          int       `json:"rowVersion"`
 	CreatedBy           string    `json:"createdBy"`
+	SubmitterName       string    `json:"submitterName"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
 }
@@ -164,6 +168,19 @@ func missingAttendanceContext(input AttendanceInput) bool {
 }
 
 func attendanceDedupKey(input AttendanceInput) string {
+	localDate := input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
+	period := strings.TrimSpace(input.PeriodText)
+	if first, last, ok := ParseCoursePeriod(period); ok {
+		period = strconv.Itoa(first) + "-" + strconv.Itoa(last)
+	}
+	canonical := strings.Join([]string{
+		input.SemesterID, input.WeekID, input.InspectionTypeID, input.ClassID, input.StudentID, localDate, period,
+	}, "\x1f")
+	digest := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(digest[:])
+}
+
+func courseAbsenceDedupKey(input AttendanceInput) string {
 	canonical := strings.Join([]string{
 		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID,
 		input.OccurredAt.UTC().Format(time.RFC3339Nano), strings.TrimSpace(input.PeriodText),
@@ -177,7 +194,7 @@ func attendanceDedupKey(input AttendanceInput) string {
 func AttendanceDedupKey(record AttendanceRecord) string {
 	return attendanceDedupKey(AttendanceInput{
 		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
-		StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
+		ClassID: record.ClassID, StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
 	})
 }
 
@@ -199,29 +216,33 @@ type AttendanceListFilter struct {
 // AttendanceScope is the already-compiled effective data scope for one list request.
 // Empty values mean the corresponding dimension is unrestricted.
 type AttendanceScope struct {
-	SemesterID       string
-	WeekID           string
-	InspectionTypeID string
-	DepartmentID     string
-	DepartmentIDs    []string
-	ClassID          string
-	Grade            string
+	SemesterID                   string
+	WeekID                       string
+	InspectionTypeID             string
+	DepartmentID                 string
+	DepartmentIDs                []string
+	ActorID                      string
+	AllowAllAdministratorRecords bool
+	ClassID                      string
+	Grade                        string
 }
 
 type AttendanceListQuery struct {
-	SemesterID       string
-	WeekID           string
-	InspectionTypeID string
-	DepartmentID     string
-	DepartmentIDs    []string
-	ClassID          string
-	Grade            string
-	Keyword          string
-	Status           string
-	Source           string
-	Sort             string
-	Page             int
-	PageSize         int
+	SemesterID                   string
+	WeekID                       string
+	InspectionTypeID             string
+	DepartmentID                 string
+	DepartmentIDs                []string
+	ActorID                      string
+	AllowAllAdministratorRecords bool
+	ClassID                      string
+	Grade                        string
+	Keyword                      string
+	Status                       string
+	Source                       string
+	Sort                         string
+	Page                         int
+	PageSize                     int
 }
 
 type AttendancePage struct {

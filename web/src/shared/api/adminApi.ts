@@ -67,6 +67,7 @@ export const updateDictionaryType = (input: DictionaryType) => apiRequest<Dictio
 export const createDictionaryItem = (typeId: string, input: Omit<DictionaryItem, 'id' | 'typeId' | 'enabled'>) => apiRequest<DictionaryItem>(`/admin/dictionaries/types/${typeId}/items`, { method: 'POST', body: JSON.stringify(input) })
 export const updateDictionaryItem = (input: DictionaryItem) => apiRequest<DictionaryItem>(`/admin/dictionaries/types/${input.typeId}/items/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const getAcademicCalendar = () => apiRequest<AcademicCalendar>('/admin/academic/calendar')
+export const getMorningScheduleCalendar = () => apiRequest<AcademicCalendar>('/academic/morning-schedule-calendar')
 export const createAcademicYear = (input: Omit<AcademicYear, 'id' | 'enabled'>) => apiRequest<AcademicYear>('/admin/academic/years', { method: 'POST', body: JSON.stringify(input) })
 export const updateAcademicYear = (input: AcademicYear) => apiRequest<AcademicYear>(`/admin/academic/years/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const createSemester = (input: Omit<Semester, 'id' | 'enabled'>) => apiRequest<Semester>('/admin/academic/semesters', { method: 'POST', body: JSON.stringify(input) })

@@ -3,17 +3,19 @@ import { allOptions, badResponse, object, queryString, type ContextOptions, type
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 /** Transport contracts for late-return inspection endpoints. */
-export type LateReturnDetails = { classId: string; studentId: string; dormitoryId: string; date: string; time: string; remark: string }
-export type LateReturnRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; details: LateReturnDetails }
-export type LateReturnRecordDTO = LateReturnRecordInput & {
+export type LateReturnDetails = { classId: string; studentId: string; dormitoryId: string; date: string; time?: string; remark: string }
+export type LateReturnRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'; details: Omit<LateReturnDetails, 'time'> }
+export type LateReturnRecordDTO = Omit<LateReturnRecordInput, 'details'> & { details: LateReturnDetails } & {
  importBatchId?: string
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
- currentDormitoryName: string; status: string; source: string; rowVersion: number; createdBy: string; canEdit: boolean
+ currentDormitoryName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; canEdit: boolean
 }
 function record(value: unknown): LateReturnRecordDTO {
  if (!object(value) || !object(value.details)) throw badResponse()
- for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentDormitoryName','status','source','createdBy']) if (typeof value[key] !== 'string') throw badResponse()
- for (const key of ['classId','studentId','dormitoryId','date','time']) if (typeof value.details[key] !== 'string') throw badResponse()
+ if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
+ for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentDormitoryName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
+ for (const key of ['classId','studentId','dormitoryId','date']) if (typeof value.details[key] !== 'string') throw badResponse()
+ if(value.details.time!==undefined&&typeof value.details.time!=='string')throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()
  if (!Number.isInteger(value.rowVersion) || typeof value.canEdit !== 'boolean') throw badResponse()
  if (value.typeCode !== 'LATE_RETURN' || (value.importBatchId !== undefined && typeof value.importBatchId !== 'string')) throw badResponse()

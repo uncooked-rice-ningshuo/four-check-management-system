@@ -1,9 +1,11 @@
 import { parseImportBatch } from './parseImportBatch'
 import { ApiError, apiDownload, apiRequest } from './httpClient'
 import { queryString } from './inspectionOptionsApi'
+import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../entities/inspection/model/inspectionScope'
 
-export type SupportedImportType = 'ATTENDANCE_RATE' | 'UNATTENDED_CLASSROOM' | 'MORNING_ATTENDANCE' | 'LATE_RETURN' | 'DORMITORY_HYGIENE' | 'CLASSROOM_HYGIENE' | 'EVENING_SELF_STUDY'
-export type InspectionImportScope = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string }
+export type SupportedImportType = 'ATTENDANCE_RATE' | 'UNATTENDED_CLASSROOM' | 'MORNING_ATTENDANCE' | 'LATE_RETURN' | 'DORMITORY_HYGIENE' | 'CLASSROOM_HYGIENE' | 'PUBLIC_DORMITORY_HYGIENE' | 'EVENING_SELF_STUDY'
+export type InspectionImportScope = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR' }
+type ResolvedInspectionImportScope = Omit<InspectionImportScope, 'attributionMode'> & { attributionMode: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR' }
 /** Share multipart/template contracts while retaining legacy endpoint boundaries. */
 export function createInspectionImportClient(root: '/imports/course-records' | '/imports/inspections') {
   return {
@@ -26,12 +28,13 @@ export function createInspectionImportClient(root: '/imports/course-records' | '
   }
 }
 
-function importScope(context: InspectionImportScope): InspectionImportScope {
+function importScope(context: InspectionImportScope): ResolvedInspectionImportScope {
   return {
     semesterId: context.semesterId,
     weekId: context.weekId,
     inspectionTypeId: context.inspectionTypeId,
     departmentId: context.departmentId,
+    attributionMode: context.attributionMode ?? (context.departmentId && context.departmentId !== COLLEGE_DEPARTMENT_OPTION_ID ? 'DEPARTMENT' : 'COLLEGE'),
   }
 }
 export const inspectionImportApi = createInspectionImportClient('/imports/inspections')

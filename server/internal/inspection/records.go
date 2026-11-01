@@ -19,6 +19,7 @@ type InspectionInput struct {
 	WeekID           string          `json:"weekId"`
 	InspectionTypeID string          `json:"inspectionTypeId"`
 	DepartmentID     string          `json:"departmentId"`
+	AttributionMode  string          `json:"attributionMode,omitempty"`
 	Details          json.RawMessage `json:"details"`
 }
 
@@ -55,6 +56,7 @@ type InspectionRecord struct {
 	InspectionTypeID  string               `json:"inspectionTypeId"`
 	TypeCode          string               `json:"typeCode"`
 	DepartmentID      string               `json:"departmentId"`
+	AttributionMode   string               `json:"attributionMode"`
 	Details           InspectionDetails    `json:"details"`
 	PenaltyMultiplier *int                 `json:"-"`
 	Status            string               `json:"status"`
@@ -63,6 +65,7 @@ type InspectionRecord struct {
 	ImportRowNo       int                  `json:"importRowNo,omitempty"`
 	RowVersion        int                  `json:"rowVersion"`
 	CreatedBy         string               `json:"createdBy"`
+	SubmitterName     string               `json:"submitterName"`
 	CreatedAt         time.Time            `json:"createdAt"`
 	UpdatedAt         time.Time            `json:"updatedAt"`
 	HasSubmission     bool                 `json:"-"`
@@ -93,6 +96,8 @@ type InspectionContext struct {
 	DetailContext
 	TypeCode, AcademicYearID    string
 	AttendancePenaltyMultiplier *int
+	MorningPlannedDates         []string
+	MorningDefaultPlannedDates  []string
 }
 
 // InspectionFilter supports bounded, structured list queries.
@@ -110,6 +115,7 @@ type InspectionFilter struct {
 	Grade                    string `form:"grade"`
 	Status                   string `form:"status"`
 	Source                   string `form:"source"`
+	AttributionMode          string `form:"attributionMode"`
 	Sort                     string `form:"sort"`
 	Page                     int    `form:"page"`
 	PageSize                 int    `form:"pageSize"`
@@ -182,7 +188,42 @@ func normalizeInspectionInput(i *InspectionInput) error {
 		}
 		i.DepartmentID = v
 	}
+	switch i.AttributionMode {
+	case "", AttributionModeDepartment, AttributionModeCollege, AttributionModeAdministrator:
+	default:
+		return ErrInspectionRequest
+	}
+	if i.AttributionMode == AttributionModeDepartment && i.DepartmentID == "" ||
+		(i.AttributionMode == AttributionModeCollege || i.AttributionMode == AttributionModeAdministrator) && i.DepartmentID != "" {
+		return ErrInspectionRequest
+	}
 	return nil
+}
+
+func resolveInspectionAttribution(actor ManualActor, input *InspectionInput) error {
+	if actor.IsSuperAdmin && strings.TrimSpace(input.DepartmentID) != "" {
+		return ErrScopeMismatch
+	}
+	departmentID, err := ResolveEntryDepartment(actor, input.DepartmentID)
+	if err != nil {
+		return err
+	}
+	input.DepartmentID = departmentID
+	mode := strings.TrimSpace(input.AttributionMode)
+	if mode == "" {
+		if actor.IsSuperAdmin && departmentID == "" {
+			mode = AttributionModeAdministrator
+		} else if departmentID == "" {
+			mode = AttributionModeCollege
+		} else {
+			mode = AttributionModeDepartment
+		}
+	}
+	if mode == AttributionModeAdministrator && (!actor.IsSuperAdmin || departmentID != "") {
+		return ErrScopeMismatch
+	}
+	input.AttributionMode = mode
+	return normalizeInspectionInput(input)
 }
 func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i InspectionInput, a MutationAccess, owner string, prior *InspectionRecord) (InspectionRecord, error) {
 	c, err := tx.Context(ctx, i)
@@ -208,6 +249,12 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 	v, issues := ValidateDetails(c.TypeCode, c.DetailContext, i.Details)
 	if len(issues) > 0 {
 		return InspectionRecord{}, &DetailsValidationError{issues}
+	}
+	if c.TypeCode == InspectionTypeMorning {
+		morning, ok := v.Details.(*MorningAttendanceDetails)
+		if !ok || !ContainsPlannedDate(c.MorningPlannedDates, morning.Date) {
+			return InspectionRecord{}, &DetailsValidationError{[]DetailIssue{detailIssue("details.date", "NOT_PLANNED")}}
+		}
 	}
 	multiplier := c.AttendancePenaltyMultiplier
 	if (c.TypeCode == InspectionTypeAttendance || c.TypeCode == InspectionTypeEveningSelfStudy) && prior != nil && prior.HasSubmission {
@@ -245,7 +292,7 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 			evening.PenaltyCount = &penaltyCount
 		}
 	}
-	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}
+	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, AttributionMode: i.AttributionMode, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}
 	r.PenaltyMultiplier = multiplier
 	refs, err := tx.References(ctx, r, c, a, owner)
 	if err != nil {
@@ -254,13 +301,17 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 	r.References = refs
 	return r, nil
 }
-func (s *RecordService) Create(ctx context.Context, actor ManualActor, i InspectionInput, m audit.Metadata) (InspectionRecord, error) {
-	departmentID, err := ResolveEntryDepartment(actor, i.DepartmentID)
-	if err != nil {
-		return InspectionRecord{}, err
+
+func ContainsPlannedDate(dates []string, target string) bool {
+	for _, date := range dates {
+		if date == target {
+			return true
+		}
 	}
-	i.DepartmentID = departmentID
-	if err := normalizeInspectionInput(&i); err != nil {
+	return false
+}
+func (s *RecordService) Create(ctx context.Context, actor ManualActor, i InspectionInput, m audit.Metadata) (InspectionRecord, error) {
+	if err := resolveInspectionAttribution(actor, &i); err != nil {
 		return InspectionRecord{}, err
 	}
 	a, err := s.access(ctx, actor)
@@ -362,8 +413,10 @@ func (s *RecordService) Update(ctx context.Context, actor ManualActor, id string
 		return InspectionRecord{}, err
 	}
 	i.Record.DepartmentID = departmentID
-	if err := normalizeInspectionInput(&i.Record); err != nil {
-		return InspectionRecord{}, err
+	if i.Record.AttributionMode != "" {
+		if err := normalizeInspectionInput(&i.Record); err != nil {
+			return InspectionRecord{}, err
+		}
 	}
 	a, err := s.access(ctx, actor)
 	if err != nil {
@@ -382,6 +435,19 @@ func (s *RecordService) Update(ctx context.Context, actor ManualActor, id string
 		}
 		if old.InspectionTypeID != i.Record.InspectionTypeID {
 			return ErrInspectionRequest
+		}
+		if i.Record.AttributionMode != "" && i.Record.AttributionMode != old.AttributionMode {
+			return ErrScopeMismatch
+		}
+		if i.Record.DepartmentID != "" && i.Record.DepartmentID != old.DepartmentID {
+			return ErrScopeMismatch
+		}
+		i.Record.DepartmentID = old.DepartmentID
+		if i.Record.AttributionMode == "" {
+			i.Record.AttributionMode = old.AttributionMode
+		}
+		if err := normalizeInspectionInput(&i.Record); err != nil {
+			return err
 		}
 		if actor.IsMember && old.DepartmentID != i.Record.DepartmentID {
 			return ErrScopeMismatch

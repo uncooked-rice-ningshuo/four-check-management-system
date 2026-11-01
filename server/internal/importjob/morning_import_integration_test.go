@@ -30,6 +30,11 @@ func TestMorningImportPostgres(t *testing.T) {
 	}
 	defer db.Close()
 	fixture := seedAttendanceIntegrationFixture(t, ctx, db)
+	// Custom manual-entry schedules do not change the Excel import baseline.
+	if _, err = db.Pool.Exec(ctx, `INSERT INTO morning_attendance_week_schedules(week_id,planned_dates,version,updated_by)
+		VALUES($1::uuid,ARRAY['2026-06-15'::date],1,$2::uuid)`, fixture.weekID, fixture.accountID); err != nil {
+		t.Fatal("configure a manual-only morning schedule", err)
+	}
 	var typeID, departmentID string
 	if err = db.Pool.QueryRow(ctx, `SELECT i.id,ds.department_id FROM inspection_types i JOIN department_inspection_scopes ds ON ds.inspection_type_id=i.id WHERE i.code='MORNING_ATTENDANCE' AND ds.enabled AND ds.can_enter ORDER BY ds.department_id LIMIT 1`).Scan(&typeID, &departmentID); err != nil {
 		t.Fatal(err)
@@ -80,7 +85,7 @@ func TestMorningImportPostgres(t *testing.T) {
 		t.Fatal("typed preview was lost", rows, err)
 	}
 	studentID := rows.Items[0].NormalizedInspection.References.Students[0].ID
-	input := importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID, DepartmentID: departmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
+	input := importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID, DepartmentID: departmentID, AttributionMode: inspection.AttributionModeDepartment, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
 	if _, err = db.Pool.Exec(ctx, `UPDATE students SET enabled=false WHERE id=$1`, studentID); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +129,7 @@ func TestMorningImportPostgres(t *testing.T) {
 	}
 	collegeConfirmed, err := service.ConfirmBatch(ctx, importjob.ConfirmBatchInput{BatchID: collegeBatch.ID, ExpectedVersion: collegeBatch.Version,
 		IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID,
-			InspectionTypeID: typeID, DepartmentID: "", ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}})
+			InspectionTypeID: typeID, DepartmentID: "", AttributionMode: inspection.AttributionModeCollege, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}})
 	if err != nil || collegeConfirmed.ImportedRows != 2 {
 		t.Fatal("college morning confirmation", collegeConfirmed, err)
 	}

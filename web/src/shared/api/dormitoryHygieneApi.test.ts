@@ -8,7 +8,7 @@ beforeEach(()=>request.mockReset())
 const record={
  id:'record',typeCode:'DORMITORY_HYGIENE',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',
  currentDormitoryName:'一区 一栋 101',currentReasonLabel:'地面',responsibleClasses:[{id:'class',label:'班级'}],
- responsibleStudents:[{id:'student',label:'学生'}],status:'DRAFT',source:'MANUAL',createdBy:'actor',rowVersion:1,canEdit:true,
+ responsibleStudents:[{id:'student',label:'学生'}],status:'DRAFT',source:'MANUAL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,
  details:{dormitoryId:'room',date:'2026-09-03',round:'首次',result:'UNQUALIFIED',responsibleClassIds:['class'],responsibleStudentIds:['student'],reasonCode:'FLOOR'},
 }
 it('loads all object and reason pages in the explicit destination scope',async()=>{

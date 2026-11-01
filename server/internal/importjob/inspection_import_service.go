@@ -14,7 +14,7 @@ type InspectionRowValidator interface {
 
 // NewInspectionImportService adds typed student and object adapters while keeping
 // existing course imports and their persisted preview format compatible.
-func NewInspectionImportService(repository Repository, files VerifiedFileReader, course AttendanceRowValidator, morning, lateReturn, dormitoryHygiene, classroomHygiene InspectionRowValidator, maxBytes int64, evening ...InspectionRowValidator) *Service {
+func NewInspectionImportService(repository Repository, files VerifiedFileReader, course AttendanceRowValidator, morning, lateReturn, dormitoryHygiene, classroomHygiene InspectionRowValidator, maxBytes int64, additional ...InspectionRowValidator) *Service {
 	service := NewCourseImportService(repository, files, course, maxBytes)
 	service.parsers[inspection.InspectionTypeMorning] = NewMorningXLSXParser(maxBytes)
 	service.parsers[inspection.InspectionTypeLateReturn] = NewLateReturnXLSXParser(maxBytes)
@@ -29,9 +29,13 @@ func NewInspectionImportService(repository Repository, files VerifiedFileReader,
 	classroomConfig.ExpectedSheetName = "教室卫生导入"
 	classroomConfig.Fields = append([]TemplateField(nil), classroomHygieneImportFields...)
 	service.parsers[inspection.InspectionTypeClassroomHygiene] = NewXLSXParser(classroomConfig)
+	service.parsers[inspection.InspectionTypePublicDormitoryHygiene] = NewPublicDormitoryHygieneXLSXParser(maxBytes)
 	service.inspectionValidators = map[string]InspectionRowValidator{inspection.InspectionTypeMorning: morning, inspection.InspectionTypeLateReturn: lateReturn, inspection.InspectionTypeDormitoryHygiene: dormitoryHygiene, inspection.InspectionTypeClassroomHygiene: classroomHygiene}
-	if len(evening) > 0 && evening[0] != nil {
-		service.inspectionValidators[inspection.InspectionTypeEveningSelfStudy] = evening[0]
+	if len(additional) > 0 && additional[0] != nil {
+		service.inspectionValidators[inspection.InspectionTypeEveningSelfStudy] = additional[0]
+	}
+	if len(additional) > 1 && additional[1] != nil {
+		service.inspectionValidators[inspection.InspectionTypePublicDormitoryHygiene] = additional[1]
 	}
 	return service
 }

@@ -16,11 +16,11 @@ func inspectionImportMatches(record importjob.InspectionImportRecord, input impo
 	if _, err := uuid.Parse(record.ID); err != nil {
 		return false
 	}
-	return record.SchemaVersion == 1 && record.CreatedBy == input.Scope.ActorID && record.ImportBatchID == input.BatchID && record.Input.SemesterID == input.Scope.SemesterID && record.Input.WeekID == input.Scope.WeekID && record.Input.InspectionTypeID == input.Scope.InspectionTypeID && record.Input.DepartmentID == input.Scope.DepartmentID
+	return record.SchemaVersion == 1 && record.CreatedBy == input.Scope.ActorID && record.ImportBatchID == input.BatchID && record.Input.SemesterID == input.Scope.SemesterID && record.Input.WeekID == input.Scope.WeekID && record.Input.InspectionTypeID == input.Scope.InspectionTypeID && record.Input.DepartmentID == input.Scope.DepartmentID && record.Input.AttributionMode == input.Scope.AttributionMode
 }
 
 func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.InspectionContext, row importjob.InspectionImportRecord, input importjob.ConfirmBatchInput) (inspection.InspectionRecord, error) {
-	if row.TypeCode != locked.TypeCode || (row.TypeCode != inspection.InspectionTypeEveningSelfStudy && row.TypeCode != inspection.InspectionTypeMorning && row.TypeCode != inspection.InspectionTypeLateReturn && row.TypeCode != inspection.InspectionTypeDormitoryHygiene && row.TypeCode != inspection.InspectionTypeClassroomHygiene) || !inspectionImportMatches(row, input) {
+	if row.TypeCode != locked.TypeCode || (row.TypeCode != inspection.InspectionTypeEveningSelfStudy && row.TypeCode != inspection.InspectionTypeMorning && row.TypeCode != inspection.InspectionTypeLateReturn && row.TypeCode != inspection.InspectionTypeDormitoryHygiene && row.TypeCode != inspection.InspectionTypeClassroomHygiene && row.TypeCode != inspection.InspectionTypePublicDormitoryHygiene) || !inspectionImportMatches(row, input) {
 		return inspection.InspectionRecord{}, importjob.ErrBatchScopeMismatch
 	}
 	details := row.Input.Details
@@ -49,7 +49,13 @@ func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.I
 	if len(issues) > 0 {
 		return inspection.InspectionRecord{}, importjob.ErrPreviewStale
 	}
-	record := inspection.InspectionRecord{ID: row.ID, SemesterID: row.Input.SemesterID, WeekID: row.Input.WeekID, InspectionTypeID: row.Input.InspectionTypeID, DepartmentID: row.Input.DepartmentID, TypeCode: row.TypeCode, Details: validated.Details, Normalized: validated, Status: inspection.RecordStatusDraft, Source: inspection.RecordSourceExcel, RowVersion: 1, CreatedBy: row.CreatedBy, ImportBatchID: row.ImportBatchID}
+	if locked.TypeCode == inspection.InspectionTypeMorning {
+		morning, ok := validated.Details.(*inspection.MorningAttendanceDetails)
+		if !ok || !inspection.ContainsPlannedDate(locked.MorningDefaultPlannedDates, morning.Date) {
+			return inspection.InspectionRecord{}, importjob.ErrPreviewStale
+		}
+	}
+	record := inspection.InspectionRecord{ID: row.ID, SemesterID: row.Input.SemesterID, WeekID: row.Input.WeekID, InspectionTypeID: row.Input.InspectionTypeID, DepartmentID: row.Input.DepartmentID, AttributionMode: row.Input.AttributionMode, TypeCode: row.TypeCode, Details: validated.Details, Normalized: validated, Status: inspection.RecordStatusDraft, Source: inspection.RecordSourceExcel, RowVersion: 1, CreatedBy: row.CreatedBy, ImportBatchID: row.ImportBatchID}
 	if locked.TypeCode == inspection.InspectionTypeEveningSelfStudy {
 		evening, ok := record.Details.(*inspection.EveningSelfStudyDetails)
 		if !ok {

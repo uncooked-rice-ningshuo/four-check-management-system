@@ -75,8 +75,6 @@ it('protects a direct dormitory-hygiene URL from an attendance-only grant',()=>{
  expect(screen.getByText('403')).toBeInTheDocument()
 })
 
-vi.mock('../shared/api/hygieneAreaApi', () => ({ hygieneAreaApi: { targets: vi.fn().mockResolvedValue([]) } }))
-
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)

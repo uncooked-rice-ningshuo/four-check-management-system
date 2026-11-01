@@ -48,6 +48,7 @@ type Batch struct {
 	SemesterID            string         `json:"semesterId"`
 	WeekID                string         `json:"weekId"`
 	DepartmentID          string         `json:"departmentId"`
+	AttributionMode       string         `json:"attributionMode"`
 	ClassID               string         `json:"classId,omitempty"`
 	Grade                 string         `json:"grade,omitempty"`
 	OriginalFileID        string         `json:"originalFileId,omitempty"`
@@ -139,6 +140,7 @@ type ConfirmScope struct {
 	WeekID           string
 	InspectionTypeID string
 	DepartmentID     string
+	AttributionMode  string
 	ClassID          string
 	Grade            string
 	ActorID          string

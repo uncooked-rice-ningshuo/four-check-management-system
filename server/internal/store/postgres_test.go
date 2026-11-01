@@ -310,7 +310,7 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 	if strings.Contains(listSQL, "semester-1") || strings.Contains(listSQL, "张晨") {
 		t.Fatalf("list query interpolates user input: %s", listSQL)
 	}
-	if len(countArgs) != 10 || len(listArgs) != 12 || listArgs[10] != 25 || listArgs[11] != 25 {
+	if len(countArgs) != 12 || len(listArgs) != 14 || listArgs[12] != 25 || listArgs[13] != 25 {
 		t.Fatalf("count/list args = %#v / %#v", countArgs, listArgs)
 	}
 }

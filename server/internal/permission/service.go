@@ -33,6 +33,7 @@ const (
 	ActionInspectionReview       = "INSPECTION_REVIEW"
 	ActionInspectionExport       = "INSPECTION_EXPORT"
 	ActionInspectionSummary      = "INSPECTION_SUMMARIZE"
+	ActionMorningScheduleManage  = "MORNING_SCHEDULE_MANAGE"
 	ActionReportView             = "REPORT_VIEW"
 	ActionReportGenerate         = "REPORT_GENERATE"
 	ActionReportCorrect          = "REPORT_CORRECT"
@@ -51,7 +52,7 @@ var ErrReportObligationRoleRequired = errors.New("weekly obligation permission r
 
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
-	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary,
+	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary, ActionMorningScheduleManage,
 	ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
@@ -206,6 +207,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 	}
 	leadership := profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER"
+	if profile.DepartmentCode == "SPORTS" && leadership {
+		result.Permissions = append(result.Permissions, allow(ActionMorningScheduleManage, Scope{}, Source{Type: SourceOrganizationRole, Label: "体育部部长/副部长早签计划管理"}))
+	}
 	for _, mapping := range profile.DepartmentScopes {
 		if !mapping.Enabled || mapping.DepartmentID != profile.DepartmentID {
 			continue
@@ -240,6 +244,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	}
 	for _, rule := range profile.Rules {
 		if !rule.Enabled {
+			continue
+		}
+		if rule.Action == ActionMorningScheduleManage && !(profile.DepartmentCode == "SPORTS" && leadership) {
 			continue
 		}
 		if rule.Effect == EffectDeny && hasRemovedScopeDimensions(rule.Scope) {

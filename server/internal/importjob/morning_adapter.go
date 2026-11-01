@@ -29,7 +29,7 @@ func (a *MorningAdapter) Validate(ctx context.Context, scope AttendanceImportSco
 	}
 	result := InspectionValidationResult{Rows: make([]InspectionValidationRow, 0, len(rows))}
 	seen := map[string]int{}
-	keys := []string{}
+	candidates := []InspectionDuplicateCandidate{}
 	for _, row := range rows {
 		validated := validateMorningRow(scope, refs, row)
 		if len(validated.Errors) == 0 {
@@ -38,12 +38,14 @@ func (a *MorningAdapter) Validate(ctx context.Context, scope AttendanceImportSco
 				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "inspection_date", fmt.Sprintf("第 %d 行与第 %d 行为同一学生同一天", row.RowNo, previous), "每名学生每天保留一条记录"))
 			} else {
 				seen[key] = row.RowNo
-				keys = append(keys, key)
+				if validated.Record.Duplicate != nil {
+					candidates = append(candidates, *validated.Record.Duplicate)
+				}
 			}
 		}
 		result.Rows = append(result.Rows, validated)
 	}
-	existing, err := a.repository.FindExistingAttendanceKeys(ctx, scope, keys)
+	existing, err := a.repository.FindExistingDailyInspectionDuplicates(ctx, scope, candidates)
 	if err != nil {
 		return InspectionValidationResult{}, fmt.Errorf("find existing morning keys: %w", err)
 	}
@@ -95,7 +97,24 @@ func validateMorningRow(scope AttendanceImportScope, refs AttendanceReferences, 
 	if len(result.Errors) > 0 {
 		return result
 	}
-	result.Record = InspectionImportRecord{SchemaVersion: 1, ID: uuid.NewString(), TypeCode: scope.TypeCode, Input: inspection.InspectionInput{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID, Details: raw}, References: inspection.InspectionReferences{Classes: []inspection.ClassReference{{ID: class.ID, Name: class.Name, Grade: class.Grade}}, Students: []inspection.StudentReference{{ID: student.ID, ClassID: student.ClassID, Number: student.StudentNo, Name: student.Name}}}, CreatedBy: scope.CreatedBy, ImportBatchID: scope.ImportBatchID, DedupKey: normalized.DuplicateKey}
+	plannedDates := scope.PlannedDates
+	if plannedDates == nil {
+		plannedDates = inspection.DefaultMorningPlannedDates(detailContext.WeekStart, detailContext.WeekEnd)
+	}
+	if !inspection.ContainsPlannedDate(plannedDates, value("inspection_date")) {
+		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "inspection_date", "该日期未安排早签", "使用本周默认安排的工作日"))
+		return result
+	}
+	result.Record = InspectionImportRecord{
+		SchemaVersion: 1, ID: uuid.NewString(), TypeCode: scope.TypeCode,
+		Input: inspection.InspectionInput{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID, AttributionMode: attributionModeForScope(scope), Details: raw},
+		References: inspection.InspectionReferences{
+			Classes:  []inspection.ClassReference{{ID: class.ID, Name: class.Name, Grade: class.Grade}},
+			Students: []inspection.StudentReference{{ID: student.ID, ClassID: student.ClassID, Number: student.StudentNo, Name: student.Name}},
+		},
+		CreatedBy: scope.CreatedBy, ImportBatchID: scope.ImportBatchID, DedupKey: normalized.DuplicateKey,
+		Duplicate: &InspectionDuplicateCandidate{Key: normalized.DuplicateKey, ClassID: class.ID, StudentID: student.ID, Date: value("inspection_date")},
+	}
 	return result
 }
 

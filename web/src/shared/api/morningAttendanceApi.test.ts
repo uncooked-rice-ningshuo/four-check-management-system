@@ -17,7 +17,7 @@ it('requests the dedicated type and loads all authorized reference pages',async(
 })
 
 it('requires the server-owned daily count and all required display fields',async()=>{
- const value={id:'record',typeCode:'MORNING_ATTENDANCE',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',status:'DRAFT',source:'MANUAL',createdBy:'actor',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',date:'2026-09-03',absenceCount:1}}
+ const value={id:'record',typeCode:'MORNING_ATTENDANCE',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',status:'DRAFT',source:'MANUAL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',date:'2026-09-03',absenceCount:1}}
  request.mockResolvedValueOnce(value)
  expect((await morningAttendanceApi.detail('record')).details.remark).toBe('')
  request.mockResolvedValueOnce({...value,details:{...value.details,absenceCount:2}})
@@ -28,7 +28,7 @@ it('requires the server-owned daily count and all required display fields',async
 
 it('omits cumulative count and subtype when creating a daily event',async()=>{
  const input={semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',details:{classId:'class',studentId:'student',date:'2026-09-03',remark:''}}
- request.mockResolvedValueOnce({id:'record',typeCode:'MORNING_ATTENDANCE',...input,studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',status:'DRAFT',source:'MANUAL',createdBy:'actor',rowVersion:1,canEdit:true,details:{...input.details,absenceCount:1}})
+ request.mockResolvedValueOnce({id:'record',typeCode:'MORNING_ATTENDANCE',...input,studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',status:'DRAFT',source:'MANUAL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,details:{...input.details,absenceCount:1}})
  await morningAttendanceApi.create(input)
  expect(JSON.parse(String(request.mock.calls[0][1]?.body)).details).toEqual(input.details)
 })

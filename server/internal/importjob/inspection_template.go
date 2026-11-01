@@ -8,6 +8,9 @@ func InspectionTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
 		return CourseTemplateDefinition{TypeCode: typeCode, Code: "CLASSROOM_HYGIENE_IMPORT", Name: "教室卫生导入模板", Sheet: "教室卫生导入", Filename: "classroom-hygiene-v1.xlsx"}, nil
 	}
+	if typeCode == inspection.InspectionTypePublicDormitoryHygiene {
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "PUBLIC_DORMITORY_HYGIENE_IMPORT", Name: "公共宿舍卫生导入模板", Sheet: "公共宿舍卫生导入", Filename: "public-dormitory-hygiene-v1.xlsx"}, nil
+	}
 	if typeCode == inspection.InspectionTypeDormitoryHygiene {
 		return CourseTemplateDefinition{TypeCode: typeCode, Code: "DORMITORY_HYGIENE_IMPORT", Name: "宿舍卫生导入模板", Sheet: "宿舍卫生导入", Filename: "dormitory-hygiene-v1.xlsx"}, nil
 	}
@@ -27,6 +30,9 @@ func InspectionTemplate(typeCode string) (CourseTemplateDefinition, error) {
 func BuildInspectionTemplate(typeCode string) ([]byte, error) {
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
 		return BuildClassroomHygieneTemplate()
+	}
+	if typeCode == inspection.InspectionTypePublicDormitoryHygiene {
+		return BuildPublicDormitoryHygieneTemplate()
 	}
 	if typeCode == inspection.InspectionTypeDormitoryHygiene {
 		return BuildDormitoryHygieneTemplate()
@@ -53,6 +59,9 @@ func NewInspectionXLSXParser(typeCode string, maxBytes int64) (*XLSXParser, erro
 	config.ExpectedTemplateCode, config.ExpectedSheetName = definition.Code, definition.Sheet
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
 		config.Fields = append([]TemplateField(nil), classroomHygieneImportFields...)
+	}
+	if typeCode == inspection.InspectionTypePublicDormitoryHygiene {
+		config.Fields = append([]TemplateField(nil), publicDormitoryHygieneImportFields...)
 	}
 	if typeCode == inspection.InspectionTypeDormitoryHygiene {
 		config.Fields = append([]TemplateField(nil), dormitoryHygieneImportFields...)

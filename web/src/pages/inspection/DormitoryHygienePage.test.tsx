@@ -17,4 +17,6 @@ it('distinguishes a failed list from an empty successful list without choosing t
  expect(screen.getByText('记录加载失败，请重试。')).toBeInTheDocument()
  expect(screen.queryByText('当前范围暂无宿舍卫生记录')).not.toBeInTheDocument()
  expect(screen.getByRole('combobox',{name:'学期'})).toHaveValue('')
+ expect(screen.getByRole('combobox',{name:'年级'})).toBeInTheDocument()
+ expect(screen.getByPlaceholderText('输入学号或姓名')).toBeInTheDocument()
 })

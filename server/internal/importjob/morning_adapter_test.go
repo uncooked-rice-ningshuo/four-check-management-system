@@ -47,6 +47,22 @@ func TestMorningAdapterNormalizesOneStudentDayAndDetectsDuplicates(t *testing.T)
 		t.Fatal("existing day accepted", result, err)
 	}
 }
+
+func TestMorningAdapterDefaultsExcelImportsToWeekdays(t *testing.T) {
+	scope := morningScope()
+	row := morningRow(5)
+	row.Values["inspection_date"] = "2026-10-04" // Sunday within the week.
+	result, err := NewMorningAdapter(&fakeAttendanceReferenceRepository{references: morningRefs()}).Validate(context.Background(), scope, []ParsedRow{row})
+	if err != nil || result.ValidCount != 0 || !hasMorningError(result.Rows[0].Errors, ErrorInvalidDate) {
+		t.Fatalf("Excel import accepted a non-default Sunday schedule: %+v %v", result, err)
+	}
+	row.Values["inspection_date"] = "2026-10-02"
+	result, err = NewMorningAdapter(&fakeAttendanceReferenceRepository{references: morningRefs()}).Validate(context.Background(), scope, []ParsedRow{row})
+	if err != nil || result.ValidCount != 1 || len(result.Rows[0].Errors) != 0 {
+		t.Fatalf("Excel import rejected the default Friday schedule: %+v %v", result, err)
+	}
+}
+
 func hasMorningError(values []ValidationError, code ErrorCode) bool {
 	for _, v := range values {
 		if v.Code == code {

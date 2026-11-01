@@ -147,8 +147,17 @@ func TestUnattendedPreviewIsTypeIsolated(t *testing.T) {
 	if _, err := importjob.NewAttendanceXLSXParser(16<<20).Parse("unattended.xlsx", content); err == nil {
 		t.Fatal("unattended accepted as attendance")
 	}
-	if err := run([]string{"--type-code", "PUBLIC_DORMITORY_HYGIENE", "--output", filepath.Join(t.TempDir(), "unsupported.xlsx")}, &bytes.Buffer{}); err == nil {
-		t.Fatal("unsupported type accepted")
+	publicPath := filepath.Join(t.TempDir(), "public-dormitory-hygiene.xlsx")
+	if err := run([]string{"--type-code", "PUBLIC_DORMITORY_HYGIENE", "--output", publicPath}, &bytes.Buffer{}); err != nil {
+		t.Fatal("public dormitory template generation failed", err)
+	}
+	publicWorkbook, err := os.ReadFile(publicPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicParser, err := importjob.NewPublicDormitoryHygieneXLSXParser(16<<20).Parse("public-dormitory-hygiene.xlsx", publicWorkbook)
+	if err != nil || len(publicParser.Fields) != 7 || publicParser.TemplateCode != "PUBLIC_DORMITORY_HYGIENE_IMPORT" {
+		t.Fatal(publicParser, err)
 	}
 }
 
@@ -179,7 +188,7 @@ func TestLateReturnPreviewKeepsEventContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := importjob.NewLateReturnXLSXParser(16<<20).Parse("late-return.xlsx", content)
-	if err != nil || len(parsed.Fields) != 7 {
+	if err != nil || len(parsed.Fields) != 6 {
 		t.Fatal(parsed, err)
 	}
 }
@@ -199,7 +208,7 @@ func TestDormitoryHygienePreviewKeepsObjectContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parser.Parse("hygiene.xlsx", content)
-	if err != nil || len(parsed.Fields) != 10 || parsed.TemplateCode != "DORMITORY_HYGIENE_IMPORT" {
+	if err != nil || len(parsed.Fields) != 7 || parsed.TemplateCode != "DORMITORY_HYGIENE_IMPORT" {
 		t.Fatal(parsed, err)
 	}
 }
@@ -219,7 +228,7 @@ func TestClassroomHygienePreviewKeepsObjectContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parser.Parse("hygiene.xlsx", content)
-	if err != nil || len(parsed.Fields) != 11 || parsed.TemplateCode != "CLASSROOM_HYGIENE_IMPORT" {
+	if err != nil || len(parsed.Fields) != 7 || parsed.TemplateCode != "CLASSROOM_HYGIENE_IMPORT" {
 		t.Fatal(parsed, err)
 	}
 }

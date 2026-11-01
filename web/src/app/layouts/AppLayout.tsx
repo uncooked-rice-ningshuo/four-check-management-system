@@ -32,7 +32,6 @@ import { hasNavigableInspectionAction } from '../../features/attendance/hooks/ha
 import { useAuth } from '../providers/authContext'
 import { useInspectionContext } from '../../features/course-inspection/model/queries'
 import { WorkContextBar } from '../../features/work-context/WorkContextBar'
-import { useHygieneAreaTargets } from '../../features/hygiene-area/model/queries'
 
 const allAdminItems = [
   { key: '/admin/registrations', icon: <SafetyCertificateOutlined />, label: <Link to="/admin/registrations">注册申请</Link> },
@@ -54,7 +53,6 @@ export function AppLayout() {
   const location = useLocation()
   const { user, signOut } = useAuth()
   const effectivePermissions = useAttendancePermissions()
-  const hygieneTargets = useHygieneAreaTargets(!!user && !user.mustChangePassword)
   const accountRoleLabel = user?.primaryDepartmentName && user.organizationRoleName
     ? `${user.primaryDepartmentName} · ${user.organizationRoleName}`
     : user?.isSuperAdmin ? '超级管理员' : user?.systemRole === 'ADMIN' ? '系统管理员' : '普通成员'
@@ -67,15 +65,15 @@ export function AppLayout() {
   const publicHygieneContext = useInspectionContext({ typeCode: 'PUBLIC_DORMITORY_HYGIENE', purpose: 'view', kind: 'semesters' })
   const classroomHygieneContext = useInspectionContext({ typeCode: 'CLASSROOM_HYGIENE', purpose: 'view', kind: 'semesters' })
   const canViewType = (id?: string) => user?.isSuperAdmin || (!!id && hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'INSPECTION_VIEW', id))
+  const canManageMorningSchedule = user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'MORNING_SCHEDULE_MANAGE')
   const adminItems = user?.isSuperAdmin
     ? allAdminItems
     : user?.systemRole === 'ADMIN'
-      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries'].includes(item.key))
-      : []
+      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries'].includes(item.key) || (item.key === '/admin/academic' && canManageMorningSchedule))
+      : canManageMorningSchedule ? allAdminItems.filter(item => item.key === '/admin/academic') : []
   const basicItems = adminItems.filter(item => ['/admin/registrations', '/admin/users'].includes(item.key))
   const configurationItems = [
     ...adminItems.filter(item => !['/admin/registrations', '/admin/users'].includes(item.key)),
-    ...(hygieneTargets.data?.length ? [{ key: '/admin/hygiene-areas', icon: <ClearOutlined />, label: <Link to="/admin/hygiene-areas">卫生区域维护</Link> }] : []),
   ]
   const visibleInspectionItems = [
     ...(canViewType(attendanceContext.data?.inspectionTypeId) ? [{ key: '/inspections/attendance', icon: <TeamOutlined />, label: <Link to="/inspections/attendance">到课率检查</Link> }] : []),

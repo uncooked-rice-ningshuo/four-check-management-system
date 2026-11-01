@@ -57,6 +57,7 @@ type CreateBatchInput struct {
 	SemesterID       string
 	WeekID           string
 	DepartmentID     string
+	AttributionMode  string
 	ClassID          string
 	Grade            string
 	SourceFile       storage.File
@@ -73,6 +74,17 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Batc
 	if input.DepartmentID == inspection.CollegeDepartmentOptionID {
 		input.DepartmentID = ""
 	}
+	if input.AttributionMode == "" {
+		if input.DepartmentID == "" {
+			input.AttributionMode = inspection.AttributionModeCollege
+		} else {
+			input.AttributionMode = inspection.AttributionModeDepartment
+		}
+	}
+	if input.AttributionMode != inspection.AttributionModeDepartment && input.AttributionMode != inspection.AttributionModeCollege && input.AttributionMode != inspection.AttributionModeAdministrator ||
+		(input.AttributionMode == inspection.AttributionModeDepartment) != (input.DepartmentID != "") {
+		return Batch{}, ErrInvalidBatch
+	}
 	if strings.TrimSpace(input.InspectionTypeID) == "" || strings.TrimSpace(input.SemesterID) == "" ||
 		strings.TrimSpace(input.WeekID) == "" ||
 		strings.TrimSpace(input.TemplateID) == "" || input.TemplateVersion < 1 || strings.TrimSpace(input.CreatedBy) == "" {
@@ -84,7 +96,7 @@ func (s *Service) CreateBatch(ctx context.Context, input CreateBatchInput) (Batc
 	now := time.Now().UTC()
 	batch := Batch{
 		ID: uuid.NewString(), InspectionTypeID: strings.TrimSpace(input.InspectionTypeID), SemesterID: strings.TrimSpace(input.SemesterID),
-		WeekID: strings.TrimSpace(input.WeekID), DepartmentID: strings.TrimSpace(input.DepartmentID), OriginalFileID: input.SourceFile.ID,
+		WeekID: strings.TrimSpace(input.WeekID), DepartmentID: strings.TrimSpace(input.DepartmentID), AttributionMode: input.AttributionMode, OriginalFileID: input.SourceFile.ID,
 		ClassID: strings.TrimSpace(input.ClassID), Grade: strings.TrimSpace(input.Grade),
 		TemplateID: strings.TrimSpace(input.TemplateID), TemplateVersion: input.TemplateVersion, Status: BatchStatusUploaded,
 		Version: 1, CreatedBy: strings.TrimSpace(input.CreatedBy), CreatedAt: now, UpdatedAt: now,
@@ -166,8 +178,14 @@ func (s *Service) ParseBatch(ctx context.Context, input ParseBatchInput) (Batch,
 	scope := AttendanceImportScope{
 		TypeCode: batch.TypeCode, InspectionTypeID: batch.InspectionTypeID, SemesterID: batch.SemesterID, WeekID: batch.WeekID,
 		DepartmentID: batch.DepartmentID, ImportBatchID: batch.ID, CreatedBy: batch.CreatedBy,
-		ClassID: batch.ClassID, Grade: batch.Grade,
+		AttributionMode: batch.AttributionMode,
+		ClassID:         batch.ClassID, Grade: batch.Grade,
 		WeekStart: batch.WeekStart, WeekEnd: batch.WeekEnd, Location: batch.Location,
+	}
+	if batch.TypeCode == inspection.InspectionTypeMorning {
+		// Excel import always uses the system default workdays. Per-week manual
+		// overrides are reserved for manual-entry validation and never affect files.
+		scope.PlannedDates = inspection.DefaultMorningPlannedDates(batch.WeekStart.Format("2006-01-02"), batch.WeekEnd.Format("2006-01-02"))
 	}
 	if validator := s.inspectionValidators[batch.TypeCode]; validator != nil {
 		return s.parseInspectionPreview(ctx, batch, scope, workbook.Rows, validator)
@@ -247,6 +265,7 @@ func batchWithinConfirmScope(batch Batch, scope ConfirmScope) bool {
 		batch.WeekID == strings.TrimSpace(scope.WeekID) &&
 		batch.InspectionTypeID == strings.TrimSpace(scope.InspectionTypeID) &&
 		batch.DepartmentID == strings.TrimSpace(scope.DepartmentID) &&
+		batch.AttributionMode == strings.TrimSpace(scope.AttributionMode) &&
 		batch.ClassID == strings.TrimSpace(scope.ClassID) &&
 		batch.Grade == strings.TrimSpace(scope.Grade) &&
 		batch.CreatedBy == strings.TrimSpace(scope.ActorID)

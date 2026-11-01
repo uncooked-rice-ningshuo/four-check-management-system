@@ -106,20 +106,17 @@ func TestValidateInspectionDetails(t *testing.T) {
 		})
 	}
 }
-func TestHygieneOtherReasonRequiresDescription(t *testing.T) {
+func TestHygieneDescriptionIsFreeTextAndRequiredForUnqualified(t *testing.T) {
 	for _, code := range []string{InspectionTypeDormitoryHygiene, InspectionTypeClassroomHygiene, InspectionTypePublicDormitoryHygiene} {
 		t.Run(code, func(t *testing.T) {
 			fields := validDetails(code)
 			fields["result"] = json.RawMessage(`"UNQUALIFIED"`)
-			fields["reasonCode"] = json.RawMessage(`"OTHER"`)
-			for _, description := range []string{`""`, `"  "`} {
-				fields["description"] = json.RawMessage(description)
-				_, issues := validateFixture(code, fields)
-				requireIssue(t, issues, "details.description", "OTHER_REASON_REQUIRED")
-			}
-			fields["description"] = json.RawMessage(`"门框积灰"`)
+			delete(fields, "description")
+			_, issues := validateFixture(code, fields)
+			requireIssue(t, issues, "details.description", "REQUIRED")
+			fields["description"] = json.RawMessage(`"来自字典的短句；录入后可以继续自定义"`)
 			if _, issues := validateFixture(code, fields); len(issues) != 0 {
-				t.Fatalf("custom reason rejected: %+v", issues)
+				t.Fatalf("custom situation text rejected: %+v", issues)
 			}
 		})
 	}
@@ -168,7 +165,7 @@ func requireIssue(t *testing.T, issues []DetailIssue, path, code string) {
 	t.Fatalf("missing %s/%s: %+v", path, code, issues)
 }
 func TestValidateHygieneDetails(t *testing.T) {
-	for _, code := range []string{"DORMITORY_HYGIENE", "CLASSROOM_HYGIENE", "PUBLIC_DORMITORY_HYGIENE"} {
+	for _, code := range []string{InspectionTypeDormitoryHygiene, InspectionTypeClassroomHygiene, InspectionTypePublicDormitoryHygiene} {
 		t.Run(code, func(t *testing.T) {
 			for _, value := range []string{`"UNKNOWN"`, `["EXCELLENT","QUALIFIED"]`, `null`} {
 				f := validDetails(code)
@@ -180,37 +177,102 @@ func TestValidateHygieneDetails(t *testing.T) {
 			}
 			f := validDetails(code)
 			f["result"] = json.RawMessage(`"UNQUALIFIED"`)
-			delete(f, "reasonCode")
+			delete(f, "description")
 			_, issues := validateFixture(code, f)
-			requireIssue(t, issues, "details.reasonCode", "REQUIRED")
-			f = validDetails(code)
-			delete(f, "time")
-			_, issues = validateFixture(code, f)
-			requireIssue(t, issues, "details.round", "OCCURRENCE_REQUIRED")
-			f["round"] = json.RawMessage(`" first "`)
+			requireIssue(t, issues, "details.description", "REQUIRED")
+			f["description"] = json.RawMessage(`"可修改的自定义说明"`)
 			r, issues := validateFixture(code, f)
-			if len(issues) != 0 || r.OccurrenceKind != "ROUND" || !r.OccurredAt.IsZero() || r.Round != "first" || r.ViolationCount != 0 {
-				t.Fatalf("bad round: %+v %+v", r, issues)
+			if len(issues) != 0 || r.OccurrenceKind != OccurrenceDate || r.ViolationCount != 1 {
+				t.Fatalf("date-only free text rejected: %+v %+v", r, issues)
 			}
-			f["time"] = json.RawMessage(`"08:00"`)
-			_, issues = validateFixture(code, f)
-			requireIssue(t, issues, "details.round", "OCCURRENCE_CONFLICT")
 			f = validDetails(code)
 			f["responsibleClassIds"] = json.RawMessage(`[]`)
 			_, issues = validateFixture(code, f)
 			requireIssue(t, issues, "details.responsibleClassIds", "REQUIRED")
-			f["responsibleClassIds"] = json.RawMessage(`["` + detailID + `","` + strings.ToUpper(detailID) + `"]`)
+			f["responsibleClassIds"] = json.RawMessage(`["` + detailID + `","abcdefab-0000-4000-8000-000000000002"]`)
 			_, issues = validateFixture(code, f)
-			requireIssue(t, issues, "details.responsibleClassIds[1]", "DUPLICATE_ITEM")
+			requireIssue(t, issues, "details.responsibleClassIds", "OUT_OF_RANGE")
 		})
 	}
-	dorm, _ := validateFixture("DORMITORY_HYGIENE", validDetails("DORMITORY_HYGIENE"))
-	public, _ := validateFixture("PUBLIC_DORMITORY_HYGIENE", validDetails("PUBLIC_DORMITORY_HYGIENE"))
+	dorm, _ := validateFixture(InspectionTypeDormitoryHygiene, validDetails(InspectionTypeDormitoryHygiene))
+	pub, _ := validateFixture(InspectionTypePublicDormitoryHygiene, validDetails(InspectionTypePublicDormitoryHygiene))
 	if _, ok := dorm.Details.(*DormitoryHygieneDetails); !ok {
 		t.Fatal("wrong dorm model")
 	}
-	if _, ok := public.Details.(*PublicDormitoryHygieneDetails); !ok {
+	if _, ok := pub.Details.(*PublicDormitoryHygieneDetails); !ok {
 		t.Fatal("wrong public model")
+	}
+}
+
+func TestDailyInspectionAdjustmentRules(t *testing.T) {
+	t.Run("attendance duplicate ignores course and clock within same period", func(t *testing.T) {
+		first := AttendanceInput{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, ClassID: detailID, StudentID: detailID, CourseID: detailID, OccurredAt: time.Date(2026, 9, 2, 8, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600)), PeriodText: "第1—2节"}
+		second := first
+		second.CourseID = "abcdefab-0000-4000-8000-000000000002"
+		second.OccurredAt = time.Date(2026, 9, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600))
+		second.PeriodText = "1-2"
+		if attendanceDedupKey(first) != attendanceDedupKey(second) {
+			t.Fatal("course and clock time must not split an attendance section duplicate")
+		}
+		second.ClassID = "abcdefab-0000-4000-8000-000000000002"
+		if attendanceDedupKey(first) == attendanceDedupKey(second) {
+			t.Fatal("class must remain part of attendance identity")
+		}
+	})
+	for _, code := range []string{InspectionTypeLateReturn, InspectionTypeEveningSelfStudy} {
+		t.Run(code+" date only", func(t *testing.T) {
+			fields := validDetails(code)
+			delete(fields, "time")
+			first, issues := validateFixture(code, fields)
+			if len(issues) != 0 || first.OccurrenceKind != OccurrenceDate || !first.OccurredAt.IsZero() {
+				t.Fatalf("date-only event rejected: %+v %+v", first, issues)
+			}
+			fields["date"] = json.RawMessage(`"2026-09-03"`)
+			second, issues := validateFixture(code, fields)
+			if len(issues) != 0 || first.DuplicateKey == second.DuplicateKey {
+				t.Fatalf("date must split event identity: %+v", issues)
+			}
+		})
+	}
+	for _, code := range []string{InspectionTypeDormitoryHygiene, InspectionTypeClassroomHygiene, InspectionTypePublicDormitoryHygiene} {
+		t.Run(code+" single responsibility date only", func(t *testing.T) {
+			fields := validDetails(code)
+			delete(fields, "time")
+			delete(fields, "round")
+			delete(fields, "reasonCode")
+			delete(fields, "areaId")
+			result, issues := validateFixture(code, fields)
+			if len(issues) != 0 || result.OccurrenceKind != OccurrenceDate {
+				t.Fatalf("date-only hygiene rejected: %+v %+v", result, issues)
+			}
+			fields["result"] = json.RawMessage(`"UNQUALIFIED"`)
+			delete(fields, "description")
+			_, issues = validateFixture(code, fields)
+			requireIssue(t, issues, "details.description", "REQUIRED")
+			fields["description"] = json.RawMessage(`"地面和桌面需要清理"`)
+			if _, issues = validateFixture(code, fields); len(issues) != 0 {
+				t.Fatalf("free text situation rejected: %+v", issues)
+			}
+			fields["responsibleStudentIds"] = json.RawMessage(`[]`)
+			_, issues = validateFixture(code, fields)
+			requireIssue(t, issues, "details.responsibleStudentIds", "REQUIRED")
+			fields["responsibleStudentIds"] = json.RawMessage(`[` + `"` + detailID + `","abcdefab-0000-4000-8000-000000000002"]`)
+			_, issues = validateFixture(code, fields)
+			requireIssue(t, issues, "details.responsibleStudentIds", "OUT_OF_RANGE")
+		})
+	}
+}
+
+func TestValidateDetailsRejectsRetiredHygieneFields(t *testing.T) {
+	for _, code := range []string{InspectionTypeDormitoryHygiene, InspectionTypeClassroomHygiene, InspectionTypePublicDormitoryHygiene} {
+		for _, field := range []string{"time", "round", "reasonCode", "areaId"} {
+			t.Run(code+"/"+field, func(t *testing.T) {
+				fields := validDetails(code)
+				fields[field] = json.RawMessage(`"legacy"`)
+				_, issues := validateFixture(code, fields)
+				requireIssue(t, issues, "details", "UNKNOWN_FIELD")
+			})
+		}
 	}
 }
 func TestValidateDetailsStrictInput(t *testing.T) {
@@ -280,25 +342,20 @@ func TestDuplicateKey(t *testing.T) {
 			}
 		})
 	}
-	f := validDetails("ATTENDANCE_RATE")
+	f := validDetails(InspectionTypeAttendance)
 	f["period"] = json.RawMessage(`" 1-2 "`)
-	a, _ := validateFixture("ATTENDANCE_RATE", f)
-	expected := AttendanceDedupKey(AttendanceRecord{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, StudentID: detailID, CourseID: detailID, OccurredAt: time.Date(2026, 9, 2, 8, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600)), PeriodText: "1-2"})
+	a, _ := validateFixture(InspectionTypeAttendance, f)
+	expected := AttendanceDedupKey(AttendanceRecord{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, ClassID: detailID, StudentID: detailID, CourseID: detailID, OccurredAt: time.Date(2026, 9, 2, 8, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600)), PeriodText: "1-2"})
 	if a.DuplicateKey != expected {
-		t.Fatal("legacy attendance hash changed")
+		t.Fatal("attendance key does not use normalized class/student/date/period")
 	}
-	f = validDetails("DORMITORY_HYGIENE")
-	a, _ = validateFixture("DORMITORY_HYGIENE", f)
+	f = validDetails(InspectionTypeDormitoryHygiene)
+	a, _ = validateFixture(InspectionTypeDormitoryHygiene, f)
 	f["result"] = json.RawMessage(`"UNQUALIFIED"`)
-	b, issues := validateFixture("DORMITORY_HYGIENE", f)
+	f["description"] = json.RawMessage(`"发现问题"`)
+	b, issues := validateFixture(InspectionTypeDormitoryHygiene, f)
 	if len(issues) != 0 || a.DuplicateKey != b.DuplicateKey || b.ViolationCount != 1 {
-		t.Fatal("result must use versioned edit")
-	}
-	delete(f, "time")
-	f["round"] = json.RawMessage(`"08:00"`)
-	b, _ = validateFixture("DORMITORY_HYGIENE", f)
-	if a.DuplicateKey == b.DuplicateKey {
-		t.Fatal("time and round collision")
+		t.Fatal("result and description must not split same-day identity")
 	}
 }
 
@@ -330,29 +387,20 @@ func TestValidateDetailsBoundaries(t *testing.T) {
 			}
 		})
 	}
-	for _, clock := range []string{"24:00", "08:60", "8:00", "08:00:00.5", "08:00Z"} {
-		f := validDetails("LATE_RETURN")
-		f["time"], _ = json.Marshal(clock)
-		_, issues := validateFixture("LATE_RETURN", f)
-		requireIssue(t, issues, "details.time", "INVALID_FORMAT")
-	}
-	for _, clock := range []string{"00:00", "23:59:59"} {
-		f := validDetails("LATE_RETURN")
-		f["time"], _ = json.Marshal(clock)
-		if _, issues := validateFixture("LATE_RETURN", f); len(issues) != 0 {
-			t.Fatal(issues)
-		}
-	}
-	f := validDetails("ATTENDANCE_RATE")
+	f := validDetails(InspectionTypeLateReturn)
+	f["time"] = json.RawMessage(`"23:59"`)
+	_, issues := validateFixture(InspectionTypeLateReturn, f)
+	requireIssue(t, issues, "details", "UNKNOWN_FIELD")
+	f = validDetails(InspectionTypeAttendance)
 	f["absenceHours"] = json.RawMessage(`24`)
-	_, issues := validateFixture("ATTENDANCE_RATE", f)
+	_, issues = validateFixture(InspectionTypeAttendance, f)
 	requireIssue(t, issues, "details.absenceHours", "PERIOD_HOURS_MISMATCH")
 	f["period"] = json.RawMessage(`"1\u001f2"`)
-	_, issues = validateFixture("ATTENDANCE_RATE", f)
+	_, issues = validateFixture(InspectionTypeAttendance, f)
 	requireIssue(t, issues, "details.period", "INVALID_FORMAT")
-	f = validDetails("LATE_RETURN")
+	f = validDetails(InspectionTypeLateReturn)
 	f["remark"] = json.RawMessage(`"safe\u0000text"`)
-	_, issues = validateFixture("LATE_RETURN", f)
+	_, issues = validateFixture(InspectionTypeLateReturn, f)
 	requireIssue(t, issues, "details.remark", "INVALID_FORMAT")
 }
 
@@ -372,12 +420,14 @@ func TestDuplicateKeyComponents(t *testing.T) {
 					ctx.WeekID = alternateID
 				case "inspectionTypeId":
 					ctx.InspectionTypeID = alternateID
-				case "occurredAt", "occurrenceDiscriminator":
-					f["time"] = json.RawMessage(`"08:01"`)
 				case "date":
 					f["date"] = json.RawMessage(`"2026-09-03"`)
 				case "period":
 					f["period"] = json.RawMessage(`"3-4"`)
+				case "occurredAt":
+					f["time"] = json.RawMessage(`"08:01"`)
+				case "responsibleClassIds", "responsibleStudentIds", "responsibleDormitoryIds":
+					f[component], _ = json.Marshal([]string{alternateID})
 				default:
 					f[component], _ = json.Marshal(alternateID)
 				}
@@ -385,22 +435,6 @@ func TestDuplicateKeyComponents(t *testing.T) {
 				changed, issues := ValidateDetails(d.Code, ctx, raw)
 				if len(issues) != 0 || changed.DuplicateKey == original.DuplicateKey {
 					t.Fatalf("identity component %s missing: %+v", component, issues)
-				}
-			}
-			if d.Granularity == "OBJECT_INSPECTION" {
-				f := validDetails(d.Code)
-				f["responsibleClassIds"] = json.RawMessage(`["` + alternateID + `"]`)
-				changed, issues := validateFixture(d.Code, f)
-				if len(issues) != 0 || changed.DuplicateKey != original.DuplicateKey {
-					t.Fatal("responsibility changes event identity")
-				}
-			}
-			if d.Granularity != "STUDENT_DAY" {
-				f := validDetails(d.Code)
-				f["time"] = json.RawMessage(`"08:00:00"`)
-				changed, issues := validateFixture(d.Code, f)
-				if len(issues) != 0 || changed.DuplicateKey != original.DuplicateKey {
-					t.Fatal("equivalent clocks differ")
 				}
 			}
 		})

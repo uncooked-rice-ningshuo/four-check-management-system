@@ -21,6 +21,7 @@ type ManualAttendanceInput struct {
 	WeekID           string  `json:"weekId"`
 	InspectionTypeID string  `json:"inspectionTypeId"`
 	DepartmentID     string  `json:"departmentId"`
+	AttributionMode  string  `json:"attributionMode,omitempty"`
 	ClassID          string  `json:"classId"`
 	Grade            string  `json:"grade"`
 	ClassName        string  `json:"className"`
@@ -81,20 +82,29 @@ func NewManualService(r manualRepository, v manualValidator, c manualCalendar, o
 
 // Create authorizes the requested and resolved scope before persisting an audited manual draft.
 func (s *ManualService) Create(ctx context.Context, actor ManualActor, input ManualAttendanceInput, metadata audit.Metadata) (AttendanceRecord, error) {
-	departmentID, err := ResolveEntryDepartment(actor, input.DepartmentID)
-	if err != nil {
+	attribution := InspectionInput{
+		SemesterID:       input.SemesterID,
+		WeekID:           input.WeekID,
+		InspectionTypeID: input.InspectionTypeID,
+		DepartmentID:     input.DepartmentID,
+		AttributionMode:  input.AttributionMode,
+	}
+	if err := resolveInspectionAttribution(actor, &attribution); err != nil {
 		return AttendanceRecord{}, err
 	}
-	input.DepartmentID = departmentID
+	input.SemesterID, input.WeekID, input.InspectionTypeID = attribution.SemesterID, attribution.WeekID, attribution.InspectionTypeID
+	input.DepartmentID, input.AttributionMode = attribution.DepartmentID, attribution.AttributionMode
+	var err error
 	input.ExcludeRecordID = ""
 	record, err := s.prepare(ctx, actor, input, "")
 	if err != nil {
 		return AttendanceRecord{}, err
 	}
 	record.Source, record.Status, record.CreatedBy, record.ImportBatchID = RecordSourceManual, RecordStatusDraft, actor.ID, ""
+	record.AttributionMode = input.AttributionMode
 	record.RowVersion = 1
 	metadata.ActorID = actor.ID
-	mutation := audit.Mutation{Metadata: metadata, Entry: audit.Entry{Action: audit.ActionInspectionRecordCreated, ResourceType: "inspectionRecord", ResourceID: record.ID, After: map[string]any{"source": record.Source, "status": record.Status, "semesterId": input.SemesterID, "weekId": input.WeekID, "departmentId": input.DepartmentID}}}
+	mutation := audit.Mutation{Metadata: metadata, Entry: audit.Entry{Action: audit.ActionInspectionRecordCreated, ResourceType: "inspectionRecord", ResourceID: record.ID, After: map[string]any{"source": record.Source, "status": record.Status, "semesterId": input.SemesterID, "weekId": input.WeekID, "departmentId": input.DepartmentID, "attributionMode": input.AttributionMode}}}
 	return s.repository.SaveManualAttendance(ctx, record, mutation)
 }
 

@@ -17,8 +17,8 @@ func TestClassroomHygieneTemplateContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	fields := []string{"classroom_name", "area_name", "inspection_date", "inspection_time", "inspection_round", "result", "responsible_class_names", "responsible_student_nos", "reason_name", "description", "remark"}
-	values := []string{"教学楼 101", "前排", "2026-10-01", "", "首轮", "不合格", "示例班", "000001", "地面", "对象检查", "备注"}
+	fields := []string{"classroom_name", "inspection_date", "result", "responsible_class_names", "responsible_student_no", "description", "remark"}
+	values := []string{"教学楼 101", "2026-10-01", "不合格", "示例班", "000001", "对象检查", "备注"}
 	for i, field := range fields {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
 		got, err := book.GetCellValue("教室卫生导入", cell)
@@ -39,7 +39,7 @@ func TestClassroomHygieneTemplateContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := parser.Parse("classroom.xlsx", filled.Bytes())
-	if err != nil || len(rows.Rows) != 1 || rows.Rows[0].Values["responsible_student_nos"] != "000001" || rows.Rows[0].Values["area_name"] != "前排" {
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0].Values["responsible_student_no"] != "000001" {
 		t.Fatal(rows, err)
 	}
 	dorm, err := NewInspectionXLSXParser(inspection.InspectionTypeDormitoryHygiene, 16<<20)

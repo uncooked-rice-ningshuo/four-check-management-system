@@ -25,6 +25,52 @@ type inspectionHTTPService interface {
 	Delete(context.Context, inspection.ManualActor, inspection.DeleteAttendanceInput, audit.Metadata) error
 }
 
+type morningScheduleHTTPService interface {
+	Get(context.Context, inspection.ManualActor, string) (inspection.MorningSchedule, error)
+	Save(context.Context, inspection.ManualActor, string, int, []string, audit.Metadata) (inspection.MorningSchedule, error)
+}
+
+func (h *handler) getMorningSchedule(c *gin.Context) {
+	actor, ok := h.inspectionActor(c)
+	if !ok {
+		return
+	}
+	if h.morningSchedules == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "早签计划服务尚未就绪")
+		return
+	}
+	schedule, err := h.morningSchedules.Get(c, actor, c.Param("weekId"))
+	if err != nil {
+		writeInspectionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, schedule)
+}
+
+func (h *handler) saveMorningSchedule(c *gin.Context) {
+	actor, ok := h.inspectionActor(c)
+	if !ok {
+		return
+	}
+	if h.morningSchedules == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "早签计划服务尚未就绪")
+		return
+	}
+	var input struct {
+		Version      int      `json:"version"`
+		PlannedDates []string `json:"plannedDates"`
+	}
+	if !bindInspection(c, &input) {
+		return
+	}
+	schedule, err := h.morningSchedules.Save(c, actor, c.Param("weekId"), input.Version, input.PlannedDates, requestMetadata(c, ""))
+	if err != nil {
+		writeInspectionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, schedule)
+}
+
 func (h *handler) inspectionActor(c *gin.Context) (inspection.ManualActor, bool) {
 	a, ok := h.currentAccount(c)
 	if !ok {
@@ -208,7 +254,7 @@ func writeInspectionError(c *gin.Context, err error) {
 	case errors.Is(err, inspection.ErrRecordNotEditable):
 		writeError(c, 409, "RECORD_NOT_EDITABLE", "仅未提交且未锁定的草稿可以修改或删除")
 	case errors.Is(err, inspection.ErrAttendanceDuplicate):
-		writeError(c, 409, "RECORD_ALREADY_EXISTS", "相同检查记录已存在，请核对日期、时间或轮次")
+		writeError(c, 409, "RECORD_ALREADY_EXISTS", "相同检查记录已存在，请核对学生、日期及检查对象")
 	case errors.Is(err, inspection.ErrAttendancePenaltyUnconfigured):
 		writeError(c, 409, "ATTENDANCE_WEEK_RULE_UNCONFIGURED", "该周到课率违纪计入规则尚未配置，请联系管理员先完成校历配置")
 	case errors.Is(err, inspection.ErrAttendanceLegacyRuleUnknown):

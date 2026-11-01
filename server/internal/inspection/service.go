@@ -71,7 +71,8 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 
 	page, err := s.repository.ListAttendance(ctx, AttendanceListQuery{
 		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
-		DepartmentID: departmentID, DepartmentIDs: append([]string(nil), scope.DepartmentIDs...), ClassID: classID, Grade: grade,
+		DepartmentID: departmentID, DepartmentIDs: append([]string(nil), scope.DepartmentIDs...), ActorID: scope.ActorID,
+		AllowAllAdministratorRecords: scope.AllowAllAdministratorRecords, ClassID: classID, Grade: grade,
 		Keyword: strings.TrimSpace(filter.Keyword), Status: filter.Status, Source: filter.Source,
 		Sort: filter.Sort, Page: filter.Page, PageSize: filter.PageSize,
 	})

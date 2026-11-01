@@ -18,7 +18,7 @@ it('rejects malformed or stalled pages instead of displaying a successful empty 
  await expect(lateReturnApi.contextOptions({purpose:'view',kind:'semesters'})).rejects.toThrow()
 })
 it('accepts an omitted optional remark but rejects missing required details', async () => {
- const value={id:'record',typeCode:'LATE_RETURN',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentDormitoryName:'宿舍',status:'DRAFT',source:'MANUAL',createdBy:'actor',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'room',date:'2026-09-03',time:'08:00:00'}}
+ const value={id:'record',typeCode:'LATE_RETURN',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentDormitoryName:'宿舍',status:'DRAFT',source:'MANUAL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'room',date:'2026-09-03',time:'08:00:00'}}
  request.mockResolvedValueOnce(value)
  expect((await lateReturnApi.detail('record')).details.remark).toBe('')
  request.mockResolvedValueOnce({...value,currentDormitoryName:undefined})
@@ -34,6 +34,6 @@ it('uses late-return context rather than course context', async () => {
 })
 
 it('rejects a response belonging to another inspection type',async()=>{
- request.mockResolvedValueOnce({id:'record',typeCode:'MORNING_ATTENDANCE',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentDormitoryName:'区域 楼栋 101',status:'DRAFT',source:'EXCEL',createdBy:'actor',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'dorm',date:'2026-09-03',time:'23:05'}})
+ request.mockResolvedValueOnce({id:'record',typeCode:'MORNING_ATTENDANCE',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentDormitoryName:'区域 楼栋 101',status:'DRAFT',source:'EXCEL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'dorm',date:'2026-09-03',time:'23:05'}})
  await expect(lateReturnApi.detail('record')).rejects.toThrow('服务返回的数据不完整')
 })

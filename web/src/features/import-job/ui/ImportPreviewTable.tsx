@@ -36,14 +36,12 @@ export function ImportPreviewTable({ typeCode = 'ATTENDANCE_RATE', rows, loading
       rowClassName={record => record.validationStatus === 'INVALID' ? 'import-preview-row-invalid' : ''}
       columns={[
         { title: 'Excel 行', dataIndex: 'rowNo', width: 88 },
-        ...((typeCode === 'DORMITORY_HYGIENE' || typeCode === 'CLASSROOM_HYGIENE') ? [
-          ...(typeCode === 'CLASSROOM_HYGIENE' ? [{title:'教室',render:(_:unknown,record:ImportRow)=>record.rawData.classroom_name||'—'},{title:'检查区域',render:(_:unknown,record:ImportRow)=>record.rawData.area_name||'—'}] : [{title:'寝室',render:(_:unknown,record:ImportRow)=>record.rawData.dormitory_name||'—'}]),
+        ...((typeCode === 'DORMITORY_HYGIENE' || typeCode === 'CLASSROOM_HYGIENE' || typeCode === 'PUBLIC_DORMITORY_HYGIENE') ? [
+          ...(typeCode === 'CLASSROOM_HYGIENE' ? [{title:'教室',render:(_:unknown,record:ImportRow)=>record.rawData.classroom_name||'—'}] : [{title:typeCode === 'PUBLIC_DORMITORY_HYGIENE' ? '责任寝室' : '寝室',render:(_:unknown,record:ImportRow)=>record.rawData.dormitory_name||'—'}]),
           {title:'检查日期',render:(_:unknown,record:ImportRow)=>record.rawData.inspection_date||'—'},
-          {title:'时间/轮次',render:(_:unknown,record:ImportRow)=>record.rawData.inspection_time||record.rawData.inspection_round||'—'},
           {title:'检查结果',render:(_:unknown,record:ImportRow)=>record.rawData.result||'—'},
           {title:'责任班级',render:(_:unknown,record:ImportRow)=>record.rawData.responsible_class_names||'—'},
           {title:'责任学生学号',render:(_:unknown,record:ImportRow)=>record.rawData.responsible_student_nos||'—'},
-          {title:'原因',render:(_:unknown,record:ImportRow)=>record.rawData.reason_name||'—'},
           {title:'情况说明',render:(_:unknown,record:ImportRow)=>record.rawData.description||'—'},
           {title:'备注',render:(_:unknown,record:ImportRow)=>record.rawData.remark||'—'},
         ] : [
@@ -55,13 +53,13 @@ export function ImportPreviewTable({ typeCode = 'ATTENDANCE_RATE', rows, loading
           { title: '缺勤次数', width: 100, render: () => 1 },
           { title: '备注', render: (_: unknown, record: ImportRow) => record.rawData.remark || '—' },
         ] : typeCode === 'EVENING_SELF_STUDY' ? [
-          { title: '检查时间', width: 170, render: (_: unknown, record: ImportRow) => [record.rawData.absence_date, record.rawData.absence_time].filter(Boolean).join(' ') || '—' },
+          { title: '缺勤日期', width: 170, render: (_: unknown, record: ImportRow) => record.rawData.absence_date || '—' },
           { title: '教室', render: (_: unknown, record: ImportRow) => record.rawData.classroom_code || '—' },
           { title: '节次', width: 100, render: () => '第 9–10 节' },
           { title: '基础缺勤次数', width: 120, render: () => 1 },
           { title: '备注', render: (_: unknown, record: ImportRow) => record.rawData.remark || '—' },
         ] : typeCode === 'LATE_RETURN' ? [
-          { title: '晚归时间', width: 170, render: (_: unknown, record: ImportRow) => [record.rawData.inspection_date,record.rawData.inspection_time].filter(Boolean).join(' ') || '—' },
+          { title: '晚归日期', width: 170, render: (_: unknown, record: ImportRow) => record.rawData.inspection_date || '—' },
           { title: '宿舍', render: (_: unknown, record: ImportRow) => record.rawData.dormitory_name || '—' },
           { title: '备注', render: (_: unknown, record: ImportRow) => record.rawData.remark || '—' },
         ] : [

@@ -18,7 +18,6 @@ type EntryOptionQuery struct {
 	StudentID        string `form:"studentId"`
 	CourseID         string `form:"courseId"`
 	ClassroomID      string `form:"classroomId"`
-	AreaID           string `form:"areaId"`
 	Keyword          string `form:"keyword"`
 	Kind             string `form:"kind"`
 	Page             int    `form:"page"`
@@ -71,7 +70,7 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 		return EntryOptionPage{}, ErrInspectionRequest
 	}
 	q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID = input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID
-	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.ClassroomID, &q.AreaID, &q.RecordID} {
+	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.ClassroomID, &q.RecordID} {
 		if *id != "" {
 			v, ok := canonicalDetailID(*id)
 			if !ok {
@@ -91,20 +90,20 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 		if q.ClassID == "" || q.StudentID == "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
-	case "dormitory-objects", "reason-codes":
-		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" || q.AreaID != "" {
+	case "dormitory-objects":
+		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
-	case "classroom-objects", "public-areas":
-		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" || q.AreaID != "" {
-			return EntryOptionPage{}, ErrInspectionRequest
-		}
-	case "classroom-areas":
-		if q.ClassID == "" || q.ClassroomID == "" || q.StudentID != "" || q.CourseID != "" || q.AreaID != "" {
+	case "classroom-objects":
+		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "responsible-dormitories":
-		if q.ClassID == "" || q.AreaID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
+		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
+			return EntryOptionPage{}, ErrInspectionRequest
+		}
+	case "situation-snippets":
+		if q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	default:

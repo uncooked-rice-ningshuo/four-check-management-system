@@ -1,4 +1,3 @@
-import { hygieneAreaApi } from '../../shared/api/hygieneAreaApi'
 import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render as testingRender, screen } from '@testing-library/react'
@@ -177,18 +176,15 @@ it('exposes dormitory-hygiene navigation only for its own view grant',()=>{
  expect(screen.queryByRole('link',{name:'到课率检查'})).not.toBeInTheDocument()
 })
 
-vi.mock('../../shared/api/hygieneAreaApi', () => ({ hygieneAreaApi: { targets: vi.fn().mockResolvedValue([]) } }))
-
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
 
-it('只在服务端返回授权维护范围后展示卫生区域入口', async () => {
-  vi.mocked(hygieneAreaApi.targets).mockResolvedValueOnce([{ kind: 'classroom-hygiene-areas', departmentId: 'd', departmentName: '检查部门', inspectionTypeId: 't', inspectionTypeName: '教室卫生' }])
+it('不再展示已废弃的卫生区域维护入口', () => {
   renderLayout()
-  expect(await screen.findByRole('link', { name: '卫生区域维护' })).toHaveAttribute('href', '/admin/hygiene-areas')
+  expect(screen.queryByRole('link', { name: '卫生区域维护' })).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: '基础数据' })).not.toBeInTheDocument()
 })
 

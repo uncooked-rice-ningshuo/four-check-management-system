@@ -4,8 +4,13 @@ import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
-import { updateAcademicYear } from '../../shared/api/adminApi'
+import { getMorningScheduleCalendar, updateAcademicYear } from '../../shared/api/adminApi'
 import { AcademicCalendarPage } from './AcademicCalendarPage'
+
+const accessState = vi.hoisted(() => ({
+  isSuperAdmin: true,
+  permissions: [] as { action: string; effect: string; scope: Record<string, string>; sources: unknown[] }[],
+}))
 
 vi.mock('../../shared/api/adminApi', () => ({
   getAcademicCalendar: vi.fn().mockResolvedValue({
@@ -15,7 +20,15 @@ vi.mock('../../shared/api/adminApi', () => ({
   }),
   createAcademicYear: vi.fn(), createSemester: vi.fn(), createWeek: vi.fn(),
   updateAcademicYear: vi.fn(), updateSemester: vi.fn(), updateWeek: vi.fn(),
+  getMorningScheduleCalendar: vi.fn().mockResolvedValue({
+    academicYears: [{ id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
+    semesters: [{ id: 's1', academicYearId: 'y1', code: 'FIRST', name: '2025-2026学年上学期', startDate: '2025-09-03T00:00:00Z', endDate: '2026-01-30T00:00:00Z', enabled: true }],
+    weeks: [{ id: 'w1', semesterId: 's1', weekNo: 2, startDate: '2025-09-08T00:00:00Z', endDate: '2025-09-14T00:00:00Z', note: '', enabled: true, attendancePenaltyMultiplier: 1 }],
+  }),
 }))
+
+vi.mock('../../app/providers/authContext', () => ({ useAuth: () => ({ user: { isSuperAdmin: accessState.isSuperAdmin } }) }))
+vi.mock('../../features/attendance/hooks/useAttendancePermissions', () => ({ useAttendancePermissions: () => ({ data: { permissions: accessState.permissions }, isLoading: false, isError: false }) }))
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -161,6 +174,22 @@ describe('学期周次交互', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     dependentKeys.forEach(key => expect(client.getQueryState(key)?.isInvalidated).toBe(true))
+  }, 30_000)
+
+  it('早签计划专属授权只显示周次和计划入口，不开放校历编辑', async () => {
+    accessState.isSuperAdmin = false
+    accessState.permissions = [{ action: 'MORNING_SCHEDULE_MANAGE', effect: 'ALLOW', scope: {}, sources: [] }]
+    try {
+      setup()
+      expect(await screen.findByRole('button', { name: '配置日期' })).toBeVisible()
+      expect(getMorningScheduleCalendar).toHaveBeenCalled()
+      expect(screen.queryByRole('tab', { name: '学年' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '新增学年' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '新增周次' })).not.toBeInTheDocument()
+    } finally {
+      accessState.isSuperAdmin = true
+      accessState.permissions = []
+    }
   }, 30_000)
 
 })

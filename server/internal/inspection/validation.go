@@ -69,17 +69,8 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 	clock, round := detailString(values, "time"), detailString(values, "round")
 	isHygiene := definition.Granularity == "OBJECT_INSPECTION"
 	if isHygiene {
-		if clock == "" && round == "" {
-			issues = append(issues, detailIssue("details.round", "OCCURRENCE_REQUIRED"))
-		}
-		if clock != "" && round != "" {
-			issues = append(issues, detailIssue("details.round", "OCCURRENCE_CONFLICT"))
-		}
-		if detailString(values, "result") == HygieneUnqualified && detailString(values, "reasonCode") == "" {
-			issues = append(issues, detailIssue("details.reasonCode", "REQUIRED"))
-		}
-		if detailString(values, "reasonCode") == "OTHER" && strings.TrimSpace(detailString(values, "description")) == "" {
-			issues = append(issues, detailIssue("details.description", "OTHER_REASON_REQUIRED"))
+		if detailString(values, "result") == HygieneUnqualified && strings.TrimSpace(detailString(values, "description")) == "" {
+			issues = append(issues, detailIssue("details.description", "REQUIRED"))
 		}
 	}
 	if len(issues) > 0 {
@@ -173,6 +164,9 @@ func normalizeDetailField(f FieldDefinition, raw json.RawMessage) (json.RawMessa
 		}
 		if len(ids) < f.MinItems {
 			return fail("REQUIRED")
+		}
+		if f.MaxItems > 0 && len(ids) > f.MaxItems {
+			return fail("OUT_OF_RANGE")
 		}
 		seen := map[string]bool{}
 		for i, id := range ids {
@@ -299,37 +293,42 @@ func detailString(values map[string]json.RawMessage, key string) string {
 	return value
 }
 func detailDuplicateKey(code string, c DetailContext, v map[string]json.RawMessage, r ValidatedDetails) string {
-	if code == InspectionTypeAttendance || code == InspectionTypeUnattended {
-		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
+	if code == InspectionTypeAttendance {
+		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, ClassID: detailString(v, "classId"), StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
+	}
+	if code == InspectionTypeUnattended {
+		return courseAbsenceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
 	}
 	if code == InspectionTypeEveningSelfStudy {
-		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "studentId"), r.OccurredAt.UTC().Format(time.RFC3339Nano)}
+		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "classId"), detailString(v, "studentId"), r.Date}
 		digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 		return hex.EncodeToString(digest[:])
 	}
 	parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID}
 	switch code {
 	case InspectionTypeMorning:
-		parts = append(parts, detailString(v, "studentId"), r.Date)
+		parts = append(parts, detailString(v, "classId"), detailString(v, "studentId"), r.Date)
 	case InspectionTypeLateReturn:
-		parts = append(parts, detailString(v, "studentId"), r.OccurredAt.UTC().Format(time.RFC3339Nano))
+		parts = append(parts, detailString(v, "classId"), detailString(v, "studentId"), r.Date)
 	default:
 		switch code {
 		case InspectionTypeDormitoryHygiene:
-			parts = append(parts, detailString(v, "dormitoryId"))
+			parts = append(parts, detailString(v, "dormitoryId"), r.Date)
 		case InspectionTypeClassroomHygiene:
-			parts = append(parts, detailString(v, "classroomId"), detailString(v, "areaId"))
+			parts = append(parts, detailString(v, "classroomId"), r.Date)
 		case InspectionTypePublicDormitoryHygiene:
-			parts = append(parts, detailString(v, "areaId"))
+			parts = append(parts, detailArrayFirst(v, "responsibleDormitoryIds"), r.Date)
 		}
-		discriminator := r.Round
-		if r.OccurrenceKind == OccurrenceTime {
-			discriminator = detailString(v, "time")
-		}
-		parts = append(parts, r.Date, r.OccurrenceKind, discriminator)
 	}
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 	return hex.EncodeToString(digest[:])
+}
+func detailArrayFirst(values map[string]json.RawMessage, key string) string {
+	var items []string
+	if raw, ok := values[key]; ok && json.Unmarshal(raw, &items) == nil && len(items) > 0 {
+		return items[0]
+	}
+	return ""
 }
 func detailIssue(path, code string) DetailIssue {
 	messages := map[string]string{
@@ -340,6 +339,7 @@ func detailIssue(path, code string) DetailIssue {
 		"OUTSIDE_WEEK": "检查日期不在所选周内", "OCCURRENCE_REQUIRED": "请填写检查时间或轮次", "OCCURRENCE_CONFLICT": "检查时间和轮次只能填写一项",
 		"OTHER_REASON_REQUIRED": "选择其他原因时请填写具体原因说明",
 		"SERVER_OWNED_FIELD":    "此字段由系统按晚自习规则生成",
+		"NOT_PLANNED":           "该日期未安排早签，请核对本周早签计划",
 	}
 	return DetailIssue{Path: path, Code: code, Message: messages[code]}
 }

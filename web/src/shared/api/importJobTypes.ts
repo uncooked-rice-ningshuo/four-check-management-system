@@ -7,6 +7,7 @@ export type ImportBatch = {
   semesterId: string
   weekId: string
   departmentId: string
+  attributionMode: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR'
   classId?: string
   grade?: string
   templateId: string

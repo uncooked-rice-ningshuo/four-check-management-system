@@ -24,7 +24,7 @@ func eveningSelfStudyScope() AttendanceImportScope {
 func eveningSelfStudyRow(rowNo int) ParsedRow {
 	return ParsedRow{RowNo: rowNo, Values: map[string]string{
 		"student_no": "S20260001", "student_name": "测试学生甲", "class_name": "示例班级A",
-		"classroom_code": "A101", "absence_date": "2026-06-17", "absence_time": "20:15", "remark": "晚自习缺勤",
+		"classroom_code": "A101", "absence_date": "2026-06-17", "remark": "晚自习缺勤",
 	}}
 }
 
@@ -85,7 +85,7 @@ func TestEveningSelfStudyAdapterRejectsInvalidRowsAndScope(t *testing.T) {
 		{"student_no", "", ErrorRequiredField}, {"student_no", "UNKNOWN", ErrorReferenceNotFound},
 		{"student_name", "错误姓名", ErrorReferenceMismatch}, {"class_name", "其他班", ErrorReferenceNotFound},
 		{"classroom_code", "B999", ErrorReferenceNotFound}, {"absence_date", "2026-06-22", ErrorOccurredOutsideWeek},
-		{"absence_time", "25:00", ErrorInvalidTime}, {"remark", string(make([]rune, 501)), ErrorTextTooLong},
+		{"remark", string(make([]rune, 501)), ErrorTextTooLong},
 	} {
 		t.Run(test.field, func(t *testing.T) {
 			row := eveningSelfStudyRow(5)

@@ -9,12 +9,13 @@ vi.mock('../model/queries',()=>({
  useInspectionEntryOptions:()=>({data:[],isLoading:false}),
  useLateReturnMutation:()=>({mutateAsync:mutate,isPending:false}),
 }))
-const record:LateReturnRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'LATE_RETURN',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',currentDormitoryName:'宿舍甲',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'room',date:'2026-09-03',time:'08:00',remark:'原备注'}}
+const record:LateReturnRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'LATE_RETURN',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',currentDormitoryName:'宿舍甲',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',submitterName:'提交人',canEdit:true,details:{classId:'class',studentId:'student',dormitoryId:'room',date:'2026-09-03',time:'08:00',remark:'原备注'}}
 it('preserves initial edit values and failed input under StrictMode, then retries the original version',async()=>{
  mutate.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(record)
  const close=vi.fn()
  render(<StrictMode><LateReturnDrawer editing={record} inspectionTypeId="type" onClose={close}/></StrictMode>)
- expect(screen.getByLabelText('晚归时间')).toHaveValue('08:00:00')
+ expect(screen.queryByLabelText('晚归时间')).not.toBeInTheDocument()
+ expect(screen.getByLabelText('晚归日期')).toBeInTheDocument()
  fireEvent.change(screen.getByLabelText('备注'),{target:{value:'修改内容'}})
  fireEvent.change(screen.getByLabelText('修改原因'),{target:{value:'核对'}})
  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
@@ -23,9 +24,11 @@ it('preserves initial edit values and failed input under StrictMode, then retrie
  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
  await waitFor(()=>expect(close).toHaveBeenCalledOnce())
  expect(mutate.mock.calls[1][0]).toMatchObject({id:'one',version:2,reason:'核对',record:{details:{remark:'修改内容'}}})
+ expect(mutate.mock.calls[1][0].record.details).not.toHaveProperty('time')
 })
 it('opens a new empty form without reading an editing record',()=>{
  render(<StrictMode><LateReturnDrawer inspectionTypeId="type" onClose={vi.fn()}/></StrictMode>)
- expect(screen.getByLabelText('晚归时间')).toHaveValue('')
+ expect(screen.getByLabelText('晚归日期')).toBeInTheDocument()
+ expect(screen.queryByLabelText('晚归时间')).not.toBeInTheDocument()
  expect(screen.queryByLabelText('修改原因')).not.toBeInTheDocument()
 })

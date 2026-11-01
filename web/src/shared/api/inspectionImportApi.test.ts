@@ -3,7 +3,7 @@ import { apiDownload, apiRequest } from './httpClient'
 import { inspectionImportApi } from './inspectionImportApi'
 vi.mock('./httpClient', async original => ({ ...await original<typeof import('./httpClient')>(), apiDownload: vi.fn(), apiRequest: vi.fn() }))
 const scope = { semesterId:'semester', weekId:'week', inspectionTypeId:'morning', departmentId:'department' }
-const batch = { ...scope, id:'batch', templateId:'template', templateVersion:1, version:3, status:'PREVIEW_READY', totalRows:2, validRows:2, invalidRows:0, importedRows:0 }
+const batch = { ...scope, attributionMode:'DEPARTMENT' as const, id:'batch', templateId:'template', templateVersion:1, version:3, status:'PREVIEW_READY', totalRows:2, validRows:2, invalidRows:0, importedRows:0 }
 beforeEach(() => vi.clearAllMocks())
 it('uses the generic entry and validates the returned destination', async () => {
  vi.mocked(apiRequest).mockResolvedValueOnce(batch)

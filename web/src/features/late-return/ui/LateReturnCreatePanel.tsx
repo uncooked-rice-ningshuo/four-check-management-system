@@ -4,7 +4,7 @@ import { useInspectionContext } from '../model/queries'
 import { LateReturnDrawer } from './LateReturnDrawer'
 
 /** Resolve the authorized default before mounting the form; later refreshes never reset entered values. */
-export function LateReturnCreatePanel({inspectionTypeId,onClose,memberDepartmentId}:{inspectionTypeId:string;onClose:()=>void;memberDepartmentId?:string}) {
+export function LateReturnCreatePanel({inspectionTypeId,onClose,memberDepartmentId,isSuperAdmin=false}:{inspectionTypeId:string;onClose:()=>void;memberDepartmentId?:string;isSuperAdmin?:boolean}) {
  const current=useCurrentAcademicWeek()
  const semesters=useInspectionContext({purpose:'entry',kind:'semesters'})
  const candidate=current.data?.week
@@ -14,5 +14,5 @@ export function LateReturnCreatePanel({inspectionTypeId,onClose,memberDepartment
  if(queries.some(query=>query.isError))return <Drawer open title="新增晚归记录" onClose={onClose}><Alert type="error" title="录入上下文加载失败，请重试。" action={<Button onClick={()=>queries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/></Drawer>
  if(queries.some(query=>query.isLoading))return <Drawer open title="新增晚归记录" onClose={onClose}><Spin/></Drawer>
  const weekId=weeks.data?.items.some(item=>item.id===candidate?.id)?candidate?.id:undefined
- return <LateReturnDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} onClose={onClose}/>
+ return <LateReturnDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} onClose={onClose}/>
 }

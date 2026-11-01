@@ -40,6 +40,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	if err := db.Ready(ctx); err != nil {
+		log.Fatal("database schema is not ready; apply pending migrations before starting the API: ", err)
+	}
 	storageConfig, err := loadStorageConfig(os.Getenv)
 	if err != nil {
 		log.Fatal(err)
@@ -79,10 +82,11 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 		MasterData:          masterdata.NewService(db), MasterDataImports: masterdataimport.NewService(db, db, maxUploadBytes),
 		Dictionary: dictionary.NewService(db), Storage: storageService,
 		ImportRollback: importjob.NewRollbackService(db, permissionService),
-		ImportJobs:     importjob.NewInspectionImportService(db, storageService, importjob.NewAttendanceAdapter(db), importjob.NewMorningAdapter(db), importjob.NewLateReturnAdapter(db), importjob.NewDormitoryHygieneAdapter(db), importjob.NewClassroomHygieneAdapter(db), maxUploadBytes, importjob.NewEveningSelfStudyAdapter(db)),
+		ImportJobs:     importjob.NewInspectionImportService(db, storageService, importjob.NewAttendanceAdapter(db), importjob.NewMorningAdapter(db), importjob.NewLateReturnAdapter(db), importjob.NewDormitoryHygieneAdapter(db), importjob.NewClassroomHygieneAdapter(db), maxUploadBytes, importjob.NewEveningSelfStudyAdapter(db), importjob.NewPublicDormitoryHygieneAdapter(db)),
 		Attendance:     inspection.NewService(db), ImportFiles: storageService, ImportMaxUploadBytes: maxUploadBytes,
 		ManualAttendance:         manualAttendance,
 		Inspections:              inspection.NewRecordService(db, permissionService),
+		MorningSchedules:         inspection.NewMorningScheduleService(db, permissionService),
 		InspectionOptions:        inspection.NewEntryOptionService(db, permissionService),
 		InspectionContextOptions: inspection.NewContextOptionService(db, permissionService),
 		WorkContext:              academic.NewWorkContextService(db),

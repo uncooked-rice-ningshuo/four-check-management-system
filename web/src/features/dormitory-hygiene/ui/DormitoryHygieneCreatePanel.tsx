@@ -4,7 +4,7 @@ import { useInspectionContext } from '../model/queries'
 import { DormitoryHygieneDrawer } from './DormitoryHygieneDrawer'
 
 /** Resolve the authorized default before mounting the form; later refreshes never reset entered values. */
-export function DormitoryHygieneCreatePanel({inspectionTypeId,onClose,memberDepartmentId}:{inspectionTypeId:string;onClose:()=>void;memberDepartmentId?:string}) {
+export function DormitoryHygieneCreatePanel({inspectionTypeId,onClose,memberDepartmentId,isSuperAdmin=false}:{inspectionTypeId:string;onClose:()=>void;memberDepartmentId?:string;isSuperAdmin?:boolean}) {
  const current=useCurrentAcademicWeek()
  const semesters=useInspectionContext({purpose:'entry',kind:'semesters'})
  const candidate=current.data?.week
@@ -14,5 +14,5 @@ export function DormitoryHygieneCreatePanel({inspectionTypeId,onClose,memberDepa
  if(queries.some(query=>query.isError))return <Drawer open title="新增宿舍卫生记录" onClose={onClose}><Alert type="error" title="录入上下文加载失败，请重试。" action={<Button onClick={()=>queries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/></Drawer>
  if(queries.some(query=>query.isLoading))return <Drawer open title="新增宿舍卫生记录" onClose={onClose}><Spin/></Drawer>
  const weekId=weeks.data?.items.some(item=>item.id===candidate?.id)?candidate?.id:undefined
- return <DormitoryHygieneDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} onClose={onClose}/>
+ return <DormitoryHygieneDrawer inspectionTypeId={inspectionTypeId} initialSemesterId={semesterId} initialWeekId={weekId} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} onClose={onClose}/>
 }

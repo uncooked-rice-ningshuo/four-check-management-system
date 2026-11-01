@@ -20,6 +20,7 @@ type FieldDefinition struct {
 	ExclusiveMinimum bool     `json:"exclusiveMinimum,omitempty"`
 	Maximum          *float64 `json:"maximum,omitempty"`
 	MinItems         int      `json:"minItems,omitempty"`
+	MaxItems         int      `json:"maxItems,omitempty"`
 	Enum             []string `json:"enum,omitempty"`
 	RequiredWhen     string   `json:"requiredWhen,omitempty"`
 	ConstValue       *float64 `json:"constValue,omitempty"`

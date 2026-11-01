@@ -52,17 +52,17 @@ func mutationScopeSQL(access inspection.MutationAccess, args *[]any) string {
 	owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
 	ownAllow, ownDeny := scopeSet(permission.ActionInspectionEnter, permission.EffectAllow), scopeSet(permission.ActionInspectionEnter, permission.EffectDeny)
 	manageAllow, manageDeny := scopeSet(permission.ActionInspectionManage, permission.EffectAllow), scopeSet(permission.ActionInspectionManage, permission.EffectDeny)
-	return "((" + owner + " AND " + ownAllow + " AND NOT " + ownDeny + ") OR (" + manageAllow + " AND NOT " + manageDeny + "))"
+	return "(ir.attribution_mode<>'ADMINISTRATOR' OR " + owner + ") AND ((" + owner + " AND " + ownAllow + " AND NOT " + ownDeny + ") OR (" + manageAllow + " AND NOT " + manageDeny + "))"
 }
 
-const mutationRecordSelect = `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),
+const mutationRecordSelect = `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
  COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
  ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
- ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,ir.created_at,ir.updated_at,
+ ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,COALESCE(submitter.name,'账号不可用'),ir.created_at,ir.updated_at,
  ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL
  FROM inspection_records ir JOIN attendance_details ad ON ad.record_id=ir.id JOIN courses c ON c.id=ad.course_id
  JOIN semesters sem ON sem.id=ir.semester_id JOIN inspection_types it ON it.id=ir.inspection_type_id
- LEFT JOIN classrooms cr ON cr.id=ad.classroom_id LEFT JOIN teaching_buildings tb ON tb.id=cr.teaching_building_id
+ LEFT JOIN classrooms cr ON cr.id=ad.classroom_id LEFT JOIN teaching_buildings tb ON tb.id=cr.teaching_building_id LEFT JOIN accounts submitter ON submitter.id=ir.created_by
  WHERE ir.id=$1::uuid AND ir.deleted_at IS NULL AND it.code='ATTENDANCE_RATE' AND `
 
 type mutationQueryer interface {
@@ -76,7 +76,7 @@ func readMutationRecord(ctx context.Context, q mutationQueryer, id string, acces
 		sql += " FOR UPDATE OF ir"
 	}
 	var r inspection.AttendanceRecord
-	err := q.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.InspectionTypeID, &r.SemesterID, &r.WeekID, &r.DepartmentID, &r.StudentID, &r.StudentNoSnapshot, &r.StudentNameSnapshot, &r.ClassID, &r.ClassNameSnapshot, &r.GradeSnapshot, &r.CourseID, &r.CourseName, &r.ClassroomID, &r.ClassroomCode, &r.OccurredAt, &r.AbsenceHours, &r.PenaltyMultiplier, &r.PenaltyHours, &r.PeriodText, &r.Remark, &r.Source, &r.Status, &r.ImportBatchID, &r.DedupKey, &r.RowVersion, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock)
+	err := q.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.InspectionTypeID, &r.SemesterID, &r.WeekID, &r.DepartmentID, &r.AttributionMode, &r.StudentID, &r.StudentNoSnapshot, &r.StudentNameSnapshot, &r.ClassID, &r.ClassNameSnapshot, &r.GradeSnapshot, &r.CourseID, &r.CourseName, &r.ClassroomID, &r.ClassroomCode, &r.OccurredAt, &r.AbsenceHours, &r.PenaltyMultiplier, &r.PenaltyHours, &r.PeriodText, &r.Remark, &r.Source, &r.Status, &r.ImportBatchID, &r.DedupKey, &r.RowVersion, &r.CreatedBy, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, inspection.ErrRecordNotFound
 	}
@@ -120,8 +120,10 @@ func (p *Postgres) UpdateAttendance(ctx context.Context, r inspection.Attendance
 	// Keep origin metadata immutable even if an internal caller supplies a replacement.
 	r.CreatedBy, r.Source, r.ImportBatchID, r.CreatedAt = original.CreatedBy, original.Source, original.ImportBatchID, original.CreatedAt
 	args := []any{r.ID, version, r.InspectionTypeID, r.SemesterID, r.WeekID, r.DepartmentID, r.StudentID, r.StudentNoSnapshot, r.StudentNameSnapshot, r.ClassID, r.ClassNameSnapshot, r.GradeSnapshot, r.OccurredAt, r.Remark, r.DedupKey}
+	periodStart, periodEnd := dedupPeriodBounds(r.PeriodText)
+	args = append(args, r.ClassID, r.StudentID, periodStart, periodEnd)
 	guard := mutationScopeSQL(a, &args)
-	sql := `UPDATE inspection_records ir SET inspection_type_id=$3,semester_id=$4,week_id=$5,department_id=NULLIF($6,'')::uuid,student_id=$7,student_no_snapshot=$8,student_name_snapshot=$9,class_id=$10,class_name_snapshot=$11,grade_snapshot=$12,occurred_at=$13,remark=$14,dedup_key=$15,row_version=ir.row_version+1,updated_at=now()
+	sql := `UPDATE inspection_records ir SET inspection_type_id=$3,semester_id=$4,week_id=$5,department_id=NULLIF($6,'')::uuid,student_id=$7,student_no_snapshot=$8,student_name_snapshot=$9,class_id=$10,class_name_snapshot=$11,grade_snapshot=$12,occurred_at=$13,remark=$14,dedup_key=$15,contract_version=2,dedup_class_id=$16,dedup_student_id=$17,dedup_date=($13::timestamptz AT TIME ZONE 'Asia/Shanghai')::date,dedup_period_start=$18,dedup_period_end=$19,row_version=ir.row_version+1,updated_at=now()
  FROM semesters sem WHERE sem.id=ir.semester_id AND ir.id=$1 AND ir.row_version=$2 AND ir.deleted_at IS NULL
  AND ((ir.status='DRAFT' AND ir.submission_id IS NULL) OR
  (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS
@@ -130,7 +132,7 @@ func (p *Postgres) UpdateAttendance(ctx context.Context, r inspection.Attendance
  AND ir.locked_by_report_id IS NULL AND ` + guard + ` RETURNING ir.row_version,ir.updated_at`
 	if err = tx.QueryRow(ctx, sql, args...).Scan(&r.RowVersion, &r.UpdatedAt); err != nil {
 		var pe *pgconn.PgError
-		if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "uq_inspection_records_active_dedup" {
+		if errors.As(err, &pe) && pe.Code == "23505" && (pe.ConstraintName == "uq_inspection_records_active_dedup" || pe.ConstraintName == "uq_inspection_records_daily_attendance") {
 			return inspection.AttendanceRecord{}, inspection.ErrAttendanceDuplicate
 		}
 		if errors.Is(err, pgx.ErrNoRows) {

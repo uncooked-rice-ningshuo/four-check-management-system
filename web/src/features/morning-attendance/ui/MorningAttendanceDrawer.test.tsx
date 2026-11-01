@@ -9,7 +9,7 @@ vi.mock('../model/queries',()=>({
  useInspectionEntryOptions:()=>({data:[],isLoading:false}),
  useMorningAttendanceMutation:()=>({mutateAsync:mutate,isPending:false}),
 }))
-const record:MorningAttendanceRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'MORNING_ATTENDANCE',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',canEdit:true,details:{classId:'class',studentId:'student',date:'2026-09-03',remark:'原备注'}}
+const record:MorningAttendanceRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'MORNING_ATTENDANCE',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',submitterName:'提交人',canEdit:true,details:{classId:'class',studentId:'student',date:'2026-09-03',remark:'原备注'}}
 it('preserves initial edit values and failed input under StrictMode, then retries the original version',async()=>{
  mutate.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(record)
  const close=vi.fn()

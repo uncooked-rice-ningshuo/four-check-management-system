@@ -26,7 +26,7 @@ export function ImportRollbackPanel({ batch, onBusyChange }: { batch: ImportBatc
   }
   return <>
     {batch.status === 'CONFIRMED' && <Button danger onClick={() => { setError(''); setSelection({ version: batch.version, count: batch.importedRows }) }}>整批回滚</Button>}
-    {batch.status === 'ROLLED_BACK' && <Alert type="info" showIcon title={`已整批回滚 ${batch.importedRows} 条记录`} description="原文件、批次、解析结果及审计记录已保留。" />}
+    {batch.status === 'ROLLED_BACK' && <Alert type="success" showIcon title={`已整批回滚 ${batch.importedRows} 条记录`} description="原文件、批次、解析结果及审计记录已保留。" />}
     {selection && <Modal open title="确认整批回滚" footer={null} onCancel={() => { if (!pending.current) setSelection(undefined) }} closable={!mutation.isPending} maskClosable={!mutation.isPending} keyboard={!mutation.isPending}>
       <p>将撤销本批次全部 {selection.count} 条记录。仅允许全部记录仍为未提交、未锁定且未修改的草稿；原文件和审计记录会保留。</p>
       {error && <Alert type="error" showIcon title={error} />}

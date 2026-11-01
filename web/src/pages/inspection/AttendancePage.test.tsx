@@ -1,5 +1,6 @@
-vi.mock('../../features/import-job/hooks/useImportContext', () => ({ useImportContext: () => ({ data: { items: [] }, isLoading: false, isError: false }) }))
+vi.mock('../../features/import-job/hooks/useImportContext', () => ({ useImportContext: (query: { kind: string }) => ({ data: { items: query.kind === 'semesters' ? [{ id: 'semester-1', label: '2026-2027 学年上学期' }] : query.kind === 'weeks' ? [{ id: 'week-1', label: '第 1 周' }] : [] }, isLoading: false, isError: false }) }))
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
@@ -24,7 +25,7 @@ vi.mock('../../features/attendance/hooks/useCreateAttendance', () => ({ useCreat
 vi.mock('../../app/providers/authContext', () => ({ useAuth: () => ({ user: currentUser }) }))
 vi.mock('../../features/import-job/hooks/useImportBatch', () => ({
   useImportTemplate: () => ({ data: { file: new Blob(['xlsx']), template: { id: 'template-1', version: 1 } }, isLoading: false }),
-  useImportBatch: () => ({ data: undefined, isLoading: false }),
+  useImportBatch: (id?: string) => ({ data: id === 'batch-1' ? { id: 'batch-1', inspectionTypeId: 'type-attendance', semesterId: 'semester-1', weekId: 'week-1', departmentId: 'department-study', attributionMode: 'DEPARTMENT', templateId: 'template-1', templateVersion: 1, status: 'PREVIEW_READY', totalRows: 1, validRows: 1, invalidRows: 0, importedRows: 0, version: 1 } : undefined, isLoading: false }),
   useImportRows: () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false }),
   useUploadAttendanceImport: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useConfirmImport: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -62,21 +63,25 @@ describe('AttendancePage', () => {
 		expect(screen.queryByRole('button', { name: '批量导入到课率' })).not.toBeInTheDocument()
 	})
 
-	it('uses ProTable filters and keeps fixed business context out of the query form', () => {
+	it('uses shared ProTable filters and places grade before class', () => {
 		recordsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })
 		const { container } = render(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
 
 		expect(container.querySelector('.ant-pro-query-filter')).not.toBeNull()
 		expect(container.querySelector('.attendance-records-table')).not.toBeNull()
 		expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
-		expect(screen.queryByLabelText('部门')).not.toBeInTheDocument()
+		expect(screen.getByLabelText('部门')).toHaveRole('combobox')
 		expect(screen.getByLabelText('学期')).toHaveRole('combobox')
 		expect(screen.getByLabelText('周次')).toHaveRole('combobox')
 		expect(screen.getByLabelText('班级')).toHaveRole('combobox')
 		expect(screen.getByLabelText('年级')).toHaveRole('combobox')
 		expect(screen.getByLabelText('数据状态')).toHaveRole('combobox')
 		expect(screen.getByLabelText('数据来源')).toHaveRole('combobox')
-		expect(screen.getByPlaceholderText('输入学号或姓名…')).toHaveAttribute('type', 'text')
+		expect(screen.getByPlaceholderText('输入学号或姓名')).toHaveAttribute('type', 'text')
+		const filterLabels = Array.from(container.querySelectorAll('.ant-pro-query-filter .ant-form-item-label label')).map(label => label.textContent?.trim())
+		expect(filterLabels.indexOf('年级')).toBeLessThan(filterLabels.indexOf('班级'))
+		const tableHeaders = Array.from(container.querySelectorAll('.attendance-records-table thead th')).map(header => header.textContent?.trim())
+		expect(tableHeaders.indexOf('年级')).toBeLessThan(tableHeaders.indexOf('班级'))
 	})
 
 	it('shows the department selector only when the account can access multiple departments', () => {
@@ -125,7 +130,9 @@ describe('AttendancePage', () => {
 		const importButton = screen.getByRole('button', { name: '批量导入到课率' })
 		expect(importButton).toBeEnabled()
 		fireEvent.click(importButton)
-		expect(screen.getByRole('combobox', { name: '导入目标部门' })).toBeInTheDocument()
+		fireEvent.click(screen.getByRole('button', { name: '准备导入' }))
+		expect(screen.queryByRole('combobox', { name: '导入目标部门' })).not.toBeInTheDocument()
+		expect(screen.getByText('管理员独立记录')).toBeInTheDocument()
 	})
 
 	it('queries all authorized departments for a member without an explicit department filter', () => {
@@ -173,6 +180,7 @@ describe('AttendancePage', () => {
 
   it('renders record status/source, pagination and opens only an in-page import drawer', () => {
     recordsQuery.mockReturnValue({ data: { items: [{ id: 'record-1', studentNo: 'S001', studentName: '测试同学', classId: 'class-1', className: '计科 2401', grade: '2026级', courseId: 'course-1', courseName: '软件工程', occurredAt: '2026-08-30T08:00:00Z', absenceHours: 2, period: '1-2', remark: '', source: 'EXCEL', status: 'DRAFT', rowVersion: 1 }], total: 21, page: 1, pageSize: 20 }, isLoading: false })
+    currentWeekQuery.mockReturnValue({ data: { week: filterOptions.weeks[0] }, isLoading: false })
     render(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
     expect(screen.getByText('测试同学')).toBeInTheDocument()
 		expect(screen.getByText('2026级')).toBeInTheDocument()
@@ -182,6 +190,8 @@ describe('AttendancePage', () => {
 		fireEvent.click(screen.getByTitle('2'))
 		expect(recordsQuery.mock.calls.at(-1)?.[0]).toMatchObject({ page: 2, pageSize: 20 })
     fireEvent.click(screen.getByRole('button', { name: '批量导入到课率' }))
+    expect(screen.getByRole('button', { name: '准备导入' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '准备导入' }))
     expect(screen.getByText('批量导入到课率')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '导入' })).not.toBeInTheDocument()
   })
@@ -205,13 +215,11 @@ describe('AttendancePage', () => {
 		expect(screen.getByRole('alert')).toHaveTextContent('无法加载权限或当前周次')
 	})
 
-	it('allows a resumed import batch drawer to close while retaining its resume id', async () => {
+	it('opens the shared import drawer for a resumed batch', () => {
 		recordsQuery.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 }, isLoading: false })
-		render(<MemoryRouter initialEntries={[{ pathname: '/inspections/attendance', search: entry.split('?')[1], state: { importBatchId: 'batch-1' } }]}><AttendancePage /></MemoryRouter>)
+		render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={[{ pathname: '/inspections/attendance', search: entry.split('?')[1], state: { importBatchId: 'batch-1' } }]}><AttendancePage /></MemoryRouter></QueryClientProvider>)
 
 		expect(screen.getByRole('dialog', { name: '批量导入到课率' })).toBeInTheDocument()
-		fireEvent.click(document.querySelector('.ant-drawer-close') as HTMLElement)
-
-		await waitFor(() => expect(screen.queryByRole('dialog', { name: '批量导入到课率' })).not.toBeInTheDocument())
+		expect(screen.getByText('校验预览')).toBeInTheDocument()
 	})
 })

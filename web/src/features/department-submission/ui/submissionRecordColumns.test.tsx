@@ -5,15 +5,17 @@ import type { SubmissionCartRecord } from '../../../entities/inspection/model/su
 import { submissionRecordColumns } from './submissionRecordColumns'
 
 const base: SubmissionCartRecord = { id: 'r', semesterId: 's', weekId: 'w', inspectionTypeId: 't', departmentId: 'd', typeCode: 'LATE_RETURN', studentNumber: 'S01', studentName: '测试学生', className: '计科一班', grade: '2026级', status: 'DRAFT', source: 'EXCEL', rowVersion: 1, canEdit: true, details: {} }
-it('shows a late-return record with dormitory and time', () => {
+it('shows a late-return record with dormitory and date only', () => {
   const row = { ...base, currentDormitoryName: '桃园 101', details: { date: '2026-09-10', time: '23:05:00', remark: '核对备注' } }
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns('LATE_RETURN')} dataSource={[row]} />)
-  for (const value of ['桃园 101', '2026-09-10', '23:05:00', '核对备注', 'Excel 导入']) expect(screen.getByText(value)).toBeInTheDocument()
+  for (const value of ['桃园 101', '2026-09-10', '核对备注', 'Excel 导入']) expect(screen.getByText(value)).toBeInTheDocument()
+  expect(screen.queryByText('23:05:00')).not.toBeInTheDocument()
 })
 it('shows hygiene responsibilities and readable result and reason', () => {
   const row = { ...base, typeCode: 'DORMITORY_HYGIENE', currentDormitoryName: '桃园 102', currentReasonLabel: '地面未清扫', responsibleClasses: [{ id: 'class', label: '计科一班' }], responsibleStudents: [{ id: 'student', label: '测试学生' }], details: { date: '2026-09-10', round: '第一轮', result: 'UNQUALIFIED', reasonCode: 'FLOOR', description: '有灰尘' } }
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns('DORMITORY_HYGIENE')} dataSource={[row]} />)
-  for (const value of ['桃园 102', '计科一班', '测试学生', '第一轮', '不合格', '地面未清扫', '有灰尘']) expect(screen.getByText(value)).toBeInTheDocument()
+  for (const value of ['桃园 102', '计科一班', '测试学生', '不合格', '有灰尘']) expect(screen.getByText(value)).toBeInTheDocument()
+  expect(screen.queryByText('第一轮')).not.toBeInTheDocument()
   expect(screen.queryByText('UNQUALIFIED')).not.toBeInTheDocument()
   expect(screen.queryByText('FLOOR')).not.toBeInTheDocument()
 })
@@ -21,16 +23,26 @@ it('does not reveal internal IDs or codes when a referenced label is missing', (
   const row = { ...base, typeCode: 'DORMITORY_HYGIENE', details: { dormitoryId: 'internal-room-id', result: 'UNKNOWN_CODE', reasonCode: 'internal-reason-code' } }
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns('DORMITORY_HYGIENE')} dataSource={[row]} />)
   expect(screen.getByText('名称不可用')).toBeInTheDocument()
-  expect(screen.getByText('原因名称不可用')).toBeInTheDocument()
   expect(screen.getByText('结果不可用')).toBeInTheDocument()
   expect(screen.queryByText('internal-room-id')).not.toBeInTheDocument()
+  expect(screen.queryByText('internal-reason-code')).not.toBeInTheDocument()
 })
 
 it.each([
   ['MORNING_ATTENDANCE', { date: '2026-09-12', absenceCount: 1 }, ['2026-09-12', '1']],
   ['UNATTENDED_CLASSROOM', { date: '2026-09-12', time: '14:00:00', period: '5-6', absenceHours: 2 }, ['2026-09-12', '14:00:00', '5-6']],
-  ['EVENING_SELF_STUDY', { date: '2026-09-12', time: '20:15:00', period: '9-10', absenceHours: 2, penaltyMultiplier: 2, penaltyHours: 4 }, ['2026-09-12', '20:15:00', '9-10', '2 倍']],
+  ['EVENING_SELF_STUDY', { date: '2026-09-12', period: '9-10', absenceHours: 2, penaltyMultiplier: 2, penaltyCount: 2 }, ['2026-09-12', '9-10', '2 倍']],
 ] as const)('shows type-specific fields for %s', (typeCode, details, values) => {
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns(typeCode)} dataSource={[{ ...base, typeCode, details }]} />)
+  for (const value of values) expect(screen.getByText(value)).toBeInTheDocument()
+})
+
+const hygieneReviewCases: Array<[string, Partial<SubmissionCartRecord>, string[]]> = [
+  ['CLASSROOM_HYGIENE', { currentClassroomName: '计科楼 101', responsibleClasses: [{ id: 'class', label: '计科一班' }], responsibleStudents: [{ id: 'student', label: '测试学生' }], details: { date: '2026-09-10', result: 'UNQUALIFIED', description: '黑板未擦' } }, ['计科楼 101', '计科一班', '测试学生', '2026-09-10', '不合格', '黑板未擦']],
+  ['PUBLIC_DORMITORY_HYGIENE', { responsibleDormitories: [{ id: 'dorm', label: '桃园 101' }], responsibleClasses: [{ id: 'class', label: '计科一班' }], responsibleStudents: [{ id: 'student', label: '测试学生' }], details: { date: '2026-09-10', result: 'UNQUALIFIED', description: '走廊有积水' } }, ['桃园 101', '计科一班', '测试学生', '2026-09-10', '不合格', '走廊有积水']],
+]
+
+it.each(hygieneReviewCases)('shows %s hygiene details in the submission review table', (typeCode, fields, values) => {
+  render(<Table<SubmissionCartRecord> rowKey="id" pagination={false} columns={submissionRecordColumns<SubmissionCartRecord>(typeCode)} dataSource={[{ ...base, typeCode, ...fields }]} />)
   for (const value of values) expect(screen.getByText(value)).toBeInTheDocument()
 })

@@ -24,6 +24,7 @@ type AttendanceImportDrawerProps = {
   }
   departments: { id: string; name: string }[]
   memberDepartmentId?: string
+  isSuperAdmin?: boolean
   batchId?: string
   onBatchIdChange: (batchId?: string) => void
   onClose: () => void
@@ -40,9 +41,9 @@ function saveTemplate(file: Blob, label: string) {
   URL.revokeObjectURL(url)
 }
 
-export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, context, initialImportScope, scopeOptions, departments, memberDepartmentId, batchId, onBatchIdChange, onClose }: AttendanceImportDrawerProps) {
-  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : typeCode === 'UNATTENDED_CLASSROOM' ? '无机课堂' : '到课率'
-  const [targetDepartmentId, setTargetDepartmentId] = useState(memberDepartmentId ?? initialImportScope?.departmentId ?? context.departmentId ?? (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : ''))
+export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, context, initialImportScope, scopeOptions, departments, memberDepartmentId, isSuperAdmin = false, batchId, onBatchIdChange, onClose }: AttendanceImportDrawerProps) {
+  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'PUBLIC_DORMITORY_HYGIENE' ? '公共宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : typeCode === 'UNATTENDED_CLASSROOM' ? '无机课堂' : '到课率'
+  const [targetDepartmentId, setTargetDepartmentId] = useState(isSuperAdmin ? '' : memberDepartmentId ?? initialImportScope?.departmentId ?? context.departmentId ?? (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : ''))
   const [targetCalendar, setTargetCalendar] = useState({ semesterId: context.semesterId, weekId: context.weekId })
   const [selectedFile, setSelectedFile] = useState<File>()
   const [fileError, setFileError] = useState('')
@@ -62,8 +63,9 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
     weekId: targetCalendar.weekId,
     inspectionTypeId: context.inspectionTypeId,
     departmentId: targetDepartmentId,
-  }), [context.inspectionTypeId, targetCalendar, targetDepartmentId])
-  const targetReady = Boolean(targetContext.semesterId && targetContext.weekId && targetContext.inspectionTypeId && targetContext.departmentId)
+    ...(isSuperAdmin ? { attributionMode: 'ADMINISTRATOR' as const } : {}),
+  }), [context.inspectionTypeId, targetCalendar, targetDepartmentId, isSuperAdmin])
+  const targetReady = Boolean(targetContext.semesterId && targetContext.weekId && targetContext.inspectionTypeId && (isSuperAdmin || targetContext.departmentId))
   const template = useImportTemplate(targetContext, open && !batchId && targetReady, typeCode)
   const batch = useImportBatch(batchId)
   const rows = useImportRows(batchId, page, pageSize, filter)
@@ -74,7 +76,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
     ? [...departments, { id: COLLEGE_DEPARTMENT_OPTION_ID, name: '校级' }] : departments
   const memberDepartmentUnavailable = memberDepartmentId !== undefined && !availableDepartments.some(item => item.id === memberDepartmentId)
   // A resumed batch owns its scope; current list filters may have changed.
-  const displayScope = activeBatch ? { ...activeBatch, departmentId: departmentOptionId(activeBatch.departmentId) } : targetContext
+  const displayScope = activeBatch ? { ...activeBatch, departmentId: activeBatch.attributionMode === 'ADMINISTRATOR' ? '' : departmentOptionId(activeBatch.departmentId) } : targetContext
   const destinationQuery = { purpose: batchId ? 'view' : 'entry', semesterId: displayScope.semesterId, weekId: displayScope.weekId, departmentId: displayScope.departmentId }
   const legacyClassQueryEnabled = open && Boolean(batchId && displayScope.semesterId && displayScope.weekId && displayScope.departmentId && displayScope.classId)
   const classes = useImportContext({ ...destinationQuery, kind: 'classes', grade: displayScope.grade }, legacyClassQueryEnabled, typeCode)
@@ -88,7 +90,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   const week = scopeOptions.weeks.find(item => item.id === displayScope.weekId && item.semesterId === displayScope.semesterId)
   const department = availableDepartments.find(item => item.id === displayScope.departmentId)
   const inspectionType = scopeOptions.inspectionType.id === displayScope.inspectionTypeId ? scopeOptions.inspectionType : undefined
-  const scopeResolved = Boolean(semester && week && department && inspectionType && legacyClassAvailable && !targetOptionsFailed && !targetOptionsLoading)
+  const scopeResolved = Boolean(semester && week && (displayScope.attributionMode === 'ADMINISTRATOR' || department) && inspectionType && legacyClassAvailable && !targetOptionsFailed && !targetOptionsLoading)
   const scopeLabels = { inspectionType: inspectionType?.name ?? '检查类型信息不可用', semester: semester?.name ?? '未找到对应学期', week: week ? week.name ?? `第 ${week.weekNo} 周` : '未找到对应周次' }
   const completedRows = activeBatch?.status === 'ROLLED_BACK' ? undefined : importedRows ?? (activeBatch?.status === 'CONFIRMED' ? activeBatch.importedRows : undefined)
 
@@ -152,7 +154,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
       okText: '保留原批次并重新上传',
       cancelText: '返回预览',
       onOk: () => {
-        setTargetDepartmentId(memberDepartmentId ?? (activeBatch ? departmentOptionId(activeBatch.departmentId) : context.departmentId || (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : '')))
+        setTargetDepartmentId(isSuperAdmin ? '' : memberDepartmentId ?? (activeBatch ? departmentOptionId(activeBatch.departmentId) : context.departmentId || (departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : '')))
         if (activeBatch) setTargetCalendar({ semesterId: activeBatch.semesterId, weekId: activeBatch.weekId })
         setSelectedFile(undefined)
         setFileError('')
@@ -207,15 +209,17 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
         <section className="import-scope-summary" aria-labelledby="import-scope-title">
           <div className="import-scope-heading">
             <Typography.Title id="import-scope-title" level={5}>本次导入范围</Typography.Title>
-            <Typography.Text type="secondary">选择记录归属部门；班级和年级由 Excel 内容解析并校验。</Typography.Text>
+              <Typography.Text type="secondary">{isSuperAdmin ? '本批次归属管理员独立记录；班级和年级由 Excel 内容解析并校验。' : '班级和年级由 Excel 内容解析并校验。'}</Typography.Text>
           </div>
           <div className="import-scope-grid">
             <div className="import-scope-item"><span>检查类型</span><strong>{scopeLabels.inspectionType}</strong></div>
             <div className="import-scope-item"><span>学期</span><strong>{scopeLabels.semester}</strong></div>
             <div className="import-scope-item"><span>周次</span><strong>{scopeLabels.week}</strong></div>
             <div className="import-scope-item import-scope-department">
-              <span>{memberDepartmentId !== undefined ? '导入归属部门' : '目标部门'}</span>
-              {batchId
+              <span>归属范围</span>
+              {displayScope.attributionMode === 'ADMINISTRATOR'
+                ? <strong>管理员独立记录</strong>
+                : batchId
                 ? <strong>{department?.name ?? '部门信息不可用'}</strong>
                 : <Select
                     aria-label="导入目标部门"

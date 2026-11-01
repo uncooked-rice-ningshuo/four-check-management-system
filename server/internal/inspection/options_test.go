@@ -19,12 +19,16 @@ func TestEntryOptionsRejectInvalidScopeBeforeRepository(t *testing.T) {
 		func(q *EntryOptionQuery) { q.Kind = "dormitories"; q.StudentID = detailID },
 		func(q *EntryOptionQuery) { q.StudentID = "invalid" },
 		func(q *EntryOptionQuery) { q.Kind = "dormitory-objects" },
-		func(q *EntryOptionQuery) { q.Kind = "reason-codes"; q.StudentID = detailID },
+		func(q *EntryOptionQuery) { q.Kind = "situation-snippets"; q.StudentID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "classroom-objects" },
 		func(q *EntryOptionQuery) { q.Kind = "classroom-areas"; q.ClassID = detailID },
-		func(q *EntryOptionQuery) { q.Kind = "responsible-dormitories"; q.ClassID = detailID },
-		func(q *EntryOptionQuery) { q.Kind = "public-areas"; q.AreaID = detailID },
-		func(q *EntryOptionQuery) { q.Kind = "reason-codes"; q.ClassID = detailID; q.AreaID = detailID },
+		func(q *EntryOptionQuery) {
+			q.Kind = "responsible-dormitories"
+			q.ClassID = detailID
+			q.StudentID = detailID
+		},
+		func(q *EntryOptionQuery) { q.Kind = "public-areas"; q.ClassID = detailID },
+		func(q *EntryOptionQuery) { q.Kind = "situation-snippets"; q.ClassID = detailID; q.CourseID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "courses"; q.PageSize = 51 },
 		func(q *EntryOptionQuery) { q.Kind = "classes"; q.Keyword = "课程" },
 		func(q *EntryOptionQuery) { q.Kind = "courses"; q.Keyword = string(make([]rune, 129)) },

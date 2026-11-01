@@ -27,7 +27,7 @@ it('rejects malformed or stalled pages instead of displaying a successful empty 
  await expect(courseInspectionApi.contextOptions({purpose:'view',kind:'semesters'})).rejects.toThrow()
 })
 it('accepts an omitted optional remark but rejects missing required details', async () => {
- const value={id:'record',typeCode:'UNATTENDED_CLASSROOM',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentCourseName:'课程',currentClassroomName:'教室',status:'DRAFT',source:'MANUAL',createdBy:'actor',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',courseId:'course',classroomId:'room',date:'2026-09-03',time:'08:00:00',period:'1-2',absenceHours:2}}
+ const value={id:'record',typeCode:'UNATTENDED_CLASSROOM',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',studentNumber:'001',studentName:'学生',className:'班级',grade:'2026',currentCourseName:'课程',currentClassroomName:'教室',status:'DRAFT',source:'MANUAL',createdBy:'actor',submitterName:'提交人',rowVersion:1,canEdit:true,details:{classId:'class',studentId:'student',courseId:'course',classroomId:'room',date:'2026-09-03',time:'08:00:00',period:'1-2',absenceHours:2}}
  request.mockResolvedValueOnce(value)
  expect((await courseInspectionApi.detail('record')).details.remark).toBe('')
  request.mockResolvedValueOnce({...value,details:{...value.details,studentId:undefined}})

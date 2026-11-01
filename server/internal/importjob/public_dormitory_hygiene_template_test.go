@@ -17,8 +17,8 @@ func TestPublicDormitoryHygieneTemplateContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	fields := []string{"area_name", "inspection_date", "inspection_time", "inspection_round", "result", "responsible_class_names", "responsible_student_nos", "responsible_dormitory_names", "reason_name", "description", "remark"}
-	values := []string{"示例区 示例楼 / 一楼 / 大厅", "2026-10-01", "", "首轮", "不合格", "示例班", "000001", "示例区 示例楼 101;示例区 示例楼 102", "地面", "对象检查", "备注"}
+	fields := []string{"responsible_dormitory_name", "inspection_date", "result", "responsible_class_names", "responsible_student_no", "description", "remark"}
+	values := []string{"示例区 示例楼 101", "2026-10-01", "不合格", "示例班", "000001", "卫生情况说明", "备注"}
 	for i, field := range fields {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
 		got, err := book.GetCellValue("公共宿舍卫生导入", cell)
@@ -36,7 +36,7 @@ func TestPublicDormitoryHygieneTemplateContract(t *testing.T) {
 	}
 	parser := NewPublicDormitoryHygieneXLSXParser(16 << 20)
 	rows, err := parser.Parse("public-area.xlsx", filled.Bytes())
-	if err != nil || len(rows.Rows) != 1 || rows.Rows[0].Values["responsible_student_nos"] != "000001" || rows.Rows[0].Values["responsible_dormitory_names"] != "示例区 示例楼 101;示例区 示例楼 102" {
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0].Values["responsible_student_no"] != "000001" || rows.Rows[0].Values["responsible_dormitory_name"] != "示例区 示例楼 101" {
 		t.Fatal(rows, err)
 	}
 	dorm, err := NewInspectionXLSXParser(inspection.InspectionTypeDormitoryHygiene, 16<<20)
@@ -52,8 +52,8 @@ func TestPublicDormitoryHygieneTemplateContract(t *testing.T) {
 	}
 }
 
-func TestPublicDormitoryHygieneImportRemainsUnregisteredPendingScopeDecision(t *testing.T) {
-	if _, err := InspectionTemplate(inspection.InspectionTypePublicDormitoryHygiene); err == nil {
-		t.Fatal("unapproved import scope enabled")
+func TestPublicDormitoryHygieneImportIsRegistered(t *testing.T) {
+	if _, err := InspectionTemplate(inspection.InspectionTypePublicDormitoryHygiene); err != nil {
+		t.Fatal("approved import scope unavailable", err)
 	}
 }

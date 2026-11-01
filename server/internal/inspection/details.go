@@ -3,6 +3,9 @@ package inspection
 import "time"
 
 const (
+	AttributionModeDepartment            = "DEPARTMENT"
+	AttributionModeCollege               = "COLLEGE"
+	AttributionModeAdministrator         = "ADMINISTRATOR"
 	InspectionTypeUnattended             = "UNATTENDED_CLASSROOM"
 	InspectionTypeMorning                = "MORNING_ATTENDANCE"
 	InspectionTypeLateReturn             = "LATE_RETURN"
@@ -28,7 +31,7 @@ type CourseAbsenceDetails struct {
 	CourseID          string   `json:"courseId"`
 	ClassroomID       string   `json:"classroomId"`
 	Date              string   `json:"date"`
-	Time              string   `json:"time"`
+	Time              string   `json:"time,omitempty"`
 	Period            string   `json:"period"`
 	AbsenceHours      float64  `json:"absenceHours"`
 	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
@@ -52,7 +55,7 @@ type EveningSelfStudyDetails struct {
 	ClassID           string   `json:"classId"`
 	ClassroomID       string   `json:"classroomId"`
 	Date              string   `json:"date"`
-	Time              string   `json:"time"`
+	Time              string   `json:"time,omitempty"`
 	Period            string   `json:"period"`
 	AbsenceHours      float64  `json:"-"`
 	PenaltyMultiplier *int     `json:"penaltyMultiplier,omitempty"`
@@ -80,7 +83,7 @@ type LateReturnDetails struct {
 	ClassID     string `json:"classId"`
 	DormitoryID string `json:"dormitoryId"`
 	Date        string `json:"date"`
-	Time        string `json:"time"`
+	Time        string `json:"time,omitempty"`
 	Remark      string `json:"remark,omitempty"`
 }
 
@@ -99,7 +102,7 @@ type HygieneDetails struct {
 	Remark                string   `json:"remark,omitempty"`
 }
 
-// DormitoryHygieneDetails identifies a room independently of its responsible students.
+// DormitoryHygieneDetails identifies the inspected room; responsibility remains a separate snapshot.
 type DormitoryHygieneDetails struct {
 	HygieneDetails
 	DormitoryID string `json:"dormitoryId"`
@@ -107,19 +110,19 @@ type DormitoryHygieneDetails struct {
 
 func (*DormitoryHygieneDetails) inspectionDetails() {}
 
-// ClassroomHygieneDetails identifies a classroom and one of its configured areas.
+// ClassroomHygieneDetails reads legacy area IDs only to preserve old history.
 type ClassroomHygieneDetails struct {
 	HygieneDetails
 	ClassroomID string `json:"classroomId"`
-	AreaID      string `json:"areaId"`
+	AreaID      string `json:"areaId,omitempty"`
 }
 
 func (*ClassroomHygieneDetails) inspectionDetails() {}
 
-// PublicDormitoryHygieneDetails identifies a public area, not a responsible room.
+// PublicDormitoryHygieneDetails reads legacy areas while new records use a responsibility dormitory.
 type PublicDormitoryHygieneDetails struct {
 	HygieneDetails
-	AreaID                  string   `json:"areaId"`
+	AreaID                  string   `json:"areaId,omitempty"`
 	ResponsibleDormitoryIDs []string `json:"responsibleDormitoryIds,omitempty"`
 }
 

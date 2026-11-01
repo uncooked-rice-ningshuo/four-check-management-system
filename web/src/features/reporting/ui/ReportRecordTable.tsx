@@ -85,10 +85,9 @@ function hygieneObjectFields(record: ReportingRecord): ReportRecordDisplayField[
       break
     case 'CLASSROOM_HYGIENE':
       fields.push(requiredField('classroom', '教室', record.currentClassroomName))
-      fields.push(requiredField('area', '负责区域', record.currentAreaName))
       break
     case 'PUBLIC_DORMITORY_HYGIENE':
-      fields.push(requiredField('area', '公共区域', record.currentAreaName))
+      fields.push(requiredField('responsibleDormitory', '责任寝室', referenceValue(record.responsibleDormitories)))
       break
   }
   return fields.filter((item): item is ReportRecordDisplayField => Boolean(item))
@@ -337,12 +336,18 @@ function hygieneColumns(recordTypeCode: string): ColumnsType<ReportingRecord> {
   }
   if (recordTypeCode === 'CLASSROOM_HYGIENE') {
     return [group('检查对象', [
-      { title: '教室与区域', key: 'classroomArea', width: 250, render: (_value, record) => groupedTableValue(hygieneObjectFields(record)) },
+      { title: '教室', key: 'classroom', width: 220, render: (_value, record) => groupedTableValue(hygieneObjectFields(record)) },
       responsibility,
     ]), time, result, note]
   }
   return [group('检查对象', [
-    { title: '公共区域', dataIndex: 'currentAreaName', width: 230, render: value => tableValue(text(value) || emptyValue) },
+    { title: '责任寝室', key: 'responsibleDormitories', width: 230, render: (_value, record) => {
+      const dormitoryFields = [
+        requiredField('responsibleDormitories', '责任寝室', referenceValue(record.responsibleDormitories)),
+        field('legacyArea', '历史检查区域', record.currentAreaName),
+      ].filter((item): item is ReportRecordDisplayField => Boolean(item))
+      return groupedTableValue(dormitoryFields)
+    } },
     responsibility,
   ]), time, result, note]
 }

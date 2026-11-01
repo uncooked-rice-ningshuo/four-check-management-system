@@ -23,7 +23,7 @@ type Props = {
   onOpenRecord?: (id: string, status: string) => void
 }
 
-const typeLabels: Record<string, string> = { ATTENDANCE_RATE: '到课率', UNATTENDED_CLASSROOM: '无机课堂', MORNING_ATTENDANCE: '早锻炼/早签', LATE_RETURN: '晚归', DORMITORY_HYGIENE: '宿舍卫生', EVENING_SELF_STUDY: '晚自习' }
+const typeLabels: Record<string, string> = { ATTENDANCE_RATE: '到课率', UNATTENDED_CLASSROOM: '无机课堂', MORNING_ATTENDANCE: '早锻炼/早签', LATE_RETURN: '晚归', DORMITORY_HYGIENE: '宿舍卫生', CLASSROOM_HYGIENE: '教室卫生', PUBLIC_DORMITORY_HYGIENE: '公共宿舍卫生', EVENING_SELF_STUDY: '晚自习' }
 
 const labels: Record<DepartmentSubmission['status'], string> = {
   PENDING_REVIEW: '待部门审核', RETURNED: '已退回', CONFIRMED: '部门已确认',
@@ -44,7 +44,7 @@ function explicitReceiptScope(listScope: Props['listScope'], inspectionTypeId: s
   return { semesterId, weekId, departmentId: departmentId === COLLEGE_DEPARTMENT_OPTION_ID ? '' : departmentId, inspectionTypeId }
 }
 
-/** Batch actions are shared by the five active inspection pages. The API enforces every scope and transition. */
+/** Batch actions are shared by all inspection pages. The API enforces every scope and transition. */
 export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listScope, canReview, onChanged, onOpenRecord }: Props) {
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(1)
@@ -129,7 +129,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       queryClient.invalidateQueries({ queryKey: ['reports', 'summary'] }), queryClient.invalidateQueries({ queryKey: ['reports', 'records'] }),
       queryClient.invalidateQueries({ queryKey: ['dashboard'] }), queryClient.invalidateQueries({ queryKey: ['morning-attendances'] }),
       queryClient.invalidateQueries({ queryKey: ['course-inspections'] }), queryClient.invalidateQueries({ queryKey: ['late-returns'] }),
-      queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
+      queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['classroom-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['public-dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     onChanged()
     void notice.success(variables.kind === 'submit' ? `已提交${variables.submissionKind === 'RECORDS' ? ` ${variables.records.length} 条记录` : '零记录回执'}，等待审核` : `批次状态：${submissionStatusLabel(result.status, result.scope.departmentId)}`)
   }, onError: error => {
@@ -138,6 +138,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       queryClient.invalidateQueries({ queryKey: ['reports', 'summary'] }), queryClient.invalidateQueries({ queryKey: ['reports', 'records'] }),
       queryClient.invalidateQueries({ queryKey: ['morning-attendances'] }), queryClient.invalidateQueries({ queryKey: ['course-inspections'] }),
       queryClient.invalidateQueries({ queryKey: ['late-returns'] }), queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }),
+      queryClient.invalidateQueries({ queryKey: ['classroom-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['public-dormitory-hygienes'] }),
       queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     void notice.error(error instanceof ApiError ? error.message : '操作失败，请刷新记录或批次后重试')
   } })

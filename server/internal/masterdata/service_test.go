@@ -52,10 +52,6 @@ func (m *memoryRepository) UpdateMasterData(_ context.Context, actorID string, r
 func (m *memoryRepository) ListMasterDataChanges(context.Context, string, string) ([]Change, error) {
 	return m.changes, nil
 }
-func (m *memoryRepository) HygieneAreaInspectionScope(context.Context, string, string) (string, error) {
-	return "30000000-0000-0000-0000-000000000003", nil
-}
-
 func TestCreateValidatesEntitySpecificRequiredFields(t *testing.T) {
 	svc := NewService(newMemoryRepository())
 	if _, err := svc.Create(context.Background(), "admin", Record{Kind: KindClass, Name: "计科 2501"}); !errors.Is(err, ErrInvalidRecord) {
@@ -63,6 +59,18 @@ func TestCreateValidatesEntitySpecificRequiredFields(t *testing.T) {
 	}
 	if _, err := svc.Create(context.Background(), "admin", Record{Kind: "UNKNOWN", Code: "X", Name: "未知"}); !errors.Is(err, ErrInvalidKind) {
 		t.Fatalf("unknown kind error = %v", err)
+	}
+}
+
+func TestHygieneAreaMaintenanceKindsAreRetired(t *testing.T) {
+	svc := NewService(newMemoryRepository())
+	for _, kind := range []string{KindClassroomHygieneArea, KindPublicDormitoryHygieneArea} {
+		if _, err := svc.List(context.Background(), Query{Kind: kind}); !errors.Is(err, ErrInvalidKind) {
+			t.Errorf("list retired %s: %v", kind, err)
+		}
+		if _, err := svc.Create(context.Background(), "admin", Record{Kind: kind, Name: "retired"}); !errors.Is(err, ErrInvalidKind) {
+			t.Errorf("create retired %s: %v", kind, err)
+		}
 	}
 }
 

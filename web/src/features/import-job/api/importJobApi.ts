@@ -4,6 +4,7 @@ import { ApiError, apiDownload, apiRequest } from '../../../shared/api/httpClien
 import { attendanceQuery } from '../../attendance/api/attendanceApi'
 
 import { parseImportBatch } from '../../../shared/api/parseImportBatch'
+import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../../entities/inspection/model/inspectionScope'
 
 export const importJobApi = {
   async template(context: InspectionContext, withExample = false) {
@@ -39,5 +40,6 @@ function importScope(context: InspectionContext) {
     weekId: context.weekId,
     inspectionTypeId: context.inspectionTypeId,
     departmentId: context.departmentId,
+    attributionMode: context.attributionMode ?? (context.departmentId && context.departmentId !== COLLEGE_DEPARTMENT_OPTION_ID ? 'DEPARTMENT' : 'COLLEGE'),
   }
 }

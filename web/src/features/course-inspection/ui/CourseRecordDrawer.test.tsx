@@ -11,7 +11,7 @@ vi.mock('../model/queries',()=>({
  useCourseMutation:()=>({mutateAsync:mutate,isPending:false}),
 }))
 vi.mock('../../../entities/inspection/ui/CourseSelect', () => ({ CourseSelect: (props: { value?: string; onChange?: (value?: string) => void }) => <input aria-label="课程" value={props.value ?? ''} onChange={event => props.onChange?.(event.target.value)} /> }))
-const record:CourseRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'UNATTENDED_CLASSROOM',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',currentCourseName:'课程甲',currentClassroomName:'教室甲',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',canEdit:true,details:{classId:'class',studentId:'student',courseId:'course',classroomId:'room',date:'2026-09-03',time:'08:00',period:'1-2',absenceHours:2,remark:'原备注'}}
+const record:CourseRecord={id:'one',semesterId:'semester',weekId:'week',inspectionTypeId:'type',departmentId:'department',typeCode:'UNATTENDED_CLASSROOM',studentNumber:'001',studentName:'学生甲',className:'班级甲',grade:'2026',currentCourseName:'课程甲',currentClassroomName:'教室甲',status:'DRAFT',source:'MANUAL',rowVersion:2,createdBy:'actor',submitterName:'提交人',canEdit:true,details:{classId:'class',studentId:'student',courseId:'course',classroomId:'room',date:'2026-09-03',time:'08:00',period:'1-2',absenceHours:2,remark:'原备注'}}
 async function selectPeriod(label:string, period:number) {
  fireEvent.mouseDown(screen.getByRole('combobox',{name:label}))
  const options = screen.getAllByText(`第 ${period} 节`,{selector:'.ant-select-item-option-content'})

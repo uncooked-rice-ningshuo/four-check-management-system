@@ -100,6 +100,14 @@ func (s *MutationService) Update(ctx context.Context, actor ManualActor, id stri
 		}
 		input.Record.DepartmentID = departmentID
 	}
+	if input.Record.AttributionMode != "" && input.Record.AttributionMode != original.AttributionMode {
+		return AttendanceRecord{}, ErrScopeMismatch
+	}
+	if input.Record.DepartmentID != "" && input.Record.DepartmentID != original.DepartmentID {
+		return AttendanceRecord{}, ErrScopeMismatch
+	}
+	input.Record.DepartmentID = original.DepartmentID
+	input.Record.AttributionMode = original.AttributionMode
 	input.Record.ExcludeRecordID = original.ID
 	updated, err := s.manual.prepare(ctx, actor, input.Record, original.CreatedBy)
 	if err != nil {
@@ -108,7 +116,7 @@ func (s *MutationService) Update(ctx context.Context, actor ManualActor, id stri
 	if original.Status == RecordStatusReturned && (updated.SemesterID != original.SemesterID || updated.WeekID != original.WeekID || updated.DepartmentID != original.DepartmentID || updated.InspectionTypeID != original.InspectionTypeID) {
 		return AttendanceRecord{}, ErrRecordNotEditable
 	}
-	updated.ID, updated.CreatedBy, updated.Source, updated.ImportBatchID = original.ID, original.CreatedBy, original.Source, original.ImportBatchID
+	updated.ID, updated.CreatedBy, updated.Source, updated.ImportBatchID, updated.AttributionMode = original.ID, original.CreatedBy, original.Source, original.ImportBatchID, original.AttributionMode
 	updated.Status, updated.RowVersion, updated.CreatedAt = original.Status, original.RowVersion+1, original.CreatedAt
 	metadata.ActorID, metadata.Reason = actor.ID, strings.TrimSpace(input.Reason)
 	m := audit.Mutation{Metadata: metadata, Entry: audit.Entry{Action: audit.ActionInspectionRecordUpdated, ResourceType: "inspectionRecord", ResourceID: id, Before: MutationAuditSnapshot(original), After: MutationAuditSnapshot(updated)}}

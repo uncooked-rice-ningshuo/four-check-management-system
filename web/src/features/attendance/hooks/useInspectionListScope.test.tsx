@@ -36,3 +36,10 @@ it('rejects a stale URL choice instead of widening the list query', () => {
   const { result } = renderHook(() => useInspectionListScope(semesters), { wrapper })
   expect(result.current.resolve(weeks).invalidSelection).toBe(true)
 })
+
+it('preserves grade and student keyword filters in the authorized list scope', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => <MemoryRouter>{children}</MemoryRouter>
+  const { result } = renderHook(() => useInspectionListScope(semesters), { wrapper })
+  act(() => result.current.update({ semesterId: 'semester-current', weekId: 'week-current', grade: '2026', keyword: 'S001', page: 1, pageSize: 20 }))
+  expect(result.current.resolve(weeks).filters).toMatchObject({ grade: '2026', keyword: 'S001' })
+})

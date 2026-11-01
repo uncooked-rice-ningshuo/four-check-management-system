@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -65,9 +66,9 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := `UPDATE students SET dormitory_id='a0000000-0000-0000-0000-000000000012';
+	 INSERT INTO students(id,student_no,name,grade_id,class_id,dormitory_id) VALUES('a0000000-0000-0000-0000-000000000023','S-FIXTURE-2','Other student','a0000000-0000-0000-0000-000000000005','a0000000-0000-0000-0000-000000000016','a0000000-0000-0000-0000-000000000012');
+	 INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password) VALUES('a0000000-0000-0000-0000-000000000024','inspection-member','Synthetic member','not-a-login-hash','ACTIVE','SYSTEM','MEMBER',false,false);
 	 UPDATE semester_weeks SET attendance_penalty_multiplier=1 WHERE id='a0000000-0000-0000-0000-000000000004';
-	 INSERT INTO classroom_hygiene_areas(id,classroom_id,name) VALUES('a0000000-0000-0000-0000-000000000020','a0000000-0000-0000-0000-000000000009','Floor');
- INSERT INTO public_dormitory_hygiene_areas(id,dormitory_building_id,floor_unit,name) VALUES('a0000000-0000-0000-0000-000000000021','a0000000-0000-0000-0000-000000000011','1','Corridor');
  INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_review) SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true FROM inspection_types ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true;`
 	if _, err = pool.Exec(ctx, sql); err != nil {
 		t.Fatal(err)
@@ -76,6 +77,8 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	svc := inspection.NewRecordService(db, perms)
 	admin := inspection.ManualActor{ID: rf("01"), IsSuperAdmin: true}
 	member := inspection.ManualActor{ID: rf("01")}
+	departmentActor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
+	departmentSvc := inspection.NewRecordService(db, &recordPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}}}})
 	types := map[string]string{}
 	rows, err := pool.Query(ctx, "SELECT code,id FROM inspection_types")
 	if err != nil {
@@ -104,7 +107,6 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
 			fields["classroomId"] = rf("09")
-			fields["time"] = "20:15"
 		case inspection.InspectionTypeMorning:
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
@@ -112,9 +114,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
 			fields["dormitoryId"] = rf("12")
-			fields["time"] = "23:00"
 		default:
-			fields["round"] = "first"
 			fields["result"] = "QUALIFIED"
 			fields["responsibleClassIds"] = []string{rf("06")}
 			fields["responsibleStudentIds"] = []string{rf("07")}
@@ -122,9 +122,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				fields["dormitoryId"] = rf("12")
 			} else if code == inspection.InspectionTypeClassroomHygiene {
 				fields["classroomId"] = rf("09")
-				fields["areaId"] = rf("20")
 			} else {
-				fields["areaId"] = rf("21")
 				fields["responsibleDormitoryIds"] = []string{rf("12")}
 			}
 		}
@@ -185,7 +183,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || err2 != nil || first.Total != 2 || second.Total != 2 || len(first.Items) != 1 || len(second.Items) != 1 || first.Items[0].ID == second.Items[0].ID {
 			t.Fatal("context pagination", err, err2)
 		}
-		record, err := svc.Create(ctx, admin, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -318,7 +316,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if e != nil || page.Total != 0 {
 			t.Fatal("manage enabled creation", e)
 		}
-		record, e := svc.Create(ctx, admin, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, e := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -383,7 +381,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || page.Total != 0 {
 			t.Fatal("morning manage enabled creation", page, err)
 		}
-		record, err := svc.Create(ctx, admin, makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-04"}), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-04"}), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -412,7 +410,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != rf("12") || page.Items[0].Label == "" {
 			t.Fatal("hygiene room option", page, err)
 		}
-		q.Kind = "reason-codes"
+		q.Kind = "situation-snippets"
 		page, err = options.EntryOptions(ctx, member, q)
 		if err != nil || page.Total != 6 || page.Items[0].ID != "FLOOR" || page.Items[0].Label != "地面不洁" {
 			t.Fatal("configured reason", page, err)
@@ -454,11 +452,11 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || page.Total != 0 {
 			t.Fatal("manage enabled hygiene creation", page, err)
 		}
-		record, err := svc.Create(ctx, admin, makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"round": "options-hygiene", "result": "UNQUALIFIED", "reasonCode": "FLOOR"}), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"result": "UNQUALIFIED", "description": "地面有灰尘"}), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if record.CurrentDormitoryName == "" || record.CurrentReasonLabel != "地面不洁" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
+		if record.CurrentDormitoryName == "" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
 			t.Fatal("hygiene display labels", record)
 		}
 		if record.ResponsibleClasses[0].ID != rf("06") || record.ResponsibleStudents[0].ID != rf("07") || record.ResponsibleClasses[0].Label == "" || record.ResponsibleStudents[0].Label == "" {
@@ -483,7 +481,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("area hygiene scoped options", func(t *testing.T) {
+	t.Run("hygiene scoped options without area or reason-code selectors", func(t *testing.T) {
 		defer func() { perms.rules = nil }()
 		options := inspection.NewEntryOptionService(db, perms)
 		contexts := inspection.NewContextOptionService(db, perms)
@@ -492,20 +490,12 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			code, kind, want string
 		}{
 			{inspection.InspectionTypeClassroomHygiene, "classroom-objects", rf("09")},
-			{inspection.InspectionTypeClassroomHygiene, "classroom-areas", rf("20")},
-			{inspection.InspectionTypeClassroomHygiene, "reason-codes", "FLOOR"},
-			{inspection.InspectionTypePublicDormitoryHygiene, "public-areas", rf("21")},
+			{inspection.InspectionTypeClassroomHygiene, "situation-snippets", "FLOOR"},
 			{inspection.InspectionTypePublicDormitoryHygiene, "responsible-dormitories", rf("12")},
-			{inspection.InspectionTypePublicDormitoryHygiene, "reason-codes", "FLOOR"},
+			{inspection.InspectionTypePublicDormitoryHygiene, "situation-snippets", "FLOOR"},
 		} {
 			q := base
-			q.InspectionTypeID, q.Kind, q.ClassroomID, q.AreaID = types[scenario.code], scenario.kind, rf("09"), rf("21")
-			if scenario.kind != "classroom-areas" {
-				q.ClassroomID = ""
-			}
-			if scenario.kind != "responsible-dormitories" {
-				q.AreaID = ""
-			}
+			q.InspectionTypeID, q.Kind = types[scenario.code], scenario.kind
 			allow := permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: q.InspectionTypeID, ClassID: q.ClassID}}
 			perms.rules = []permission.EffectivePermission{allow}
 			page, err := options.EntryOptions(ctx, member, q)
@@ -516,26 +506,26 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				}
 			}
 			if err != nil || !found || page.Total < 1 {
-				t.Fatal("area hygiene option", scenario, page, err)
+				t.Fatal("hygiene option", scenario, page, err)
 			}
 			contextPage, err := contexts.ContextOptions(ctx, member, inspection.ContextOptionQuery{TypeCode: scenario.code, Purpose: "entry", Kind: "classes", SemesterID: q.SemesterID, WeekID: q.WeekID, DepartmentID: q.DepartmentID})
 			if err != nil || contextPage.Total != 1 || contextPage.Items[0].ID != q.ClassID {
-				t.Fatal("area hygiene context", scenario, contextPage, err)
+				t.Fatal("hygiene context", scenario, contextPage, err)
 			}
 			perms.rules = append(perms.rules, permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Scope: permission.Scope{ClassID: q.ClassID}})
 			page, err = options.EntryOptions(ctx, member, q)
 			if err != nil || page.Total != 0 {
-				t.Fatal("DENY leaked area hygiene option", scenario, page, err)
+				t.Fatal("DENY leaked hygiene option", scenario, page, err)
 			}
 			perms.rules = nil
 		}
 		for _, code := range []string{inspection.InspectionTypeClassroomHygiene, inspection.InspectionTypePublicDormitoryHygiene} {
-			record, err := svc.Create(ctx, admin, makeInput(code, map[string]any{"round": "area-labels-" + code, "result": "UNQUALIFIED", "reasonCode": "FLOOR"}), audit.Metadata{})
+			record, err := departmentSvc.Create(ctx, departmentActor, makeInput(code, map[string]any{"result": "UNQUALIFIED", "description": "地面有灰尘"}), audit.Metadata{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if record.CurrentAreaName == "" || record.CurrentReasonLabel != "地面不洁" || len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 {
-				t.Fatal("area display labels", code, record)
+			if len(record.ResponsibleClasses) != 1 || len(record.ResponsibleStudents) != 1 || record.Details == nil {
+				t.Fatal("hygiene display labels", code, record)
 			}
 			if code == inspection.InspectionTypePublicDormitoryHygiene && (len(record.ResponsibleDormitories) != 1 || record.ResponsibleDormitories[0].ID != rf("12") || record.ResponsibleDormitories[0].Label == "") {
 				t.Fatal("responsible room labels", record)
@@ -545,19 +535,15 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 		}
 		q := base
-		q.InspectionTypeID, q.Kind = types[inspection.InspectionTypePublicDormitoryHygiene], "classroom-areas"
-		q.ClassroomID = rf("09")
-		if _, err := options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
-			t.Fatal("cross-type area option accepted", err)
-		}
-		q.InspectionTypeID, q.Kind, q.ClassroomID = types[inspection.InspectionTypeAttendance], "reason-codes", ""
-		if _, err := options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
-			t.Fatal("attendance reason option accepted", err)
-		}
-		q.InspectionTypeID, q.Kind, q.ClassroomID, q.AreaID = types[inspection.InspectionTypeClassroomHygiene], "classroom-areas", rf("19"), ""
-		page, err := options.EntryOptions(ctx, admin, q)
-		if err != nil || page.Total != 0 {
-			t.Fatal("unrelated classroom area", page, err)
+		for _, retired := range []struct{ code, kind string }{
+			{inspection.InspectionTypeClassroomHygiene, "classroom-areas"},
+			{inspection.InspectionTypePublicDormitoryHygiene, "public-areas"},
+			{inspection.InspectionTypeClassroomHygiene, "reason-codes"},
+		} {
+			q.InspectionTypeID, q.Kind = types[retired.code], retired.kind
+			if _, err := options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
+				t.Fatal("retired hygiene option accepted", retired, err)
+			}
 		}
 	})
 	t.Run("late return scoped options", func(t *testing.T) {
@@ -615,7 +601,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-08"}),
 		makeInput(inspection.InspectionTypeAttendance, map[string]any{"period": "3-4", "absenceHours": 1}),
 	} {
-		if _, e := svc.Create(ctx, admin, invalid, audit.Metadata{}); e == nil {
+		if _, e := departmentSvc.Create(ctx, departmentActor, invalid, audit.Metadata{}); e == nil {
 			t.Fatal("invalid attendance details accepted")
 		} else {
 			if _, ok := e.(*inspection.DetailsValidationError); !ok {
@@ -626,11 +612,11 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	for _, invalid := range []inspection.InspectionInput{
 		makeInput(inspection.InspectionTypeMorning, map[string]any{"studentId": rf("16")}),
 		makeInput(inspection.InspectionTypeMorning, map[string]any{"classId": rf("16")}),
-		makeInput(inspection.InspectionTypeClassroomHygiene, map[string]any{"classroomId": rf("19")}),
-		makeInput(inspection.InspectionTypePublicDormitoryHygiene, map[string]any{"areaId": rf("20")}),
-		makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"result": "UNQUALIFIED", "reasonCode": "UNKNOWN"}),
+		makeInput(inspection.InspectionTypeClassroomHygiene, map[string]any{"classroomId": rf("20")}),
+		makeInput(inspection.InspectionTypePublicDormitoryHygiene, map[string]any{"responsibleDormitoryIds": []string{rf("20")}}),
+		makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"dormitoryId": rf("20")}),
 	} {
-		if _, e := svc.Create(ctx, admin, invalid, audit.Metadata{}); !errors.Is(e, inspection.ErrInvalidAttendanceRecord) {
+		if _, e := departmentSvc.Create(ctx, departmentActor, invalid, audit.Metadata{}); !errors.Is(e, inspection.ErrInvalidAttendanceRecord) {
 			t.Fatal("invalid reference accepted", e)
 		}
 	}
@@ -646,7 +632,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE semester_weeks SET attendance_penalty_multiplier=2 WHERE id=$1`, rf("04")); err != nil {
 			t.Fatal(err)
 		}
-		record, err := svc.Create(ctx, admin, makeInput(inspection.InspectionTypeAttendance, nil), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeAttendance, nil), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -696,11 +682,11 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	for _, def := range catalog {
 		t.Run(def.Code, func(t *testing.T) {
 			input := makeInput(def.Code, nil)
-			r, e := svc.Create(ctx, admin, input, audit.Metadata{})
+			r, e := departmentSvc.Create(ctx, departmentActor, input, audit.Metadata{})
 			if e != nil {
 				t.Fatal("create", e)
 			}
-			if _, e = svc.Create(ctx, admin, input, audit.Metadata{}); !errors.Is(e, inspection.ErrAttendanceDuplicate) {
+			if _, e = departmentSvc.Create(ctx, departmentActor, input, audit.Metadata{}); !errors.Is(e, inspection.ErrAttendanceDuplicate) {
 				t.Fatal("duplicate", e)
 			}
 			read, e := svc.Detail(ctx, admin, r.ID)
@@ -715,10 +701,10 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				if read.CurrentCourseName != "" {
 					t.Fatalf("evening self-study unexpectedly has a course: %#v", read)
 				}
-				if _, err := svc.Create(ctx, admin, makeInput(def.Code, map[string]any{"period": "8-9"}), audit.Metadata{}); err == nil {
+				if _, err := departmentSvc.Create(ctx, departmentActor, makeInput(def.Code, map[string]any{"period": "8-9"}), audit.Metadata{}); err == nil {
 					t.Fatal("client supplied fixed evening period")
 				}
-				if _, err := svc.Create(ctx, admin, makeInput(def.Code, map[string]any{"penaltyCount": 99}), audit.Metadata{}); err == nil {
+				if _, err := departmentSvc.Create(ctx, departmentActor, makeInput(def.Code, map[string]any{"penaltyCount": 99}), audit.Metadata{}); err == nil {
 					t.Fatal("client supplied server-owned evening count")
 				}
 			}
@@ -857,7 +843,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			if _, e = svc.Detail(ctx, admin, r.ID); !errors.Is(e, inspection.ErrRecordNotFound) {
 				t.Fatal("deleted visible", e)
 			}
-			if _, e = svc.Create(ctx, admin, input, audit.Metadata{}); e != nil {
+			if _, e = departmentSvc.Create(ctx, departmentActor, input, audit.Metadata{}); e != nil {
 				t.Fatal("recreate", e)
 			}
 			var auditText string
@@ -869,17 +855,72 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 		})
 	}
+	t.Run("hygiene cannot be re-inspected by assigning another student", func(t *testing.T) {
+		for _, scenario := range []struct {
+			code     string
+			location map[string]any
+		}{
+			{inspection.InspectionTypeDormitoryHygiene, map[string]any{"dormitoryId": rf("12")}},
+			{inspection.InspectionTypeClassroomHygiene, map[string]any{"classroomId": rf("09")}},
+			{inspection.InspectionTypePublicDormitoryHygiene, map[string]any{"responsibleDormitoryIds": []string{rf("12")}}},
+		} {
+			firstExtra := map[string]any{"date": "2026-09-05"}
+			for key, value := range scenario.location {
+				firstExtra[key] = value
+			}
+			first, err := departmentSvc.Create(ctx, departmentActor, makeInput(scenario.code, firstExtra), audit.Metadata{})
+			if err != nil {
+				t.Fatal("first inspection", scenario.code, err)
+			}
+			secondExtra := map[string]any{"date": "2026-09-05", "responsibleClassIds": []string{rf("16")}, "responsibleStudentIds": []string{rf("23")}}
+			for key, value := range scenario.location {
+				secondExtra[key] = value
+			}
+			if _, err = departmentSvc.Create(ctx, departmentActor, makeInput(scenario.code, secondExtra), audit.Metadata{}); !errors.Is(err, inspection.ErrAttendanceDuplicate) {
+				t.Fatalf("same object/date accepted with another responsible student (%s): %v", scenario.code, err)
+			}
+			if err = svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: first.ID, Version: first.RowVersion}}, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
+				t.Fatal("cleanup", err)
+			}
+		}
+	})
+	t.Run("administrator records stay outside department workflows", func(t *testing.T) {
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-06", "time": "09:45", "remark": "admin independent"})
+		input.DepartmentID = ""
+		adminRecord, err := svc.Create(ctx, admin, input, audit.Metadata{})
+		if err != nil || adminRecord.AttributionMode != inspection.AttributionModeAdministrator || adminRecord.DepartmentID != "" {
+			t.Fatalf("administrator attribution: %+v %v", adminRecord, err)
+		}
+		memberActor := inspection.ManualActor{ID: rf("24"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
+		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}, {Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}}
+		if _, err = svc.Detail(ctx, memberActor, adminRecord.ID); !errors.Is(err, inspection.ErrRecordNotFound) {
+			t.Fatal("department member read administrator record", err)
+		}
+		page, err := svc.List(ctx, memberActor, inspection.InspectionFilter{InspectionTypeID: adminRecord.InspectionTypeID, SubmissionCandidatesOnly: true})
+		if err != nil {
+			t.Fatal("department submission candidates", err)
+		}
+		for _, record := range page.Items {
+			if record.ID == adminRecord.ID {
+				t.Fatal("administrator record entered department submission candidates")
+			}
+		}
+		if err = svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: adminRecord.ID, Version: adminRecord.RowVersion}}, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
+			t.Fatal("cleanup administrator record", err)
+		}
+		perms.rules = nil
+	})
 	allow := func(action, class string) permission.EffectivePermission {
 		return permission.EffectivePermission{Action: action, Effect: permission.EffectAllow, Scope: permission.Scope{ClassID: class}}
 	}
-	hygiene := makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"round": "cross", "responsibleClassIds": []string{rf("06"), rf("16")}})
-	cross, err := svc.Create(ctx, admin, hygiene, audit.Metadata{})
+	hygiene := makeInput(inspection.InspectionTypeDormitoryHygiene, map[string]any{"date": "2026-09-06", "responsibleClassIds": []string{rf("16")}, "responsibleStudentIds": []string{rf("23")}})
+	cross, err := departmentSvc.Create(ctx, departmentActor, hygiene, audit.Metadata{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	perms.rules = []permission.EffectivePermission{allow(permission.ActionInspectionView, rf("06")), allow(permission.ActionInspectionEnter, rf("06"))}
 	if _, err = svc.Detail(ctx, member, cross.ID); !errors.Is(err, inspection.ErrRecordNotFound) {
-		t.Fatal("partial read", err)
+		t.Fatal("unrelated responsibility read", err)
 	}
 	page, err := svc.List(ctx, member, inspection.InspectionFilter{InspectionTypeID: types[inspection.InspectionTypeDormitoryHygiene]})
 	if err != nil {
@@ -887,11 +928,14 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	}
 	for _, r := range page.Items {
 		if r.ID == cross.ID {
-			t.Fatal("partial list leaked")
+			t.Fatal("unrelated responsibility list leaked")
 		}
 	}
 	if _, err = svc.Update(ctx, member, cross.ID, inspection.InspectionEdit{Version: 1, Reason: "核对", Record: hygiene}, audit.Metadata{}); !errors.Is(err, inspection.ErrRecordNotFound) {
-		t.Fatal("partial edit", err)
+		t.Fatal("unrelated responsibility edit", err)
+	}
+	if err = svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: cross.ID, Version: cross.RowVersion}}, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
+		t.Fatal("cleanup cross-scope fixture", err)
 	}
 	ownInput := makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-04"})
 	own, err := svc.Create(ctx, member, ownInput, audit.Metadata{})
@@ -968,7 +1012,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	if _, err = pool.Exec(ctx, `CREATE FUNCTION fail_record_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture audit failure'; END $$; CREATE TRIGGER fail_record_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_record_audit();`); err != nil {
 		t.Fatal(err)
 	}
-	failedInput := makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-05"})
+	failedInput := makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-04", "classId": rf("16"), "studentId": rf("23")})
 	if _, e := svc.Update(ctx, admin, own.ID, inspection.InspectionEdit{Version: 3, Reason: "核对", Record: ownInput}, audit.Metadata{}); e == nil {
 		t.Fatal("audit failure accepted update")
 	}
@@ -978,13 +1022,13 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	if r, e := svc.Detail(ctx, admin, own.ID); e != nil || r.RowVersion != 3 {
 		t.Fatal("audit rollback changed record", e)
 	}
-	if _, err = svc.Create(ctx, admin, failedInput, audit.Metadata{}); err == nil {
-		t.Fatal("audit failure accepted")
+	if _, err = departmentSvc.Create(ctx, departmentActor, failedInput, audit.Metadata{}); err == nil || !strings.Contains(err.Error(), "fixture audit failure") {
+		t.Fatal("audit failure was not the cause of rejected create", err)
 	}
 	if _, err = pool.Exec(ctx, "DROP TRIGGER fail_record_audit ON audit_logs"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Create(ctx, admin, failedInput, audit.Metadata{}); err != nil {
+	if _, err = departmentSvc.Create(ctx, departmentActor, failedInput, audit.Metadata{}); err != nil {
 		t.Fatal("audit failure left duplicate", err)
 	}
 	// A submitted record must reference a real batch with the same scope.
@@ -1011,9 +1055,9 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		}
 	}
 	t.Run("college record is independent of department", func(t *testing.T) {
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"time": "10:00"})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "time": "10:00", "classId": rf("16"), "studentId": rf("23")})
 		input.DepartmentID = inspection.CollegeDepartmentOptionID
-		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("06")}}}
+		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("16")}}}
 		if _, err := svc.Create(ctx, member, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
 			t.Fatalf("department grant created college record: %v", err)
 		}
@@ -1026,7 +1070,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		if err := pool.QueryRow(ctx, `SELECT department_id IS NULL FROM inspection_records WHERE id=$1`, record.ID).Scan(&storedNull); err != nil || !storedNull {
 			t.Fatalf("college department persistence: %v %v", storedNull, err)
 		}
-		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("06")}}}
+		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("16")}}}
 		if _, err := svc.Detail(ctx, member, record.ID); !errors.Is(err, inspection.ErrRecordNotFound) {
 			t.Fatalf("department-scoped view reached college record: %v", err)
 		}
@@ -1048,6 +1092,30 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		account, err := db.FindByID(ctx, rf("01"))
 		if err != nil || account.PrimaryDepartmentName != "学习部" || account.OrganizationRoleName != "部门委员" {
 			t.Fatalf("account assignment names: %+v %v", account, err)
+		}
+	})
+	t.Run("morning schedule default and audited update", func(t *testing.T) {
+		service := inspection.NewMorningScheduleService(db, perms)
+		before, err := service.Get(ctx, admin, rf("04"))
+		wantDefault := []string{"2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07"}
+		if err != nil || !before.IsDefault || before.Version != 0 || !reflect.DeepEqual(before.PlannedDates, wantDefault) {
+			t.Fatalf("default morning schedule=%+v err=%v", before, err)
+		}
+		updated, err := service.Save(ctx, admin, rf("04"), before.Version, []string{"2026-09-06"}, audit.Metadata{})
+		wantUpdated := []string{"2026-09-06"}
+		if err != nil || updated.IsDefault || updated.Version != 1 || !reflect.DeepEqual(updated.PlannedDates, wantUpdated) || updated.UpdatedBy != admin.ID {
+			t.Fatalf("updated morning schedule=%+v err=%v", updated, err)
+		}
+		var auditCount int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM audit_logs WHERE resource_id=$1 AND action='MORNING_SCHEDULE_CHANGED'", rf("04")).Scan(&auditCount); err != nil || auditCount != 1 {
+			t.Fatalf("morning schedule audit count=%d err=%v", auditCount, err)
+		}
+		manualRecord, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeMorning, map[string]any{"date": "2026-09-06"}), audit.Metadata{})
+		if err != nil {
+			t.Fatalf("manual morning entry did not use the adjusted Sunday plan: %v", err)
+		}
+		if err := svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: manualRecord.ID, Version: manualRecord.RowVersion}}, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("other hygiene reason database guard", func(t *testing.T) {

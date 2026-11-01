@@ -1,20 +1,21 @@
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
-import { ProTable, type ProColumns } from '@ant-design/pro-components'
+import { ProTable, type ProColumns, type ProFormInstance } from '@ant-design/pro-components'
 import { Alert, Button, Empty, Space, Tag, Typography } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../app/providers/authContext'
 import type { AttendanceFilters, AttendanceRecord, InspectionContext } from '../../entities/inspection/model/inspection'
 import { useAttendanceFilterOptions, useAttendancePermissions, useCurrentAcademicWeek } from '../../features/attendance/hooks/useAttendancePermissions'
 import { useAttendanceRecords } from '../../features/attendance/hooks/useAttendanceRecords'
 import { importErrorMessage } from '../../features/import-job/model/importErrorMessages'
-import { AttendanceImportDrawer } from '../../features/import-job/ui/AttendanceImportDrawer'
+import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
 import { CourseCreatePanel } from '../../features/course-inspection/ui/CourseCreatePanel'
 import { AttendanceMutationDialogs } from '../../features/attendance/ui/AttendanceMutationDialogs'
 import { canMutateAttendance } from '../../features/attendance/hooks/canMutateAttendance'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
-import { COLLEGE_DEPARTMENT_OPTION_ID } from '../../entities/inspection/model/inspectionScope'
+import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
 import { ApiError } from '../../shared/api/httpClient'
 
 type AttendanceSearchValues = {
@@ -26,7 +27,6 @@ type AttendanceSearchValues = {
 	keyword?: string
 	status?: AttendanceFilters['status']
 	source?: AttendanceFilters['source']
-	sort?: AttendanceFilters['sort']
 }
 
 const statusLabels: Record<NonNullable<AttendanceFilters['status']>, string> = {
@@ -53,6 +53,12 @@ export function AttendancePage() {
 	const [search, setSearch] = useSearchParams()
 	const importBatchId = (location.state as { importBatchId?: string } | null)?.importBatchId
 	const [manualOpen, setManualOpen] = useState(false)
+	const form = useRef<ProFormInstance>(undefined)
+	const [draftSemester, setDraftSemester] = useState<string>()
+	const [semesterChangeRevision, setSemesterChangeRevision] = useState(0)
+	useEffect(() => {
+		if (semesterChangeRevision > 0) form.current?.setFieldValue('weekId', undefined)
+	}, [semesterChangeRevision])
   const [editId, setEditId] = useState<string>()
   const [deleting, setDeleting] = useState<AttendanceRecord[]>([])
   const [selection, setSelection] = useState<AttendanceRecord[]>([])
@@ -88,7 +94,7 @@ export function AttendancePage() {
 		keyword: search.get('keyword') ?? '',
 		status: optionalStatus(search.get('status')),
 		source: optionalSource(search.get('source')),
-		sort: optionalSort(search.get('sort')) ?? 'occurredAtDesc',
+		sort: 'occurredAtDesc',
 		page,
 		pageSize,
 	}
@@ -101,12 +107,11 @@ export function AttendancePage() {
   const canReview = Boolean(user?.isSuperAdmin || (attendanceTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', attendanceTypeId)))
   const canImport = Boolean(user?.isSuperAdmin || (attendanceTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', attendanceTypeId)))
 	const error = records.error instanceof ApiError ? records.error : undefined
-	const departmentCount = options?.departments.length ?? 0
-	const showDepartmentFilter = departmentCount > 1 || (departmentCount === 1 && !departmentId)
 
 	const replaceSearch = (values: AttendanceSearchValues, nextPage = 1, nextPageSize = pageSize) => {
 		setSelection([])
 		const next = new URLSearchParams(search)
+		next.delete('sort')
 		const entries: Record<keyof AttendanceSearchValues, string | undefined> = {
 			semesterId: values.semesterId,
 			weekId: values.weekId,
@@ -116,7 +121,6 @@ export function AttendancePage() {
 			keyword: values.keyword?.trim(),
 			status: values.status,
 			source: values.source,
-			sort: values.sort,
 		}
 		Object.entries(entries).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
 		next.set('page', String(nextPage))
@@ -132,39 +136,37 @@ export function AttendancePage() {
 		keyword: filters.keyword,
 		status: filters.status,
 		source: filters.source,
-		sort: filters.sort,
 	}
 	const columns = useMemo<ProColumns<AttendanceRecord>[]>(() => {
-		const semesterName = (id: string) => options?.semesters.find(item => item.id === id)?.name ?? '未知学期'
+		const semesterOptions = options?.semesters.map(item => ({ id: item.id, label: item.name })) ?? []
+		const currentFilterSemester = draftSemester === undefined ? semesterId : draftSemester
+		const weekOptions = options?.weeks.filter(week => week.semesterId === currentFilterSemester).map(item => ({ id: item.id, label: `第 ${item.weekNo} 周` })) ?? []
+		const filters = createInspectionFilterColumns<AttendanceRecord>({
+			semesters: semesterOptions,
+			weeks: weekOptions,
+			departments: options?.departments.map(item => ({ id: item.id, label: item.name })) ?? [],
+			grades: options?.grades.map(item => ({ id: item, label: gradeLabel(item) })) ?? [],
+			classes: options?.classes.map(item => ({ id: item.id, label: item.name })) ?? [],
+			selectedSemesterId: currentFilterSemester,
+			onSemesterChange: value => { setDraftSemester(value ?? ''); setSemesterChangeRevision(revision => revision + 1) },
+		})
 		const result: ProColumns<AttendanceRecord>[] = [
-			{ title: '学期', dataIndex: 'semesterId', hideInTable: true, order: 9, valueType: 'select', fieldProps: { options: options?.semesters.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '请选择学期', allowClear: false, showSearch: true, optionFilterProp: 'label' } },
-			{ title: '周次', dataIndex: 'weekId', hideInTable: true, order: 8, valueType: 'select', fieldProps: { options: options?.weeks.map(item => ({ value: item.id, label: `${semesterName(item.semesterId)} · 第 ${item.weekNo} 周` })) ?? [], placeholder: '请选择周次', allowClear: false, showSearch: true, optionFilterProp: 'label' } },
-		]
-		if (showDepartmentFilter) {
-			result.push({ title: '部门', dataIndex: 'departmentId', hideInTable: true, order: 7, valueType: 'select', fieldProps: { options: options?.departments.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '全部有权部门', allowClear: true, showSearch: true, optionFilterProp: 'label' } })
-		}
-		result.push(
-			{ title: '班级', dataIndex: 'classId', hideInTable: true, order: 6, valueType: 'select', fieldProps: { options: options?.classes.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '全部班级', allowClear: true, showSearch: true, optionFilterProp: 'label' } },
-			{ title: '年级', dataIndex: 'grade', hideInTable: true, order: 5, valueType: 'select', fieldProps: { options: options?.grades.map(item => ({ value: item, label: gradeLabel(item) })) ?? [], placeholder: '全部年级', allowClear: true } },
-			{ title: '数据状态', dataIndex: 'status', hideInTable: true, order: 4, valueType: 'select', valueEnum: Object.fromEntries(Object.entries(statusLabels).map(([value, text]) => [value, { text }])), fieldProps: { placeholder: '全部状态', allowClear: true } },
-			{ title: '数据来源', dataIndex: 'source', hideInTable: true, order: 3, valueType: 'select', valueEnum: Object.fromEntries(Object.entries(sourceLabels).map(([value, text]) => [value, { text }])), fieldProps: { placeholder: '全部来源', allowClear: true } },
-			{ title: '关键字', dataIndex: 'keyword', hideInTable: true, order: 2, fieldProps: { autoComplete: 'off', spellCheck: false, allowClear: true, placeholder: '输入学号或姓名…' } },
-			{ title: '排序', dataIndex: 'sort', hideInTable: true, order: 1, valueType: 'select', valueEnum: { occurredAtDesc: { text: '检查时间从新到旧' }, occurredAtAsc: { text: '检查时间从旧到新' }, studentNoAsc: { text: '学号升序' }, studentNoDesc: { text: '学号降序' } }, fieldProps: { allowClear: false } },
+			...filters,
 			{ title: '学号', dataIndex: 'studentNo', width: 140, search: false, copyable: true },
 			{ title: '姓名', dataIndex: 'studentName', width: 110, search: false },
-			{ title: '班级', dataIndex: 'className', width: 150, search: false },
 			{ title: '年级', dataIndex: 'grade', width: 90, search: false, renderText: value => value ? gradeLabel(String(value)) : '—' },
+			{ title: '班级', dataIndex: 'className', width: 150, search: false },
 			{ title: '课程', dataIndex: 'courseName', width: 180, search: false, ellipsis: true },
 			{ title: '检查时间', dataIndex: 'occurredAt', width: 180, search: false, renderText: value => dateTimeFormatter.format(new Date(value)) },
 			{ title: '节次', dataIndex: 'period', width: 100, search: false },
 			{ title: '实际旷课节次数', dataIndex: 'absenceHours', width: 125, search: false },
 			{ title: '违纪计入倍数', dataIndex: 'penaltyMultiplier', width: 125, search: false, render: (_, record) => record.penaltyMultiplier ? `${record.penaltyMultiplier} 倍` : '历史待核对' },
 			{ title: '违纪计入次数', dataIndex: 'penaltyHours', width: 125, search: false, render: (_, record) => record.penaltyHours ?? '历史待核对' },
-			{ title: '数据来源', dataIndex: 'source', width: 110, search: false, render: (_, record) => <Tag>{sourceLabels[record.source] ?? record.source}</Tag> },
-			{ title: '数据状态', dataIndex: 'status', width: 110, search: false, render: (_, record) => <Tag color={record.status === 'CONFIRMED' ? 'green' : record.status === 'RETURNED' ? 'red' : 'blue'}>{statusLabels[record.status as keyof typeof statusLabels] ?? record.status}</Tag> },
-		)
+			...createInspectionProvenanceColumns<AttendanceRecord>(),
+		]
+		if (user?.isSuperAdmin) result.push({ title: '记录归属', key: 'attribution', width: 160, search: false, render: (_, record) => attributionLabel(record.attributionMode, record.departmentId, options?.departments.find(item => item.id === record.departmentId)?.name) })
 		return result
-	}, [options, showDepartmentFilter])
+	}, [draftSemester, options, semesterId, user?.isSuperAdmin])
 
 	const updateImportBatchId = (batchId?: string) => {
 		navigate(`${location.pathname}${location.search}`, { replace: true, state: { ...(location.state ?? {}), importBatchId: batchId } })
@@ -191,23 +193,23 @@ export function AttendancePage() {
 			dataSource={listReady && !records.isError ? records.data?.items ?? [] : []}
 			headerTitle={<Space size={10}><span>到课率记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag></Space>}
 			search={{ labelWidth: 'auto', defaultCollapsed: false }}
+			formRef={form}
 			form={{ initialValues: searchValues }}
-			onSubmit={values => replaceSearch({ ...searchValues, ...values })}
-			onReset={() => replaceSearch({ semesterId, weekId, sort: 'occurredAtDesc' })}
+			onSubmit={values => { replaceSearch({ ...searchValues, ...values }); setDraftSemester(undefined) }}
+			onReset={() => { replaceSearch({ semesterId, weekId }); setDraftSemester(undefined) }}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
 			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
 			scroll={{ x: 1320 }}
 			locale={{ emptyText: <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}
 		/>
-		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
-		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} onClose={() => setManualOpen(false)} />}
-		{drawerOpen && options && <AttendanceImportDrawer
-			open={drawerOpen}
+		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
+		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={() => setManualOpen(false)} />}
+		{drawerOpen && attendanceTypeId && <InspectionImportScopePanel
+			typeCode="ATTENDANCE_RATE"
+			inspectionTypeId={attendanceTypeId}
 			memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined}
-			context={context}
-			scopeOptions={options}
-			departments={[...(options?.responsibleDepartments ?? []).filter(department => options?.departments.some(allowed => allowed.id === department.id)), ...(user?.systemRole !== 'MEMBER' ? (options?.departments ?? []).filter(department => department.id === COLLEGE_DEPARTMENT_OPTION_ID) : [])]}
+			isSuperAdmin={!!user?.isSuperAdmin}
 			batchId={importBatchId}
 			onBatchIdChange={updateImportBatchId}
 			onClose={() => setDrawerOpen(false)}
@@ -238,8 +240,4 @@ function optionalStatus(value: string | null): AttendanceFilters['status'] {
 
 function optionalSource(value: string | null): AttendanceFilters['source'] {
 	return value && value in sourceLabels ? value as AttendanceFilters['source'] : undefined
-}
-
-function optionalSort(value: string | null): AttendanceFilters['sort'] {
-	return value && ['occurredAtDesc', 'occurredAtAsc', 'studentNoAsc', 'studentNoDesc'].includes(value) ? value as AttendanceFilters['sort'] : undefined
 }

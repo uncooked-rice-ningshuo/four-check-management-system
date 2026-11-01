@@ -5,20 +5,23 @@ export type { ContextOptions, InspectionOption, InspectionQuery } from './inspec
 export type HygieneResult = 'EXCELLENT' | 'QUALIFIED' | 'UNQUALIFIED'
 /** One inspected classroom area/event with authorized responsibility associations. */
 export type ClassroomHygieneDetails = {
- classroomId:string;areaId:string;date:string;time?:string;round?:string;result:HygieneResult
- responsibleClassIds:string[];responsibleStudentIds?:string[];reasonCode?:string;description?:string;remark?:string
+ classroomId:string;date:string;result:HygieneResult
+ responsibleClassIds:string[];responsibleStudentIds?:string[];description?:string;remark?:string
 }
-export type ClassroomHygieneInput = {semesterId:string;weekId:string;inspectionTypeId:string;departmentId:string;details:ClassroomHygieneDetails}
+export type ClassroomHygieneInput = {semesterId:string;weekId:string;inspectionTypeId:string;departmentId:string;attributionMode?:'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR';details:ClassroomHygieneDetails}
 export type ClassroomHygieneRecordDTO = ClassroomHygieneInput & {
- id:string;typeCode:'CLASSROOM_HYGIENE';currentClassroomName:string;currentAreaName:string;currentReasonLabel?:string
+ id:string;typeCode:'CLASSROOM_HYGIENE';currentClassroomName:string;currentAreaName?:string;currentReasonLabel?:string
  responsibleClasses:InspectionOption[];responsibleStudents:InspectionOption[]
- importBatchId?:string;status:string;source:string;rowVersion:number;createdBy:string;canEdit:boolean
+ importBatchId?:string;status:string;source:string;rowVersion:number;createdBy:string;submitterName:string;canEdit:boolean
 }
 function option(value:unknown):value is InspectionOption {return object(value)&&typeof value.id==='string'&&typeof value.label==='string'}
 function record(value:unknown):ClassroomHygieneRecordDTO {
  if(!object(value)||!object(value.details)||value.typeCode!=='CLASSROOM_HYGIENE')throw badResponse()
- for(const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','currentClassroomName','currentAreaName','status','source','createdBy'])if(typeof value[key]!=='string')throw badResponse()
- for(const key of ['classroomId','areaId','date'])if(typeof value.details[key]!=='string')throw badResponse()
+ if(value.attributionMode!==undefined&&!['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode)))throw badResponse()
+ for(const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','currentClassroomName','status','source','createdBy','submitterName'])if(typeof value[key]!=='string')throw badResponse()
+ if(value.currentAreaName!==undefined&&typeof value.currentAreaName!=='string')throw badResponse()
+ for(const key of ['classroomId','date'])if(typeof value.details[key]!=='string')throw badResponse()
+ if(value.details.areaId!==undefined&&typeof value.details.areaId!=='string')throw badResponse()
  for(const key of ['time','round','reasonCode','description','remark'])if(value.details[key]!==undefined&&typeof value.details[key]!=='string')throw badResponse()
  if(!['EXCELLENT','QUALIFIED','UNQUALIFIED'].includes(String(value.details.result))||!Array.isArray(value.details.responsibleClassIds)||!value.details.responsibleClassIds.length||!value.details.responsibleClassIds.every(item=>typeof item==='string'))throw badResponse()
  if(value.details.responsibleStudentIds!==undefined&&(!Array.isArray(value.details.responsibleStudentIds)||!value.details.responsibleStudentIds.every(item=>typeof item==='string')))throw badResponse()
@@ -28,7 +31,7 @@ function record(value:unknown):ClassroomHygieneRecordDTO {
  if(value.currentReasonLabel!==undefined&&typeof value.currentReasonLabel!=='string')throw badResponse()
  if(!Number.isInteger(value.rowVersion)||typeof value.canEdit!=='boolean')throw badResponse()
  // All required fields and optional arrays have been checked above; normalize legacy omissions only.
- return {...value,responsibleStudents:value.responsibleStudents??[],details:{...value.details,responsibleStudentIds:value.details.responsibleStudentIds??[],reasonCode:value.details.reasonCode??'',description:value.details.description??'',remark:value.details.remark??''}} as ClassroomHygieneRecordDTO
+ return {...value,responsibleStudents:value.responsibleStudents??[],details:{...value.details,responsibleStudentIds:value.details.responsibleStudentIds??[],reasonCode:value.details.reasonCode??'',description:value.details.description??'',remark:value.details.remark??''}} as unknown as ClassroomHygieneRecordDTO
 }
 export const classroomHygieneApi={
  async contextOptions(query:InspectionQuery):Promise<ContextOptions>{return allOptions('/inspections/context-options',{typeCode:'CLASSROOM_HYGIENE',...query},true)},

@@ -18,6 +18,7 @@ const (
 	ActionOrganizationUpdated     Action = "ORGANIZATION_UPDATED"
 	ActionPermissionRuleChanged   Action = "PERMISSION_RULE_CHANGED"
 	ActionAcademicCalendarChanged Action = "ACADEMIC_CALENDAR_CHANGED"
+	ActionMorningScheduleChanged  Action = "MORNING_SCHEDULE_CHANGED"
 	ActionMasterDataChanged       Action = "MASTER_DATA_CHANGED"
 	ActionDictionaryChanged       Action = "DICTIONARY_CHANGED"
 	ActionFileUploadSucceeded     Action = "FILE_UPLOAD_SUCCEEDED"

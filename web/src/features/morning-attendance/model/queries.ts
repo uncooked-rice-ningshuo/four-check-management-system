@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { morningAttendanceApi, type MorningAttendanceRecordInput, type InspectionQuery } from '../../../shared/api/morningAttendanceApi'
+import { morningScheduleApi } from '../../../shared/api/morningScheduleApi'
 
 /** Read authorized context options separately for viewing and mutation targets. */
 export function useInspectionContext(query: InspectionQuery, enabled=true) {
@@ -12,6 +13,10 @@ export function useInspectionEntryOptions(query: InspectionQuery, enabled=true) 
 /** Cache record lists by their full structured filter. */
 export function useMorningAttendanceRecords(query: InspectionQuery, enabled=true) {
  return useQuery({queryKey:['morning-attendances','records',query],queryFn:()=>morningAttendanceApi.list(query),enabled})
+}
+/** Load the selected week's plan for the visible summary and editable drawer. */
+export function useMorningSchedule(weekId?:string) {
+ return useQuery({queryKey:['morning-schedule',weekId],queryFn:()=>morningScheduleApi.get(weekId??''),enabled:!!weekId})
 }
 /** Retrieve the authoritative detail and mutation hint for one record. */
 export function useMorningAttendanceRecord(id?:string) {

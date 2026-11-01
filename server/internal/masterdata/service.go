@@ -116,7 +116,6 @@ type Repository interface {
 	CreateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	UpdateMasterData(context.Context, string, Record, audit.Mutation) (Record, error)
 	ListMasterDataChanges(context.Context, string, string) ([]Change, error)
-	HygieneAreaInspectionScope(context.Context, string, string) (string, error)
 }
 
 type Service struct{ repository Repository }
@@ -204,17 +203,6 @@ func (s *Service) ListChanges(ctx context.Context, kind, id string) ([]Change, e
 	return s.repository.ListMasterDataChanges(ctx, kind, id)
 }
 
-// HygieneAreaInspectionScope resolves the configured department/type mapping for scoped area maintenance.
-func (s *Service) HygieneAreaInspectionScope(ctx context.Context, kind, departmentID string) (string, error) {
-	if kind != KindClassroomHygieneArea && kind != KindPublicDormitoryHygieneArea {
-		return "", ErrInvalidKind
-	}
-	if _, err := uuid.Parse(departmentID); err != nil {
-		return "", ErrInvalidRelation
-	}
-	return s.repository.HygieneAreaInspectionScope(ctx, kind, departmentID)
-}
-
 func (s *Service) validateRelations(ctx context.Context, record Record) error {
 	if record.Kind == KindCourse {
 		return nil
@@ -263,7 +251,7 @@ func (s *Service) validateRelations(ctx context.Context, record Record) error {
 
 func validKind(kind string) bool {
 	switch kind {
-	case KindFaculty, KindGrade, KindDormitoryArea, KindDormitoryBuilding, KindTeachingBuilding, KindMajor, KindStaff, KindClass, KindDormitory, KindClassroom, KindCourse, KindStudent, KindClassroomHygieneArea, KindPublicDormitoryHygieneArea:
+	case KindFaculty, KindGrade, KindDormitoryArea, KindDormitoryBuilding, KindTeachingBuilding, KindMajor, KindStaff, KindClass, KindDormitory, KindClassroom, KindCourse, KindStudent:
 		return true
 	default:
 		return false

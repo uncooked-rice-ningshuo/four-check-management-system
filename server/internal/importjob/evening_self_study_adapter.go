@@ -32,28 +32,30 @@ func (a *EveningSelfStudyAdapter) Validate(ctx context.Context, scope Attendance
 	}
 	result := InspectionValidationResult{Rows: make([]InspectionValidationRow, 0, len(rows))}
 	seen := map[string]int{}
-	keys := make([]string, 0, len(rows))
+	candidates := make([]InspectionDuplicateCandidate, 0, len(rows))
 	for _, row := range rows {
 		validated := validateEveningSelfStudyRow(scope, refs, row)
 		if len(validated.Errors) == 0 {
 			key := validated.Record.DedupKey
 			if previous, exists := seen[key]; exists {
-				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与第 %d 行为同一学生同一时段", row.RowNo, previous), "每名学生在同一日期和固定节次保留一条记录"))
+				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与第 %d 行为同一学生同一天", row.RowNo, previous), "每名学生每天保留一条晚自习记录"))
 			} else {
 				seen[key] = row.RowNo
-				keys = append(keys, key)
+				if validated.Record.Duplicate != nil {
+					candidates = append(candidates, *validated.Record.Duplicate)
+				}
 			}
 		}
 		result.Rows = append(result.Rows, validated)
 	}
-	existing, err := a.repository.FindExistingAttendanceKeys(ctx, scope, uniqueStrings(keys))
+	existing, err := a.repository.FindExistingDailyInspectionDuplicates(ctx, scope, candidates)
 	if err != nil {
-		return InspectionValidationResult{}, fmt.Errorf("find existing evening self-study keys: %w", err)
+		return InspectionValidationResult{}, fmt.Errorf("find existing evening self-study dates: %w", err)
 	}
 	for i := range result.Rows {
 		row := &result.Rows[i]
 		if _, found := existing[row.Record.DedupKey]; found && row.Record.DedupKey != "" {
-			row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", "该学生此日期的晚自习缺勤记录已存在", "核对已有记录，不重复导入同一日期和节次"))
+			row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", "该学生当天的晚自习缺勤记录已存在", "核对已有记录，不重复导入同一天"))
 		}
 		if len(row.Errors) == 0 {
 			result.ValidCount++
@@ -67,7 +69,7 @@ func (a *EveningSelfStudyAdapter) Validate(ctx context.Context, scope Attendance
 func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceReferences, row ParsedRow) InspectionValidationRow {
 	result := InspectionValidationRow{RowNo: row.RowNo, Errors: []ValidationError{}}
 	value := func(key string) string { return strings.TrimSpace(row.Values[key]) }
-	for _, field := range []string{"student_no", "student_name", "class_name", "classroom_code", "absence_date", "absence_time"} {
+	for _, field := range []string{"student_no", "student_name", "class_name", "absence_date"} {
 		if value(field) == "" {
 			result.Errors = append(result.Errors, validationError(ErrorRequiredField, field, "必填字段不能为空", "按模板填写此字段"))
 		}
@@ -86,7 +88,7 @@ func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceRef
 	}
 	details := inspection.EveningSelfStudyDetails{
 		StudentID: student.ID, ClassID: class.ID, ClassroomID: classroom.ID,
-		Date: value("absence_date"), Time: value("absence_time"), Period: "9-10", Remark: value("remark"),
+		Date: value("absence_date"), Period: "9-10", Remark: value("remark"),
 	}
 	raw, err := json.Marshal(details)
 	if err != nil {
@@ -99,19 +101,17 @@ func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceRef
 		code, field, message := ErrorInvalidDate, "absence_date", "缺勤日期格式无效"
 		if issue.Code == "OUTSIDE_WEEK" {
 			code, message = ErrorOccurredOutsideWeek, "缺勤日期不在当前周次内"
-		} else if strings.Contains(issue.Path, "time") {
-			code, field, message = ErrorInvalidTime, "absence_time", "检查时间格式无效"
 		} else if strings.Contains(issue.Path, "period") || strings.Contains(issue.Path, "absenceHours") {
 			code, field, message = ErrorInvalidHours, "absence_date", "晚自习时段不符合固定规则"
 		}
-		result.Errors = append(result.Errors, validationError(code, field, message, "晚自习固定为第 9–10 节；日期须处于所选周次"))
+		result.Errors = append(result.Errors, validationError(code, field, message, "晚自习固定为第 9–10 节；日期须处于所选周次，教室可选"))
 	}
 	if len(result.Errors) > 0 {
 		return result
 	}
 	inputDetails, err := json.Marshal(map[string]any{
 		"studentId": details.StudentID, "classId": details.ClassID, "classroomId": details.ClassroomID,
-		"date": details.Date, "time": details.Time, "remark": details.Remark,
+		"date": details.Date, "remark": details.Remark,
 	})
 	if err != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidWorkbook, "absence_date", "无法生成检查明细", "重新核对模板"))
@@ -119,9 +119,10 @@ func validateEveningSelfStudyRow(scope AttendanceImportScope, refs AttendanceRef
 	}
 	result.Record = InspectionImportRecord{
 		SchemaVersion: 1, ID: uuid.NewString(), TypeCode: scope.TypeCode,
-		Input:      inspection.InspectionInput{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID, Details: inputDetails},
+		Input:      inspection.InspectionInput{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: scope.DepartmentID, AttributionMode: attributionModeForScope(scope), Details: inputDetails},
 		References: inspection.InspectionReferences{Classes: []inspection.ClassReference{{ID: class.ID, Name: class.Name, Grade: class.Grade}}, Students: []inspection.StudentReference{{ID: student.ID, ClassID: student.ClassID, Number: student.StudentNo, Name: student.Name}}},
 		CreatedBy:  scope.CreatedBy, ImportBatchID: scope.ImportBatchID, DedupKey: normalized.DuplicateKey,
+		Duplicate: &InspectionDuplicateCandidate{Key: normalized.DuplicateKey, ClassID: class.ID, StudentID: student.ID, Date: value("absence_date")},
 	}
 	return result
 }

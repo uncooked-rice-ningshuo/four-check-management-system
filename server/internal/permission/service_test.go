@@ -88,6 +88,31 @@ func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
 	}
 }
 
+func TestOnlySportsLeadershipReceivesMorningScheduleManagement(t *testing.T) {
+	for _, testCase := range []struct {
+		name             string
+		departmentCode   string
+		organizationRole string
+		want             bool
+	}{
+		{name: "sports minister", departmentCode: "SPORTS", organizationRole: "MINISTER", want: true},
+		{name: "sports vice minister", departmentCode: "SPORTS", organizationRole: "VICE_MINISTER", want: true},
+		{name: "other department minister", departmentCode: "STUDY", organizationRole: "MINISTER"},
+		{name: "sports member", departmentCode: "SPORTS", organizationRole: "MEMBER"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			profile := AccessProfile{AccountID: "user", SystemRole: SystemRoleMember, DepartmentCode: testCase.departmentCode, OrganizationRoleCode: testCase.organizationRole}
+			result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := result.Allowed(ActionMorningScheduleManage, Scope{}); got != testCase.want {
+				t.Fatalf("morning schedule permission = %t, want %t; permissions=%+v", got, testCase.want, result.Permissions)
+			}
+		})
+	}
+}
+
 func TestOfficeLeadershipCanReceiveSeparatelyConfiguredForceGeneratePermission(t *testing.T) {
 	profile := AccessProfile{AccountID: "office-deputy", SystemRole: SystemRoleMember,
 		DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}

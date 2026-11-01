@@ -6,7 +6,7 @@ import { ApiError } from '../../../shared/api/httpClient'
 import { ImportRollbackPanel } from './ImportRollbackPanel'
 const mutateAsync = vi.fn()
 vi.mock('../hooks/useImportRollback', () => ({ useImportRollback: () => ({ mutateAsync, isPending: false }) }))
-const batch: ImportBatch = { id: 'batch', inspectionTypeId: 'type', semesterId: 'term', weekId: 'week', departmentId: 'department', templateId: 'template', templateVersion: 1, status: 'CONFIRMED', totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 2, version: 4 }
+const batch: ImportBatch = { id: 'batch', inspectionTypeId: 'type', semesterId: 'term', weekId: 'week', departmentId: 'department', attributionMode: 'DEPARTMENT', templateId: 'template', templateVersion: 1, status: 'CONFIRMED', totalRows: 2, validRows: 2, invalidRows: 0, importedRows: 2, version: 4 }
 beforeEach(() => mutateAsync.mockReset())
 it('requires a reason, preserves it on failure, retries and resets after closing in StrictMode', async () => {
   mutateAsync.mockRejectedValueOnce(new ApiError(500, 'IMPORT_SERVICE_UNAVAILABLE', 'unavailable')).mockResolvedValueOnce({})

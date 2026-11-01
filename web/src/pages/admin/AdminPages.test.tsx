@@ -146,8 +146,6 @@ vi.mock('../../features/course-inspection/model/queries', () => ({
   useInspectionContext: (query: { typeCode: string }) => ({ data: { inspectionTypeId: query.typeCode, items: [] }, isLoading: false }),
 }))
 
-vi.mock('../../shared/api/hygieneAreaApi', () => ({ hygieneAreaApi: { targets: vi.fn().mockResolvedValue([]) } }))
-
 function render(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)

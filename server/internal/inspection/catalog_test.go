@@ -62,8 +62,8 @@ func TestInspectionCatalog(t *testing.T) {
 	}
 	for _, code := range []string{"DORMITORY_HYGIENE", "CLASSROOM_HYGIENE", "PUBLIC_DORMITORY_HYGIENE"} {
 		d, _ := LookupInspectionDefinition(code)
-		if code == "PUBLIC_DORMITORY_HYGIENE" && (!reflect.DeepEqual(d.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE"}) || d.TemplateStatus != "PLANNED") {
-			t.Fatal("verified manual actions missing or unverified import enabled", code)
+		if code == "PUBLIC_DORMITORY_HYGIENE" && (!reflect.DeepEqual(d.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || d.TemplateStatus != "ACTIVE") {
+			t.Fatal("public dormitory import action missing", code)
 		}
 		if d.Granularity != "OBJECT_INSPECTION" {
 			t.Fatal(code)

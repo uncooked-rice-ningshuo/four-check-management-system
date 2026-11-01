@@ -7,7 +7,6 @@ import { OrganizationConfigPage } from '../pages/admin/OrganizationConfigPage'
 import { RegistrationReviewPage } from '../pages/admin/RegistrationReviewPage'
 import { UserManagementPage } from '../pages/admin/UserManagementPage'
 import { MasterDataPage } from '../pages/admin/MasterDataPage'
-import { HygieneAreaPage } from '../pages/admin/HygieneAreaPage'
 import { DictionaryPage } from '../pages/admin/DictionaryPage'
 import { ChangePasswordPage } from '../pages/auth/ChangePasswordPage'
 import { LoginPage } from '../pages/auth/LoginPage'
@@ -32,6 +31,7 @@ import { EffectivePermissionRoute } from './router/EffectivePermissionRoute'
 
 const protectedPage = (page: ReactNode) => <ProtectedRoute>{page}</ProtectedRoute>
 const superAdminOnly = (page: ReactNode) => <SuperAdminOnly>{page}</SuperAdminOnly>
+const adminOrSystemAdmin = (page: ReactNode) => <SuperAdminRoute>{page}</SuperAdminRoute>
 
 export default function App() {
   return <Routes>
@@ -41,23 +41,22 @@ export default function App() {
 		<Route path="/change-password" element={protectedPage(<ChangePasswordPage />)} />
 		<Route element={protectedPage(<AppLayout />)}>
 			<Route index element={<HomePage />} />
-			<Route path="admin" element={<SuperAdminRoute><Outlet /></SuperAdminRoute>}>
-				<Route index element={<Navigate to="/" replace />} />
+			<Route path="admin" element={<Outlet />}>
+				<Route index element={adminOrSystemAdmin(<Navigate to="/" replace />)} />
 				<Route path="registrations" element={superAdminOnly(<RegistrationReviewPage />)} />
 				<Route path="users" element={superAdminOnly(<UserManagementPage />)} />
 				<Route path="organization" element={superAdminOnly(<OrganizationConfigPage />)} />
-				<Route path="academic" element={superAdminOnly(<AcademicCalendarPage />)} />
-				<Route path="master-data" element={<MasterDataPage />} />
-				<Route path="dictionaries" element={<DictionaryPage />} />
-				<Route path="profile" element={<AccountProfilePage />} />
-				<Route path="security" element={<AccountSecurityPage />} />
+				<Route path="academic" element={<EffectivePermissionRoute action="MORNING_SCHEDULE_MANAGE"><AcademicCalendarPage /></EffectivePermissionRoute>} />
+				<Route path="master-data" element={adminOrSystemAdmin(<MasterDataPage />)} />
+				<Route path="dictionaries" element={adminOrSystemAdmin(<DictionaryPage />)} />
+				<Route path="profile" element={adminOrSystemAdmin(<AccountProfilePage />)} />
+				<Route path="security" element={adminOrSystemAdmin(<AccountSecurityPage />)} />
 			</Route>
 			<Route path="inspections/attendance" element={<InspectionTypeRoute typeCode="ATTENDANCE_RATE"><AttendancePage /></InspectionTypeRoute>} />
 			<Route path="reports/workbench" element={<EffectivePermissionRoute action="REPORT_VIEW"><WeeklyReportSummaryPage /></EffectivePermissionRoute>} />
 			<Route path="reports/weekly-summary" element={<Navigate to="/reports/workbench" replace />} />
 			<Route path="reports/weekly-draft" element={<Navigate to="/reports/workbench" replace />} />
 			<Route path="reports/archive" element={<EffectivePermissionRoute action="ARCHIVE_VIEW"><WeeklyReportArchivePage /></EffectivePermissionRoute>} />
-			<Route path="admin/hygiene-areas" element={<HygieneAreaPage />} />
 			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
 			<Route path="inspections/evening-self-study" element={<InspectionTypeRoute typeCode="EVENING_SELF_STUDY"><EveningSelfStudyPage /></InspectionTypeRoute>} />
 			<Route path="inspections/morning-attendance" element={<InspectionTypeRoute typeCode="MORNING_ATTENDANCE"><MorningAttendancePage /></InspectionTypeRoute>} />

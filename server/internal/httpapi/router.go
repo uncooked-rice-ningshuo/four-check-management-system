@@ -47,6 +47,7 @@ type AdminServices struct {
 	Attendance               attendanceHTTPService
 	ManualAttendance         manualAttendanceHTTPService
 	Inspections              inspectionHTTPService
+	MorningSchedules         morningScheduleHTTPService
 	InspectionOptions        inspectionOptionHTTPService
 	InspectionContextOptions inspectionContextOptionHTTPService
 	AttendanceMutations      attendanceMutationHTTPService
@@ -144,6 +145,7 @@ type handler struct {
 	attendance                 attendanceHTTPService
 	manualAttendance           manualAttendanceHTTPService
 	inspections                inspectionHTTPService
+	morningSchedules           morningScheduleHTTPService
 	inspectionOptions          inspectionOptionHTTPService
 	inspectionContextOptions   inspectionContextOptionHTTPService
 	workContext                *academic.WorkContextService
@@ -178,6 +180,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.reportingObligationService, _ = dependencies[0].Reporting.(reportingObligationHTTPService)
 		h.manualAttendance = dependencies[0].ManualAttendance
 		h.inspections = dependencies[0].Inspections
+		h.morningSchedules = dependencies[0].MorningSchedules
 		h.inspectionOptions = dependencies[0].InspectionOptions
 		h.inspectionContextOptions = dependencies[0].InspectionContextOptions
 		h.workContext = dependencies[0].WorkContext
@@ -239,14 +242,6 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	masterDataAdmin.POST("/master-data/:kind", h.createMasterData)
 	masterDataAdmin.PUT("/master-data/:kind/:id", h.updateMasterData)
 	masterDataAdmin.GET("/master-data/:kind/:id/changes", h.listMasterDataChanges)
-	// Area maintenance accepts a type-scoped master-data grant without exposing
-	// the general master-data endpoints to that actor.
-	v1.GET("/admin/hygiene-areas/options", h.hygieneAreaOptions)
-	v1.GET("/admin/hygiene-areas/:kind/references", h.requireHygieneAreaManage(), h.hygieneAreaReferences)
-	v1.GET("/admin/hygiene-areas/:kind", h.requireHygieneAreaManage(), h.listMasterData)
-	v1.POST("/admin/hygiene-areas/:kind", h.requireHygieneAreaManage(), h.createMasterData)
-	v1.PUT("/admin/hygiene-areas/:kind/:id", h.requireHygieneAreaManage(), h.updateMasterData)
-	v1.GET("/admin/hygiene-areas/:kind/:id/changes", h.requireHygieneAreaManage(), h.listMasterDataChanges)
 	dictionaryAdmin := v1.Group("/admin", h.requireAction(permission.ActionDictionaryManage))
 	dictionaryAdmin.GET("/dictionaries", h.listDictionaries)
 	dictionaryAdmin.POST("/dictionaries/types", h.createDictionaryType)
@@ -254,6 +249,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	dictionaryAdmin.POST("/dictionaries/types/:typeId/items", h.createDictionaryItem)
 	dictionaryAdmin.PUT("/dictionaries/types/:typeId/items/:id", h.updateDictionaryItem)
 	v1.GET("/academic/current-week", h.currentWeek)
+	v1.GET("/academic/morning-schedule-calendar", h.requireAction(permission.ActionMorningScheduleManage), h.listCalendar)
 	v1.GET("/work-context", h.getWorkContext)
 	v1.PUT("/work-context", h.setWorkContext)
 	v1.GET("/inspections/attendance/filter-options", h.attendanceFilterOptions)
@@ -261,6 +257,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.GET("/inspections/submission-candidates", h.listSubmissionCandidates)
 	v1.POST("/inspections/attendance", h.createManualAttendance)
 	v1.POST("/inspections", h.createInspection)
+	v1.GET("/inspections/morning-schedule/:weekId", h.getMorningSchedule)
+	v1.PUT("/inspections/morning-schedule/:weekId", h.saveMorningSchedule)
 	v1.GET("/inspections", h.listInspections)
 	v1.GET("/inspections/entry-options", h.inspectionEntryOptions)
 	v1.GET("/inspections/context-options", h.inspectionContextOptionList)
@@ -1022,7 +1020,8 @@ func (h *handler) listAttendance(c *gin.Context) {
 	}
 	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
-		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments, ClassID: scope.ClassID, Grade: scope.Grade,
+		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments, ActorID: account.ID,
+		AllowAllAdministratorRecords: account.IsSuperAdmin, ClassID: scope.ClassID, Grade: scope.Grade,
 	})
 	if err != nil {
 		writeImportError(c, err)
@@ -1172,6 +1171,18 @@ func (h *handler) uploadAttendanceImport(c *gin.Context) {
 		return
 	}
 	scope := inspectionScopeFromForm(c)
+	attributionMode := strings.TrimSpace(c.PostForm("attributionMode"))
+	if requester.IsSuperAdmin {
+		if scope.DepartmentID != "" || (attributionMode != "" && attributionMode != inspection.AttributionModeAdministrator) {
+			writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "管理员导入不选择部门归属")
+			return
+		}
+		attributionMode = inspection.AttributionModeAdministrator
+	}
+	if attributionMode == inspection.AttributionModeAdministrator && (!requester.IsSuperAdmin || scope.DepartmentID != "") {
+		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "管理员独立记录仅可由系统超级管理员录入，且不能选择部门归属")
+		return
+	}
 	departmentID, err := inspection.ResolveEntryDepartment(inspection.ManualActor{ID: requester.ID, IsSuperAdmin: requester.IsSuperAdmin, IsMember: requester.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: requester.PrimaryDepartmentID}, scope.DepartmentID)
 	if err != nil {
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "当前账号无有效录入部门或不能选择其他部门")
@@ -1215,7 +1226,7 @@ func (h *handler) uploadAttendanceImport(c *gin.Context) {
 		return
 	}
 	batch, err := h.importJobs.CreateBatch(c, importjob.CreateBatchInput{
-		InspectionTypeID: scope.InspectionTypeID, SemesterID: scope.SemesterID, WeekID: scope.WeekID, DepartmentID: scope.DepartmentID,
+		InspectionTypeID: scope.InspectionTypeID, SemesterID: scope.SemesterID, WeekID: scope.WeekID, DepartmentID: scope.DepartmentID, AttributionMode: attributionMode,
 		ClassID: scope.ClassID, Grade: scope.Grade,
 		SourceFile: stored, TemplateID: c.PostForm("templateId"), TemplateVersion: templateVersion, CreatedBy: account.ID,
 	})
@@ -1271,7 +1282,7 @@ func (h *handler) confirmImportBatch(c *gin.Context) {
 	result, err := h.importJobs.ConfirmBatch(c, importjob.ConfirmBatchInput{
 		BatchID: batch.ID, ExpectedVersion: input.Version, IdempotencyKey: c.GetHeader("Idempotency-Key"),
 		Scope: importjob.ConfirmScope{SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID,
-			DepartmentID: batch.DepartmentID, ClassID: batch.ClassID, Grade: batch.Grade, ActorID: account.ID},
+			DepartmentID: batch.DepartmentID, AttributionMode: batch.AttributionMode, ClassID: batch.ClassID, Grade: batch.Grade, ActorID: account.ID},
 		AuditMetadata: requestMetadata(c, ""),
 	})
 	if err != nil {
@@ -1371,6 +1382,10 @@ func (h *handler) authorizedBatch(c *gin.Context, action string) (auth.Account, 
 	scope := permission.Scope{SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID, DepartmentID: batch.DepartmentID, ClassID: batch.ClassID, Grade: batch.Grade}
 	if account.IsSuperAdmin {
 		return account, batch, true
+	}
+	if batch.AttributionMode == inspection.AttributionModeAdministrator && batch.CreatedBy != account.ID {
+		writeInspectionForbidden(c, true)
+		return auth.Account{}, importjob.Batch{}, false
 	}
 	if h.permission == nil {
 		writeInspectionForbidden(c, true)
@@ -1527,52 +1542,6 @@ func (h *handler) requireAction(action string) gin.HandlerFunc {
 			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
 			c.Abort()
 			return
-		}
-		c.Set("account", a)
-		c.Next()
-	}
-}
-
-func (h *handler) requireHygieneAreaManage() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		a, ok := h.currentAccount(c)
-		if !ok {
-			c.Abort()
-			return
-		}
-		if a.MustChangePassword {
-			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
-			c.Abort()
-			return
-		}
-		if h.masterData == nil {
-			writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "基础数据服务尚未就绪")
-			c.Abort()
-			return
-		}
-		typeID, err := h.masterData.HygieneAreaInspectionScope(c, c.Param("kind"), c.Query("departmentId"))
-		if errors.Is(err, masterdata.ErrInvalidKind) || errors.Is(err, masterdata.ErrInvalidRelation) {
-			writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "区域类型或目标部门无效")
-			c.Abort()
-			return
-		}
-		if err != nil {
-			writeResult(c, nil, err)
-			c.Abort()
-			return
-		}
-		if !a.IsSuperAdmin {
-			if h.permission == nil {
-				writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
-				c.Abort()
-				return
-			}
-			effective, effectiveErr := h.permission.Effective(c, a.ID)
-			if effectiveErr != nil || !effective.Allowed(permission.ActionMasterDataManage, permission.Scope{DepartmentID: c.Query("departmentId"), InspectionTypeID: typeID}) {
-				writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
-				c.Abort()
-				return
-			}
 		}
 		c.Set("account", a)
 		c.Next()

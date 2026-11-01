@@ -34,14 +34,19 @@ func TestReadyRequiresCurrentSchema(t *testing.T) {
 		t.Fatalf("read migrations: %v (files=%d)", err, len(files))
 	}
 	for _, f := range files {
-		if filepath.Base(f) == "016_department_submissions.sql" {
+		if filepath.Base(f) == "037_daily_inspection_adjustments.sql" {
 			if db.Ready(ctx) == nil {
-				t.Fatal("schema missing department workflow reports ready")
+				t.Fatal("schema missing daily inspection adjustments reports ready")
 			}
 			_, readErr := db.GetInspection(ctx, "00000000-0000-4000-8000-000000000016", inspection.MutationAccess{Unrestricted: true})
 			var pgErr *pgconn.PgError
-			if !errors.As(readErr, &pgErr) || pgErr.Code != "42P01" {
-				t.Fatalf("pre-016 generic inspection read should expose missing relation: %v", readErr)
+			if !errors.As(readErr, &pgErr) || pgErr.Code != "42703" {
+				t.Fatalf("pre-037 inspection read should expose missing attribution column: %v", readErr)
+			}
+		}
+		if filepath.Base(f) == "016_department_submissions.sql" {
+			if db.Ready(ctx) == nil {
+				t.Fatal("schema missing department workflow reports ready")
 			}
 		}
 		if filepath.Base(f) == "017_department_submission_revision_immutability.sql" && db.Ready(ctx) == nil {

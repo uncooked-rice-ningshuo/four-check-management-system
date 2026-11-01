@@ -3,6 +3,7 @@ export type InspectionContext = {
   weekId: string
   inspectionTypeId: string
   departmentId: string
+  attributionMode?: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR'
   classId?: string
   grade?: string
 }
@@ -12,7 +13,9 @@ export type AttendanceRecord = {
   weekId?: string
   inspectionTypeId?: string
   departmentId?: string
+  attributionMode?: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR'
   createdBy?: string
+  submitterName?: string
   importBatchId?: string
   id: string
   studentNo: string

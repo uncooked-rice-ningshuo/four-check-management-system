@@ -39,13 +39,13 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypeDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitory-objects" && q.Kind != "reason-codes" {
+	if scope.TypeCode == inspection.InspectionTypeDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitory-objects" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypeClassroomHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classroom-objects" && q.Kind != "classroom-areas" && q.Kind != "reason-codes" {
+	if scope.TypeCode == inspection.InspectionTypeClassroomHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classroom-objects" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypePublicDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "public-areas" && q.Kind != "responsible-dormitories" && q.Kind != "reason-codes" {
+	if scope.TypeCode == inspection.InspectionTypePublicDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "responsible-dormitories" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
 	owner := a.ActorID
@@ -76,7 +76,8 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	base := ` FROM classes c JOIN grades g ON g.id=c.grade_id
  JOIN semesters sem ON sem.id=$1::uuid
  CROSS JOIN LATERAL (SELECT c.id AS id,c.id AS class_id,g.name AS grade_snapshot,
- $1::uuid AS semester_id,$2::uuid AS week_id,$3::uuid AS inspection_type_id,NULLIF($4,'')::uuid AS department_id,$5::uuid AS created_by) ir `
+ $1::uuid AS semester_id,$2::uuid AS week_id,$3::uuid AS inspection_type_id,NULLIF($4,'')::uuid AS department_id,
+ CASE WHEN NULLIF($4,'') IS NULL THEN 'COLLEGE' ELSE 'DEPARTMENT' END AS attribution_mode,$5::uuid AS created_by) ir `
 	where := ` WHERE c.enabled AND g.enabled AND ` + guard
 	if q.ClassID != "" {
 		args = append(args, q.ClassID)
@@ -117,8 +118,8 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		base += " CROSS JOIN dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
 		where += " AND d.enabled AND b.enabled AND da.enabled"
 		columns = "d.id,da.name || ' ' || b.name || ' ' || d.room_no AS label"
-	case "reason-codes":
-		args = append(args, scope.TypeCode+"_REASON")
+	case "situation-snippets":
+		args = append(args, scope.TypeCode+"_SITUATION_SNIPPET")
 		base += fmt.Sprintf(" JOIN dictionary_types dt ON dt.code=$%d JOIN dictionary_items di ON di.type_id=dt.id ", len(args))
 		where += " AND dt.enabled AND di.enabled"
 		columns = "di.value AS id,di.label AS label,di.sort_order AS order_hint"
@@ -126,19 +127,9 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		base += " CROSS JOIN classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id "
 		where += " AND cr.enabled AND b.enabled"
 		columns = "cr.id,b.name || ' ' || cr.room_no AS label"
-	case "classroom-areas":
-		args = append(args, q.ClassroomID)
-		base += fmt.Sprintf(" JOIN classroom_hygiene_areas ar ON ar.classroom_id=$%d::uuid JOIN classrooms cr ON cr.id=ar.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id ", len(args))
-		where += " AND ar.enabled AND cr.enabled AND b.enabled"
-		columns = "ar.id,b.name || ' ' || cr.room_no || ' / ' || ar.name AS label"
-	case "public-areas":
-		base += " CROSS JOIN public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
-		where += " AND ar.enabled AND b.enabled AND da.enabled"
-		columns = "ar.id,da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name AS label"
 	case "responsible-dormitories":
-		args = append(args, q.AreaID)
-		base += fmt.Sprintf(" JOIN public_dormitory_hygiene_areas ar ON ar.id=$%d::uuid JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id JOIN dormitories d ON d.dormitory_building_id=b.id ", len(args))
-		where += " AND ar.enabled AND b.enabled AND da.enabled AND d.enabled"
+		base += " JOIN dormitories d ON true JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
+		where += " AND d.enabled AND b.enabled AND da.enabled"
 		columns = "d.id,da.name || ' ' || b.name || ' ' || d.room_no AS label"
 	default:
 		return result, inspection.ErrInspectionRequest
@@ -149,7 +140,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	}
 	listQuery := selection
 	orderBy := "label,id"
-	if q.Kind == "reason-codes" {
+	if q.Kind == "situation-snippets" {
 		listQuery = "SELECT id,label,order_hint FROM (" + selection + ") options"
 		orderBy = "order_hint,id"
 	}
@@ -160,7 +151,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	}
 	for rows.Next() {
 		var option inspection.EntryOption
-		if q.Kind == "reason-codes" {
+		if q.Kind == "situation-snippets" {
 			var orderHint int
 			err = rows.Scan(&option.ID, &option.Label, &orderHint)
 		} else {

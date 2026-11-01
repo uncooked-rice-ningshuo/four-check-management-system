@@ -30,6 +30,11 @@ func (f *fakeAttendanceReferenceRepository) FindExistingAttendanceKeys(_ context
 	return f.existing, f.existingErr
 }
 
+func (f *fakeAttendanceReferenceRepository) FindExistingDailyInspectionDuplicates(_ context.Context, scope AttendanceImportScope, candidates []InspectionDuplicateCandidate) (map[string]struct{}, error) {
+	f.existingCalls++
+	return f.existing, f.existingErr
+}
+
 func validAttendanceReferences() AttendanceReferences {
 	multiplier := 1
 	return AttendanceReferences{

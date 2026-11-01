@@ -109,7 +109,7 @@ func (s *importHTTPStub) CreateBatch(_ context.Context, input importjob.CreateBa
 	if s.createErr != nil {
 		return importjob.Batch{}, s.createErr
 	}
-	s.batch = importjob.Batch{ID: "batch-1", InspectionTypeID: input.InspectionTypeID, SemesterID: input.SemesterID, WeekID: input.WeekID, DepartmentID: input.DepartmentID, ClassID: input.ClassID, Grade: input.Grade, OriginalFileID: input.SourceFile.ID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Status: importjob.BatchStatusUploaded, Version: 1, CreatedBy: input.CreatedBy}
+	s.batch = importjob.Batch{ID: "batch-1", InspectionTypeID: input.InspectionTypeID, SemesterID: input.SemesterID, WeekID: input.WeekID, DepartmentID: input.DepartmentID, AttributionMode: input.AttributionMode, ClassID: input.ClassID, Grade: input.Grade, OriginalFileID: input.SourceFile.ID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Status: importjob.BatchStatusUploaded, Version: 1, CreatedBy: input.CreatedBy}
 	return s.batch, nil
 }
 func (s *importHTTPStub) ParseBatch(_ context.Context, input importjob.ParseBatchInput) (importjob.Batch, error) {
@@ -419,6 +419,48 @@ func TestMemberUploadUsesTrustedDepartment(t *testing.T) {
 	}
 	if result := upload(""); result.Code != 201 || imports.batch.DepartmentID != "10000000-0000-0000-0000-000000000002" {
 		t.Fatalf("member import department: %d %s %+v", result.Code, result.Body.String(), imports.batch)
+	}
+}
+
+func TestSuperAdminImportUsesIndependentAttributionAndRejectsDepartmentTarget(t *testing.T) {
+	router, token, imports, _ := attendanceRouterWithRole(t, true, true)
+	upload := func(departmentID, attributionMode string) *httptest.ResponseRecorder {
+		t.Helper()
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		for key, value := range map[string]string{
+			"semesterId": "semester-1", "weekId": "week-1", "inspectionTypeId": "type-attendance",
+			"departmentId": departmentID, "attributionMode": attributionMode, "templateId": "template-1", "templateVersion": "1",
+		} {
+			if err := writer.WriteField(key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		part, err := writer.CreateFormFile("file", "attendance.xlsx")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("small-xlsx")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/imports/attendance", &body)
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	if response := upload("", "ADMINISTRATOR"); response.Code != http.StatusCreated || imports.batch.DepartmentID != "" || imports.batch.AttributionMode != inspection.AttributionModeAdministrator {
+		t.Fatalf("administrator import attribution=%d %s batch=%+v", response.Code, response.Body.String(), imports.batch)
+	}
+	if response := upload("10000000-0000-0000-0000-000000000002", "ADMINISTRATOR"); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "FORBIDDEN_SCOPE") {
+		t.Fatalf("administrator selected a target department: %d %s", response.Code, response.Body.String())
+	}
+	if response := upload("", "COLLEGE"); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "FORBIDDEN_SCOPE") {
+		t.Fatalf("administrator selected legacy college attribution: %d %s", response.Code, response.Body.String())
 	}
 }
 

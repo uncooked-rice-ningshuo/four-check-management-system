@@ -360,8 +360,14 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 	if f.Sort == inspection.SortOccurredAtAscending {
 		direction = "ASC"
 	}
+	orderBy := `COALESCE(ir.occurred_at,ir.inspection_date::timestamp AT TIME ZONE 'Asia/Shanghai') ` + direction + `,ir.id ` + direction
+	if f.Sort == inspection.SortStudentNoAscending {
+		orderBy = `COALESCE(NULLIF(ir.student_no_snapshot,''),(SELECT COALESCE(MIN(rs.student_no_snapshot),'') FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id)) ASC,ir.id ASC`
+	} else if f.Sort == inspection.SortStudentNoDescending {
+		orderBy = `COALESCE(NULLIF(ir.student_no_snapshot,''),(SELECT COALESCE(MIN(rs.student_no_snapshot),'') FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id)) DESC,ir.id DESC`
+	}
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
-	rows, err := tx.Query(ctx, `SELECT ir.id,COALESCE((SELECT MIN(r.row_no) FROM import_rows r WHERE r.record_id=ir.id),0)`+inspectionFrom+where+` ORDER BY COALESCE(ir.occurred_at,ir.inspection_date::timestamp AT TIME ZONE 'Asia/Shanghai') `+direction+`,ir.id `+direction+fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
+	rows, err := tx.Query(ctx, `SELECT ir.id,COALESCE((SELECT MIN(r.row_no) FROM import_rows r WHERE r.record_id=ir.id),0)`+inspectionFrom+where+` ORDER BY `+orderBy+fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
 	if err != nil {
 		return result, err
 	}

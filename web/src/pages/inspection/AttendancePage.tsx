@@ -15,7 +15,7 @@ import { canMutateAttendance } from '../../features/attendance/hooks/canMutateAt
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
 import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { ApiError } from '../../shared/api/httpClient'
 
 type AttendanceSearchValues = {
@@ -27,6 +27,7 @@ type AttendanceSearchValues = {
 	keyword?: string
 	status?: AttendanceFilters['status']
 	source?: AttendanceFilters['source']
+	sort?: AttendanceFilters['sort']
 }
 
 const statusLabels: Record<NonNullable<AttendanceFilters['status']>, string> = {
@@ -55,10 +56,15 @@ export function AttendancePage() {
 	const [manualOpen, setManualOpen] = useState(false)
 	const form = useRef<ProFormInstance>(undefined)
 	const [draftSemester, setDraftSemester] = useState<string>()
+	const [selectedGrade, setSelectedGrade] = useState<string>()
 	const [semesterChangeRevision, setSemesterChangeRevision] = useState(0)
 	useEffect(() => {
 		if (semesterChangeRevision > 0) form.current?.setFieldValue('weekId', undefined)
 	}, [semesterChangeRevision])
+	const [gradeChangeRevision, setGradeChangeRevision] = useState(0)
+	useEffect(() => {
+		if (gradeChangeRevision > 0) form.current?.setFieldValue('classId', undefined)
+	}, [gradeChangeRevision])
   const [editId, setEditId] = useState<string>()
   const [deleting, setDeleting] = useState<AttendanceRecord[]>([])
   const [selection, setSelection] = useState<AttendanceRecord[]>([])
@@ -94,7 +100,7 @@ export function AttendancePage() {
 		keyword: search.get('keyword') ?? '',
 		status: optionalStatus(search.get('status')),
 		source: optionalSource(search.get('source')),
-		sort: 'occurredAtDesc',
+		sort: optionalSort(search.get('sort')) ?? 'occurredAtDesc',
 		page,
 		pageSize,
 	}
@@ -111,7 +117,6 @@ export function AttendancePage() {
 	const replaceSearch = (values: AttendanceSearchValues, nextPage = 1, nextPageSize = pageSize) => {
 		setSelection([])
 		const next = new URLSearchParams(search)
-		next.delete('sort')
 		const entries: Record<keyof AttendanceSearchValues, string | undefined> = {
 			semesterId: values.semesterId,
 			weekId: values.weekId,
@@ -121,6 +126,7 @@ export function AttendancePage() {
 			keyword: values.keyword?.trim(),
 			status: values.status,
 			source: values.source,
+			sort: values.sort,
 		}
 		Object.entries(entries).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
 		next.set('page', String(nextPage))
@@ -136,22 +142,28 @@ export function AttendancePage() {
 		keyword: filters.keyword,
 		status: filters.status,
 		source: filters.source,
+		sort: filters.sort,
 	}
+
 	const columns = useMemo<ProColumns<AttendanceRecord>[]>(() => {
 		const semesterOptions = options?.semesters.map(item => ({ id: item.id, label: item.name })) ?? []
 		const currentFilterSemester = draftSemester === undefined ? semesterId : draftSemester
+		const currentFilterGrade = selectedGrade === undefined ? grade : selectedGrade
 		const weekOptions = options?.weeks.filter(week => week.semesterId === currentFilterSemester).map(item => ({ id: item.id, label: `第 ${item.weekNo} 周` })) ?? []
 		const filters = createInspectionFilterColumns<AttendanceRecord>({
 			semesters: semesterOptions,
 			weeks: weekOptions,
 			departments: options?.departments.map(item => ({ id: item.id, label: item.name })) ?? [],
 			grades: options?.grades.map(item => ({ id: item, label: gradeLabel(item) })) ?? [],
-			classes: options?.classes.map(item => ({ id: item.id, label: item.name })) ?? [],
+			classes: options?.classes.map(item => ({ id: item.id, label: item.name, grade: item.grade })) ?? [],
 			selectedSemesterId: currentFilterSemester,
 			onSemesterChange: value => { setDraftSemester(value ?? ''); setSemesterChangeRevision(revision => revision + 1) },
+			selectedGrade: currentFilterGrade,
+			onGradeChange: value => { setSelectedGrade(value ?? ''); setGradeChangeRevision(revision => revision + 1) },
 		})
 		const result: ProColumns<AttendanceRecord>[] = [
 			...filters,
+			createInspectionSortColumn<AttendanceRecord>(),
 			{ title: '学号', dataIndex: 'studentNo', width: 140, search: false, copyable: true },
 			{ title: '姓名', dataIndex: 'studentName', width: 110, search: false },
 			{ title: '年级', dataIndex: 'grade', width: 90, search: false, renderText: value => value ? gradeLabel(String(value)) : '—' },
@@ -166,7 +178,7 @@ export function AttendancePage() {
 		]
 		if (user?.isSuperAdmin) result.push({ title: '记录归属', key: 'attribution', width: 160, search: false, render: (_, record) => attributionLabel(record.attributionMode, record.departmentId, options?.departments.find(item => item.id === record.departmentId)?.name) })
 		return result
-	}, [draftSemester, options, semesterId, user?.isSuperAdmin])
+	}, [draftSemester, grade, options, selectedGrade, semesterId, user?.isSuperAdmin])
 
 	const updateImportBatchId = (batchId?: string) => {
 		navigate(`${location.pathname}${location.search}`, { replace: true, state: { ...(location.state ?? {}), importBatchId: batchId } })
@@ -195,7 +207,7 @@ export function AttendancePage() {
 			formRef={form}
 			form={{ initialValues: searchValues }}
 			onSubmit={values => { replaceSearch({ ...searchValues, ...values }); setDraftSemester(undefined) }}
-			onReset={() => { replaceSearch({ semesterId, weekId }); setDraftSemester(undefined) }}
+			onReset={() => { setSelectedGrade(''); replaceSearch({ semesterId, weekId }); setDraftSemester(undefined) }}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
 			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
@@ -239,4 +251,8 @@ function optionalStatus(value: string | null): AttendanceFilters['status'] {
 
 function optionalSource(value: string | null): AttendanceFilters['source'] {
 	return value && value in sourceLabels ? value as AttendanceFilters['source'] : undefined
+}
+
+function optionalSort(value: string | null): AttendanceFilters['sort'] {
+	return value && ['occurredAtDesc', 'occurredAtAsc', 'studentNoAsc', 'studentNoDesc'].includes(value) ? value as AttendanceFilters['sort'] : undefined
 }

@@ -8,7 +8,7 @@ import type { PublicDormitoryHygieneRecord } from '../../entities/inspection/mod
 import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
 import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
@@ -24,6 +24,7 @@ export function PublicDormitoryHygienePage() {
  const [importing,setImporting]=useState(!!importBatchId)
  const setImportBatchId=(id?:string)=>navigate(location.pathname+location.search,{replace:true,state:{...location.state,importBatchId:id}})
  const form=useRef<ProFormInstance>(undefined)
+ const [selectedGrade,setSelectedGrade]=useState<string>()
  const [creating,setCreating]=useState(false)
  const [panel,setPanel]=useState<{id:string;mode:'detail'|'edit'}>()
  const [deleting,setDeleting]=useState<PublicDormitoryHygieneRecord[]>([])
@@ -37,6 +38,10 @@ export function PublicDormitoryHygienePage() {
  useEffect(()=>{
   if(previousFilterSemester.current!==scope.optionSemesterId){previousFilterSemester.current=scope.optionSemesterId;form.current?.setFieldValue('weekId',undefined)}
  },[scope.optionSemesterId])
+ const previousFilterGrade=useRef(selectedGrade)
+ useEffect(()=>{
+  if(previousFilterGrade.current!==selectedGrade){previousFilterGrade.current=selectedGrade;form.current?.setFieldValue('classId',undefined)}
+ },[selectedGrade])
  const departments=useInspectionContext({purpose:'view',kind:'departments'})
  const classes=useInspectionContext({purpose:'view',kind:'classes'})
  const grades=useInspectionContext({purpose:'view',kind:'grades'})
@@ -47,16 +52,20 @@ export function PublicDormitoryHygienePage() {
  const selections=(records.data?.items??[]).filter(record=>selected.includes(record.id)&&record.canEdit)
  const optionQueries=[scope.currentWeek,semesters,weeks,departments,classes,grades]
  const optionError=optionQueries.some(query=>query.isError)
+ const gradeFilter=selectedGrade===undefined?String(filters.grade??''):selectedGrade
  const columns:ProColumns<PublicDormitoryHygieneRecord>[]=[
   ...createInspectionFilterColumns<PublicDormitoryHygieneRecord>({
    semesters:(semesters.data?.items??[]).map(item=>({id:item.id,label:item.label})),
    weeks:(weeks.data?.items??[]).map(item=>({id:item.id,label:item.label})),
    departments:(departments.data?.items??[]).map(item=>({id:item.id,label:item.label})),
    grades:(grades.data?.items??[]).map(item=>({id:item.id,label:item.label})),
-   classes:(classes.data?.items??[]).map(item=>({id:item.id,label:item.label})),
+   classes:(classes.data?.items??[]).map(item=>({id:item.id,label:item.label,grade:item.grade})),
    selectedSemesterId:scope.optionSemesterId,
    onSemesterChange:value=>setDraftSemester(value??''),
+   selectedGrade:gradeFilter,
+   onGradeChange:value=>setSelectedGrade(value??''),
   }),
+  createInspectionSortColumn<PublicDormitoryHygieneRecord>(),
   {title:'检查日期',key:'date',search:false,width:160,render:(_,record)=>record.details.date},
   {title:'检查结果',key:'result',search:false,width:100,render:(_,record)=>results[record.details.result]},
   {title:'责任班级',key:'responsibleClasses',search:false,width:220,render:(_,record)=>record.responsibleClasses.map(item=>item.label).join('、')},
@@ -75,7 +84,7 @@ const displayColumns=attributionColumn?[...columns.slice(0,-1),attributionColumn
  {optionError&&<Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={()=>optionQueries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
  <ProTable<PublicDormitoryHygieneRecord> key={`${semesterId??''}-${weekId??''}`} className="attendance-records-table" cardBordered rowKey="id" columns={displayColumns} dataSource={records.isError?[]:records.data?.items??[]} loading={records.isLoading||semesters.isLoading||scope.currentWeek.isLoading}
  headerTitle={<Space size={10}><span>公共宿舍卫生记录</span><Tag color="blue">共 {records.data?.total??0} 条</Tag></Space>}
- formRef={form} form={{initialValues:filters}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{saveFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{saveFilters({page:1,pageSize:20});setSelected([])}}
+ formRef={form} form={{initialValues:filters}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{saveFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{setSelectedGrade('');saveFilters({page:1,pageSize:20});setSelected([])}}
  scroll={{x:1700}} pagination={{current:Number(filters.page),pageSize:Number(filters.pageSize),total:records.data?.total??0,showSizeChanger:true,showQuickJumper:true,showTotal:total=>`共 ${total} 条`,onChange:(page,pageSize)=>{saveFilters({...filters,page,pageSize});setSelected([])}}}
  rowSelection={{selectedRowKeys:selected,onChange:setSelected,getCheckboxProps:record=>({disabled:!record.canEdit})}}
  locale={{emptyText:invalidSelection?'所选学期或周次不可用':records.isError?<Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={()=>void records.refetch()}>重试</Button>}/>:optionError?'请先恢复筛选选项加载':<Empty description={scope.currentWeek.data?.week===null?'当前没有有效教学周，请选择学期和周次':'当前范围暂无公共宿舍卫生记录'}/>}}

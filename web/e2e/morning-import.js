@@ -36,7 +36,7 @@ async (page) => {
   await fresh()
   await page.getByText('当前范围暂无早锻炼/早签记录', { exact: true }).waitFor()
   let drawer = await openImport(true)
-  await select(drawer, '导入目标部门', '体育部')
+  await select(drawer, '导入目标部门', '文体部')
   const [download] = await Promise.all([page.waitForEvent('download'), drawer.getByRole('button', { name: '下载标准模板' }).click()])
   await download.saveAs(`${output}/downloaded-template.xlsx`)
   check(download.suggestedFilename().endsWith('.xlsx'), 'Wrong download filename')
@@ -127,7 +127,7 @@ async (page) => {
   await page.getByText('当前范围暂无早锻炼/早签记录', { exact: true }).waitFor()
   cases.push('列表批次入口、整批二次确认、必填原因、500保留重试、成功后批次与列表缓存同步')
   drawer = await openImport(true)
-  await select(drawer, '导入目标部门', '体育部')
+  await select(drawer, '导入目标部门', '文体部')
   await drawer.locator('input[type=file]').setInputFiles(fixture.validFile)
   const uploaded = await response('POST', '/api/v1/imports/inspections', () => drawer.getByRole('button', { name: '上传并生成预览' }).click(), 201)
   const second = await uploaded.json()
@@ -186,7 +186,7 @@ async (page) => {
   const draftRow = page.locator(`tr[data-row-key="${remainingDraftId}"]`)
   await page.getByRole('button', { name: '提交记录' }).click()
   const cart = page.getByRole('dialog', { name: '提交检查记录' })
-  for (const [label, text] of [['提交学期', '浏览器回归学期'], ['提交周次', fixture.weekStart], ['提交归属', '体育部']]) {
+  for (const [label, text] of [['提交学期', '浏览器回归学期'], ['提交周次', fixture.weekStart], ['提交归属', '文体部']]) {
     await cart.getByRole('combobox', { name: label }).click()
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: text }).first().click()
   }

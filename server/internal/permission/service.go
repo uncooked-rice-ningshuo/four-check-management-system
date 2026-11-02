@@ -208,7 +208,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	}
 	leadership := profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER"
 	if profile.DepartmentCode == "SPORTS" && leadership {
-		result.Permissions = append(result.Permissions, allow(ActionMorningScheduleManage, Scope{}, Source{Type: SourceOrganizationRole, Label: "体育部部长/副部长早签计划管理"}))
+		result.Permissions = append(result.Permissions, allow(ActionMorningScheduleManage, Scope{}, Source{Type: SourceOrganizationRole, Label: "文体部部长/副部长早签计划管理"}))
 	}
 	for _, mapping := range profile.DepartmentScopes {
 		if !mapping.Enabled || mapping.DepartmentID != profile.DepartmentID {

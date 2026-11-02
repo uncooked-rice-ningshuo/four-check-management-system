@@ -28,7 +28,8 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
   const weeks = useInspectionContext({ purpose: 'entry', recordId, kind: 'weeks', semesterId }, !!semesterId)
   const departments = useInspectionContext({ purpose: 'entry', recordId, kind: 'departments', semesterId, weekId }, !!semesterId && !!weekId)
   const scope = { semesterId, weekId, departmentId, inspectionTypeId, recordId }
-  const ready = !!semesterId && !!weekId && (isSuperAdmin || !!departmentId)
+  const departmentReady = isSuperAdmin || (!!departmentId && (!!editing || departments.data?.items.some(item => item.id === departmentId)))
+  const ready = !!semesterId && !!weekId && departmentReady
   const classes = useInspectionEntryOptions({ ...scope, kind: 'classes' }, ready)
   const students = useResponsibleStudentOptions(scope, classIds, ready)
   const dormitories = useInspectionEntryOptions({ ...scope, kind: 'responsible-dormitories', classId: primaryClassId }, ready && !!primaryClassId)
@@ -36,17 +37,21 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
   const coreQueries = [semesters, weeks, departments, classes, students, dormitories]
   const failed = coreQueries.some(query => query.isError)
   const clear = (names: (keyof Values)[]) => form.setFields(names.map(name => ({ name, value: undefined, errors: [] })))
-  // The default destination is only a suggestion: members never receive the
-  // college option, so fall back to the first authorized department instead of
-  // leaving an option id the select cannot render.
+  // Keep the college default only when it is an authorized option. Never infer
+  // a different department from list order; a blank required field makes the
+  // user choose the intended record attribution explicitly.
   useEffect(() => {
-    if (editing || isSuperAdmin) return
+    if (editing || isSuperAdmin || memberEntry) return
     const items = departments.data?.items
-    if (!items?.length) return
+    if (!items) return
     const current = form.getFieldValue('departmentId')
     if (current && items.some(item => item.id === current)) return
-    form.setFieldValue('departmentId', items[0].id)
-  }, [departments.data?.items, editing, form, isSuperAdmin])
+    if (items.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID)) {
+      form.setFieldValue('departmentId', COLLEGE_DEPARTMENT_OPTION_ID)
+    } else if (current) {
+      form.setFieldValue('departmentId', undefined)
+    }
+  }, [departments.data?.items, editing, form, isSuperAdmin, memberEntry])
   const insertSnippet = (text: string) => {
     form.setFieldValue('description', appendHygieneSituationSnippet(form.getFieldValue('description'), text))
   }
@@ -73,7 +78,7 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
       initialValues={editing ? { semesterId: editing.semesterId, weekId: editing.weekId, departmentId: initialDepartmentId, responsibleDormitoryIds: editing.details.responsibleDormitoryIds?.slice(0, 1) ?? editing.responsibleDormitories.slice(0, 1).map(item => item.id), date: editing.details.date, result: editing.details.result, responsibleClassIds: editing.details.responsibleClassIds.slice(0, 1), responsibleStudentIds: editing.details.responsibleStudentIds?.slice(0, 1) ?? [], description: editing.details.description ?? '', remark: editing.details.remark ?? '' } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: initialDepartmentId, result: 'QUALIFIED', responsibleDormitoryIds: [], responsibleClassIds: [], responsibleStudentIds: [] }}>
       <Row gutter={16}>
         <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => clear(semesterClear)} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => clear(['departmentId', 'responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
         {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><Typography.Text type="secondary">{editing ? (editing.attributionMode === 'ADMINISTRATOR' ? '此记录归属管理员独立数据' : '修改将保留原记录归属部门') : '本次记录归属管理员，不需要选择目标部门'}</Typography.Text></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>}
         <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任班级" rules={required}><Select mode="multiple" maxCount={1} disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={choices(classes.data, editing?.responsibleClasses)} onChange={() => clear(['responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleDormitoryIds" label="责任寝室" rules={required}><Select mode="multiple" maxCount={1} disabled={!primaryClassId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, dormitoryFallback)} /></Form.Item></Col>

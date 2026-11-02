@@ -13,7 +13,9 @@ export function LoginPage() {
   const finishLogin = (user: User) => {
     const from = (location.state as { from?: string })?.from
     const canReturn = from && from !== '/' && from !== '/change-password'
-    navigate(user.mustChangePassword ? '/change-password' : canReturn ? from : '/', { replace: true })
+    // 会话过期后被送回登录页的账号未必有权访问原页面（同一台机器可能换了账号），
+    // 因此标记这次返回，让路由守卫在无权时改去工作台而不是停在 403 死胡同。
+    navigate(user.mustChangePassword ? '/change-password' : canReturn ? from : '/', { replace: true, state: canReturn ? { fromLogin: true } : undefined })
   }
   const retryRecovery = async () => {
     if (loading || submitting) return

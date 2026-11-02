@@ -27,7 +27,7 @@ it('loads this week’s planned days, allows editing, and saves the explicit dat
   renderDialog()
   const monday = await screen.findByRole('checkbox', { name: /2026-11-02.*周一/ })
   expect(monday).toBeChecked()
-  expect(screen.getByText(/手工录入校验，Excel 导入始终按本周默认工作日校验/)).toBeInTheDocument()
+  expect(screen.getByText(/手工录入校验，Excel 导入始终按默认工作日校验/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('checkbox', { name: /2026-11-03.*周二/ }))
   fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
   await waitFor(() => expect(scheduleApi.save).toHaveBeenCalledWith('week', 2, ['2026-11-02', '2026-11-04', '2026-11-05', '2026-11-06']))

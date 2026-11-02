@@ -77,7 +77,7 @@ export function AcademicWeekImportDrawer({ open, calendar, onClose }: AcademicWe
   ]
 
   const chooseFile = (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+    if (!/\.xlsx$/i.test(file.name)) {
       setSelectedFile(undefined)
       setBatch(undefined)
       setFileError('仅支持无宏的 .xlsx 文件')

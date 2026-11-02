@@ -12,3 +12,12 @@ coverage/
 .pnpm-store/
 
 output/
+
+.agents/
+.claude/
+.kiro/
+.qoder/
+.hermes/
+.codex/
+.gemini/
+.opencode/

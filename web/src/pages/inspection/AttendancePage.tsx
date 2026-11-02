@@ -181,7 +181,6 @@ export function AttendancePage() {
 		</div>
 		{(permissions.isError || currentWeek.isError) && <Alert role="alert" type="error" showIcon title="无法加载权限或当前周次，请稍后重试" />}
 		{filterOptions.isError && <Alert role="alert" type="error" showIcon title="无法加载到课率筛选项，请稍后重试" />}
-		{listReady && records.isError && <Alert role="alert" type={error?.status === 403 ? 'warning' : 'error'} showIcon title={importErrorMessage(error?.code)} action={<Button onClick={() => records.refetch?.()}>重试</Button>} />}
 		<ProTable<AttendanceRecord, AttendanceSearchValues>
 			key={`${attendanceTypeId}-${departmentId}-${semesterId}-${weekId}`}
 			className="attendance-records-table"
@@ -201,7 +200,7 @@ export function AttendancePage() {
 			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
 			scroll={{ x: 1320 }}
-			locale={{ emptyText: <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}
+			locale={{ emptyText: records.isError ? <Alert role="alert" type={error?.status === 403 ? 'warning' : 'error'} showIcon title={importErrorMessage(error?.code)} action={<Button onClick={() => records.refetch?.()}>重试</Button>} /> : <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}
 		/>
 		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
 		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={() => setManualOpen(false)} />}

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render as testingRender, screen, within } from '@testing-library/react'
+import { fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppLayout } from '../../app/layouts/AppLayout'
@@ -112,6 +112,7 @@ describe('超级管理员页面', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter><AcademicCalendarPage /></MemoryRouter></QueryClientProvider>)
     const buttons = await screen.findAllByRole('button', { name: '新增学年' })
+    await waitFor(() => expect(buttons[0]).toBeEnabled())
     fireEvent.click(buttons[0])
     await screen.findByRole('dialog', { name: '新增学年' })
     await new Promise(resolve => setTimeout(resolve, 350))

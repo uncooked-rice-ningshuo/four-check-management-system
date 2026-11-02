@@ -203,9 +203,11 @@ describe('AttendancePage', () => {
     expect(screen.queryByRole('button', { name: '批量导入到课率' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新增记录' })).not.toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('无权访问当前学期、周次或部门的数据')
+    expect(screen.queryByText('当前范围暂无到课率记录')).not.toBeInTheDocument()
     recordsQuery.mockReturnValue({ error: new ApiError(409, 'VERSION_CONFLICT', 'conflict'), isError: true, isLoading: false })
     rerender(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
     expect(screen.getByRole('alert')).toHaveTextContent('数据已被其他人更新，请刷新后重试')
+    expect(screen.queryByText('当前范围暂无到课率记录')).not.toBeInTheDocument()
   })
 
 	it('reports permission and current-week context failures independently', () => {

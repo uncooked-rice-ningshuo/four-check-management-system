@@ -4,7 +4,7 @@ import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
-import { getMorningScheduleCalendar, updateAcademicYear } from '../../shared/api/adminApi'
+import { getAcademicCalendar, getMorningScheduleCalendar, updateAcademicYear } from '../../shared/api/adminApi'
 import { AcademicCalendarPage } from './AcademicCalendarPage'
 
 const accessState = vi.hoisted(() => ({
@@ -37,6 +37,16 @@ function setup() {
 }
 
 describe('学期周次交互', () => {
+  it('校历加载失败时提供重试，不显示未配置空状态', async () => {
+    vi.mocked(getAcademicCalendar).mockRejectedValueOnce(new Error('network unavailable'))
+    setup()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('学期周次加载失败')
+    expect(screen.queryByText('尚未配置学年和学期')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
+    expect(await screen.findByRole('tab', { name: '学年' })).toBeInTheDocument()
+  }, 30_000)
+
   it('创建弹窗关闭后首次编辑不会操作未挂载的校历表单', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
@@ -186,6 +196,22 @@ describe('学期周次交互', () => {
       expect(screen.queryByRole('tab', { name: '学年' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '新增学年' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '新增周次' })).not.toBeInTheDocument()
+    } finally {
+      accessState.isSuperAdmin = true
+      accessState.permissions = []
+    }
+  }, 30_000)
+
+  it('周次授权数据加载失败时可重试，且不会误报空周次', async () => {
+    accessState.isSuperAdmin = false
+    accessState.permissions = [{ action: 'MORNING_SCHEDULE_MANAGE', effect: 'ALLOW', scope: {}, sources: [] }]
+    vi.mocked(getMorningScheduleCalendar).mockRejectedValueOnce(new Error('network unavailable'))
+    try {
+      setup()
+      expect(await screen.findByRole('alert')).toHaveTextContent('周次加载失败')
+      expect(screen.queryByText('当前范围暂无')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
+      expect(await screen.findByRole('button', { name: '配置日期' })).toBeInTheDocument()
     } finally {
       accessState.isSuperAdmin = true
       accessState.permissions = []

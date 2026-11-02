@@ -7,17 +7,14 @@
 .submission-steps { margin: 0 0 36px; padding: 24px 0 0; }
 .submission-stage { display: flex; flex: 1; flex-direction: column; padding: 0 0 20px; }
 .submission-stage-heading { margin-bottom: 24px; }
-.submission-stage-heading h3 { margin: 0 0 6px; color: #1d2939; font-size: 18px; font-weight: 650; }
-.submission-stage-heading p { margin: 0; color: #667085; font-size: 13px; line-height: 1.6; }
-.submission-scope-grid { display: grid; width: min(100%, 560px); grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.submission-stage-heading .ant-typography { color: #1d2939; }
+.submission-stage-heading .ant-typography + .ant-typography { margin: 0; line-height: 1.6; }
+.submission-scope-grid { display: grid; width: min(100%, 720px); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 22px; }
 .submission-scope-grid label { display: grid; gap: 8px; color: #344054; font-size: 13px; font-weight: 600; }
 .submission-scope-grid .ant-select { width: 100%; min-height: 40px; font-weight: 400; }
 .submission-scope-summary { margin-bottom: 26px; padding: 12px 14px; border: 1px solid #e4e7ec; border-radius: 6px; background: #f9fafb; color: #667085; font-size: 13px; }
 .submission-scope-summary strong { margin-left: 10px; color: #344054; font-weight: 550; }
-.submission-tabs { display: inline-flex; align-self: flex-start; gap: 2px; margin-bottom: 20px; padding: 3px; border-radius: 6px; background: #f2f4f7; }
-.submission-tabs button { padding: 7px 14px; border: 0; border-radius: 4px; background: transparent; color: #526071; cursor: pointer; font-size: 13px; }
-.submission-tabs button.active { background: #fff; color: #1d2939; font-weight: 600; box-shadow: 0 1px 3px #1018281a; }
-.submission-tabs button:focus-visible { outline: 2px solid #2563a5; outline-offset: 2px; }
+.submission-tabs { align-self: flex-start; margin-bottom: 20px; }
 .submission-drawer .ant-table-wrapper { border: 1px solid #e4e7ec; border-radius: 6px; overflow: hidden; }
 .submission-drawer .ant-table-wrapper .ant-table-thead > tr > th { background: #f9fafb; color: #667085; font-size: 12px; font-weight: 600; }
 .submission-drawer .ant-table-wrapper .ant-table-thead > tr > th::before { display: none; }

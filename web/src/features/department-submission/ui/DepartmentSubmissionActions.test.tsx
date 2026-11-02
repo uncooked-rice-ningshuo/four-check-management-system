@@ -118,7 +118,7 @@ it('adds only eligible Excel batch records and shows changed records before subm
   fireEvent.click(screen.getByRole('button', { name: '提交记录' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '下一步：添加记录' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '下一步：添加记录' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Excel 批次' }))
+  fireEvent.click(screen.getByRole('radio', { name: 'Excel 批次' }))
   fireEvent.click(await screen.findByRole('button', { name: '添加整批可提交记录' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '下一步：核对清单' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '下一步：核对清单' }))
@@ -160,7 +160,7 @@ it('shows the imported record details in batch selection and final confirmation'
   fireEvent.click(screen.getByRole('button', { name: '提交记录' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '下一步：添加记录' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '下一步：添加记录' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Excel 批次' }))
+  fireEvent.click(screen.getByRole('radio', { name: 'Excel 批次' }))
   fireEvent.click(await screen.findByRole('button', { name: '查看记录' }))
   expect(await screen.findByText('线性代数')).toBeInTheDocument()
   expect(screen.getByText('10:00:00')).toBeInTheDocument()
@@ -183,7 +183,7 @@ it('labels a confirmed college batch as college confirmed', async () => {
   fireEvent.click(screen.getByRole('button', { name: '检查提交批次' }))
   fireEvent.click(await screen.findByRole('button', { name: '确认' }))
   fireEvent.click(await screen.findByRole('button', { name: '确认批次' }))
-  expect(await screen.findByText('批次状态：校级已确认')).toBeInTheDocument()
+  expect(await screen.findByText('批次状态：管理员已确认')).toBeInTheDocument()
 })
 
 it('does not describe a department batch with a missing name as college-level', async () => {

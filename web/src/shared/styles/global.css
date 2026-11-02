@@ -482,11 +482,11 @@ body {
 .admin-sider .ant-menu-item-icon {
   color: inherit !important;
   font-size: 17px;
-  transition: font-size 200ms ease, margin 300ms ease !important;
+  transition: color 160ms ease !important;
 }
 .admin-sider .ant-menu-title-content {
   color: inherit !important;
-  transition: opacity 300ms ease, margin 300ms ease !important;
+  transition: opacity 160ms ease !important;
 }
 .admin-sider .ant-menu-title-content a {
   color: inherit !important;
@@ -1310,17 +1310,16 @@ body {
   padding: 14px 16px;
   color: #24445f;
   border: 1px solid var(--brand-mist);
-  border-left: 4px solid var(--brand-primary);
   border-radius: 8px;
   background: #eff6ff;
 }
 .academic-rule-preview span {
-  color: #6c8795;
+  color: #52677a;
   font-size: 12px;
   letter-spacing: .08em;
 }
 .academic-rule-preview strong { font-size: 16px; }
-.academic-rule-preview small { color: #708594; }
+.academic-rule-preview small { color: #52677a; }
 .skip-link {
   position: fixed;
   inset-block-start: 12px;

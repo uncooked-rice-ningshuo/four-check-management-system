@@ -20,7 +20,7 @@ export function HygieneSituationSnippets({ items = [], loading = false, failed =
       ) : (
         <Space wrap size={[8, 8]}>
           {items.map((item) => (
-            <Button key={item.id} size="small" loading={loading} onClick={() => onChoose(item.label)}>
+            <Button key={item.id} size="small" loading={loading} aria-label={item.label} onClick={() => onChoose(item.label)}>
               {item.label}
             </Button>
           ))}

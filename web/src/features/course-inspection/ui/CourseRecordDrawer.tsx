@@ -12,6 +12,7 @@ import { useCourseMutation, useInspectionContext, useInspectionEntryOptions } fr
 type Values = Omit<CourseDetails, 'period'> & { periodStart?: number; periodEnd?: number; semesterId: string; weekId: string; departmentId: string; reason?: string }
 type Props = { editing?: CourseRecord; inspectionTypeId: string; initialSemesterId?: string; initialWeekId?: string; memberDepartmentId?: string; isSuperAdmin?: boolean; typeCode?: 'UNATTENDED_CLASSROOM' | 'ATTENDANCE_RATE'; title?: string; onClose: () => void }
 const required = [{ required: true, message: '请填写或选择此项' }]
+const penaltyCountFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
 const options = (items?: InspectionOption[], fallback?: InspectionOption) => {
  const all = items ?? []
  return (fallback && !all.some(item=>item.id===fallback.id) ? [fallback,...all] : all).map(item=>({value:item.id,label:item.label}))
@@ -80,7 +81,7 @@ export function CourseRecordDrawer({ editing: initialEditing, inspectionTypeId, 
  <Form name="course-record" form={form} layout="vertical" onFinish={submit} disabled={mutation.isPending}
  initialValues={initialValues}
  onValuesChange={(changed, values)=>{if(typeCode==='ATTENDANCE_RATE'&&('periodStart' in changed||'periodEnd' in changed))form.setFieldValue('absenceHours',coursePeriodHours(values.periodStart,values.periodEnd))}}>
- {typeCode==='ATTENDANCE_RATE' && weekId && (effectiveMultiplier ? <Typography.Text type="secondary" role="status">{typeof absenceHours==='number' && absenceHours>0 ? `实际旷课 ${absenceHours} 节次；${sameSubmittedOccurrence?'原记录':'本周'}按 ${effectiveMultiplier} 倍计入违纪，共 ${Number((absenceHours*effectiveMultiplier).toFixed(2))} 次。` : `${sameSubmittedOccurrence?'原记录':'本周'}违纪计入倍数为 ${effectiveMultiplier}；选择节次后自动显示计入结果。`}</Typography.Text> : <Alert type="warning" showIcon title={legacyRuleUnknown?'该历史记录的违纪计入规则未知，不能按当前周次规则直接更正。':'该周到课率违纪计入规则尚未配置，请联系管理员。'} />)}
+ {typeCode==='ATTENDANCE_RATE' && weekId && (effectiveMultiplier ? <Typography.Text type="secondary" role="status">{typeof absenceHours==='number' && absenceHours>0 ? `实际旷课 ${absenceHours} 节次；${sameSubmittedOccurrence?'原记录':'本周'}按 ${effectiveMultiplier} 倍计入违纪，共 ${penaltyCountFormatter.format(absenceHours*effectiveMultiplier)} 次。` : `${sameSubmittedOccurrence?'原记录':'本周'}违纪计入倍数为 ${effectiveMultiplier}；选择节次后自动显示计入结果。`}</Typography.Text> : <Alert type="warning" showIcon title={legacyRuleUnknown?'该历史记录的违纪计入规则未知，不能按当前周次规则直接更正。':'该周到课率违纪计入规则尚未配置，请联系管理员。'} />)}
  <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>clear(memberEntry?['weekId','classId','studentId','classroomId','periodStart','periodEnd']:['weekId','departmentId','classId','studentId','classroomId','periodStart','periodEnd'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>clear(memberEntry?['classId','studentId','classroomId','periodStart','periodEnd']:['departmentId','classId','studentId','classroomId','periodStart','periodEnd'])}/></Form.Item></Col>

@@ -47,7 +47,7 @@ export function PublicDormitoryHygienePage() {
  const grades=useInspectionContext({purpose:'view',kind:'grades'})
  const inspectionTypeId=semesters.data?.inspectionTypeId
  const records=usePublicDormitoryHygieneRecords({...filters,inspectionTypeId},!!inspectionTypeId&&!!semesterId&&!!weekId&&!scope.currentWeek.isLoading&&!scope.currentWeek.isError&&!invalidSelection)
- const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId))
+ const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&(user?.systemRole!=='MEMBER'||!!user.primaryDepartmentId)&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId))
  const canReview=!!user?.isSuperAdmin|| (!!inspectionTypeId&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_REVIEW',inspectionTypeId))
  const selections=(records.data?.items??[]).filter(record=>selected.includes(record.id)&&record.canEdit)
  const optionQueries=[scope.currentWeek,semesters,weeks,departments,classes,grades]
@@ -90,8 +90,8 @@ const displayColumns=attributionColumn?[...columns.slice(0,-1),attributionColumn
  locale={{emptyText:invalidSelection?'所选学期或周次不可用':records.isError?<Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={()=>void records.refetch()}>重试</Button>}/>:optionError?'请先恢复筛选选项加载':<Empty description={scope.currentWeek.data?.week===null?'当前没有有效教学周，请选择学期和周次':'当前范围暂无公共宿舍卫生记录'}/>}}
  toolBarRender={()=>[<Space key="actions" wrap style={{minWidth:0,maxWidth:'100%'}}>{canCreate&&<><Button key="create" icon={<PlusOutlined aria-hidden/>} onClick={()=>setCreating(true)}>新增记录</Button><Button key="import" type="primary" icon={<UploadOutlined aria-hidden/>} onClick={()=>setImporting(true)}>批量导入</Button></>}<DepartmentSubmissionActions typeCode="PUBLIC_DORMITORY_HYGIENE" inspectionTypeId={inspectionTypeId??''} listScope={filters} selected={selections} canReview={canReview} onChanged={()=>{setSelected([]);void records.refetch()}} onOpenRecord={(id,status)=>setPanel({id,mode:status==='RETURNED'?'edit':'detail'})}/>{selections.length>0&&<Button key="delete" danger onClick={()=>setDeleting(selections)}>批量删除（{selections.length}）</Button>}</Space>]}/>
  {importing&&inspectionTypeId&&<InspectionImportScopePanel memberDepartmentId={user?.systemRole==='MEMBER'?user.primaryDepartmentId:undefined} typeCode="PUBLIC_DORMITORY_HYGIENE" isSuperAdmin={!!user?.isSuperAdmin} inspectionTypeId={inspectionTypeId} batchId={importBatchId} onBatchIdChange={setImportBatchId} onClose={()=>setImporting(false)}/>}
- {creating&&inspectionTypeId&&<PublicDormitoryHygieneCreatePanel inspectionTypeId={inspectionTypeId} isSuperAdmin={!!user?.isSuperAdmin} onClose={()=>setCreating(false)}/>}
- {panel&&<PublicDormitoryHygienePanel key={panel.id+panel.mode} {...panel} isSuperAdmin={!!user?.isSuperAdmin} onClose={()=>setPanel(undefined)}/>}
+ {creating&&inspectionTypeId&&<PublicDormitoryHygieneCreatePanel inspectionTypeId={inspectionTypeId} memberDepartmentId={user?.systemRole==='MEMBER'?user.primaryDepartmentId:undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={()=>setCreating(false)}/>}
+ {panel&&<PublicDormitoryHygienePanel key={panel.id+panel.mode} {...panel} memberDepartmentId={user?.systemRole==='MEMBER'?user.primaryDepartmentId:undefined} isSuperAdmin={!!user?.isSuperAdmin} onClose={()=>setPanel(undefined)}/>}
  {deleting.length>0&&<PublicDormitoryHygieneDeleteDialog records={deleting} onClose={()=>{setDeleting([]);setSelected([])}}/>}
  </section>
 }

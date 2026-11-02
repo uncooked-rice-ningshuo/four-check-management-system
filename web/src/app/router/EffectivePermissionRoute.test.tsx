@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectivePermissionRoute } from './EffectivePermissionRoute'
 
@@ -56,5 +56,16 @@ describe('EffectivePermissionRoute', () => {
     render(<MemoryRouter><EffectivePermissionRoute action="INSPECTION_VIEW"><div>业务页面</div></EffectivePermissionRoute></MemoryRouter>)
 
     expect(screen.getByText('业务页面')).toBeInTheDocument()
+  })
+
+  it('returns to the workbench when login bounces back to a page without the grant', () => {
+    permissionsQuery.mockReturnValue({ data: { permissions: [] }, isLoading: false })
+    render(<MemoryRouter initialEntries={[{ pathname: '/reports/workbench', state: { fromLogin: true } }]}><Routes>
+      <Route path="/reports/workbench" element={<EffectivePermissionRoute action="INSPECTION_VIEW"><div>业务页面</div></EffectivePermissionRoute>} />
+      <Route path="/" element={<div>统一工作台</div>} />
+    </Routes></MemoryRouter>)
+
+    expect(screen.getByText('统一工作台')).toBeInTheDocument()
+    expect(screen.queryByText('403')).not.toBeInTheDocument()
   })
 })

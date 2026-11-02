@@ -6,7 +6,7 @@ import { attributionLabel } from '../../../entities/inspection/model/inspectionS
 import { useClassroomHygieneDelete, useClassroomHygieneRecord, useInspectionContext } from '../model/queries'
 import { ClassroomHygieneDrawer } from './ClassroomHygieneDrawer'
 
-export function ClassroomHygienePanel({id,mode,onClose,isSuperAdmin=false}:{id:string;mode:'detail'|'edit';onClose:()=>void;isSuperAdmin?:boolean}) {
+export function ClassroomHygienePanel({id,mode,onClose,memberDepartmentId,isSuperAdmin=false}:{id:string;mode:'detail'|'edit';onClose:()=>void;memberDepartmentId?:string;isSuperAdmin?:boolean}) {
  const query=useClassroomHygieneRecord(id)
  const record=query.data
  const semesters=useInspectionContext({purpose:'view',kind:'semesters'})
@@ -17,7 +17,7 @@ export function ClassroomHygienePanel({id,mode,onClose,isSuperAdmin=false}:{id:s
  if(query.isError) return <Drawer open title="教室卫生记录" onClose={onClose}><Alert type="error" title="记录加载失败或无权访问。" action={<Button onClick={()=>void query.refetch()}>重试</Button>}/></Drawer>
  if(!record) return <Drawer open title="教室卫生记录" onClose={onClose}><Spin/></Drawer>
  if(record.typeCode!=='CLASSROOM_HYGIENE')return <Drawer open title="教室卫生记录" onClose={onClose}><Alert type="error" title="记录类型不匹配。"/></Drawer>
- if(mode==='edit')return record.canEdit?<ClassroomHygieneDrawer editing={record} inspectionTypeId={record.inspectionTypeId} isSuperAdmin={isSuperAdmin} onClose={onClose}/>:<Drawer open title="教室卫生记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
+ if(mode==='edit')return record.canEdit?<ClassroomHygieneDrawer editing={record} inspectionTypeId={record.inspectionTypeId} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} onClose={onClose}/>:<Drawer open title="教室卫生记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
  return <Drawer open title="教室卫生详情" size={640} onClose={onClose}>{scopeError&&<Alert type="warning" title="范围名称加载失败，请关闭后重试。"/>}<Descriptions column={1} items={[
  {key:'semester',label:'学期',children:label(semesters.data?.items,record.semesterId)},
  {key:'week',label:'周次',children:label(weeks.data?.items,record.weekId)},

@@ -6,7 +6,7 @@ import { ApiError } from '../../../shared/api/httpClient'
 import { usePublicDormitoryHygieneDelete, usePublicDormitoryHygieneRecord, useInspectionContext } from '../model/queries'
 import { PublicDormitoryHygieneDrawer } from './PublicDormitoryHygieneDrawer'
 
-export function PublicDormitoryHygienePanel({id,mode,onClose,isSuperAdmin=false}:{id:string;mode:'detail'|'edit';onClose:()=>void;isSuperAdmin?:boolean}) {
+export function PublicDormitoryHygienePanel({id,mode,onClose,memberDepartmentId,isSuperAdmin=false}:{id:string;mode:'detail'|'edit';onClose:()=>void;memberDepartmentId?:string;isSuperAdmin?:boolean}) {
  const query=usePublicDormitoryHygieneRecord(id)
  const record=query.data
  const semesters=useInspectionContext({purpose:'view',kind:'semesters'})
@@ -17,7 +17,7 @@ export function PublicDormitoryHygienePanel({id,mode,onClose,isSuperAdmin=false}
  if(query.isError) return <Drawer open title="公共宿舍卫生记录" onClose={onClose}><Alert type="error" title="记录加载失败或无权访问。" action={<Button onClick={()=>void query.refetch()}>重试</Button>}/></Drawer>
  if(!record) return <Drawer open title="公共宿舍卫生记录" onClose={onClose}><Spin/></Drawer>
  if(record.typeCode!=='PUBLIC_DORMITORY_HYGIENE')return <Drawer open title="公共宿舍卫生记录" onClose={onClose}><Alert type="error" title="记录类型不匹配。"/></Drawer>
- if(mode==='edit')return record.canEdit?<PublicDormitoryHygieneDrawer editing={record} isSuperAdmin={isSuperAdmin} inspectionTypeId={record.inspectionTypeId} onClose={onClose}/>:<Drawer open title="公共宿舍卫生记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
+ if(mode==='edit')return record.canEdit?<PublicDormitoryHygieneDrawer editing={record} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} inspectionTypeId={record.inspectionTypeId} onClose={onClose}/>:<Drawer open title="公共宿舍卫生记录" onClose={onClose}><Alert type="warning" title="记录当前不可编辑，请刷新列表。"/></Drawer>
  return <Drawer open title="公共宿舍卫生详情" size={640} onClose={onClose}>{scopeError&&<Alert type="warning" title="范围名称加载失败，请关闭后重试。"/>}<Descriptions column={1} items={[
  {key:'semester',label:'学期',children:label(semesters.data?.items,record.semesterId)},
  {key:'week',label:'周次',children:label(weeks.data?.items,record.weekId)},

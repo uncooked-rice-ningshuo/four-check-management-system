@@ -30,7 +30,7 @@ async (page) => {
   }
   await select(drawer,'录入学期','浏览器回归学期')
   await select(drawer,'录入周次',fixture.weekStart)
-  await select(drawer,'目标部门','体育部')
+  await select(drawer,'目标部门','文体部')
   await select(drawer,'学生班级','E2E class')
   await select(drawer,'学生',name)
   check(await drawer.getByLabel('缺勤次数').count()===0 && await drawer.getByLabel('活动类型').count()===0,'Server-owned or subtype field exposed')
@@ -51,7 +51,7 @@ async (page) => {
  cases.push('周次筛选空态和重置恢复')
  await row('E2E student A').getByRole('button',{name:'详情',exact:true}).click()
  const detail=page.getByRole('dialog',{name:'早锻炼/早签详情'})
- await detail.getByText('体育部',{exact:true}).waitFor({timeout:5000}).catch(async()=>{throw new Error('Department label missing in detail: '+(await detail.innerText()).slice(0,500))})
+ await detail.getByText('文体部',{exact:true}).waitFor({timeout:5000}).catch(async()=>{throw new Error('Department label missing in detail: '+(await detail.innerText()).slice(0,500))})
  await detail.getByText('缺勤次数',{exact:true}).waitFor()
  await detail.getByRole('button',{name:'Close',exact:true}).click()
  await detail.waitFor({state:'hidden'})

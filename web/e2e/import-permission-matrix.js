@@ -46,7 +46,7 @@ async (page) => {
     check(ownRecords.total === 4 && ownRecords.items.length === 4, 'Own department records missing')
     check(otherRecords.total === 0 && otherRecords.items.length === 0, 'Unfiltered list leaked another department')
     await request(outsider.client, outsider.token, '/inspections/attendance?' + query(scope), 'GET', undefined, 403, 'FORBIDDEN_SCOPE')
-    cases.push('部门留空由服务端限制：学习部四条，体育部零条；显式越权部门返回 403')
+    cases.push('部门留空由服务端限制：学习部四条，文体部零条；显式越权部门返回 403')
     const templatePath = '/imports/attendance/template?' + query(scope)
     const download = await request(owner.client, owner.token, templatePath)
     check(download.headers()['content-type'].includes('spreadsheetml'), 'Template is not an XLSX response')

@@ -20,7 +20,7 @@
 
 ProTable 原生搜索/工具栏；独立新增目标与列表筛选；只默认有权当前周，无当前周不选首项；不手填UUID。表单使用挂载快照 initialValues、onChange清依赖，失败保留输入，409关闭重开核对。canEdit只作提示，后端权威。接类型导航、路由及前后端catalog手工动作，IMPORT不开放。
 
-先回归再实现，前端运行代码改动必须lint/test/build；后端改动gofmt/vet/test。浏览器覆盖首次编辑、新增关闭再编辑、A/B切换、失败重试、重开、StrictMode、权限角色、真实409、批删及窄屏。可适配 `web/e2e/late-return.js` 去掉宿舍/时间，保留角色矩阵，在 `verify-browser.py` 增加聚焦和默认套件入口。体育部已有早签映射，应用不得写死部门关系。
+先回归再实现，前端运行代码改动必须lint/test/build；后端改动gofmt/vet/test。浏览器覆盖首次编辑、新增关闭再编辑、A/B切换、失败重试、重开、StrictMode、权限角色、真实409、批删及窄屏。可适配 `web/e2e/late-return.js` 去掉宿舍/时间，保留角色矩阵，在 `verify-browser.py` 增加聚焦和默认套件入口。文体部已有早签映射，应用不得写死部门关系。
 
 ## 工具与边界
 

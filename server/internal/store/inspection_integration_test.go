@@ -58,6 +58,10 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			t.Fatal(file, e)
 		}
 	}
+	var sportsDepartmentName string
+	if err = pool.QueryRow(ctx, `SELECT name FROM departments WHERE code='SPORTS'`).Scan(&sportsDepartmentName); err != nil || sportsDepartmentName != "文体部" {
+		t.Fatalf("SPORTS department name after migration chain = %q, err=%v", sportsDepartmentName, err)
+	}
 	seed, err := os.ReadFile("testdata/phase_two_extension_seed.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -1145,5 +1149,55 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 				t.Fatal(err)
 			}
 		}
+	})
+	t.Run("student number sort uses snapshots and preserves time default", func(t *testing.T) {
+		firstInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
+			"date": "2026-09-05", "studentId": rf("07"), "classId": rf("06"), "time": "08:00",
+		})
+		firstInput.DepartmentID = ""
+		first, err := svc.Create(ctx, admin, firstInput, audit.Metadata{})
+		if err != nil {
+			t.Fatal("create first sortable record", err)
+		}
+		secondInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
+			"date": "2026-09-06", "studentId": rf("23"), "classId": rf("16"), "time": "08:00",
+		})
+		secondInput.DepartmentID = ""
+		second, err := svc.Create(ctx, admin, secondInput, audit.Metadata{})
+		if err != nil {
+			t.Fatal("create second sortable record", err)
+		}
+		defer func() {
+			items := []inspection.VersionedRecord{{ID: first.ID, Version: first.RowVersion}, {ID: second.ID, Version: second.RowVersion}}
+			if err := svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: items, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
+				t.Errorf("delete sortable records: %v", err)
+			}
+		}()
+
+		// Exercise the legacy fallback used when only the responsibility relation has a student snapshot.
+		if _, err := pool.Exec(ctx, `UPDATE inspection_records SET student_no_snapshot='' WHERE id=$1`, first.ID); err != nil {
+			t.Fatal("clear direct student snapshot", err)
+		}
+		assertRelativeOrder := func(sort, before, after string) {
+			t.Helper()
+			page, err := svc.List(ctx, admin, inspection.InspectionFilter{
+				InspectionTypeID: types[inspection.InspectionTypeAttendance], Sort: sort, Page: 1, PageSize: 100,
+			})
+			if err != nil {
+				t.Fatalf("list sorted records (%s): %v", sort, err)
+			}
+			positions := map[string]int{}
+			for index, record := range page.Items {
+				if record.ID == first.ID || record.ID == second.ID {
+					positions[record.ID] = index
+				}
+			}
+			if len(positions) != 2 || positions[before] >= positions[after] {
+				t.Fatalf("sort %q order = %v, want %s before %s", sort, positions, before, after)
+			}
+		}
+		assertRelativeOrder(inspection.SortStudentNoAscending, first.ID, second.ID)
+		assertRelativeOrder(inspection.SortStudentNoDescending, second.ID, first.ID)
+		assertRelativeOrder(inspection.SortOccurredAtDescending, second.ID, first.ID)
 	})
 }

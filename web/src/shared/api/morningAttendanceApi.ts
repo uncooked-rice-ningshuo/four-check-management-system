@@ -1,17 +1,18 @@
 import { apiRequest } from './httpClient'
 import { allOptions, badResponse, object, queryString, type ContextOptions, type InspectionOption, type InspectionQuery } from './inspectionOptionsApi'
+import { validInspectionProvenance, type InspectionProvenance } from './inspectionProvenance'
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 /** The server owns absenceCount; each record represents one student on one day. */
 export type MorningAttendanceDetails = { classId: string; studentId: string; date: string; remark: string }
 export type MorningAttendanceRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'; details: MorningAttendanceDetails }
-export type MorningAttendanceRecordDTO = MorningAttendanceRecordInput & {
+export type MorningAttendanceRecordDTO = MorningAttendanceRecordInput & InspectionProvenance & {
  importBatchId?: string
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
  status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; canEdit: boolean
 }
 function record(value: unknown): MorningAttendanceRecordDTO {
- if (!object(value) || !object(value.details)) throw badResponse()
+	if (!object(value) || !object(value.details) || !validInspectionProvenance(value)) throw badResponse()
  if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
  for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
  if (value.importBatchId !== undefined && typeof value.importBatchId !== 'string') throw badResponse()

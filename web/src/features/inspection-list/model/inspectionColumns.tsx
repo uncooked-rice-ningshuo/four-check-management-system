@@ -68,7 +68,7 @@ export function createInspectionFilterColumns<T>({
   ]
 }
 
-type InspectionRecordProvenance = { source: string; status: string; submitterName?: string }
+type InspectionRecordProvenance = { source: string; status: string; submitterName?: string; createdByName?: string; submittedByName?: string; submittedAt?: string }
 
 /** Shared sort control keeps the ordering choice identical on every inspection list. */
 export function createInspectionSortColumn<T>(): ProColumns<T> {
@@ -88,12 +88,14 @@ export function createInspectionSortColumn<T>(): ProColumns<T> {
   }
 }
 
-/** Shared visible provenance fields make the submitting actor easy to find in every list. */
+/** Keep original data entry separate from department submission attribution. */
 export function createInspectionProvenanceColumns<T extends InspectionRecordProvenance>(): ProColumns<T>[] {
   return [
     { title: '数据来源', dataIndex: 'source', search: false, width: 120, render: (_, record) => <Tag>{sourceLabels[record.source as keyof typeof sourceLabels] ?? record.source}</Tag> },
     { title: '数据状态', dataIndex: 'status', search: false, width: 120, render: (_, record) => <Tag color={statusColors[record.status] ?? 'default'}>{statusLabels[record.status as keyof typeof statusLabels] ?? record.status}</Tag> },
-    { title: '提交人', dataIndex: 'submitterName', search: false, width: 130, ellipsis: true, renderText: value => value || '账号不可用' },
+    { title: '录入人', dataIndex: 'createdByName', search: false, width: 130, ellipsis: true, render: (_, record) => record.createdByName || record.submitterName || '账号不可用' },
+    { title: '部门提交人', dataIndex: 'submittedByName', search: false, width: 130, ellipsis: true, renderText: value => value || '—' },
+    { title: '提交时间', dataIndex: 'submittedAt', search: false, width: 170, renderText: value => typeof value === 'string' ? new Date(value).toLocaleString('zh-CN') : '—' },
   ]
 }
 

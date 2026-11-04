@@ -16,7 +16,7 @@ func (h *handler) listSubmissionImportBatches(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "导入服务尚未就绪")
 		return
 	}
-	account, scope, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionEnter)
+	account, scope, ok := h.authorizeInspectionRequestAny(c, permission.ActionInspectionEnter, permission.ActionInspectionManage)
 	if !ok {
 		return
 	}
@@ -67,11 +67,11 @@ func (h *handler) listSubmissionBatchRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if batch.CreatedBy != account.ID {
+	if batch.AttributionMode == inspection.AttributionModeAdministrator {
 		writeImportError(c, importjob.ErrBatchNotFound)
 		return
 	}
-	if _, ok = h.authorizeInspectionScope(c, permission.ActionInspectionEnter, permission.Scope{
+	if _, ok = h.authorizeInspectionScopeAny(c, []string{permission.ActionInspectionEnter, permission.ActionInspectionManage}, permission.Scope{
 		SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID, DepartmentID: batch.DepartmentID,
 	}, true); !ok {
 		return

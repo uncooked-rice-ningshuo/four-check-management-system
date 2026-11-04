@@ -49,6 +49,7 @@ export function submissionRecordColumns<T extends SubmissionCartRecord>(typeCode
     col('情况说明', 'description', 180, r => detail(r, 'description')),
   )
   columns.push(col('备注', 'remark', 180, r => detail(r, 'remark')),
+    col('录入人', 'createdByName', 130, r => r.createdByName || '账号不可用'),
     col('来源', 'source', 160, r => r.source === 'EXCEL' && r.importRowNo ? `Excel 导入 · 第 ${r.importRowNo} 行` : sourceLabels[r.source] ?? '来源未知'),
     col('状态', 'status', 100, r => statusLabels[r.status] ?? '状态未知'))
   return columns

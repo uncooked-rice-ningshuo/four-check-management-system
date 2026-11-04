@@ -15,7 +15,11 @@ export type AttendanceRecord = {
   departmentId?: string
   attributionMode?: 'DEPARTMENT' | 'COLLEGE' | 'ADMINISTRATOR'
   createdBy?: string
+  createdByName?: string
   submitterName?: string
+  submittedByName?: string
+  submittedAt?: string
+  canDelete?: boolean
   importBatchId?: string
   id: string
   studentNo: string

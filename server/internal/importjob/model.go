@@ -85,6 +85,7 @@ type SubmissionBatchSummary struct {
 	InspectionTypeID   string    `json:"inspectionTypeId"`
 	DepartmentID       string    `json:"departmentId"`
 	OriginalName       string    `json:"originalName"`
+	CreatedByName      string    `json:"createdByName,omitempty"`
 	Status             string    `json:"status"`
 	CreatedAt          time.Time `json:"createdAt"`
 	ConfirmedAt        time.Time `json:"confirmedAt"`

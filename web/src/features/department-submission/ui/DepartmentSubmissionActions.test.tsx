@@ -110,7 +110,7 @@ it('shows a recoverable option failure instead of accepting an unresolved scope'
 })
 
 it('adds only eligible Excel batch records and shows changed records before submission', async () => {
-  cartApi.batches.mockResolvedValue({ items: [{ ...scope, id: 'import-id', originalName: '晚归.xlsx', status: 'CONFIRMED', createdAt: '2026-09-01T00:00:00Z', confirmedAt: '2026-09-01T00:00:00Z', importedRows: 2, selectableRecords: 1, submittedRecords: 1, unavailableRecords: 0 }], total: 1, page: 1, pageSize: 10 })
+  cartApi.batches.mockResolvedValue({ items: [{ ...scope, id: 'import-id', originalName: '晚归.xlsx', createdByName: '其他委员', status: 'CONFIRMED', createdAt: '2026-09-01T00:00:00Z', confirmedAt: '2026-09-01T00:00:00Z', importedRows: 2, selectableRecords: 1, submittedRecords: 1, unavailableRecords: 0 }], total: 1, page: 1, pageSize: 10 })
   cartApi.batchRecords.mockResolvedValue({ items: [{ record: { ...cartRecord, source: 'EXCEL', importBatchId: 'import-id' }, selectable: true }, { record: { ...cartRecord, id: 'already', status: 'PENDING_REVIEW' }, selectable: false, unavailableReason: 'ALREADY_SUBMITTED' }], total: 2, page: 1, pageSize: 100 })
   cartApi.detail.mockResolvedValue({ ...cartRecord, rowVersion: 2 })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -119,6 +119,8 @@ it('adds only eligible Excel batch records and shows changed records before subm
   await waitFor(() => expect(screen.getByRole('button', { name: '下一步：添加记录' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '下一步：添加记录' }))
   fireEvent.click(screen.getByRole('radio', { name: 'Excel 批次' }))
+  expect(await screen.findByRole('columnheader', { name: '导入人' })).toBeInTheDocument()
+  expect(await screen.findByText('其他委员')).toBeInTheDocument()
   fireEvent.click(await screen.findByRole('button', { name: '添加整批可提交记录' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '下一步：核对清单' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '下一步：核对清单' }))

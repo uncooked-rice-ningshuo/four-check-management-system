@@ -96,6 +96,8 @@ type importHTTPStub struct {
 	batch                                         importjob.Batch
 	rows                                          importjob.ImportRowPage
 	template                                      importjob.Template
+	templateErr                                   error
+	files                                         *fileHTTPStub
 	parseErr                                      error
 	confirmErr                                    error
 	confirmKey                                    string
@@ -139,7 +141,7 @@ func (s *importHTTPStub) ListSubmissionBatches(_ context.Context, _ string, quer
 	return importjob.SubmissionBatchPage{Items: []importjob.SubmissionBatchSummary{}, Page: query.Page, PageSize: query.PageSize}, nil
 }
 func (s *importHTTPStub) PublishedTemplate(context.Context, string) (importjob.Template, error) {
-	return s.template, nil
+	return s.template, s.templateErr
 }
 func (s *importHTTPStub) ConfirmBatch(_ context.Context, input importjob.ConfirmBatchInput) (importjob.ConfirmResult, error) {
 	s.confirmCalls++
@@ -163,6 +165,7 @@ type fileHTTPStub struct {
 	stored         storage.File
 	content        []byte
 	storeErr       error
+	readErr        error
 	metadata       audit.Metadata
 	onDiscard      func()
 	discardContext context.Context
@@ -178,6 +181,9 @@ func (s *fileHTTPStub) Store(_ context.Context, input storage.StoreInput, metada
 	return s.stored, nil
 }
 func (s *fileHTTPStub) ReadVerified(context.Context, string, audit.Metadata) (storage.File, []byte, error) {
+	if s.readErr != nil {
+		return storage.File{}, nil, s.readErr
+	}
 	return storage.File{ID: "template-file", OriginalName: "到课率导入模板.xlsx", Status: storage.StatusAvailable}, s.content, nil
 }
 func (s *fileHTTPStub) Discard(ctx context.Context, _ string, _ audit.Metadata) error {
@@ -246,6 +252,7 @@ func attendanceRouterWithPasswordState(t *testing.T, allowed, superAdmin, mustCh
 	}
 	attendance := &attendanceHTTPStub{page: inspection.AttendancePage{Items: []inspection.AttendanceRecord{}, Page: 1, PageSize: 20}}
 	files := &fileHTTPStub{content: []byte("xlsx-template"), onDiscard: func() { imports.discarded = true }}
+	imports.files = files
 	organizationService := organization.NewService(&attendanceOrganizationRepository{catalogs: organization.Catalogs{
 		Departments: []organization.Department{
 			{ID: "10000000-0000-0000-0000-000000000002", Code: "STUDY", Name: "学习部", Enabled: true},
@@ -368,6 +375,27 @@ func TestAttendanceTemplateDownloadAndUploadAreProtectedAndSafe(t *testing.T) {
 	if download.Code != http.StatusOK || download.Header().Get("Content-Disposition") == "" || download.Header().Get("X-Import-Template-ID") != "template-1" || download.Header().Get("X-Import-Template-Version") != "1" || !bytes.Equal(download.Body.Bytes(), []byte("xlsx-template")) {
 		t.Fatalf("download=%d headers=%v body=%q", download.Code, download.Header(), download.Body.Bytes())
 	}
+
+	imports.files.readErr = storage.ErrUnavailable
+	unavailable := performJSON(router, http.MethodGet, "/api/v1/imports/attendance/template?"+contextQuery, nil, token)
+	if unavailable.Code != http.StatusServiceUnavailable || !strings.Contains(unavailable.Body.String(), `"code":"IMPORT_SERVICE_UNAVAILABLE"`) {
+		t.Fatalf("storage unavailable response=%d %s", unavailable.Code, unavailable.Body.String())
+	}
+
+	imports.files.readErr = storage.ErrFileNotFound
+	missingFile := performJSON(router, http.MethodGet, "/api/v1/imports/attendance/template?"+contextQuery, nil, token)
+	if missingFile.Code != http.StatusConflict || !strings.Contains(missingFile.Body.String(), `"code":"SOURCE_FILE_UNAVAILABLE"`) {
+		t.Fatalf("missing template file response=%d %s", missingFile.Code, missingFile.Body.String())
+	}
+
+	imports.files.readErr = nil
+	imports.templateErr = importjob.ErrTemplateNotFound
+	missingTemplate := performJSON(router, http.MethodGet, "/api/v1/imports/attendance/template?"+contextQuery, nil, token)
+	if missingTemplate.Code != http.StatusNotFound || !strings.Contains(missingTemplate.Body.String(), `"code":"IMPORT_TEMPLATE_NOT_FOUND"`) {
+		t.Fatalf("unpublished template response=%d %s", missingTemplate.Code, missingTemplate.Body.String())
+	}
+
+	imports.templateErr = nil
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -698,6 +726,8 @@ func TestImportBatchReadFailureIsNotReportedAsMissing(t *testing.T) {
 		code   string
 	}{
 		{"missing", importjob.ErrBatchNotFound, http.StatusNotFound, "IMPORT_BATCH_NOT_FOUND"},
+		{"file metadata missing", storage.ErrFileNotFound, http.StatusConflict, "SOURCE_FILE_UNAVAILABLE"},
+		{"object storage unavailable", storage.ErrUnavailable, http.StatusServiceUnavailable, "IMPORT_SERVICE_UNAVAILABLE"},
 		{"internal", errors.New("private database diagnostic"), http.StatusInternalServerError, "IMPORT_SERVICE_UNAVAILABLE"},
 	} {
 		t.Run(failure.name, func(t *testing.T) {

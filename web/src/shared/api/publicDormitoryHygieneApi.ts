@@ -1,5 +1,6 @@
 import { apiRequest } from './httpClient'
 import { allOptions, badResponse, object, queryString, type ContextOptions, type InspectionOption, type InspectionQuery } from './inspectionOptionsApi'
+import { validInspectionProvenance, type InspectionProvenance } from './inspectionProvenance'
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 export type HygieneResult = 'EXCELLENT' | 'QUALIFIED' | 'UNQUALIFIED'
@@ -9,14 +10,14 @@ export type PublicDormitoryHygieneDetails = {
  responsibleClassIds:string[];responsibleStudentIds?:string[];reasonCode?:string;description?:string;remark?:string
 }
 export type PublicDormitoryHygieneInput = {semesterId:string;weekId:string;inspectionTypeId:string;departmentId:string;attributionMode?:'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR';details:PublicDormitoryHygieneDetails}
-export type PublicDormitoryHygieneRecordDTO = PublicDormitoryHygieneInput & {
+export type PublicDormitoryHygieneRecordDTO = PublicDormitoryHygieneInput & InspectionProvenance & {
  id:string;typeCode:'PUBLIC_DORMITORY_HYGIENE';currentAreaName?:string;currentReasonLabel?:string
  responsibleClasses:InspectionOption[];responsibleStudents:InspectionOption[];responsibleDormitories:InspectionOption[]
  status:string;source:string;rowVersion:number;createdBy:string;submitterName:string;canEdit:boolean
 }
 function option(value:unknown):value is InspectionOption {return object(value)&&typeof value.id==='string'&&typeof value.label==='string'}
 function record(value:unknown):PublicDormitoryHygieneRecordDTO {
- if(!object(value)||!object(value.details)||value.typeCode!=='PUBLIC_DORMITORY_HYGIENE')throw badResponse()
+	if(!object(value)||!object(value.details)||!validInspectionProvenance(value)||value.typeCode!=='PUBLIC_DORMITORY_HYGIENE')throw badResponse()
  if(value.attributionMode!==undefined&&!['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode)))throw badResponse()
  for(const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','status','source','createdBy','submitterName'])if(typeof value[key]!=='string')throw badResponse()
  if(value.currentAreaName!==undefined&&typeof value.currentAreaName!=='string')throw badResponse()

@@ -12,13 +12,15 @@ coverage/
 .pnpm-store/
 
 output/
+.codegraph/
 
 .agents/
 .claude/
 .kiro/
 .qoder/
 .hermes/
-.codex/
+.codex/*
+!.codex/config.toml
 .gemini/
 .opencode/
 品牌素材-透明背景/

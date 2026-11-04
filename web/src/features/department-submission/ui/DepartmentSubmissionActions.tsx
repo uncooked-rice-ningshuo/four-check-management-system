@@ -271,7 +271,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
             {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
             {item.status === 'RETURNED' && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}
           </Space> },
-        ]} expandable={{ expandedRowRender: item => <Space direction="vertical"><Typography.Text>提交时间：{new Date(item.submittedAt).toLocaleString('zh-CN')}</Typography.Text><Typography.Text>{item.kind === 'ZERO_RECORD' ? '已检查并确认零条；该回执不包含记录。后续发现实际记录时，应另行提交新批次。' : `记录数：${item.recordIds.length}`}</Typography.Text>{item.returnReason && <Alert type="warning" title={`退回原因：${item.returnReason}`} />}{onOpenRecord && item.records.map((record, index) => record.status === 'RETURNED' && <Button key={record.id} type="link" onClick={() => { setOpen(false); onOpenRecord(record.id, record.status) }}>更正第 {index + 1} 条记录</Button>)}</Space> }} />
+        ]} expandable={{ expandedRowRender: item => <Space direction="vertical"><Typography.Text>批次创建人：{item.createdByName || '账号不可用'}</Typography.Text><Typography.Text>实际提交人：{item.submittedByName || '账号不可用'}</Typography.Text><Typography.Text>提交时间：{new Date(item.submittedAt).toLocaleString('zh-CN')}</Typography.Text><Typography.Text>{item.kind === 'ZERO_RECORD' ? '已检查并确认零条；该回执不包含记录。后续发现实际记录时，应另行提交新批次。' : `记录数：${item.recordIds.length}`}</Typography.Text>{item.returnReason && <Alert type="warning" title={`退回原因：${item.returnReason}`} />}{onOpenRecord && item.records.map((record, index) => record.status === 'RETURNED' && <Button key={record.id} type="link" onClick={() => { setOpen(false); onOpenRecord(record.id, record.status) }}>更正第 {index + 1} 条记录</Button>)}</Space> }} />
     </Drawer>
     <Drawer title="提交检查记录" open={cartOpen} size={980} destroyOnHidden className="submission-drawer" onClose={() => {
       if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
@@ -295,10 +295,10 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
         columns={recordColumns} />
       </>}
       {sourceTab === 'excel' && <>
-      {importBatches.isError && <Alert type="error" title="本人历史导入批次加载失败" action={<Button onClick={() => void importBatches.refetch()}>重试</Button>} />}
+      {importBatches.isError && <Alert type="error" title="业务范围导入批次加载失败" action={<Button onClick={() => void importBatches.refetch()}>重试</Button>} />}
       <Table size="small" rowKey="id" loading={importBatches.isLoading} dataSource={importBatches.isError ? [] : importBatches.data?.items ?? []} locale={{ emptyText: importBatches.isError ? <span aria-hidden="true" /> : '当前范围暂无已确认入库的 Excel 批次' }}
-        pagination={{ current: importPage, pageSize: 10, total: importBatches.data?.total ?? 0, onChange: setImportPage }} scroll={{ x: 880 }} columns={[
-          { title: '文件', dataIndex: 'originalName' }, { title: '确认时间', dataIndex: 'confirmedAt', render: value => value === '0001-01-01T00:00:00Z' ? '—' : new Date(value).toLocaleString('zh-CN') },
+        pagination={{ current: importPage, pageSize: 10, total: importBatches.data?.total ?? 0, onChange: setImportPage }} scroll={{ x: 940 }} columns={[
+          { title: '文件', dataIndex: 'originalName' }, { title: '导入人', dataIndex: 'createdByName', render: value => value || '账号不可用' }, { title: '确认时间', dataIndex: 'confirmedAt', render: value => value === '0001-01-01T00:00:00Z' ? '—' : new Date(value).toLocaleString('zh-CN') },
           { title: '入库数', dataIndex: 'importedRows' }, { title: '可提交', dataIndex: 'selectableRecords' }, { title: '已提交', dataIndex: 'submittedRecords' }, { title: '不可用', dataIndex: 'unavailableRecords' },
           { title: '操作', key: 'actions', render: (_, item) => <Space><Button type="link" onClick={() => { setActiveImportBatch(item.id); setBatchRecordPage(1) }}>查看记录</Button><Button type="link" disabled={contextChanged || !item.selectableRecords} onClick={() => void addWholeBatch(item.id)}>添加整批可提交记录</Button></Space> },
         ]} />

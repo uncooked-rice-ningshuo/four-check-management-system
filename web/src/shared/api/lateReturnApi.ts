@@ -1,17 +1,18 @@
 import { apiRequest } from './httpClient'
 import { allOptions, badResponse, object, queryString, type ContextOptions, type InspectionOption, type InspectionQuery } from './inspectionOptionsApi'
+import { validInspectionProvenance, type InspectionProvenance } from './inspectionProvenance'
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 /** Transport contracts for late-return inspection endpoints. */
 export type LateReturnDetails = { classId: string; studentId: string; dormitoryId: string; date: string; time?: string; remark: string }
 export type LateReturnRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'; details: Omit<LateReturnDetails, 'time'> }
-export type LateReturnRecordDTO = Omit<LateReturnRecordInput, 'details'> & { details: LateReturnDetails } & {
+export type LateReturnRecordDTO = Omit<LateReturnRecordInput, 'details'> & { details: LateReturnDetails } & InspectionProvenance & {
  importBatchId?: string
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
  currentDormitoryName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; canEdit: boolean
 }
 function record(value: unknown): LateReturnRecordDTO {
- if (!object(value) || !object(value.details)) throw badResponse()
+	if (!object(value) || !object(value.details) || !validInspectionProvenance(value)) throw badResponse()
  if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
  for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentDormitoryName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
  for (const key of ['classId','studentId','dormitoryId','date']) if (typeof value.details[key] !== 'string') throw badResponse()

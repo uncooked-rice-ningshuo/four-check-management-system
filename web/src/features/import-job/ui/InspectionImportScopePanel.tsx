@@ -13,7 +13,7 @@ export function InspectionImportScopePanel({ typeCode, inspectionTypeId, memberD
   typeCode: SupportedImportType;
   inspectionTypeId: string; memberDepartmentId?: string; isSuperAdmin?: boolean; batchId?: string; onBatchIdChange: (id?: string) => void; onClose: () => void
 }) {
-  const label = typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'PUBLIC_DORMITORY_HYGIENE' ? '公共宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : '无机课堂'
+  const label = typeCode === 'ATTENDANCE_RATE' ? '到课率' : typeCode === 'CLASSROOM_HYGIENE' ? '教室卫生' : typeCode === 'DORMITORY_HYGIENE' ? '宿舍卫生' : typeCode === 'PUBLIC_DORMITORY_HYGIENE' ? '公共宿舍卫生' : typeCode === 'LATE_RETURN' ? '晚归' : typeCode === 'MORNING_ATTENDANCE' ? '早锻炼/早签' : typeCode === 'EVENING_SELF_STUDY' ? '晚自习' : '无机课堂'
   const [selectedSemester, setSelectedSemester] = useState<string>()
   const [selectedWeek, setSelectedWeek] = useState<string>()
   const [chosen, setChosen] = useState<InspectionContext>()

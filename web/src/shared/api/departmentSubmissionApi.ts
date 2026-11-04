@@ -11,8 +11,9 @@ function submission(value: unknown): DepartmentSubmission {
   if (kind !== 'RECORDS' && kind !== 'ZERO_RECORD') throw badResponse()
   for (const key of ['reviewedBy', 'returnReason', 'reviewedAt']) if (value[key] !== undefined && typeof value[key] !== 'string') throw badResponse()
   for (const key of ['semesterName', 'departmentName']) if (value[key] !== undefined && typeof value[key] !== 'string') throw badResponse()
+  for (const key of ['createdByName', 'submittedByName']) if (value[key] !== undefined && typeof value[key] !== 'string') throw badResponse()
   if (value.weekNo !== undefined && !Number.isInteger(value.weekNo)) throw badResponse()
-  if (!value.records.every(record => object(record) && typeof record.id === 'string' && Number.isInteger(record.rowVersion) && typeof record.status === 'string' && typeof record.createdBy === 'string')) throw badResponse()
+  if (!value.records.every(record => object(record) && typeof record.id === 'string' && Number.isInteger(record.rowVersion) && typeof record.status === 'string' && typeof record.createdBy === 'string' && (record.createdByName === undefined || typeof record.createdByName === 'string'))) throw badResponse()
   return { ...value, kind } as DepartmentSubmission
 }
 

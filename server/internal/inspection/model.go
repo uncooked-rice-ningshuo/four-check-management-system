@@ -100,9 +100,14 @@ type AttendanceRecord struct {
 	DedupKey            string    `json:"-"`
 	RowVersion          int       `json:"rowVersion"`
 	CreatedBy           string    `json:"createdBy"`
-	SubmitterName       string    `json:"submitterName"`
-	CreatedAt           time.Time `json:"createdAt"`
-	UpdatedAt           time.Time `json:"updatedAt"`
+	CreatedByName       string    `json:"createdByName"`
+	// SubmitterName is retained as a compatibility alias for older clients.
+	SubmitterName   string     `json:"submitterName"`
+	SubmittedByName string     `json:"submittedByName,omitempty"`
+	SubmittedAt     *time.Time `json:"submittedAt,omitempty"`
+	CanDelete       bool       `json:"canDelete"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 // NewAttendanceRecord enforces the invariants shared by manual and imported attendance drafts.
@@ -216,33 +221,29 @@ type AttendanceListFilter struct {
 // AttendanceScope is the already-compiled effective data scope for one list request.
 // Empty values mean the corresponding dimension is unrestricted.
 type AttendanceScope struct {
-	SemesterID                   string
-	WeekID                       string
-	InspectionTypeID             string
-	DepartmentID                 string
-	DepartmentIDs                []string
-	ActorID                      string
-	AllowAllAdministratorRecords bool
-	ClassID                      string
-	Grade                        string
+	SemesterID       string
+	WeekID           string
+	InspectionTypeID string
+	DepartmentID     string
+	DepartmentIDs    []string
+	ClassID          string
+	Grade            string
 }
 
 type AttendanceListQuery struct {
-	SemesterID                   string
-	WeekID                       string
-	InspectionTypeID             string
-	DepartmentID                 string
-	DepartmentIDs                []string
-	ActorID                      string
-	AllowAllAdministratorRecords bool
-	ClassID                      string
-	Grade                        string
-	Keyword                      string
-	Status                       string
-	Source                       string
-	Sort                         string
-	Page                         int
-	PageSize                     int
+	SemesterID       string
+	WeekID           string
+	InspectionTypeID string
+	DepartmentID     string
+	DepartmentIDs    []string
+	ClassID          string
+	Grade            string
+	Keyword          string
+	Status           string
+	Source           string
+	Sort             string
+	Page             int
+	PageSize         int
 }
 
 type AttendancePage struct {

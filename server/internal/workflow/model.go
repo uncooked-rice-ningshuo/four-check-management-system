@@ -58,31 +58,34 @@ type SubmitInput struct {
 }
 
 type Submission struct {
-	ID             string             `json:"id"`
-	Scope          Scope              `json:"scope"`
-	SemesterName   string             `json:"semesterName,omitempty"`
-	WeekNo         int                `json:"weekNo,omitempty"`
-	DepartmentName string             `json:"departmentName,omitempty"`
-	Status         State              `json:"status"`
-	Kind           SubmissionKind     `json:"kind"`
-	RevisionNo     int                `json:"revisionNo"`
-	RowVersion     int                `json:"rowVersion"`
-	CreatedBy      string             `json:"createdBy"`
-	SubmittedBy    string             `json:"submittedBy"`
-	ReviewedBy     string             `json:"reviewedBy,omitempty"`
-	ReturnReason   string             `json:"returnReason,omitempty"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	SubmittedAt    time.Time          `json:"submittedAt"`
-	ReviewedAt     *time.Time         `json:"reviewedAt,omitempty"`
-	RecordIDs      []string           `json:"recordIds"`
-	Records        []SubmissionRecord `json:"records"`
+	ID              string             `json:"id"`
+	Scope           Scope              `json:"scope"`
+	SemesterName    string             `json:"semesterName,omitempty"`
+	WeekNo          int                `json:"weekNo,omitempty"`
+	DepartmentName  string             `json:"departmentName,omitempty"`
+	Status          State              `json:"status"`
+	Kind            SubmissionKind     `json:"kind"`
+	RevisionNo      int                `json:"revisionNo"`
+	RowVersion      int                `json:"rowVersion"`
+	CreatedBy       string             `json:"createdBy"`
+	CreatedByName   string             `json:"createdByName,omitempty"`
+	SubmittedBy     string             `json:"submittedBy"`
+	SubmittedByName string             `json:"submittedByName,omitempty"`
+	ReviewedBy      string             `json:"reviewedBy,omitempty"`
+	ReturnReason    string             `json:"returnReason,omitempty"`
+	CreatedAt       time.Time          `json:"createdAt"`
+	SubmittedAt     time.Time          `json:"submittedAt"`
+	ReviewedAt      *time.Time         `json:"reviewedAt,omitempty"`
+	RecordIDs       []string           `json:"recordIds"`
+	Records         []SubmissionRecord `json:"records"`
 }
 
 type SubmissionRecord struct {
-	ID         string `json:"id"`
-	RowVersion int    `json:"rowVersion"`
-	Status     string `json:"status"`
-	CreatedBy  string `json:"createdBy"`
+	ID            string `json:"id"`
+	RowVersion    int    `json:"rowVersion"`
+	Status        string `json:"status"`
+	CreatedBy     string `json:"createdBy"`
+	CreatedByName string `json:"createdByName,omitempty"`
 }
 
 type ListQuery struct {

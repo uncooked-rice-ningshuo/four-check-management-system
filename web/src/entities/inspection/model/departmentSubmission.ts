@@ -8,7 +8,7 @@ export type DepartmentSubmissionScope = {
 
 export type VersionedInspectionRecord = { id: string; version: number }
 export type DepartmentSubmissionKind = 'RECORDS' | 'ZERO_RECORD'
-export type SubmissionRecord = { id: string; rowVersion: number; status: string; createdBy: string }
+export type SubmissionRecord = { id: string; rowVersion: number; status: string; createdBy: string; createdByName?: string }
 export type DepartmentSubmission = {
   id: string
   scope: DepartmentSubmissionScope
@@ -20,7 +20,9 @@ export type DepartmentSubmission = {
   revisionNo: number
   rowVersion: number
   createdBy: string
+  createdByName?: string
   submittedBy: string
+  submittedByName?: string
   reviewedBy?: string
   returnReason?: string
   createdAt: string

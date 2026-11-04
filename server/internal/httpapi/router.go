@@ -1003,11 +1003,10 @@ func attendanceInspectionType(values []organization.InspectionType) (organizatio
 }
 
 func (h *handler) listAttendance(c *gin.Context) {
-	account, scope, allowedDepartments, ok := h.authorizeAttendanceList(c)
+	_, scope, allowedDepartments, ok := h.authorizeAttendanceList(c)
 	if !ok {
 		return
 	}
-	_ = account
 	page, pageSize, ok := pagination(c)
 	if !ok {
 		return
@@ -1020,8 +1019,8 @@ func (h *handler) listAttendance(c *gin.Context) {
 	}
 	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
-		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments, ActorID: account.ID,
-		AllowAllAdministratorRecords: account.IsSuperAdmin, ClassID: scope.ClassID, Grade: scope.Grade,
+		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments,
+		ClassID: scope.ClassID, Grade: scope.Grade,
 	})
 	if err != nil {
 		writeImportError(c, err)
@@ -1312,6 +1311,10 @@ func (h *handler) cancelImportBatch(c *gin.Context) {
 }
 
 func (h *handler) authorizeInspectionRequest(c *gin.Context, action string) (auth.Account, permission.Scope, bool) {
+	return h.authorizeInspectionRequestAny(c, action)
+}
+
+func (h *handler) authorizeInspectionRequestAny(c *gin.Context, actions ...string) (auth.Account, permission.Scope, bool) {
 	scope := permission.Scope{
 		SemesterID: c.Query("semesterId"), WeekID: c.Query("weekId"), InspectionTypeID: c.Query("inspectionTypeId"),
 		DepartmentID: c.Query("departmentId"), ClassID: c.Query("classId"), Grade: c.Query("grade"),
@@ -1319,7 +1322,7 @@ func (h *handler) authorizeInspectionRequest(c *gin.Context, action string) (aut
 	if scope.DepartmentID == inspection.CollegeDepartmentOptionID {
 		scope.DepartmentID = ""
 	}
-	account, ok := h.authorizeInspectionScope(c, action, scope, false)
+	account, ok := h.authorizeInspectionScopeAny(c, actions, scope, false)
 	return account, scope, ok
 }
 
@@ -1336,6 +1339,10 @@ func hasRemovedImportTarget(classID, grade string) bool {
 }
 
 func (h *handler) authorizeInspectionScope(c *gin.Context, action string, scope permission.Scope, hideExistence bool) (auth.Account, bool) {
+	return h.authorizeInspectionScopeAny(c, []string{action}, scope, hideExistence)
+}
+
+func (h *handler) authorizeInspectionScopeAny(c *gin.Context, actions []string, scope permission.Scope, hideExistence bool) (auth.Account, bool) {
 	account, ok := h.currentAccount(c)
 	if !ok {
 		return auth.Account{}, false
@@ -1357,7 +1364,16 @@ func (h *handler) authorizeInspectionScope(c *gin.Context, action string, scope 
 		return auth.Account{}, false
 	}
 	effective, err := h.permission.Effective(c, account.ID)
-	if err != nil || !effective.Allowed(action, scope) {
+	allowed := false
+	if err == nil {
+		for _, action := range actions {
+			if effective.Allowed(action, scope) {
+				allowed = true
+				break
+			}
+		}
+	}
+	if err != nil || !allowed {
 		writeInspectionForbidden(c, hideExistence)
 		return auth.Account{}, false
 	}
@@ -1484,8 +1500,10 @@ func writeImportError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "INVALID_IMPORT_REQUEST", "导入请求不符合要求")
 	case errors.Is(err, storage.ErrFileTooLarge):
 		writeError(c, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "上传文件超过大小限制")
-	case errors.Is(err, storage.ErrFileUnavailable), errors.Is(err, storage.ErrIntegrityMismatch), errors.Is(err, storage.ErrObjectMissing):
+	case errors.Is(err, storage.ErrFileUnavailable), errors.Is(err, storage.ErrFileNotFound), errors.Is(err, storage.ErrIntegrityMismatch), errors.Is(err, storage.ErrObjectMissing):
 		writeError(c, http.StatusConflict, "SOURCE_FILE_UNAVAILABLE", "文件不可用或完整性校验失败")
+	case errors.Is(err, storage.ErrUnavailable):
+		writeError(c, http.StatusServiceUnavailable, "IMPORT_SERVICE_UNAVAILABLE", "导入服务暂时不可用，请稍后重试")
 	default:
 		var parsed *importjob.ParseError
 		if errors.As(err, &parsed) {

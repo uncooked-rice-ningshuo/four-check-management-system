@@ -151,7 +151,7 @@ func (h *handler) listSubmissionCandidates(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "检查记录服务尚未就绪")
 		return
 	}
-	account, _, ok := h.authorizeInspectionRequest(c, permission.ActionInspectionEnter)
+	account, _, ok := h.authorizeInspectionRequestAny(c, permission.ActionInspectionEnter, permission.ActionInspectionManage)
 	if !ok {
 		return
 	}

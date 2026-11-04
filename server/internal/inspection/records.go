@@ -34,6 +34,8 @@ type InspectionEdit struct {
 type InspectionRecord struct {
 	// CanEdit is an interaction hint; mutations always recheck scope, state and version.
 	CanEdit bool `json:"canEdit"`
+	// CanDelete excludes returned submissions even when they remain editable.
+	CanDelete bool `json:"canDelete"`
 	// Current reference labels are live master-data names, never historical snapshots.
 	CurrentDormitoryName string `json:"currentDormitoryName"`
 	CurrentCourseName    string `json:"currentCourseName"`
@@ -46,32 +48,36 @@ type InspectionRecord struct {
 	ResponsibleDormitories []EntryOption `json:"responsibleDormitories,omitempty"`
 	CurrentReasonLabel     string        `json:"currentReasonLabel,omitempty"`
 	// Display fields are persisted record snapshots, not current master-data values.
-	StudentNumber     string               `json:"studentNumber"`
-	StudentName       string               `json:"studentName"`
-	ClassName         string               `json:"className"`
-	Grade             string               `json:"grade"`
-	ID                string               `json:"id"`
-	SemesterID        string               `json:"semesterId"`
-	WeekID            string               `json:"weekId"`
-	InspectionTypeID  string               `json:"inspectionTypeId"`
-	TypeCode          string               `json:"typeCode"`
-	DepartmentID      string               `json:"departmentId"`
-	AttributionMode   string               `json:"attributionMode"`
-	Details           InspectionDetails    `json:"details"`
-	PenaltyMultiplier *int                 `json:"-"`
-	Status            string               `json:"status"`
-	Source            string               `json:"source"`
-	ImportBatchID     string               `json:"importBatchId,omitempty"`
-	ImportRowNo       int                  `json:"importRowNo,omitempty"`
-	RowVersion        int                  `json:"rowVersion"`
-	CreatedBy         string               `json:"createdBy"`
-	SubmitterName     string               `json:"submitterName"`
-	CreatedAt         time.Time            `json:"createdAt"`
-	UpdatedAt         time.Time            `json:"updatedAt"`
-	HasSubmission     bool                 `json:"-"`
-	HasReportLock     bool                 `json:"-"`
-	Normalized        ValidatedDetails     `json:"-"`
-	References        InspectionReferences `json:"-"`
+	StudentNumber     string            `json:"studentNumber"`
+	StudentName       string            `json:"studentName"`
+	ClassName         string            `json:"className"`
+	Grade             string            `json:"grade"`
+	ID                string            `json:"id"`
+	SemesterID        string            `json:"semesterId"`
+	WeekID            string            `json:"weekId"`
+	InspectionTypeID  string            `json:"inspectionTypeId"`
+	TypeCode          string            `json:"typeCode"`
+	DepartmentID      string            `json:"departmentId"`
+	AttributionMode   string            `json:"attributionMode"`
+	Details           InspectionDetails `json:"details"`
+	PenaltyMultiplier *int              `json:"-"`
+	Status            string            `json:"status"`
+	Source            string            `json:"source"`
+	ImportBatchID     string            `json:"importBatchId,omitempty"`
+	ImportRowNo       int               `json:"importRowNo,omitempty"`
+	RowVersion        int               `json:"rowVersion"`
+	CreatedBy         string            `json:"createdBy"`
+	CreatedByName     string            `json:"createdByName"`
+	// SubmitterName is retained as a compatibility alias for older clients.
+	SubmitterName   string               `json:"submitterName"`
+	SubmittedByName string               `json:"submittedByName,omitempty"`
+	SubmittedAt     *time.Time           `json:"submittedAt,omitempty"`
+	CreatedAt       time.Time            `json:"createdAt"`
+	UpdatedAt       time.Time            `json:"updatedAt"`
+	HasSubmission   bool                 `json:"-"`
+	HasReportLock   bool                 `json:"-"`
+	Normalized      ValidatedDetails     `json:"-"`
+	References      InspectionReferences `json:"-"`
 }
 
 // ClassReference and StudentReference are server-owned snapshots used for scope and persistence.

@@ -18,14 +18,18 @@ const submissionSelect = `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.dep
  COALESCE(ds.reviewed_by::text,''),ds.return_reason,ds.created_at,
 	 COALESCE(ds.submitted_at,ds.created_at),ds.reviewed_at,rev.record_ids,
 	 CASE WHEN ds.submission_kind='ZERO_RECORD' THEN '[]'::jsonb ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('id',ir.id,'rowVersion',ir.row_version,
-	 'status',ir.status,'createdBy',ir.created_by) ORDER BY ir.id)
-	 FROM inspection_records ir WHERE ir.submission_id=ds.id AND ir.deleted_at IS NULL),'[]'::jsonb) END
- ,sem.name,w.week_no,COALESCE(d.name,'校级')
+	 'status',ir.status,'createdBy',ir.created_by,'createdByName',COALESCE(batch_creator.name,record_creator.name,'账号不可用')) ORDER BY ir.id)
+	 FROM inspection_records ir LEFT JOIN accounts record_creator ON record_creator.id=ir.created_by
+	 LEFT JOIN import_batches ib ON ib.id=ir.import_batch_id LEFT JOIN accounts batch_creator ON batch_creator.id=ib.created_by
+	 WHERE ir.submission_id=ds.id AND ir.deleted_at IS NULL),'[]'::jsonb) END
+	 ,sem.name,w.week_no,COALESCE(d.name,'校级'),COALESCE(submission_creator.name,''),COALESCE(submission_actor.name,'')
  FROM department_submissions ds JOIN department_submission_revisions rev
  ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
  JOIN semesters sem ON sem.id=ds.semester_id
  JOIN semester_weeks w ON w.id=ds.week_id
- LEFT JOIN departments d ON d.id=ds.department_id`
+	 LEFT JOIN departments d ON d.id=ds.department_id
+	 LEFT JOIN accounts submission_creator ON submission_creator.id=ds.created_by
+	 LEFT JOIN accounts submission_actor ON submission_actor.id=ds.submitted_by`
 
 func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
 	a := inspection.MutationAccess{ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
@@ -106,7 +110,7 @@ func scanSubmission(row pgx.Row) (workflow.Submission, error) {
 		&value.Scope.InspectionTypeID, &value.Kind, &value.Status, &value.RevisionNo, &value.RowVersion,
 		&value.CreatedBy, &value.SubmittedBy, &value.ReviewedBy, &value.ReturnReason,
 		&value.CreatedAt, &value.SubmittedAt, &value.ReviewedAt, &value.RecordIDs, &recordsJSON,
-		&value.SemesterName, &value.WeekNo, &value.DepartmentName)
+		&value.SemesterName, &value.WeekNo, &value.DepartmentName, &value.CreatedByName, &value.SubmittedByName)
 	if err != nil {
 		return workflow.Submission{}, err
 	}

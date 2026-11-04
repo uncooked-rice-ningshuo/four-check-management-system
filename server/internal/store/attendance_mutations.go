@@ -52,7 +52,8 @@ func mutationScopeSQL(access inspection.MutationAccess, args *[]any) string {
 	owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
 	ownAllow, ownDeny := scopeSet(permission.ActionInspectionEnter, permission.EffectAllow), scopeSet(permission.ActionInspectionEnter, permission.EffectDeny)
 	manageAllow, manageDeny := scopeSet(permission.ActionInspectionManage, permission.EffectAllow), scopeSet(permission.ActionInspectionManage, permission.EffectDeny)
-	return "(ir.attribution_mode<>'ADMINISTRATOR' OR " + owner + ") AND ((" + owner + " AND " + ownAllow + " AND NOT " + ownDeny + ") OR (" + manageAllow + " AND NOT " + manageDeny + "))"
+	manage := "(" + manageAllow + " AND NOT " + manageDeny + ")"
+	return "(ir.attribution_mode<>'ADMINISTRATOR' OR " + owner + " OR " + manage + ") AND ((" + owner + " AND " + ownAllow + " AND NOT " + ownDeny + ") OR " + manage + ")"
 }
 
 const mutationRecordSelect = `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,

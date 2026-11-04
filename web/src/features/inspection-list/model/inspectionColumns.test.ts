@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import type { ProColumns } from '@ant-design/pro-components'
-import { createInspectionFilterColumns, createInspectionSortColumn } from './inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from './inspectionColumns'
 
 type SelectOption = { value: string; label: string }
 
@@ -65,4 +65,14 @@ it('排序列不回显为空，默认展示检查时间从新到旧', () => {
   const fieldProps = createInspectionSortColumn<unknown>().fieldProps as { allowClear?: boolean; placeholder?: string }
   expect(fieldProps.allowClear).toBe(false)
   expect(fieldProps.placeholder).toBe('检查时间从新到旧')
+})
+
+it('把录入人和部门提交人作为不同来源展示', () => {
+  const columns = createInspectionProvenanceColumns<{ source: string; status: string; createdByName?: string; submitterName?: string; submittedByName?: string }>()
+  expect(columns.map(item => item.title)).toEqual(['数据来源', '数据状态', '录入人', '部门提交人', '提交时间'])
+  const creator = columns.find(item => item.dataIndex === 'createdByName')
+  const submitter = columns.find(item => item.dataIndex === 'submittedByName')
+  const row = { source: 'EXCEL', status: 'CONFIRMED', createdByName: '批次导入员', submittedByName: '部门部长' }
+  expect(creator?.render && Reflect.apply(creator.render, null, [undefined, row, 0, {}, {}])).toBe('批次导入员')
+  expect(submitter?.renderText && Reflect.apply(submitter.renderText, null, ['部门部长', row, 0, {}])).toBe('部门部长')
 })

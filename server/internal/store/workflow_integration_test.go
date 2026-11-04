@@ -153,8 +153,27 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 	}
 	created, err := service.Submit(ctx, actor, input, audit.Metadata{})
 	if err != nil || created.RevisionNo != 1 || created.Status != workflow.PendingReview ||
-		len(created.RecordIDs) != 2 || len(created.Records) != 2 || created.WeekNo != 1 || created.DepartmentName == "" {
+		len(created.RecordIDs) != 2 || len(created.Records) != 2 || created.WeekNo != 1 || created.DepartmentName == "" ||
+		created.CreatedByName != "Schema fixture" || created.SubmittedByName != "Schema fixture" ||
+		created.Records[0].CreatedByName != "Schema fixture" {
 		t.Fatalf("submit: %+v %v", created, err)
+	}
+	attendancePage, err := (&Postgres{Pool: pool}).ListAttendance(ctx, inspection.AttendanceListQuery{
+		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
+		DepartmentID: department, Sort: inspection.SortOccurredAtDescending, Page: 1, PageSize: 10,
+	})
+	if err != nil || attendancePage.Total != 3 {
+		t.Fatalf("submitted attendance list: %+v %v", attendancePage, err)
+	}
+	var listedSubmissionRecord bool
+	for _, record := range attendancePage.Items {
+		if record.ID == first {
+			listedSubmissionRecord = record.CreatedByName == "Schema fixture" && record.SubmitterName == "Schema fixture" &&
+				record.SubmittedByName == "Schema fixture" && record.SubmittedAt != nil && !record.CanDelete
+		}
+	}
+	if !listedSubmissionRecord {
+		t.Fatalf("attendance list lost record creator, submission actor, or state provenance: %+v", attendancePage.Items)
 	}
 	assertWorkflowState(t, pool, first, "PENDING_REVIEW", true, 2)
 	assertWorkflowState(t, pool, second, "PENDING_REVIEW", true, 2)

@@ -55,30 +55,48 @@ func (p *Postgres) SaveManualAttendance(ctx context.Context, r inspection.Attend
 }
 
 func lockAttendanceReferences(ctx context.Context, tx pgx.Tx, r inspection.AttendanceRecord) error {
-	departmentJoin := `JOIN departments d ON d.id=$8`
-	departmentMapping := `JOIN department_inspection_scopes ds ON ds.department_id=d.id AND ds.inspection_type_id=it.id`
-	departmentWhere := "AND d.enabled AND ds.enabled AND ds.can_enter"
-	departmentLocks := ",d,ds"
-	if r.DepartmentID == "" {
-		departmentJoin, departmentMapping, departmentWhere, departmentLocks = "", "", "", ""
+	args := []any{r.StudentID, r.ClassID, r.GradeSnapshot, r.CourseID, r.ClassroomID, r.WeekID, r.SemesterID}
+	departmentJoin, departmentMapping, departmentWhere, departmentLocks := "", "", "", ""
+	if r.DepartmentID != "" {
+		departmentJoin = `JOIN departments d ON d.id=$8::uuid`
+		departmentMapping = `JOIN department_inspection_scopes ds ON ds.department_id=d.id AND ds.inspection_type_id=it.id`
+		departmentWhere = "AND d.enabled AND ds.enabled AND ds.can_enter"
+		departmentLocks = ",d,ds"
+		args = append(args, r.DepartmentID)
 	}
+	inspectionTypeArg := len(args) + 1
+	args = append(args, r.InspectionTypeID)
+	studentNoArg := len(args) + 1
+	args = append(args, r.StudentNoSnapshot)
+	studentNameArg := len(args) + 1
+	args = append(args, r.StudentNameSnapshot)
+	classNameArg := len(args) + 1
+	args = append(args, r.ClassNameSnapshot)
+	courseNameArg := len(args) + 1
+	args = append(args, r.CourseName)
+	classroomCodeArg := len(args) + 1
+	args = append(args, r.ClassroomCode)
+	occurredAtArg := len(args) + 1
+	args = append(args, r.OccurredAt)
 	var valid bool
-	err := tx.QueryRow(ctx, fmt.Sprintf(`SELECT true FROM students s
+	sql := fmt.Sprintf(`SELECT true FROM students s
  JOIN classes c ON c.id=s.class_id JOIN grades g ON g.id=c.grade_id
 	JOIN courses co ON co.id=$4
  JOIN classrooms cr ON cr.id=$5 JOIN teaching_buildings tb ON tb.id=cr.teaching_building_id
  JOIN semester_weeks w ON w.id=$6 AND w.semester_id=$7
  JOIN semesters sem ON sem.id=w.semester_id JOIN academic_years y ON y.id=sem.academic_year_id
  %s
- JOIN inspection_types it ON it.id=$9 AND it.code='ATTENDANCE_RATE'
+	JOIN inspection_types it ON it.id=$%d::uuid AND it.code='ATTENDANCE_RATE'
  %s
  WHERE s.id=$1 AND c.id=$2 AND g.name=$3 AND s.enabled AND c.enabled AND g.enabled
  AND co.enabled AND cr.enabled AND tb.enabled AND w.enabled AND sem.enabled AND y.enabled
  AND it.enabled %s
- AND s.student_no=$10 AND s.name=$11 AND c.name=$12
- AND co.name=$13 AND tb.name || ' ' || cr.room_no=$14
- AND ($15::timestamptz AT TIME ZONE 'Asia/Shanghai')::date BETWEEN w.start_date AND w.end_date
-	 FOR SHARE OF s,c,g,co,cr,tb,w,sem,y,it%s`, departmentJoin, departmentMapping, departmentWhere, departmentLocks), r.StudentID, r.ClassID, r.GradeSnapshot, r.CourseID, r.ClassroomID, r.WeekID, r.SemesterID, r.DepartmentID, r.InspectionTypeID, r.StudentNoSnapshot, r.StudentNameSnapshot, r.ClassNameSnapshot, r.CourseName, r.ClassroomCode, r.OccurredAt).Scan(&valid)
+	AND s.student_no=$%d AND s.name=$%d AND c.name=$%d
+	AND co.name=$%d AND tb.name || ' ' || cr.room_no=$%d
+	AND ($%d::timestamptz AT TIME ZONE 'Asia/Shanghai')::date BETWEEN w.start_date AND w.end_date
+	 FOR SHARE OF s,c,g,co,cr,tb,w,sem,y,it%s`, departmentJoin, inspectionTypeArg, departmentMapping, departmentWhere,
+		studentNoArg, studentNameArg, classNameArg, courseNameArg, classroomCodeArg, occurredAtArg, departmentLocks)
+	err := tx.QueryRow(ctx, sql, args...).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return inspection.ErrInvalidAttendanceRecord
 	}

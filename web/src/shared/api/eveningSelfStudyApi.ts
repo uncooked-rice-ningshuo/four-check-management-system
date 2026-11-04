@@ -1,5 +1,6 @@
 import { apiRequest } from './httpClient'
 import { allOptions, badResponse, object, queryString, type ContextOptions, type InspectionOption, type InspectionQuery } from './inspectionOptionsApi'
+import { validInspectionProvenance, type InspectionProvenance } from './inspectionProvenance'
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 export type EveningSelfStudyDetails = {
@@ -10,14 +11,14 @@ export type EveningSelfStudyRecordInput = {
  semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'
  details: Pick<EveningSelfStudyDetails, 'classId' | 'studentId' | 'classroomId' | 'date' | 'remark'>
 }
-export type EveningSelfStudyRecordDTO = EveningSelfStudyRecordInput & {
+export type EveningSelfStudyRecordDTO = EveningSelfStudyRecordInput & InspectionProvenance & {
  id: string; typeCode: 'EVENING_SELF_STUDY'; studentNumber: string; studentName: string; className: string; grade: string
  currentClassroomName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; importBatchId?: string; canEdit: boolean
  details: EveningSelfStudyDetails
 }
 
 function record(value: unknown): EveningSelfStudyRecordDTO {
- if (!object(value) || !object(value.details)) throw badResponse()
+	if (!object(value) || !object(value.details) || !validInspectionProvenance(value)) throw badResponse()
  if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
  for (const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentClassroomName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
  for (const key of ['classId','studentId','classroomId','date']) if (typeof value.details[key] !== 'string') throw badResponse()

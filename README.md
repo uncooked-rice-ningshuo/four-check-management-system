@@ -75,6 +75,22 @@ pnpm --version
 
 需要数据库或 MinIO 的集成验证时，只能连接一次性测试资源。相关测试可能执行全部迁移并写入数据；不要指向生产库、共享数据库或日常业务环境。前端和后端的详细开发约定见 [AGENTS.md](AGENTS.md)。
 
+## CodeGraph（本地代码图）
+
+仓库为 Codex 配置了项目级 CodeGraph MCP 服务（`.codex/config.toml`），固定使用 `@colbymchenry/codegraph@1.6.2`。Codex 需将本项目标记为可信后才会加载项目级 MCP 配置；首次启动时 `npx` 会从 npm 获取该版本。该工具只用于开发时的代码结构查询，不是应用运行依赖。
+
+首次建立本地索引，在仓库根目录执行：
+
+```bash
+CODEGRAPH_TELEMETRY=0 npx --yes --package=@colbymchenry/codegraph@1.6.2 codegraph init --yes
+```
+
+索引位于本地 `.codegraph/`，不会提交到 Git；自动同步由 MCP 服务负责。匿名使用遥测在 Codex 配置和初始化命令中均已关闭。`codegraph.json` 排除了可能含敏感材料的参考文件、页面素材及输出目录。查看索引状态：
+
+```bash
+CODEGRAPH_TELEMETRY=0 npx --yes --package=@colbymchenry/codegraph@1.6.2 codegraph status
+```
+
 ## 仓库结构
 
 ```text
@@ -96,6 +112,7 @@ compose.yaml          本地 Docker Compose 配置
 - [按检查类型组织的通报工作台方案](docs/plans/2026-11-01-report-type-first-workbench-design.md)：工作台页面与数据查询调整。
 - [腾讯云部署记录](docs/deployment/ip-trial-deployment-log.md)：试运行环境部署核验。
 - [测试数据清理说明](docs/deployment/test-business-data-cleanup.md)：试运行环境测试数据清理流程。
+- [CodeGraph 官方仓库](https://github.com/colbymchenry/codegraph)：本地代码图与 MCP 工具。
 
 ## 数据与安全
 

@@ -22,8 +22,6 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 	if a.Unrestricted {
 		return "TRUE"
 	}
-	*args = append(*args, a.ActorID)
-	adminIndependentGuard := fmt.Sprintf("(ir.attribution_mode<>'ADMINISTRATOR' OR ir.created_by=$%d::uuid)", len(*args))
 	one := func(class, grade string) string {
 		action := func(name string) string {
 			rules := func(effect string) string {
@@ -74,14 +72,19 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 		}
 		*args = append(*args, a.ActorID)
 		owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
-		return "((" + owner + " AND " + action(permission.ActionInspectionEnter) + ") OR " + action(permission.ActionInspectionManage) + ")"
+		manage := action(permission.ActionInspectionManage)
+		return "((" + owner + " AND " + action(permission.ActionInspectionEnter) + ") OR " + manage + ")"
 	}
 	personal := one("ir.class_id", "ir.grade_snapshot")
-	if mode == "read" && a.ReportScopeValidated {
-		return "(" + personal + " AND " + adminIndependentGuard + ")"
+	if mode == "read" {
+		if a.ReportScopeValidated {
+			return personal
+		}
+		responsible := one("rc.class_id", "rc.grade_snapshot")
+		return "((ir.class_id IS NOT NULL AND " + personal + ") OR (ir.class_id IS NULL AND EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id) AND NOT EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND NOT (" + responsible + "))))"
 	}
 	responsible := one("rc.class_id", "rc.grade_snapshot")
-	return "(((ir.class_id IS NOT NULL AND " + personal + ") OR (ir.class_id IS NULL AND EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id) AND NOT EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND NOT (" + responsible + ")))) AND " + adminIndependentGuard + ")"
+	return "((ir.class_id IS NOT NULL AND " + personal + ") OR (ir.class_id IS NULL AND EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id) AND NOT EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND NOT (" + responsible + "))))"
 }
 
 type inspectionTx struct{ tx pgx.Tx }
@@ -257,22 +260,31 @@ func referenceError(err error) error {
 	return err
 }
 
-const inspectionFrom = ` FROM inspection_records ir JOIN semesters sem ON sem.id=ir.semester_id JOIN inspection_types it ON it.id=ir.inspection_type_id LEFT JOIN accounts submitter ON submitter.id=ir.created_by `
-const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,COALESCE(submitter.name,'账号不可用'),ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,ir.class_name_snapshot,ir.grade_snapshot`
+const inspectionFrom = ` FROM inspection_records ir
+	JOIN semesters sem ON sem.id=ir.semester_id
+	JOIN inspection_types it ON it.id=ir.inspection_type_id
+	LEFT JOIN accounts creator ON creator.id=ir.created_by
+	LEFT JOIN import_batches ib ON ib.id=ir.import_batch_id
+	LEFT JOIN accounts importer ON importer.id=ib.created_by
+	LEFT JOIN department_submissions ds ON ds.id=ir.submission_id
+	LEFT JOIN accounts actual_submitter ON actual_submitter.id=ds.submitted_by `
+const inspectionCreatedByName = `COALESCE(importer.name,creator.name,'账号不可用')`
+const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,` + inspectionCreatedByName + `,` + inspectionCreatedByName + `,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,ir.class_name_snapshot,ir.grade_snapshot`
 const inspectionEditableSQL = `ir.locked_by_report_id IS NULL AND (
  (ir.status='DRAFT' AND ir.submission_id IS NULL)
  OR (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS(
   SELECT 1 FROM department_submissions ds WHERE ds.id=ir.submission_id AND ds.status='RETURNED')))`
+const inspectionDeletableSQL = `ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL`
 
 func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.MutationAccess, mode string, lock bool) (inspection.InspectionRecord, error) {
 	args := []any{id}
 	editable := inspectionAccessSQL(a, "mutate", &args)
-	sql := inspectionColumns + `,(` + inspectionEditableSQL + ` AND ` + editable + `)` + inspectionFrom + ` WHERE ir.id=$1 AND ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, mode, &args)
+	sql := inspectionColumns + `,(` + inspectionEditableSQL + ` AND ` + editable + `),(` + inspectionDeletableSQL + ` AND ` + editable + `),COALESCE(actual_submitter.name,''),ds.submitted_at` + inspectionFrom + ` WHERE ir.id=$1 AND ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, mode, &args)
 	if lock {
 		sql += " FOR UPDATE OF ir"
 	}
 	var r inspection.InspectionRecord
-	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.AttributionMode, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.Grade, &r.CanEdit)
+	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.AttributionMode, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedByName, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.Grade, &r.CanEdit, &r.CanDelete, &r.SubmittedByName, &r.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, inspection.ErrRecordNotFound
 	}

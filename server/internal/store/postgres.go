@@ -1463,7 +1463,8 @@ func (p *Postgres) ListAttendance(ctx context.Context, query inspection.Attendan
 			&record.ClassNameSnapshot, &record.GradeSnapshot, &record.CourseID, &record.CourseName,
 			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours, &record.PenaltyMultiplier, &record.PenaltyHours,
 			&record.PeriodText, &record.Remark, &record.Source, &record.Status, &record.ImportBatchID,
-			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.SubmitterName, &record.CreatedAt, &record.UpdatedAt,
+			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.CreatedByName, &record.SubmitterName, &record.CreatedAt, &record.UpdatedAt,
+			&record.SubmittedByName, &record.SubmittedAt, &record.CanDelete,
 		); err != nil {
 			return inspection.AttendancePage{}, err
 		}
@@ -1482,7 +1483,11 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		JOIN courses c ON c.id = ad.course_id
 		LEFT JOIN classrooms cr ON cr.id = ad.classroom_id
 		LEFT JOIN teaching_buildings tb ON tb.id = cr.teaching_building_id
-		LEFT JOIN accounts submitter ON submitter.id = ir.created_by
+		LEFT JOIN accounts creator ON creator.id = ir.created_by
+		LEFT JOIN import_batches ib ON ib.id = ir.import_batch_id
+		LEFT JOIN accounts importer ON importer.id = ib.created_by
+		LEFT JOIN department_submissions ds ON ds.id = ir.submission_id
+		LEFT JOIN accounts actual_submitter ON actual_submitter.id = ds.submitted_by
 		WHERE ir.semester_id = $1::uuid
 		  AND ir.week_id = $2::uuid
 		  AND ir.inspection_type_id = $3::uuid
@@ -1496,7 +1501,6 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		       OR ir.student_name_snapshot ILIKE '%' || $7 || '%')
 		  AND ($8::text = '' OR ir.status = $8)
 		  AND ($9::text = '' OR ir.source = $9)
-		  AND ($11::boolean OR ir.attribution_mode<>'ADMINISTRATOR' OR ir.created_by=NULLIF($12,'')::uuid)
 		  AND ir.deleted_at IS NULL`
 	countSQL := `SELECT count(*)` + where
 	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
@@ -1505,7 +1509,8 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
 		ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,
 		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
-		COALESCE(submitter.name,'账号不可用'),ir.created_at,ir.updated_at` + where + ` ORDER BY ` + orderBy + ` LIMIT $13 OFFSET $14`
+			COALESCE(importer.name,creator.name,'账号不可用'),COALESCE(importer.name,creator.name,'账号不可用'),ir.created_at,ir.updated_at,
+			COALESCE(actual_submitter.name,''),ds.submitted_at,(ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL)` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
 	departmentIDs := query.DepartmentIDs
 	if departmentIDs == nil {
 		departmentIDs = make([]string, 0)
@@ -1513,7 +1518,6 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 	countArgs := []any{
 		query.SemesterID, query.WeekID, query.InspectionTypeID, query.DepartmentID,
 		query.ClassID, query.Grade, query.Keyword, query.Status, query.Source, departmentIDs,
-		query.AllowAllAdministratorRecords, query.ActorID,
 	}
 	listArgs := append(append([]any{}, countArgs...), query.PageSize, (query.Page-1)*query.PageSize)
 	return countSQL, countArgs, listSQL, listArgs, nil
@@ -1661,26 +1665,26 @@ func (p *Postgres) FindImportBatch(ctx context.Context, id string) (importjob.Ba
 
 func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q importjob.SubmissionBatchQuery) (importjob.SubmissionBatchPage, error) {
 	page := importjob.SubmissionBatchPage{Items: []importjob.SubmissionBatchSummary{}, Page: q.Page, PageSize: q.PageSize}
-	from := ` FROM import_batches b JOIN files f ON f.id=b.original_file_id LEFT JOIN inspection_records ir ON ir.import_batch_id=b.id AND ir.deleted_at IS NULL`
-	where := ` WHERE b.created_by=$1 AND b.status='CONFIRMED' AND b.semester_id=$2 AND b.week_id=$3 AND b.inspection_type_id=$4 AND COALESCE(b.department_id::text,'')=$5`
-	args := []any{actorID, q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID}
+	from := ` FROM import_batches b JOIN files f ON f.id=b.original_file_id LEFT JOIN accounts batch_creator ON batch_creator.id=b.created_by LEFT JOIN inspection_records ir ON ir.import_batch_id=b.id AND ir.deleted_at IS NULL`
+	where := ` WHERE b.status='CONFIRMED' AND b.attribution_mode<>'ADMINISTRATOR' AND b.semester_id=$1 AND b.week_id=$2 AND b.inspection_type_id=$3 AND COALESCE(b.department_id::text,'')=$4`
+	args := []any{q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID}
 	if err := p.Pool.QueryRow(ctx, `SELECT count(DISTINCT b.id)`+from+where, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
 	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
-	rows, err := p.Pool.Query(ctx, `SELECT b.id,b.semester_id,b.week_id,b.inspection_type_id,COALESCE(b.department_id::text,''),f.original_name,b.status,b.created_at,COALESCE(b.confirmed_at,'epoch'::timestamptz),b.imported_rows,
+	rows, err := p.Pool.Query(ctx, `SELECT b.id,b.semester_id,b.week_id,b.inspection_type_id,COALESCE(b.department_id::text,''),f.original_name,COALESCE(batch_creator.name,'账号不可用'),b.status,b.created_at,COALESCE(b.confirmed_at,'epoch'::timestamptz),b.imported_rows,
 		count(ir.id) FILTER (WHERE ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL),
 		count(ir.id) FILTER (WHERE ir.submission_id IS NOT NULL),
 		count(ir.id) FILTER (WHERE ir.submission_id IS NULL AND (ir.status<>'DRAFT' OR ir.locked_by_report_id IS NOT NULL))
 		`+from+where+`
-		GROUP BY b.id,f.original_name ORDER BY b.confirmed_at DESC,b.id LIMIT $6 OFFSET $7`, args...)
+			GROUP BY b.id,f.original_name ORDER BY b.confirmed_at DESC,b.id LIMIT $5 OFFSET $6`, args...)
 	if err != nil {
 		return page, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var item importjob.SubmissionBatchSummary
-		if err := rows.Scan(&item.ID, &item.SemesterID, &item.WeekID, &item.InspectionTypeID, &item.DepartmentID, &item.OriginalName, &item.Status, &item.CreatedAt, &item.ConfirmedAt, &item.ImportedRows, &item.SelectableRecords, &item.SubmittedRecords, &item.UnavailableRecords); err != nil {
+		if err := rows.Scan(&item.ID, &item.SemesterID, &item.WeekID, &item.InspectionTypeID, &item.DepartmentID, &item.OriginalName, &item.CreatedByName, &item.Status, &item.CreatedAt, &item.ConfirmedAt, &item.ImportedRows, &item.SelectableRecords, &item.SubmittedRecords, &item.UnavailableRecords); err != nil {
 			return page, err
 		}
 		page.Items = append(page.Items, item)

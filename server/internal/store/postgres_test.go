@@ -298,6 +298,7 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 		"($6::text = '' OR ir.grade_snapshot = $6)",
 		"($8::text = '' OR ir.status = $8)",
 		"($9::text = '' OR ir.source = $9)",
+		"LEFT JOIN department_submissions ds ON ds.id = ir.submission_id",
 		"ir.deleted_at IS NULL",
 	} {
 		if !strings.Contains(countSQL, fragment) || !strings.Contains(listSQL, fragment) {
@@ -307,10 +308,25 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 	if !strings.Contains(listSQL, "ORDER BY ir.student_no_snapshot ASC, ir.id ASC") {
 		t.Fatalf("list query does not use whitelisted sort: %s", listSQL)
 	}
+	for _, fragment := range []string{
+		"LEFT JOIN accounts creator ON creator.id = ir.created_by",
+		"LEFT JOIN accounts importer ON importer.id = ib.created_by",
+		"COALESCE(importer.name,creator.name,'账号不可用')",
+		"COALESCE(actual_submitter.name,'')",
+		"ds.submitted_at",
+		"ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL",
+	} {
+		if !strings.Contains(listSQL, fragment) {
+			t.Errorf("attendance record provenance/deletion capability missing %q: %s", fragment, listSQL)
+		}
+	}
 	if strings.Contains(listSQL, "semester-1") || strings.Contains(listSQL, "张晨") {
 		t.Fatalf("list query interpolates user input: %s", listSQL)
 	}
-	if len(countArgs) != 12 || len(listArgs) != 14 || listArgs[12] != 25 || listArgs[13] != 25 {
+	if strings.Contains(countSQL, "ir.attribution_mode<>'ADMINISTRATOR'") || strings.Contains(listSQL, "ir.attribution_mode<>'ADMINISTRATOR'") {
+		t.Fatalf("business-scope view must not hide records by creator attribution: %s", countSQL)
+	}
+	if len(countArgs) != 10 || len(listArgs) != 12 || listArgs[10] != 25 || listArgs[11] != 25 {
 		t.Fatalf("count/list args = %#v / %#v", countArgs, listArgs)
 	}
 }

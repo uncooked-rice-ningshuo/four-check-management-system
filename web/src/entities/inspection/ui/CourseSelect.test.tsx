@@ -9,9 +9,9 @@ vi.mock('../../../shared/api/courseInspectionApi', () => ({ courseInspectionApi:
 const courseOptions = vi.mocked(courseInspectionApi.courseOptions)
 const scope = { semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: 'department', recordId: undefined }
 
-function renderCourseSelect() {
+function renderCourseSelect(scopeOverride = scope) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><CourseSelect scope={scope} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><CourseSelect scope={scopeOverride} /></QueryClientProvider>)
 }
 
 function page(page: number) {
@@ -27,6 +27,18 @@ function page(page: number) {
 }
 
 beforeEach(() => courseOptions.mockReset())
+
+it('loads global courses for an administrator scope without a department', async () => {
+  courseOptions.mockImplementation(async () => page(1))
+  renderCourseSelect({ ...scope, departmentId: '' })
+  fireEvent.mouseDown(screen.getByRole('combobox'))
+
+  expect(await screen.findByText('课程 1')).toBeInTheDocument()
+  expect(courseOptions).toHaveBeenCalledWith(expect.objectContaining({
+    semesterId: 'semester', weekId: 'week', inspectionTypeId: 'type', departmentId: '',
+    page: 1, pageSize: 20,
+  }))
+})
 
 it('loads the next bounded course page when the option list scrolls to its end', async () => {
   courseOptions.mockImplementation(async (query: InspectionQuery = {}) => page(Number(query.page ?? 1)))

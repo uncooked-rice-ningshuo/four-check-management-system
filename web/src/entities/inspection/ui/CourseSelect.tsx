@@ -26,7 +26,9 @@ export function CourseSelect({ id, value, onChange, scope, selectedLabel, disabl
   const [searchInput, setSearchInput] = useState('')
   const [keyword, setKeyword] = useState('')
   const [selectedOption, setSelectedOption] = useState<{ id: string; label: string }>()
-  const ready = Boolean(scope.semesterId && scope.weekId && scope.inspectionTypeId && scope.departmentId)
+  // Courses are a global catalog; administrator-owned records have no department.
+  // The entry-options API still applies the caller's authoritative scope.
+  const ready = Boolean(scope.semesterId && scope.weekId && scope.inspectionTypeId)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setKeyword(searchInput), 250)

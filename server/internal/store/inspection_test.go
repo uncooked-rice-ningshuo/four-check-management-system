@@ -42,3 +42,25 @@ func TestReportScopedReadIncludesClasslessRecordsWithinAuthorizedCell(t *testing
 		}
 	}
 }
+
+func TestInspectionViewIsBusinessScopedAndMutationSeparatesEntryFromManagement(t *testing.T) {
+	access := inspection.MutationAccess{ActorID: "actor", Permissions: []permission.EffectivePermission{
+		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
+		{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
+		{Action: permission.ActionInspectionManage, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
+	}}
+	readArgs := []any{}
+	readSQL := inspectionAccessSQL(access, "read", &readArgs)
+	if strings.Contains(readSQL, "ir.created_by=") || !strings.Contains(readSQL, "ir.inspection_type_id") {
+		t.Fatalf("view must apply the business scope without creator filtering: %s", readSQL)
+	}
+	if len(readArgs) != 2 || readArgs[0] != "attendance" || readArgs[1] != "attendance" {
+		t.Fatalf("view query arguments = %#v", readArgs)
+	}
+
+	mutateArgs := []any{}
+	mutateSQL := inspectionAccessSQL(access, "mutate", &mutateArgs)
+	if !strings.Contains(mutateSQL, "ir.created_by=") || !strings.Contains(mutateSQL, "ir.inspection_type_id") || !strings.Contains(mutateSQL, " OR ") {
+		t.Fatalf("mutation must allow owned ENTER records or scoped MANAGE records: %s", mutateSQL)
+	}
+}

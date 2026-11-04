@@ -19,6 +19,7 @@ export type SubmissionCartRecord = {
   grade: string
   status: string
   source: string
+  createdByName?: string
   importBatchId?: string
   importRowNo?: number
   rowVersion: number
@@ -33,6 +34,7 @@ export type SubmissionCartBatch = {
   inspectionTypeId: string
   departmentId: string
   originalName: string
+  createdByName?: string
   status: string
   createdAt: string
   confirmedAt: string

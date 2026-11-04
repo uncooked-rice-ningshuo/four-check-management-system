@@ -6,9 +6,9 @@ import { submissionRecordColumns } from './submissionRecordColumns'
 
 const base: SubmissionCartRecord = { id: 'r', semesterId: 's', weekId: 'w', inspectionTypeId: 't', departmentId: 'd', typeCode: 'LATE_RETURN', studentNumber: 'S01', studentName: '测试学生', className: '计科一班', grade: '2026级', status: 'DRAFT', source: 'EXCEL', rowVersion: 1, canEdit: true, details: {} }
 it('shows a late-return record with dormitory and date only', () => {
-  const row = { ...base, currentDormitoryName: '桃园 101', details: { date: '2026-09-10', time: '23:05:00', remark: '核对备注' } }
+  const row = { ...base, createdByName: '批次导入员', currentDormitoryName: '桃园 101', details: { date: '2026-09-10', time: '23:05:00', remark: '核对备注' } }
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns('LATE_RETURN')} dataSource={[row]} />)
-  for (const value of ['桃园 101', '2026-09-10', '核对备注', 'Excel 导入']) expect(screen.getByText(value)).toBeInTheDocument()
+  for (const value of ['桃园 101', '2026-09-10', '核对备注', 'Excel 导入', '批次导入员']) expect(screen.getByText(value)).toBeInTheDocument()
   expect(screen.queryByText('23:05:00')).not.toBeInTheDocument()
 })
 it('shows hygiene responsibilities and readable result and reason', () => {

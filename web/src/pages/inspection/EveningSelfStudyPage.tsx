@@ -47,7 +47,7 @@ export function EveningSelfStudyPage() {
  const inspectionTypeId = semesters.data?.inspectionTypeId
  const records = useEveningSelfStudyRecords({ ...filters, inspectionTypeId }, !!inspectionTypeId && !!semesterId && !!weekId && !scope.currentWeek.isLoading && !scope.currentWeek.isError && !invalidSelection)
  const canCreate = user?.isSuperAdmin || (!!inspectionTypeId && (user?.systemRole !== 'MEMBER' || !!user.primaryDepartmentId) && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_ENTER', inspectionTypeId))
- const selections = (records.data?.items ?? []).filter(record => selected.includes(record.id) && record.canEdit && record.status === 'DRAFT')
+ const selections = (records.data?.items ?? []).filter(record => selected.includes(record.id) && record.canDelete)
  const canReview = !!user?.isSuperAdmin || (!!inspectionTypeId && hasNavigableInspectionAction(permissions.data?.permissions, 'INSPECTION_REVIEW', inspectionTypeId))
  const optionQueries = [scope.currentWeek, semesters, weeks, departments, classes, grades]
  const optionError = optionQueries.some(query => query.isError)
@@ -74,7 +74,7 @@ export function EveningSelfStudyPage() {
   { title: '节次', key: 'period', search: false, width: 100, render: () => '第 9–10 节' },
   { title: '违纪计入次数', key: 'penaltyCount', search: false, width: 120, render: (_, record) => record.details.penaltyCount ?? '历史待核对' },
   ...createInspectionProvenanceColumns<EveningSelfStudyRecord>(),
-  { title: '操作', valueType: 'option', fixed: 'right', width: 270, render: (_, record) => <Space>{record.importBatchId && record.canEdit && <Button type="link" onClick={() => { setImportBatchId(record.importBatchId); setImporting(true) }}>导入批次</Button>}<Button type="link" onClick={() => setPanel({ record, readOnly: true })}>详情</Button>{record.canEdit && <><Button type="link" onClick={() => setPanel({ record, readOnly: false })}>编辑</Button>{record.status === 'DRAFT' && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</>}</Space> },
+  { title: '操作', valueType: 'option', fixed: 'right', width: 270, render: (_, record) => <Space>{record.importBatchId && record.canEdit && <Button type="link" onClick={() => { setImportBatchId(record.importBatchId); setImporting(true) }}>导入批次</Button>}<Button type="link" onClick={() => setPanel({ record, readOnly: true })}>详情</Button>{record.canEdit && <Button type="link" onClick={() => setPanel({ record, readOnly: false })}>编辑</Button>}{record.canDelete && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</Space> },
  ]
  const attributionColumn:ProColumns<EveningSelfStudyRecord>|undefined=user?.isSuperAdmin?{title:'记录归属',key:'attribution',search:false,width:160,render:(_,record)=>attributionLabel(record.attributionMode,record.departmentId,departments.data?.items.find(item=>item.id===record.departmentId)?.label)}:undefined
 const displayColumns=attributionColumn?[...columns.slice(0,-1),attributionColumn,...columns.slice(-1)]:columns
@@ -87,7 +87,7 @@ const displayColumns=attributionColumn?[...columns.slice(0,-1),attributionColumn
    key={`${semesterId ?? ''}-${weekId ?? ''}`} formRef={form} form={{ initialValues: filters }} search={{ labelWidth: 'auto', defaultCollapsed: false }} options={{ reload: () => void records.refetch(), density: true, setting: true }}
    onSubmit={values => { saveFilters({ ...values, page: 1, pageSize: filters.pageSize }); setSelected([]) }} onReset={()=>{setSelectedGrade(''); saveFilters({ page: 1, pageSize: 20 }); setSelected([]) }} scroll={{ x: 1500 }}
    pagination={{ current: Number(filters.page), pageSize: Number(filters.pageSize), total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (page, pageSize) => { saveFilters({ ...filters, page, pageSize }); setSelected([]) } }}
-   rowSelection={{ selectedRowKeys: selected, onChange: setSelected, getCheckboxProps: record => ({ disabled: !record.canEdit || record.status !== 'DRAFT' }) }}
+   rowSelection={{ selectedRowKeys: selected, onChange: setSelected, getCheckboxProps: record => ({ disabled: !record.canDelete }) }}
    locale={{ emptyText: invalidSelection ? '所选学期或周次不可用' : records.isError ? <Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={() => void records.refetch()}>重试</Button>} /> : optionError ? '请先恢复筛选选项加载' : <Empty description="当前范围暂无晚自习缺勤记录" /> }}
    toolBarRender={() => [<Space key="actions" wrap style={{ minWidth: 0, maxWidth: '100%' }}>{canCreate && <><Button key="create" icon={<PlusOutlined aria-hidden />} onClick={() => setCreating(true)}>新增记录</Button><Button type="primary" icon={<UploadOutlined aria-hidden />} onClick={() => setImporting(true)}>批量导入</Button></>}<DepartmentSubmissionActions typeCode="EVENING_SELF_STUDY" inspectionTypeId={inspectionTypeId ?? ''} listScope={filters} selected={selections} canReview={canReview} onChanged={() => { setSelected([]); void records.refetch() }} onOpenRecord={(id, status) => { const record = records.data?.items.find(item => item.id === id); if (record) setPanel({ record, readOnly: status !== 'RETURNED' }) }} />{selections.length > 0 && <Button key="delete" danger onClick={() => setDeleting(selections)}>批量删除（{selections.length}）</Button>}</Space>]}
   />

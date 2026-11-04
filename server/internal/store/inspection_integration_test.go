@@ -895,10 +895,24 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || adminRecord.AttributionMode != inspection.AttributionModeAdministrator || adminRecord.DepartmentID != "" {
 			t.Fatalf("administrator attribution: %+v %v", adminRecord, err)
 		}
+		attendancePage, err := db.ListAttendance(ctx, inspection.AttendanceListQuery{
+			SemesterID: rf("03"), WeekID: rf("04"), InspectionTypeID: adminRecord.InspectionTypeID,
+			DepartmentID: inspection.CollegeDepartmentOptionID, Sort: inspection.SortOccurredAtDescending, Page: 1, PageSize: 20,
+		})
+		if err != nil || attendancePage.Total != 1 || len(attendancePage.Items) != 1 {
+			t.Fatalf("administrator attendance list: %+v %v", attendancePage, err)
+		}
+		listedAdminRecord := attendancePage.Items[0]
+		if listedAdminRecord.ID != adminRecord.ID || listedAdminRecord.CreatedByName != "Schema fixture" ||
+			listedAdminRecord.SubmitterName != "Schema fixture" || listedAdminRecord.SubmittedByName != "" ||
+			listedAdminRecord.SubmittedAt != nil || !listedAdminRecord.CanDelete {
+			t.Fatalf("attendance provenance or draft deletion capability: %+v", listedAdminRecord)
+		}
 		memberActor := inspection.ManualActor{ID: rf("24"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}, {Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}}
-		if _, err = svc.Detail(ctx, memberActor, adminRecord.ID); !errors.Is(err, inspection.ErrRecordNotFound) {
-			t.Fatal("department member read administrator record", err)
+		visible, detailErr := svc.Detail(ctx, memberActor, adminRecord.ID)
+		if detailErr != nil || visible.CanEdit || visible.CanDelete || visible.CreatedByName != "Schema fixture" || visible.SubmitterName != "Schema fixture" || visible.SubmittedByName != "" {
+			t.Fatalf("business-scoped member must be able to view, but not mutate, another creator's record: %+v %v", visible, detailErr)
 		}
 		page, err := svc.List(ctx, memberActor, inspection.InspectionFilter{InspectionTypeID: adminRecord.InspectionTypeID, SubmissionCandidatesOnly: true})
 		if err != nil {
@@ -909,8 +923,43 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				t.Fatal("administrator record entered department submission candidates")
 			}
 		}
-		if err = svc.Delete(ctx, admin, inspection.DeleteAttendanceInput{Items: []inspection.VersionedRecord{{ID: adminRecord.ID, Version: adminRecord.RowVersion}}, Reason: "fixture cleanup"}, audit.Metadata{}); err != nil {
-			t.Fatal("cleanup administrator record", err)
+		manager := inspection.ManualActor{ID: rf("24")}
+		perms.rules = []permission.EffectivePermission{
+			{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID}},
+			{Action: permission.ActionInspectionManage, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID}},
+		}
+		managed, err := svc.Detail(ctx, manager, adminRecord.ID)
+		if err != nil || !managed.CanEdit || !managed.CanDelete {
+			t.Fatalf("business manager capabilities for independent record: %+v %v", managed, err)
+		}
+		managerEdit := makeInput(inspection.InspectionTypeAttendance, map[string]any{
+			"date": "2026-09-06", "time": "09:45", "remark": "manager corrected independent record",
+		})
+		managerEdit.DepartmentID = ""
+		updated, err := svc.Update(ctx, manager, adminRecord.ID, inspection.InspectionEdit{
+			Version: managed.RowVersion, Reason: "manager correction", Record: managerEdit,
+		}, audit.Metadata{})
+		if err != nil || updated.CreatedBy != adminRecord.CreatedBy || updated.AttributionMode != inspection.AttributionModeAdministrator {
+			t.Fatalf("manager edit must preserve independent ownership: %+v %v", updated, err)
+		}
+		attendanceAccess := inspection.MutationAccess{ActorID: manager.ID, Permissions: perms.rules}
+		attendanceDraft, err := db.ReadAttendanceForMutation(ctx, updated.ID, attendanceAccess)
+		if err != nil {
+			t.Fatal("attendance manager could not read an independent draft for mutation", err)
+		}
+		attendanceDraft.Remark = "attendance manager corrected independent record"
+		attendanceUpdated, err := db.UpdateAttendance(ctx, attendanceDraft, attendanceDraft.RowVersion, attendanceAccess, audit.Mutation{
+			Metadata: audit.Metadata{ActorID: manager.ID},
+			Entry:    audit.Entry{Action: audit.ActionInspectionRecordUpdated, ResourceType: "inspectionRecord", ResourceID: updated.ID},
+		})
+		if err != nil || attendanceUpdated.RowVersion != updated.RowVersion+1 {
+			t.Fatalf("attendance manager edit: %+v %v", attendanceUpdated, err)
+		}
+		if err = db.DeleteAttendance(ctx, []inspection.VersionedRecord{{ID: attendanceUpdated.ID, Version: attendanceUpdated.RowVersion}}, attendanceAccess, audit.Metadata{ActorID: manager.ID}); err != nil {
+			t.Fatal("attendance manager could not delete an eligible independent draft", err)
+		}
+		if _, err = svc.Detail(ctx, admin, adminRecord.ID); !errors.Is(err, inspection.ErrRecordNotFound) {
+			t.Fatal("manager deletion did not remove independent draft", err)
 		}
 		perms.rules = nil
 	})

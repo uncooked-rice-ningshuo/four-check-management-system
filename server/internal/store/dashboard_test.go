@@ -56,3 +56,15 @@ func TestMutationSQLSeparatesOwnAndManagedRecords(t *testing.T) {
 		}
 	}
 }
+
+func TestAttendanceMutationSQLAllowsManagerForAdministratorAttribution(t *testing.T) {
+	args := []any{"record"}
+	sql := mutationScopeSQL(inspection.MutationAccess{ActorID: "manager", Permissions: []permission.EffectivePermission{
+		{Action: permission.ActionInspectionManage, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
+	}}, &args)
+	for _, fragment := range []string{"ir.attribution_mode<>'ADMINISTRATOR' OR", "ir.created_by=", "ir.inspection_type_id="} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("manager mutation guard is missing %q: %s", fragment, sql)
+		}
+	}
+}

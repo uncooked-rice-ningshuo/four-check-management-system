@@ -11,6 +11,7 @@ function record(value: unknown): SubmissionCartRecord {
   for (const key of ['responsibleClasses', 'responsibleStudents', 'responsibleDormitories']) if (value[key] !== undefined && (!Array.isArray(value[key]) || !value[key].every(item => object(item) && typeof item.id === 'string' && typeof item.label === 'string'))) throw badResponse()
   if (value.importBatchId !== undefined && typeof value.importBatchId !== 'string') throw badResponse()
   if (value.importRowNo !== undefined && !Number.isInteger(value.importRowNo)) throw badResponse()
+  if (value.createdByName !== undefined && typeof value.createdByName !== 'string') throw badResponse()
   if (!Number.isInteger(value.rowVersion) || typeof value.canEdit !== 'boolean') throw badResponse()
   return value as SubmissionCartRecord
 }
@@ -23,6 +24,7 @@ function page<T>(value: unknown, parse: (item: unknown) => T): SubmissionCartPag
 function batch(value: unknown): SubmissionCartBatch {
   if (!object(value)) throw badResponse()
   for (const key of ['id', 'semesterId', 'weekId', 'inspectionTypeId', 'departmentId', 'originalName', 'status', 'createdAt', 'confirmedAt']) if (typeof value[key] !== 'string') throw badResponse()
+  if (value.createdByName !== undefined && typeof value.createdByName !== 'string') throw badResponse()
   for (const key of ['importedRows', 'selectableRecords', 'submittedRecords', 'unavailableRecords']) if (!Number.isInteger(value[key])) throw badResponse()
   return value as SubmissionCartBatch
 }

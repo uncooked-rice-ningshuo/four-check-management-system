@@ -1,8 +1,9 @@
 import { ProFormDatePicker } from '@ant-design/pro-components'
-import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space, Typography } from 'antd'
+import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { PublicDormitoryHygieneRecord, HygieneResult, InspectionOption } from '../../../entities/inspection/model/publicDormitoryHygieneRecord'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
+import { InspectionAttributionNote } from '../../../shared/components/InspectionAttributionNote'
 import { HygieneSituationSnippets } from '../../../shared/components/HygieneSituationSnippets'
 import { ApiError } from '../../../shared/api/httpClient'
 import { appendHygieneSituationSnippet } from '../../../shared/utils/hygieneSituation'
@@ -79,7 +80,7 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
       <Row gutter={16}>
         <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => clear(semesterClear)} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
-        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><Typography.Text type="secondary">{editing ? (editing.attributionMode === 'ADMINISTRATOR' ? '此记录归属管理员独立数据' : '修改将保留原记录归属部门') : '本次记录归属管理员，不需要选择目标部门'}</Typography.Text></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>}
+        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>}
         <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任班级" rules={required}><Select mode="multiple" maxCount={1} disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={choices(classes.data, editing?.responsibleClasses)} onChange={() => clear(['responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleDormitoryIds" label="责任寝室" rules={required}><Select mode="multiple" maxCount={1} disabled={!primaryClassId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, dormitoryFallback)} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="负责学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!classIds.length} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing?.responsibleStudents)} /></Form.Item></Col>

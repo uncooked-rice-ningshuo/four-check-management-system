@@ -95,7 +95,8 @@ it('never assigns a department to an administrator-owned record', async () => {
   render(<StrictMode><ClassroomHygieneDrawer inspectionTypeId="type" initialSemesterId="semester" initialWeekId="week" isSuperAdmin onClose={vi.fn()} /></StrictMode>)
 
   expect(screen.queryByRole('combobox', { name: '业务归属部门' })).not.toBeInTheDocument()
-  expect(screen.getByText('本次记录归属管理员，不需要选择目标部门')).toBeInTheDocument()
+  expect(screen.getByText('管理员独立记录')).toBeInTheDocument()
+  expect(screen.getByText('无需选择目标部门；记录不进入部门提交、审核和通报流程。')).toBeInTheDocument()
   await waitFor(() => expect(entryOptions).toHaveBeenCalled())
   expect(entryOptions.mock.calls.every(call => !call[0].departmentId)).toBe(true)
 })

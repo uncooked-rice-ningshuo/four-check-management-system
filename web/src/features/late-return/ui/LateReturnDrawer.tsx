@@ -1,8 +1,9 @@
 import { ProFormDatePicker } from '@ant-design/pro-components'
-import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space, Typography } from 'antd'
+import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { LateReturnDetails, LateReturnRecord, InspectionOption } from '../../../entities/inspection/model/lateReturnRecord'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
+import { InspectionAttributionNote } from '../../../shared/components/InspectionAttributionNote'
 import { ApiError } from '../../../shared/api/httpClient'
 import { useLateReturnMutation, useInspectionContext, useInspectionEntryOptions } from '../model/queries'
 
@@ -59,7 +60,7 @@ export function LateReturnDrawer({ editing: initialEditing, inspectionTypeId, in
  <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>clear(memberEntry?['weekId','classId','studentId','dormitoryId']:['weekId','departmentId','classId','studentId','dormitoryId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>clear(memberEntry?['classId','studentId','dormitoryId']:['departmentId','classId','studentId','dormitoryId'])}/></Form.Item></Col>
- {isSuperAdmin?<Col span={24}><Form.Item name="departmentId" hidden><Input/></Form.Item><Typography.Text type="secondary">{editing?(editing.attributionMode==='ADMINISTRATOR'?'此记录归属管理员独立数据':'修改将保留原记录归属部门'):'本次记录归属管理员，不需要选择目标部门'}</Typography.Text></Col>:<Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items)} onChange={()=>clear(['classId','studentId','dormitoryId'])}/></Form.Item></Col>}
+ {isSuperAdmin?<Col span={24}><Form.Item name="departmentId" hidden><Input/></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col>:<Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items)} onChange={()=>clear(['classId','studentId','dormitoryId'])}/></Form.Item></Col>}
  <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={options(classes.data,fallback('classId',editing?.className??''))} onChange={()=>clear(['studentId','dormitoryId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="studentId" label="学生" rules={required}><Select disabled={!classId} showSearch optionFilterProp="label" loading={students.isFetching} options={options(students.data,editing && editing.details.classId===classId?fallback('studentId',`${editing.studentName}（${editing.studentNumber}）`):undefined)} onChange={()=>clear(['dormitoryId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="学生宿舍" rules={required}><Select disabled={!studentId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={options(dormitories.data,editing && editing.details.studentId===studentId?fallback('dormitoryId',editing.currentDormitoryName):undefined)}/></Form.Item></Col>

@@ -1392,6 +1392,87 @@ body {
 .admin-page .ant-table-cell { font-variant-numeric: tabular-nums; }
 .admin-page h1, .admin-page h2, .admin-page h3 { text-wrap: balance; }
 .ant-modal-body, .ant-drawer-body { overscroll-behavior: contain; }
+.inspection-attribution-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  margin: -2px 0 18px;
+  padding: 9px 12px;
+  border: 1px solid #d8e7f8;
+  border-radius: 7px;
+  background: #f5f9fe;
+  color: #52749a;
+  font-size: 13px;
+}
+.inspection-attribution-note > .anticon {
+  flex: 0 0 auto;
+  color: #4b83c5;
+  font-size: 15px;
+}
+.inspection-attribution-note__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 9px;
+  row-gap: 2px;
+  min-width: 0;
+}
+.inspection-attribution-note__title {
+  color: #31577d;
+  font-weight: 600;
+}
+.inspection-attribution-note__description {
+  color: #667f99;
+}
+.hygiene-situation-snippets {
+  display: grid;
+  gap: 10px;
+  margin: -3px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #e4ebf3;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.hygiene-situation-snippets__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.hygiene-situation-snippets__title {
+  color: #344b63;
+  font-size: 13px;
+}
+.hygiene-situation-snippets__title .anticon {
+  color: #527da8;
+}
+.hygiene-situation-snippets__header > .ant-typography {
+  color: #7a8795;
+  font-size: 12px;
+}
+.hygiene-situation-snippets__options {
+  display: flex;
+}
+.hygiene-situation-snippets__option.ant-btn {
+  height: 30px;
+  padding-inline: 11px;
+  border-color: #d9e3ee;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: none;
+  color: #405c78;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+.hygiene-situation-snippets__option.ant-btn:hover {
+  border-color: #8bb0d6;
+  background: #edf5fd;
+  color: #285d91;
+}
+.hygiene-situation-snippets__message {
+  font-size: 12px;
+}
 @media (max-width: 1100px) {
   .dictionary-grid { grid-template-columns: 1fr; }
 }
@@ -1399,6 +1480,7 @@ body {
   .skip-link { transition: none; }
   .admin-brand-text { transition: none; }
   .weekly-report-stage-actions { transition: none; }
+  .hygiene-situation-snippets__option.ant-btn { transition: none; }
 }
 @media (max-width: 760px) {
   .weekly-report-archive-drawer-wrapper {

@@ -16,6 +16,7 @@ type EntryOptionQuery struct {
 	RecordID         string `form:"recordId"`
 	ClassID          string `form:"classId"`
 	StudentID        string `form:"studentId"`
+	DormitoryID      string `form:"dormitoryId"`
 	CourseID         string `form:"courseId"`
 	ClassroomID      string `form:"classroomId"`
 	Keyword          string `form:"keyword"`
@@ -31,6 +32,9 @@ type EntryOption struct {
 	AttendancePenaltyMultiplier *int   `json:"attendancePenaltyMultiplier,omitempty"`
 	// Grade is current class metadata, never an authorization input.
 	Grade string `json:"grade,omitempty"`
+	// ClassID lets entry derive the responsibility class from a chosen student.
+	ClassID   string `json:"classId,omitempty"`
+	ClassName string `json:"className,omitempty"`
 }
 type EntryOptionPage struct {
 	Items    []EntryOption `json:"items"`
@@ -70,7 +74,7 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 		return EntryOptionPage{}, ErrInspectionRequest
 	}
 	q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID = input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID
-	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.ClassroomID, &q.RecordID} {
+	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.DormitoryID, &q.ClassroomID, &q.RecordID} {
 		if *id != "" {
 			v, ok := canonicalDetailID(*id)
 			if !ok {
@@ -82,7 +86,9 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 	switch q.Kind {
 	case "classes":
 	case "students":
-		if q.ClassID == "" {
+		// Room-first entry lists a dormitory's members before a class exists;
+		// either a class or a dormitory must scope the candidates.
+		if q.ClassID == "" && q.DormitoryID == "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "courses", "classrooms":
@@ -91,7 +97,9 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "dormitory-objects":
-		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
+		// The room catalog does not depend on a responsibility class: entry
+		// selects the room first and derives the class from its student.
+		if q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "classroom-objects":
@@ -99,7 +107,7 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "responsible-dormitories":
-		if q.ClassID == "" || q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
+		if q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "situation-snippets":

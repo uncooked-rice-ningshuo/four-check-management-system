@@ -571,7 +571,7 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		}
 		schoolSubmit := workflow.NewService(&Postgres{Pool: pool}, &workflowPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID, ClassID: class}}}})
 		batch, err := schoolSubmit.Submit(ctx, actor, schoolInput, audit.Metadata{})
-		if err != nil || batch.Scope.DepartmentID != "" || batch.DepartmentName != "校级" || batch.Status != workflow.PendingReview {
+		if err != nil || batch.Scope.DepartmentID != "" || batch.DepartmentName != "管理员" || batch.Status != workflow.PendingReview {
 			t.Fatalf("college submit: %+v %v", batch, err)
 		}
 		if _, err := departmentOnly.Detail(ctx, actor, batch.ID); !errors.Is(err, workflow.ErrSubmissionMissing) {

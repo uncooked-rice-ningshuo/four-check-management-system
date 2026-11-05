@@ -6,7 +6,7 @@ var morningImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"},
 	{Code: "student_name", Header: "姓名"},
 	{Code: "class_name", Header: "班级"},
-	{Code: "inspection_date", Header: "检查日期"},
+	{Code: "inspection_date", Header: "缺勤日期"},
 	{Code: "remark", Header: "备注"},
 }
 

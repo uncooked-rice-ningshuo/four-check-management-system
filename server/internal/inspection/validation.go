@@ -293,11 +293,19 @@ func detailString(values map[string]json.RawMessage, key string) string {
 	return value
 }
 func detailDuplicateKey(code string, c DetailContext, v map[string]json.RawMessage, r ValidatedDetails) string {
+	// Date-level records leave OccurredAt zero; rebuild midnight Asia/Shanghai so the
+	// identity still carries the business date.
+	occurred := r.OccurredAt
+	if occurred.IsZero() && r.Date != "" {
+		if parsed, err := time.ParseInLocation("2006-01-02", r.Date, time.FixedZone("Asia/Shanghai", 8*3600)); err == nil {
+			occurred = parsed
+		}
+	}
 	if code == InspectionTypeAttendance {
-		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, ClassID: detailString(v, "classId"), StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
+		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, ClassID: detailString(v, "classId"), StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: occurred, PeriodText: detailString(v, "period")})
 	}
 	if code == InspectionTypeUnattended {
-		return courseAbsenceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: r.OccurredAt, PeriodText: detailString(v, "period")})
+		return courseAbsenceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: occurred})
 	}
 	if code == InspectionTypeEveningSelfStudy {
 		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "classId"), detailString(v, "studentId"), r.Date}

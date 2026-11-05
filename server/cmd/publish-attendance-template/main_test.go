@@ -156,7 +156,7 @@ func TestUnattendedPreviewIsTypeIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	publicParser, err := importjob.NewPublicDormitoryHygieneXLSXParser(16<<20).Parse("public-dormitory-hygiene.xlsx", publicWorkbook)
-	if err != nil || len(publicParser.Fields) != 7 || publicParser.TemplateCode != "PUBLIC_DORMITORY_HYGIENE_IMPORT" {
+	if err != nil || len(publicParser.Fields) != 8 || publicParser.TemplateCode != "PUBLIC_DORMITORY_HYGIENE_IMPORT" {
 		t.Fatal(publicParser, err)
 	}
 }
@@ -208,7 +208,7 @@ func TestDormitoryHygienePreviewKeepsObjectContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parser.Parse("hygiene.xlsx", content)
-	if err != nil || len(parsed.Fields) != 7 || parsed.TemplateCode != "DORMITORY_HYGIENE_IMPORT" {
+	if err != nil || len(parsed.Fields) != 8 || parsed.TemplateCode != "DORMITORY_HYGIENE_IMPORT" {
 		t.Fatal(parsed, err)
 	}
 }
@@ -228,7 +228,7 @@ func TestClassroomHygienePreviewKeepsObjectContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parser.Parse("hygiene.xlsx", content)
-	if err != nil || len(parsed.Fields) != 7 || parsed.TemplateCode != "CLASSROOM_HYGIENE_IMPORT" {
+	if err != nil || len(parsed.Fields) != 8 || parsed.TemplateCode != "CLASSROOM_HYGIENE_IMPORT" {
 		t.Fatal(parsed, err)
 	}
 }

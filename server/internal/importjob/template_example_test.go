@@ -35,7 +35,7 @@ func TestExampleTemplateCopyKeepsPublishedVersionAndSkipsExample(t *testing.T) {
 				t.Fatal(err)
 			}
 			parsed, err := parser.Parse(definition.Filename, copyBytes)
-			if err != nil || parsed.TemplateVersion != 1 || len(parsed.Rows) != 0 {
+			if err != nil || parsed.TemplateVersion != CurrentTemplateVersion || len(parsed.Rows) != 0 {
 				t.Fatalf("example was imported: %+v %v", parsed, err)
 			}
 			book, err := excelize.OpenReader(bytes.NewReader(copyBytes))

@@ -442,10 +442,8 @@ func TestDuplicateKeyComponents(t *testing.T) {
 }
 
 func TestValidateDetailsStoragePrecision(t *testing.T) {
-	for _, code := range []string{InspectionTypeAttendance, InspectionTypeUnattended} {
-		fields := validDetails(code)
-		fields["absenceHours"] = json.RawMessage(`0.001`)
-		_, issues := validateFixture(code, fields)
-		requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
-	}
+	fields := validDetails(InspectionTypeAttendance)
+	fields["absenceHours"] = json.RawMessage(`0.001`)
+	_, issues := validateFixture(InspectionTypeAttendance, fields)
+	requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
 }

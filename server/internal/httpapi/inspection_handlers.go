@@ -159,7 +159,7 @@ func (h *handler) listSubmissionCandidates(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(c.Query("departmentId")) == "" {
-		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或校级范围")
+		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或管理员范围")
 		return
 	}
 	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}

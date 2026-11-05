@@ -13,22 +13,12 @@ import (
 	"testing"
 )
 
-var attendanceFields = []TemplateField{
-	{Code: "student_no", Header: "学号"},
-	{Code: "student_name", Header: "姓名"},
-	{Code: "class_name", Header: "班级"},
-	{Code: "course_name", Header: "课程"},
-	{Code: "absence_date", Header: "旷课日期"},
-	{Code: "absence_time", Header: "旷课时间"},
-	{Code: "period", Header: "节次"},
-	{Code: "absence_hours", Header: "旷课学时"},
-	{Code: "classroom_code", Header: "上课地点"},
-	{Code: "remark", Header: "备注"},
-}
+// attendanceFields mirrors the production contract so the parser tests move with it.
+var attendanceFields = attendanceImportFields
 
 func attendanceParser(limits XLSXLimits) *XLSXParser {
 	return NewXLSXParser(ParserConfig{
-		ExpectedTemplateCode: "ATTENDANCE_IMPORT", ExpectedTemplateVersion: 1,
+		ExpectedTemplateCode: "ATTENDANCE_IMPORT", ExpectedTemplateVersion: CurrentTemplateVersion,
 		ExpectedSheetName: "到课率导入", Fields: attendanceFields, DataStartRow: 5, Limits: limits,
 	})
 }
@@ -55,7 +45,7 @@ func attendanceRows(dataRows ...[]string) [][]string {
 		headers[index] = field.Header
 	}
 	rows := [][]string{
-		{"template_code", "ATTENDANCE_IMPORT", "template_version", "1"},
+		{"template_code", "ATTENDANCE_IMPORT", "template_version", "2"},
 		codes,
 		headers,
 		{"请勿修改第1-4行；旷课日期格式为 YYYY-MM-DD"},
@@ -64,7 +54,7 @@ func attendanceRows(dataRows ...[]string) [][]string {
 }
 
 func validDataRow() []string {
-	return []string{" S20260001 ", " 测试学生甲 ", " 示例班级A ", " 数据结构 ", "2026-06-17", "08:00", "第1-2节", "2", "A101", " 示例数据 "}
+	return []string{" S20260001 ", " 测试学生甲 ", " 示例班级A ", "2026-06-17", " 数据结构 ", "第1-2节", "2", "A101", " 示例数据 "}
 }
 
 func TestXLSXParserParsesValidTemplateAndNormalizesBlankRows(t *testing.T) {
@@ -73,7 +63,7 @@ func TestXLSXParserParsesValidTemplateAndNormalizesBlankRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workbook.TemplateCode != "ATTENDANCE_IMPORT" || workbook.TemplateVersion != 1 || workbook.SheetName != "到课率导入" {
+	if workbook.TemplateCode != "ATTENDANCE_IMPORT" || workbook.TemplateVersion != CurrentTemplateVersion || workbook.SheetName != "到课率导入" {
 		t.Fatalf("metadata = %+v", workbook)
 	}
 	if len(workbook.Fields) != len(attendanceFields) || workbook.Fields[0] != attendanceFields[0] {
@@ -165,7 +155,7 @@ func TestXLSXParserRejectsMultipleWorksheets(t *testing.T) {
 
 func TestXLSXParserRejectsTemplateVersionAndHeaderMismatch(t *testing.T) {
 	wrongVersion := attendanceRows(validDataRow())
-	wrongVersion[0][3] = "2"
+	wrongVersion[0][3] = "1"
 	content := makeXLSX(t, []workbookSheet{{Name: "到课率导入", Rows: wrongVersion}}, nil)
 	requireParserCode(t, attendanceParser(defaultTestLimits()), "attendance.xlsx", content, ErrorTemplateVersionMismatch)
 
@@ -192,26 +182,35 @@ func TestXLSXParserAllows1000RowsAndRejects1001Rows(t *testing.T) {
 }
 
 func TestAttendanceGoldenWorkbook(t *testing.T) {
-	validContent, err := os.ReadFile(filepath.Join("testdata", "attendance-v1-valid.xlsx"))
+	validContent, err := os.ReadFile(filepath.Join("testdata", "attendance-v2-valid.xlsx"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	workbook, err := attendanceParser(defaultTestLimits()).Parse("attendance-v1-valid.xlsx", validContent)
+	workbook, err := attendanceParser(defaultTestLimits()).Parse("attendance-v2-valid.xlsx", validContent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workbook.SheetName != "到课率导入" || len(workbook.Fields) != 10 || len(workbook.Rows) != 2 {
+	if workbook.SheetName != "到课率导入" || len(workbook.Fields) != 9 || len(workbook.Rows) != 2 {
 		t.Fatalf("golden workbook shape = sheet %q, fields %d, rows %d", workbook.SheetName, len(workbook.Fields), len(workbook.Rows))
 	}
 	if workbook.Rows[0].Values["student_no"] != "S20260001" || workbook.Rows[1].Values["student_name"] != "测试学生乙" {
 		t.Fatalf("golden rows = %+v", workbook.Rows)
 	}
 
-	invalidContent, err := os.ReadFile(filepath.Join("testdata", "attendance-v1-invalid.xlsx"))
+	invalidContent, err := os.ReadFile(filepath.Join("testdata", "attendance-v2-invalid.xlsx"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireParserCode(t, attendanceParser(defaultTestLimits()), "attendance-v1-invalid.xlsx", invalidContent, ErrorInvalidHeader)
+	requireParserCode(t, attendanceParser(defaultTestLimits()), "attendance-v2-invalid.xlsx", invalidContent, ErrorInvalidHeader)
+}
+
+// The published v1 workbook must be rejected by version, not silently reinterpreted.
+func TestAttendanceGoldenV1IsRejectedByVersion(t *testing.T) {
+	legacy, err := os.ReadFile(filepath.Join("testdata", "attendance-v1-valid.xlsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireParserCode(t, attendanceParser(defaultTestLimits()), "attendance-v1-valid.xlsx", legacy, ErrorTemplateVersionMismatch)
 }
 
 func requireParserCode(t *testing.T, parser *XLSXParser, filename string, content []byte, code ErrorCode) {
@@ -424,12 +423,12 @@ func TestAttendanceHeaderAcceptsNewAndPublishedLegacyWording(t *testing.T) {
 		codes[i] = field.Code
 		headers[i] = field.Header
 	}
-	headers[7] = "旷课节次数"
+	headers[6] = "旷课学时"
 	if !p.validHeaders(codes, headers) {
-		t.Fatal("new period count header rejected")
+		t.Fatal("current absence-hours header rejected")
 	}
-	headers[7] = "旷课学时"
+	headers[6] = "旷课节次数"
 	if !p.validHeaders(codes, headers) {
-		t.Fatal("published legacy template rejected")
+		t.Fatal("published legacy wording rejected")
 	}
 }

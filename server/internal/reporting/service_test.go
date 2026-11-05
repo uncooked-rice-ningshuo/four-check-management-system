@@ -165,7 +165,7 @@ func TestRecordsCanReadOneTypeAcrossVisibleSources(t *testing.T) {
 	const typeID = "30000000-0000-0000-0000-000000000001"
 	repository := &reportingRepositoryStub{summary: Summary{Rows: []SummaryRow{
 		{DepartmentID: "10000000-0000-0000-0000-000000000002", DepartmentName: "学习部", InspectionTypeID: typeID},
-		{DepartmentID: "", DepartmentName: "校级", CollegeLevel: true, InspectionTypeID: typeID},
+		{DepartmentID: "", DepartmentName: "管理员", CollegeLevel: true, InspectionTypeID: typeID},
 	}}, records: []inspection.InspectionRecord{{ID: "record-1", DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: typeID},
 		{ID: "record-2", InspectionTypeID: typeID}}, recordTotal: 2}
 	grant := permission.EffectivePermission{Action: permission.ActionReportView, Effect: permission.EffectAllow}
@@ -175,7 +175,7 @@ func TestRecordsCanReadOneTypeAcrossVisibleSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if repository.recordQuery.DepartmentID != "" || repository.recordQuery.CollegeLevel || result.Total != 2 ||
-		result.Items[0].SourceDepartmentName != "学习部" || result.Items[1].SourceDepartmentName != "校级" {
+		result.Items[0].SourceDepartmentName != "学习部" || result.Items[1].SourceDepartmentName != "管理员" {
 		t.Fatalf("cross-source records = %+v; query = %+v", result, repository.recordQuery)
 	}
 }

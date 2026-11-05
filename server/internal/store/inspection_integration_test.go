@@ -21,6 +21,15 @@ const recordFixturePrefix = "a0000000-0000-0000-0000-"
 
 func rf(n string) string { return recordFixturePrefix + "0000000000" + n }
 
+func containsOption(items []inspection.EntryOption, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 type recordPermissions struct {
 	rules []permission.EffectivePermission
 }
@@ -572,7 +581,30 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 		}
 		perms.rules = []permission.EffectivePermission{allow}
-		q.StudentID = rf("01")
+		// Room-first entry: the room catalog is class-independent, and student
+		// options carry the class that entry derives from the chosen student.
+		q.Kind, q.StudentID, q.ClassID = "dormitory-objects", "", ""
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("12")) {
+			t.Fatal("room catalog", page, err)
+		}
+		q.Kind, q.DormitoryID = "students", rf("12")
+		page, err = options.EntryOptions(ctx, member, q)
+		memberOption, found := inspection.EntryOption{}, false
+		for _, item := range page.Items {
+			if item.ID == rf("07") {
+				memberOption, found = item, true
+			}
+		}
+		if err != nil || !found || memberOption.ClassID != rf("06") {
+			t.Fatal("dormitory members with class", page, err)
+		}
+		q.DormitoryID = rf("11")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || page.Total != 0 {
+			t.Fatal("non-resident student", page, err)
+		}
+		q.Kind, q.DormitoryID, q.StudentID, q.ClassID = "dormitories", "", rf("01"), rf("06")
 		page, err = options.EntryOptions(ctx, member, q)
 		if err != nil || page.Total != 0 {
 			t.Fatal("unrelated student", page, err)
@@ -582,12 +614,15 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if _, err = options.EntryOptions(ctx, member, q); !errors.Is(err, inspection.ErrInspectionRequest) {
 			t.Fatal("late return course options accepted", err)
 		}
-		q.Kind = "dormitories"
 		q.InspectionTypeID = types[inspection.InspectionTypeUnattended]
-		if _, err = options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
-			t.Fatal("unattended housing options accepted", err)
+		for _, kind := range []string{"dormitories", "dormitory-objects"} {
+			q.Kind = kind
+			if _, err = options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
+				t.Fatal("unattended housing options accepted", err)
+			}
 		}
 		q.InspectionTypeID = types[inspection.InspectionTypeLateReturn]
+		q.Kind = "dormitories"
 		if _, err = pool.Exec(ctx, "UPDATE dormitories SET enabled=false WHERE id=$1", rf("12")); err != nil {
 			t.Fatal(err)
 		}

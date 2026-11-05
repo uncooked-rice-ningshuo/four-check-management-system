@@ -22,7 +22,7 @@ const submissionSelect = `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.dep
 	 FROM inspection_records ir LEFT JOIN accounts record_creator ON record_creator.id=ir.created_by
 	 LEFT JOIN import_batches ib ON ib.id=ir.import_batch_id LEFT JOIN accounts batch_creator ON batch_creator.id=ib.created_by
 	 WHERE ir.submission_id=ds.id AND ir.deleted_at IS NULL),'[]'::jsonb) END
-	 ,sem.name,w.week_no,COALESCE(d.name,'校级'),COALESCE(submission_creator.name,''),COALESCE(submission_actor.name,'')
+	 ,sem.name,w.week_no,COALESCE(d.name,'管理员'),COALESCE(submission_creator.name,''),COALESCE(submission_actor.name,'')
  FROM department_submissions ds JOIN department_submission_revisions rev
  ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
  JOIN semesters sem ON sem.id=ds.semester_id

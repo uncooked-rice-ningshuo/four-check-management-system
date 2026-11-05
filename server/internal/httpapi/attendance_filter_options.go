@@ -85,7 +85,7 @@ func (h *handler) attendanceFilterOptions(c *gin.Context) {
 		}
 	}
 	if _, allowed := options["departments"][inspection.CollegeDepartmentOptionID]; allowed {
-		result.Departments = append(result.Departments, organization.Department{ID: inspection.CollegeDepartmentOptionID, Code: "COLLEGE", Name: "校级", Enabled: true})
+		result.Departments = append(result.Departments, organization.Department{ID: inspection.CollegeDepartmentOptionID, Code: "COLLEGE", Name: "管理员", Enabled: true})
 	}
 	weekIDs := map[string]bool{}
 	for _, s := range calendar.Semesters {

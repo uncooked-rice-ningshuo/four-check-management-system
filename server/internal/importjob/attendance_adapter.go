@@ -194,11 +194,16 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	studentNo, studentName, className := value("student_no"), value("student_name"), value("class_name")
 	courseName, courseID, classroomCode := value("course_name"), value("course_id"), value("classroom_code")
 	period, remark := value("period"), value("remark")
-	for field, fieldValue := range map[string]string{
+	unattended := scope.TypeCode == inspection.InspectionTypeUnattended
+	requiredFields := map[string]string{
 		"student_no": studentNo, "student_name": studentName, "class_name": className,
-		"absence_date": value("absence_date"), "absence_time": value("absence_time"), "period": period,
-		"absence_hours": value("absence_hours"), "classroom_code": classroomCode,
-	} {
+		"absence_date": value("absence_date"), "classroom_code": classroomCode,
+	}
+	if !unattended {
+		// 到课率 keeps the period and hour contract; 无机课堂 no longer collects either.
+		requiredFields["period"], requiredFields["absence_hours"] = period, value("absence_hours")
+	}
+	for field, fieldValue := range requiredFields {
 		if fieldValue == "" {
 			result.Errors = append(result.Errors, validationError(ErrorRequiredField, field, "必填字段不能为空", "填写模板要求的值"))
 		}
@@ -249,25 +254,34 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 	if value("absence_date") != "" && dateErr != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", "日期格式无效", "使用 YYYY-MM-DD 格式"))
 	}
-	clock, timeErr := time.ParseInLocation("15:04", value("absence_time"), location)
-	if value("absence_time") != "" && timeErr != nil {
+	clockText := value("absence_time")
+	clock, timeErr := time.ParseInLocation("15:04", clockText, location)
+	if clockText != "" && timeErr != nil {
 		result.Errors = append(result.Errors, validationError(ErrorInvalidTime, "absence_time", "时间格式无效", "使用 HH:MM 的 24 小时格式"))
 	}
 	var occurredAt time.Time
-	if dateErr == nil && timeErr == nil {
-		occurredAt = time.Date(date.Year(), date.Month(), date.Day(), clock.Hour(), clock.Minute(), 0, 0, location)
+	if dateErr == nil && (clockText == "" || timeErr == nil) {
+		hour, minute := 0, 0
+		if clockText != "" {
+			hour, minute = clock.Hour(), clock.Minute()
+		}
+		occurredAt = time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, location)
 		if occurredAt.Before(startOfBusinessDay(scope.WeekStart, location)) || occurredAt.After(endOfBusinessDay(scope.WeekEnd, location)) {
 			result.Errors = append(result.Errors, validationError(ErrorOccurredOutsideWeek, "absence_date", "旷课日期不在所选周次", "选择该周次范围内的日期"))
 		}
 	}
 	hours, hoursErr := strconv.ParseFloat(value("absence_hours"), 64)
-	if value("absence_hours") != "" && (hoursErr != nil || hours <= 0 || hours > 24) {
-		result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "旷课节次数格式或范围无效", "填写大于 0 且不超过 24 的数字"))
-	} else if value("absence_hours") != "" {
+	if !unattended && value("absence_hours") != "" && (hoursErr != nil || hours <= 0 || hours > 24) {
+		result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "旷课学时格式或范围无效", "填写大于 0 且不超过 24 的数字"))
+	} else if !unattended && value("absence_hours") != "" {
 		expected, validPeriod := inspection.AttendanceHoursForPeriod(period)
 		if !validPeriod || hours != expected {
-			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课节次数与节次不一致", "每节课按 1 节次填写，核对缺课节次"))
+			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课学时与节次不一致", "每节课按 1 学时填写，核对缺课节次"))
 		}
+	}
+	recordType := inspection.InspectionTypeAttendance
+	if unattended {
+		recordType = inspection.InspectionTypeUnattended
 	}
 	if utf8.RuneCountInString(period) > 64 {
 		result.Errors = append(result.Errors, validationError(ErrorTextTooLong, "period", "节次文本过长", "将节次控制在 64 个字符内"))
@@ -279,7 +293,7 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		return result
 	}
 	record, err := inspection.NewAttendanceRecord(inspection.AttendanceInput{
-		InspectionTypeID: scope.InspectionTypeID, InspectionTypeCode: inspection.InspectionTypeAttendance,
+		InspectionTypeID: scope.InspectionTypeID, InspectionTypeCode: recordType,
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, DepartmentID: scope.DepartmentID,
 		StudentID: student.ID, StudentNoSnapshot: student.StudentNo, StudentNameSnapshot: student.Name,
 		ClassID: class.ID, ClassNameSnapshot: class.Name, GradeSnapshot: class.Grade,

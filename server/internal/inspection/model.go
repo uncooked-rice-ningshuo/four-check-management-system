@@ -110,19 +110,28 @@ type AttendanceRecord struct {
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
-// NewAttendanceRecord enforces the invariants shared by manual and imported attendance drafts.
+// NewAttendanceRecord enforces the invariants shared by manual and imported drafts.
+// 无机课堂 reuses the course-absence storage but records one violation per day, so the
+// server owns both the period and the hour count instead of accepting them as input.
 func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
-	if strings.TrimSpace(input.InspectionTypeCode) != InspectionTypeAttendance {
+	typeCode := strings.TrimSpace(input.InspectionTypeCode)
+	if typeCode != InspectionTypeAttendance && typeCode != InspectionTypeUnattended {
 		return AttendanceRecord{}, ErrInspectionTypeMismatch
 	}
-	if missingAttendanceContext(input) || input.OccurredAt.IsZero() || input.WeekStart.IsZero() || input.WeekEnd.IsZero() ||
-		math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
-		strings.TrimSpace(input.PeriodText) == "" {
+	if missingAttendanceContext(input) || input.OccurredAt.IsZero() || input.WeekStart.IsZero() || input.WeekEnd.IsZero() {
 		return AttendanceRecord{}, ErrInvalidAttendanceRecord
 	}
-	actualHours, validPeriod := AttendanceHoursForPeriod(input.PeriodText)
-	if !validPeriod || input.AbsenceHours != actualHours {
-		return AttendanceRecord{}, ErrInvalidAttendanceRecord
+	if typeCode == InspectionTypeUnattended {
+		input.AbsenceHours, input.PeriodText = 1, ""
+	} else {
+		if math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
+			strings.TrimSpace(input.PeriodText) == "" {
+			return AttendanceRecord{}, ErrInvalidAttendanceRecord
+		}
+		actualHours, validPeriod := AttendanceHoursForPeriod(input.PeriodText)
+		if !validPeriod || input.AbsenceHours != actualHours {
+			return AttendanceRecord{}, ErrInvalidAttendanceRecord
+		}
 	}
 	weekStart, weekEnd, occurredDate := attendanceBusinessDates(input)
 	if weekStart.After(weekEnd) {
@@ -185,10 +194,12 @@ func attendanceDedupKey(input AttendanceInput) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// courseAbsenceDedupKey identifies one student/course/day event. 无机课堂 records one
+// violation per day, so the key ignores any clock time and the fixed period.
 func courseAbsenceDedupKey(input AttendanceInput) string {
+	localDate := input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
 	canonical := strings.Join([]string{
-		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID,
-		input.OccurredAt.UTC().Format(time.RFC3339Nano), strings.TrimSpace(input.PeriodText),
+		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID, localDate,
 	}, "\x1f")
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])

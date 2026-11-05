@@ -36,7 +36,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if scope.TypeCode == inspection.InspectionTypeEveningSelfStudy && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classrooms" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" {
+	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" && q.Kind != "dormitory-objects" {
 		return result, inspection.ErrInspectionRequest
 	}
 	if scope.TypeCode == inspection.InspectionTypeDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitory-objects" && q.Kind != "situation-snippets" {
@@ -90,7 +90,13 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	case "students":
 		base += " JOIN students s ON s.class_id=c.id "
 		where += " AND s.enabled"
-		columns = "s.id,s.name || '（' || s.student_no || '，' || c.name || '）' AS label"
+		// A selected dormitory narrows students to its current members and
+		// returns the class so entry can derive the responsibility class.
+		if q.DormitoryID != "" {
+			args = append(args, q.DormitoryID)
+			where += fmt.Sprintf(" AND s.dormitory_id=$%d::uuid", len(args))
+		}
+		columns = "s.id,s.name || '（' || s.student_no || '，' || c.name || '）' AS label,s.class_id AS class_id,c.name AS class_name"
 	case "courses":
 		// A course is a label in the inspection record; its options do not depend
 		// on a selected class, date, classroom, semester schedule, or period.
@@ -151,10 +157,13 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	}
 	for rows.Next() {
 		var option inspection.EntryOption
-		if q.Kind == "situation-snippets" {
+		switch q.Kind {
+		case "situation-snippets":
 			var orderHint int
 			err = rows.Scan(&option.ID, &option.Label, &orderHint)
-		} else {
+		case "students":
+			err = rows.Scan(&option.ID, &option.Label, &option.ClassID, &option.ClassName)
+		default:
 			err = rows.Scan(&option.ID, &option.Label)
 		}
 		if err != nil {

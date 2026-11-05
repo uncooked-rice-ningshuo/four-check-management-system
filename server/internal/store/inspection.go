@@ -418,7 +418,7 @@ func (t *inspectionTx) readDetails(ctx context.Context, r inspection.InspectionR
 	switch r.TypeCode {
 	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
 		table = "attendance_details"
-		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
+		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',COALESCE(d.period_text,''),'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours,'penaltyCount',d.penalty_count)`
 	case inspection.InspectionTypeEveningSelfStudy:
 		table = "evening_self_study_details"
 		extra = personal + ` || jsonb_build_object('classroomId',d.classroom_id,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyCount',d.penalty_count)`
@@ -618,8 +618,23 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	}
 	return nil
 }
+// courseDetailSQL writes the shared course-absence row. 无机课堂 no longer collects a
+// period or hours: the server owns one violation per record, so an empty period becomes
+// NULL and absence_hours falls back to 1 while penalty_count carries the week multiplier.
 func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *int) (string, []any) {
-	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier`, []any{id, v.CourseID, v.ClassroomID, v.AbsenceHours, v.Period, multiplier}
+	hours := v.AbsenceHours
+	if hours <= 0 {
+		hours = 1
+	}
+	var period any
+	if strings.TrimSpace(v.Period) != "" {
+		period = strings.TrimSpace(v.Period)
+	}
+	var penaltyCount any
+	if period == nil && multiplier != nil {
+		penaltyCount = *multiplier
+	}
+	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier,penalty_count) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`, []any{id, v.CourseID, v.ClassroomID, hours, period, multiplier, penaltyCount}
 }
 func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord, a inspection.MutationAccess) error {
 	args := []any{r.ID, r.RowVersion}

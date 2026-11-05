@@ -4,7 +4,7 @@ package importjob
 var lateReturnImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"},
 	{Code: "inspection_date", Header: "晚归日期"},
-	{Code: "dormitory_name", Header: "宿舍完整名称"}, {Code: "remark", Header: "备注"},
+	{Code: "dormitory_name", Header: "宿舍"}, {Code: "remark", Header: "备注"},
 }
 
 // BuildLateReturnTemplate preserves individual events, never cumulative counts.

@@ -77,33 +77,49 @@ type XLSXParser struct {
 	config ParserConfig
 }
 
+// CurrentTemplateVersion is written into every generated workbook and required on upload.
+// Bumping it invalidates older files by design; users must download the current template.
+const CurrentTemplateVersion = 2
+
 var attendanceImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"},
 	{Code: "student_name", Header: "姓名"},
 	{Code: "class_name", Header: "班级"},
-	{Code: "course_name", Header: "课程"},
 	{Code: "absence_date", Header: "旷课日期"},
-	{Code: "absence_time", Header: "旷课时间"},
-	{Code: "period", Header: "节次"},
-	{Code: "absence_hours", Header: "旷课节次数"},
+	{Code: "course_name", Header: "课程"},
+	{Code: "period", Header: "旷课节次"},
+	{Code: "absence_hours", Header: "旷课学时"},
 	{Code: "classroom_code", Header: "上课地点"},
 	{Code: "remark", Header: "备注"},
 }
 
-// NewAttendanceXLSXParser returns the locked first-version attendance template parser.
+// unattendedImportFields is the independent 无机课堂 contract: no time, period or hours.
+// The server owns one violation per record, so none of those inputs are accepted.
+var unattendedImportFields = []TemplateField{
+	{Code: "student_no", Header: "学号"},
+	{Code: "student_name", Header: "姓名"},
+	{Code: "class_name", Header: "班级"},
+	{Code: "absence_date", Header: "检查日期"},
+	{Code: "course_name", Header: "课程"},
+	{Code: "classroom_code", Header: "上课地点"},
+	{Code: "remark", Header: "备注"},
+}
+
+// NewAttendanceXLSXParser returns the locked attendance template parser.
 func NewAttendanceXLSXParser(maxCompressedBytes int64) *XLSXParser {
 	return NewXLSXParser(ParserConfig{
-		ExpectedTemplateCode: "ATTENDANCE_IMPORT", ExpectedTemplateVersion: 1,
+		ExpectedTemplateCode: "ATTENDANCE_IMPORT", ExpectedTemplateVersion: CurrentTemplateVersion,
 		ExpectedSheetName: "到课率导入", Fields: append([]TemplateField(nil), attendanceImportFields...), DataStartRow: 5,
 		Limits: XLSXLimits{MaxCompressedBytes: maxCompressedBytes, MaxEntries: 512, MaxEntryUncompressedBytes: 16 << 20, MaxTotalUncompressedBytes: 64 << 20, MaxRows: 1000},
 	})
 }
 
-// NewUnattendedXLSXParser shares the hardened parser while rejecting other template types.
+// NewUnattendedXLSXParser shares the hardened parser with its own field contract.
 func NewUnattendedXLSXParser(maxCompressedBytes int64) *XLSXParser {
 	config := NewAttendanceXLSXParser(maxCompressedBytes).config
 	config.ExpectedTemplateCode = "UNATTENDED_CLASSROOM_IMPORT"
 	config.ExpectedSheetName = "无机课堂导入"
+	config.Fields = append([]TemplateField(nil), unattendedImportFields...)
 	return NewXLSXParser(config)
 }
 
@@ -231,7 +247,8 @@ func (p *XLSXParser) validHeaders(codes, headers []string) bool {
 	normalizedCodes := normalizedRow(codes, len(p.config.Fields))
 	normalizedHeaders := normalizedRow(headers, len(p.config.Fields))
 	for index, field := range p.config.Fields {
-		legacyAttendanceHeader := p.config.ExpectedTemplateCode == "ATTENDANCE_IMPORT" && field.Code == "absence_hours" && normalizedHeaders[index] == "旷课学时"
+		// 旷课学时 was published under the older wording 旷课节次数; accept both spellings.
+		legacyAttendanceHeader := p.config.ExpectedTemplateCode == "ATTENDANCE_IMPORT" && field.Code == "absence_hours" && normalizedHeaders[index] == "旷课节次数"
 		if normalizedCodes[index] != field.Code || (normalizedHeaders[index] != field.Header && !legacyAttendanceHeader) {
 			return false
 		}

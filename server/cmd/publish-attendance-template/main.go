@@ -33,7 +33,7 @@ func main() {
 func run(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("publish-attendance-template", flag.ContinueOnError)
 	flags.SetOutput(output)
-	typeCode := flags.String("type-code", "ATTENDANCE_RATE", "ATTENDANCE_RATE, UNATTENDED_CLASSROOM, MORNING_ATTENDANCE, LATE_RETURN, DORMITORY_HYGIENE, CLASSROOM_HYGIENE, EVENING_SELF_STUDY")
+	typeCode := flags.String("type-code", "ATTENDANCE_RATE", "ATTENDANCE_RATE, UNATTENDED_CLASSROOM, MORNING_ATTENDANCE, LATE_RETURN, DORMITORY_HYGIENE, CLASSROOM_HYGIENE, PUBLIC_DORMITORY_HYGIENE, EVENING_SELF_STUDY")
 	apply := flags.Bool("apply", false, "publish to configured PostgreSQL/MinIO (default: preview only)")
 	actor := flags.String("actor-id", "", "active super administrator UUID for audit attribution")
 	reason := flags.String("reason", "", "publication reason (required with --apply)")
@@ -76,7 +76,7 @@ func run(args []string, output io.Writer) error {
 		}
 	}
 	if !*apply {
-		return json.NewEncoder(output).Encode(map[string]any{"mode": "preview", "code": definition.Code, "version": 1, "sizeBytes": len(content), "sha256": fmt.Sprintf("%x", sha256.Sum256(content))})
+		return json.NewEncoder(output).Encode(map[string]any{"mode": "preview", "code": definition.Code, "version": importjob.CurrentTemplateVersion, "sizeBytes": len(content), "sha256": fmt.Sprintf("%x", sha256.Sum256(content))})
 	}
 	for _, key := range []string{"DATABASE_URL", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "MINIO_USE_TLS"} {
 		if strings.TrimSpace(os.Getenv(key)) == "" {

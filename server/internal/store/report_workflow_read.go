@@ -222,7 +222,7 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 	pageArgs = append(pageArgs, query.PageSize, (query.Page-1)*query.PageSize)
 	rows, err := p.Pool.Query(ctx, `SELECT version_record.included_data_json::text,
  version_record.source_submission_id::text,version_record.source_revision_no,
- COALESCE(department.name,'校级'),submitter.name,revision.submitted_at `+base+
+ COALESCE(department.name,'管理员'),submitter.name,revision.submitted_at `+base+
 		fmt.Sprintf(" ORDER BY version_record.inspection_record_id LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), pageArgs...)
 	if err != nil {
 		return reporting.RecordPage{}, err

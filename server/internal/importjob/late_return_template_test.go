@@ -18,8 +18,8 @@ func TestLateReturnTemplateUsesStudentEventFields(t *testing.T) {
 	}
 	parser := NewLateReturnXLSXParser(16 << 20)
 	parsed, err := parser.Parse("late-return.xlsx", content)
-	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "晚归日期"}, {Code: "dormitory_name", Header: "宿舍完整名称"}, {Code: "remark", Header: "备注"}}
-	if err != nil || parsed.TemplateCode != "LATE_RETURN_IMPORT" || parsed.TemplateVersion != 1 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
+	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "晚归日期"}, {Code: "dormitory_name", Header: "宿舍"}, {Code: "remark", Header: "备注"}}
+	if err != nil || parsed.TemplateCode != "LATE_RETURN_IMPORT" || parsed.TemplateVersion != 2 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
 		t.Fatalf("invalid template %+v %v", parsed, err)
 	}
 	book, err := excelize.OpenReader(bytes.NewReader(content))

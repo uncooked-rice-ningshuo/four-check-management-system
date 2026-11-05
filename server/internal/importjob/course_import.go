@@ -18,19 +18,22 @@ type CourseTemplateDefinition struct{ TypeCode, Code, Name, Sheet, Filename stri
 func CourseTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	switch typeCode {
 	case "ATTENDANCE_RATE":
-		return CourseTemplateDefinition{typeCode, "ATTENDANCE_IMPORT", "到课率导入模板", "到课率导入", "attendance-v1.xlsx"}, nil
+		return CourseTemplateDefinition{typeCode, "ATTENDANCE_IMPORT", "到课率导入模板", "到课率导入", "attendance-v2.xlsx"}, nil
 	case "UNATTENDED_CLASSROOM":
-		return CourseTemplateDefinition{typeCode, "UNATTENDED_CLASSROOM_IMPORT", "无机课堂导入模板", "无机课堂导入", "unattended-classroom-v1.xlsx"}, nil
+		return CourseTemplateDefinition{typeCode, "UNATTENDED_CLASSROOM_IMPORT", "无机课堂导入模板", "无机课堂导入", "unattended-classroom-v2.xlsx"}, nil
 	default:
 		return CourseTemplateDefinition{}, ErrInvalidBatch
 	}
 }
 
-// BuildCourseTemplate generates only the approved shared course-field format.
+// BuildCourseTemplate generates only the approved course-field format for each type.
 func BuildCourseTemplate(typeCode string) ([]byte, error) {
-	definition, err := CourseTemplate(typeCode)
-	if err != nil {
-		return nil, err
+	switch typeCode {
+	case "ATTENDANCE_RATE":
+		return BuildAttendanceTemplate()
+	case "UNATTENDED_CLASSROOM":
+		return BuildUnattendedTemplate()
+	default:
+		return nil, ErrInvalidBatch
 	}
-	return buildCourseTemplate(definition.Sheet, definition.Code)
 }

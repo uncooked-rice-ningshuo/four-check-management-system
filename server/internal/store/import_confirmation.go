@@ -32,7 +32,30 @@ func lockInspectionImportContext(ctx context.Context, tx pgx.Tx, scope importjob
 // membership must be previewed again because it changes the authorization scope.
 func lockCourseImportReferences(ctx context.Context, tx pgx.Tx, scope inspection.InspectionContext, record inspection.AttendanceRecord) error {
 	occurred := record.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60))
-	raw, err := json.Marshal(inspection.CourseAbsenceDetails{StudentID: record.StudentID, ClassID: record.ClassID, CourseID: record.CourseID, ClassroomID: record.ClassroomID, Date: occurred.Format("2006-01-02"), Time: occurred.Format("15:04:05"), Period: record.PeriodText, AbsenceHours: record.AbsenceHours, Remark: record.Remark})
+	// Rebuild the detail payload from the stored columns. 到课率 and 无机课堂 now answer to
+	// different field sets (无机课堂 collects no period, hours or clock time), so drop every
+	// key the catalog does not define: validation rejects unknown fields, which would abort
+	// the whole confirmation and be reported as a stale preview.
+	definition, err := inspection.LookupInspectionDefinition(scope.TypeCode)
+	if err != nil {
+		return err
+	}
+	details := map[string]any{
+		"studentId": record.StudentID, "classId": record.ClassID, "courseId": record.CourseID,
+		"classroomId": record.ClassroomID, "date": occurred.Format("2006-01-02"),
+		"time": occurred.Format("15:04:05"), "period": record.PeriodText,
+		"absenceHours": record.AbsenceHours, "remark": record.Remark,
+	}
+	known := make(map[string]bool, len(definition.Fields))
+	for _, field := range definition.Fields {
+		known[field.Key] = true
+	}
+	for key := range details {
+		if !known[key] {
+			delete(details, key)
+		}
+	}
+	raw, err := json.Marshal(details)
 	if err != nil {
 		return err
 	}

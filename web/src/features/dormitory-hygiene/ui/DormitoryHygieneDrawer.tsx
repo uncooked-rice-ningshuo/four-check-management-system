@@ -14,6 +14,8 @@ type Values = {
   weekId: string
   departmentId: string
   dormitoryId: string
+  dormitoryAreaId?: string
+  dormitoryBuildingId?: string
   date: string
   result: HygieneResult
   responsibleClassIds: string[]
@@ -35,6 +37,8 @@ export function DormitoryHygieneDrawer({ editing: initialEditing, inspectionType
   const weekId = Form.useWatch('weekId', form)
   const departmentId = Form.useWatch('departmentId', form)
   const dormitoryId = Form.useWatch('dormitoryId', form)
+  const dormitoryAreaId = Form.useWatch('dormitoryAreaId', form)
+  const dormitoryBuildingId = Form.useWatch('dormitoryBuildingId', form)
   const result = Form.useWatch('result', form) ?? editing?.details.result ?? 'QUALIFIED'
   const mutation = useDormitoryHygieneMutation(), submitting = useRef(false)
   const [error, setError] = useState('')
@@ -47,9 +51,12 @@ export function DormitoryHygieneDrawer({ editing: initialEditing, inspectionType
   const scope = { semesterId, weekId, departmentId, inspectionTypeId, recordId }
   const ready = !!semesterId && !!weekId && (isSuperAdmin || !!departmentId)
   const students = useResponsibleStudentOptions({ ...scope, dormitoryId }, ready && !!dormitoryId)
-  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'dormitory-objects' }, ready)
+  // Housing is chosen as area → building → room before the responsible student.
+  const areas = useInspectionEntryOptions({ ...scope, kind: 'dormitory-areas' }, ready)
+  const buildings = useInspectionEntryOptions({ ...scope, kind: 'dormitory-buildings', dormitoryAreaId }, ready && !!dormitoryAreaId)
+  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'dormitory-objects', dormitoryAreaId, dormitoryBuildingId }, ready && !!dormitoryBuildingId)
   const snippets = useInspectionEntryOptions({ ...scope, kind: 'situation-snippets' }, ready)
-  const coreQueries = [semesters, weeks, departments, students, dormitories]
+  const coreQueries = [semesters, weeks, departments, areas, buildings, students, dormitories]
   const failed = coreQueries.some(query => query.isError)
   const clear = (names: (keyof Values)[]) => form.setFields(names.map(name => ({ name, value: undefined, errors: [] })))
   const chooseStudent = (studentIds: string[]) => {
@@ -87,15 +94,18 @@ export function DormitoryHygieneDrawer({ editing: initialEditing, inspectionType
     <Form form={form} name="dormitory-hygiene-record" layout="vertical" onFinish={submit} disabled={mutation.isPending}
       initialValues={editing ? {
         semesterId: editing.semesterId, weekId: editing.weekId, departmentId: initialDepartmentId,
-        dormitoryId: editing.details.dormitoryId, date: editing.details.date, result: editing.details.result,
+        dormitoryId: editing.details.dormitoryId, dormitoryAreaId: editing.currentDormitoryAreaId, dormitoryBuildingId: editing.currentDormitoryBuildingId,
+        date: editing.details.date, result: editing.details.result,
         responsibleClassIds: editing.details.responsibleClassIds.slice(0, 1), responsibleStudentIds: editing.details.responsibleStudentIds?.slice(0, 1) ?? [],
         description: editing.details.description ?? '', remark: editing.details.remark ?? '',
       } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: initialDepartmentId, result: 'QUALIFIED', responsibleClassIds: [], responsibleStudentIds: [] }}>
       <Row gutter={16}>
-        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => { clear(['weekId', 'responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>
-        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>}
-        <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="宿舍" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, editing ? [{ id: editing.details.dormitoryId, label: editing.currentDormitoryName }] : [])} onChange={() => { clear(['responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => { clear(['weekId', 'dormitoryAreaId', 'dormitoryBuildingId', 'dormitoryId', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => { clear(['dormitoryAreaId', 'dormitoryBuildingId', 'dormitoryId', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => { clear(['dormitoryAreaId', 'dormitoryBuildingId', 'dormitoryId', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>}
+        <Col xs={24} sm={12}><Form.Item name="dormitoryAreaId" label="宿舍区"><Select disabled={!ready} showSearch optionFilterProp="label" loading={areas.isFetching} options={choices(areas.data)} onChange={() => { clear(['dormitoryBuildingId', 'dormitoryId', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="dormitoryBuildingId" label="宿舍栋"><Select disabled={!dormitoryAreaId} showSearch optionFilterProp="label" loading={buildings.isFetching} options={choices(buildings.data)} onChange={() => { clear(['dormitoryId', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="房间号" rules={required}><Select disabled={!dormitoryBuildingId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, editing ? [{ id: editing.details.dormitoryId, label: editing.currentDormitoryName }] : [])} onChange={() => { clear(['responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="责任学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!dormitoryId} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing && editing.details.dormitoryId === dormitoryId ? editing.responsibleStudents : [])} onChange={chooseStudent} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任学生班级" rules={required} extra="按所选学生自动带出"><Select mode="multiple" maxCount={1} disabled options={classChoice ? [{ value: classChoice.id, label: classChoice.label }] : []} /></Form.Item></Col>
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>

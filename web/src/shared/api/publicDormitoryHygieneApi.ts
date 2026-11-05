@@ -11,7 +11,7 @@ export type PublicDormitoryHygieneDetails = {
 }
 export type PublicDormitoryHygieneInput = {semesterId:string;weekId:string;inspectionTypeId:string;departmentId:string;attributionMode?:'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR';details:PublicDormitoryHygieneDetails}
 export type PublicDormitoryHygieneRecordDTO = PublicDormitoryHygieneInput & InspectionProvenance & {
- id:string;typeCode:'PUBLIC_DORMITORY_HYGIENE';currentAreaName?:string;currentReasonLabel?:string
+ id:string;typeCode:'PUBLIC_DORMITORY_HYGIENE';currentAreaName?:string;currentDormitoryAreaId?:string;currentDormitoryBuildingId?:string;currentReasonLabel?:string
  responsibleClasses:InspectionOption[];responsibleStudents:InspectionOption[];responsibleDormitories:InspectionOption[]
  status:string;source:string;rowVersion:number;createdBy:string;submitterName:string;canEdit:boolean
 }
@@ -21,6 +21,7 @@ function record(value:unknown):PublicDormitoryHygieneRecordDTO {
  if(value.attributionMode!==undefined&&!['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode)))throw badResponse()
  for(const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','status','source','createdBy','submitterName'])if(typeof value[key]!=='string')throw badResponse()
  if(value.currentAreaName!==undefined&&typeof value.currentAreaName!=='string')throw badResponse()
+ for(const key of ['currentDormitoryAreaId','currentDormitoryBuildingId'])if(value[key]!==undefined&&typeof value[key]!=='string')throw badResponse()
  if(value.details.date===undefined||typeof value.details.date!=='string'||(value.details.areaId!==undefined&&typeof value.details.areaId!=='string'))throw badResponse()
  for(const key of ['time','round','reasonCode','description','remark'])if(value.details[key]!==undefined&&typeof value.details[key]!=='string')throw badResponse()
  if(!['EXCELLENT','QUALIFIED','UNQUALIFIED'].includes(String(value.details.result))||!Array.isArray(value.details.responsibleClassIds)||!value.details.responsibleClassIds.length||!value.details.responsibleClassIds.every(item=>typeof item==='string'))throw badResponse()

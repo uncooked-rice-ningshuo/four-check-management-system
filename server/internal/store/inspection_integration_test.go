@@ -108,14 +108,20 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	makeInput := func(code string, extra map[string]any) inspection.InspectionInput {
 		fields := map[string]any{"date": "2026-09-03", "remark": "Synthetic private text"}
 		switch code {
-		case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
+		case inspection.InspectionTypeAttendance:
+			// 到课率 keeps the period and hour columns; the clock time is no longer collected.
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
 			fields["courseId"] = rf("13")
 			fields["classroomId"] = rf("09")
-			fields["time"] = "08:00"
 			fields["period"] = "1-2"
 			fields["absenceHours"] = 2
+		case inspection.InspectionTypeUnattended:
+			// 无机课堂 records one violation per day: the server owns period and hours.
+			fields["studentId"] = rf("07")
+			fields["classId"] = rf("06")
+			fields["courseId"] = rf("13")
+			fields["classroomId"] = rf("09")
 		case inspection.InspectionTypeEveningSelfStudy:
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
@@ -196,7 +202,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || err2 != nil || first.Total != 2 || second.Total != 2 || len(first.Items) != 1 || len(second.Items) != 1 || first.Items[0].ID == second.Items[0].ID {
 			t.Fatal("context pagination", err, err2)
 		}
-		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, nil), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,7 +335,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if e != nil || page.Total != 0 {
 			t.Fatal("manage enabled creation", e)
 		}
-		record, e := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, e := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, nil), audit.Metadata{})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -700,7 +706,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		const primary = "10000000-0000-0000-0000-000000000002"
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: primary, InspectionTypeID: types[inspection.InspectionTypeAttendance], ClassID: rf("06")}}}
 		actor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: primary}
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"time": "09:45", "remark": "member attribution"})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"remark": "member attribution"})
 		input.DepartmentID = "10000000-0000-0000-0000-000000000003"
 		if _, err := svc.Create(ctx, actor, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
 			t.Fatalf("member chose another department: %v", err)
@@ -924,7 +930,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 	})
 	t.Run("administrator records stay outside department workflows", func(t *testing.T) {
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-06", "time": "09:45", "remark": "admin independent"})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-06", "remark": "admin independent"})
 		input.DepartmentID = ""
 		adminRecord, err := svc.Create(ctx, admin, input, audit.Metadata{})
 		if err != nil || adminRecord.AttributionMode != inspection.AttributionModeAdministrator || adminRecord.DepartmentID != "" {
@@ -968,7 +974,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			t.Fatalf("business manager capabilities for independent record: %+v %v", managed, err)
 		}
 		managerEdit := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-06", "time": "09:45", "remark": "manager corrected independent record",
+			"date": "2026-09-06", "remark": "manager corrected independent record",
 		})
 		managerEdit.DepartmentID = ""
 		updated, err := svc.Update(ctx, manager, adminRecord.ID, inspection.InspectionEdit{
@@ -1143,7 +1149,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		}
 	}
 	t.Run("college record is independent of department", func(t *testing.T) {
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "time": "10:00", "classId": rf("16"), "studentId": rf("23")})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "classId": rf("16"), "studentId": rf("23")})
 		input.DepartmentID = inspection.CollegeDepartmentOptionID
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("16")}}}
 		if _, err := svc.Create(ctx, member, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
@@ -1236,7 +1242,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 	})
 	t.Run("student number sort uses snapshots and preserves time default", func(t *testing.T) {
 		firstInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-05", "studentId": rf("07"), "classId": rf("06"), "time": "08:00",
+			"date": "2026-09-05", "studentId": rf("07"), "classId": rf("06"),
 		})
 		firstInput.DepartmentID = ""
 		first, err := svc.Create(ctx, admin, firstInput, audit.Metadata{})
@@ -1244,7 +1250,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 			t.Fatal("create first sortable record", err)
 		}
 		secondInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-06", "studentId": rf("23"), "classId": rf("16"), "time": "08:00",
+			"date": "2026-09-06", "studentId": rf("23"), "classId": rf("16"),
 		})
 		secondInput.DepartmentID = ""
 		second, err := svc.Create(ctx, admin, secondInput, audit.Metadata{})

@@ -31,7 +31,7 @@ export function CourseRecordPanel({id,mode,onClose,memberDepartmentId,isSuperAdm
  {key:'class',label:'班级',children:record.className},{key:'grade',label:'年级',children:record.grade},
  {key:'course',label:'课程（当前名称）',children:record.currentCourseName||'—'},
  {key:'room',label:'教室（当前名称）',children:record.currentClassroomName||'—'},
- {key:'date',label:'检查时间',children:`${record.details.date} ${record.details.time}`},
+ {key:'date',label:'检查日期',children:record.details.time&&record.details.time!=='00:00:00'?`${record.details.date} ${record.details.time}`:record.details.date},
  {key:'period',label:'节次',children:record.details.period},{key:'hours',label:'旷课学时',children:record.details.absenceHours},
  {key:'remark',label:'备注',children:record.details.remark||'—'},
  ]}/></Drawer>

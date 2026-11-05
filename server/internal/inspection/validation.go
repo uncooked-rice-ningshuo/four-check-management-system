@@ -67,6 +67,12 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 		issues = append(issues, detailIssue("details.date", "OUTSIDE_WEEK"))
 	}
 	clock, round := detailString(values, "time"), detailString(values, "round")
+	// 到课率 and 无机课堂 no longer collect a clock time, but storage still requires an
+	// occurrence instant for course absences. Pin it to midnight of the business date so
+	// every record of one day shares the same instant; the dedup keys compare dates.
+	if clock == "" && (code == InspectionTypeAttendance || code == InspectionTypeUnattended) {
+		clock = "00:00:00"
+	}
 	isHygiene := definition.Granularity == "OBJECT_INSPECTION"
 	if isHygiene {
 		if detailString(values, "result") == HygieneUnqualified && strings.TrimSpace(detailString(values, "description")) == "" {

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "lint": "eslint .",
-    "test:browser": "python3 ../server/scripts/verify-browser.py"
+    "test:browser": "python3 ../server/scripts/verify-browser.py",
+    "test:midscene": "playwright test --config playwright.midscene.config.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
@@ -21,11 +22,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@midscene/web": "^1.17.5",
+    "@playwright/test": "^1.64.1",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.1.0",
+    "dotenv": "^18.0.9",
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",

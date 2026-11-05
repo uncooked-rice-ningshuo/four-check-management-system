@@ -75,6 +75,18 @@ pnpm --version
 
 需要数据库或 MinIO 的集成验证时，只能连接一次性测试资源。相关测试可能执行全部迁移并写入数据；不要指向生产库、共享数据库或日常业务环境。前端和后端的详细开发约定见 [AGENTS.md](AGENTS.md)。
 
+### Midscene 可视化回归
+
+Midscene 通过截图定位控件并操作页面，独立于现有的隔离 Playwright CLI 套件。使用 Node.js 22.12+、仓库指定的 pnpm 和已安装的 Google Chrome；示例已预配 OpenAI GPT-6 Luna 与 Responses API，在 `web/` 安装依赖后复制 `.env.midscene.example` 为 `.env.midscene.local`，只需填写 `MIDSCENE_MODEL_API_KEY`。只读登录表单冒烟默认启动本地 Vite，报告保存在 `web/midscene_run/report/`，失败跟踪保存在被 Git 忽略的 `output/midscene/`。
+
+```bash
+cd web
+cp .env.midscene.example .env.midscene.local
+corepack pnpm@11.7.0 test:midscene
+```
+
+如需对隔离环境中的其他页面回归，可在 `.env.midscene.local` 设置 `MIDSCENE_BASE_URL` 指向隔离应用地址。Midscene 会把页面截图发送到 OpenAI；仅使用合成数据，勿对生产或共享业务数据运行。
+
 ## CodeGraph（本地代码图）
 
 仓库为 Codex 配置了项目级 CodeGraph MCP 服务（`.codex/config.toml`），固定使用 `@colbymchenry/codegraph@1.6.2`。Codex 需将本项目标记为可信后才会加载项目级 MCP 配置；首次启动时 `npx` 会从 npm 获取该版本。该工具只用于开发时的代码结构查询，不是应用运行依赖。

@@ -4,6 +4,8 @@
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+web/.env.midscene.local
+web/midscene_run/
 web/vite.config.js
 web/vite.config.d.ts
 server/bin/

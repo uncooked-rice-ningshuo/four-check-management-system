@@ -1,4 +1,6 @@
 allowBuilds:
   esbuild: true
+  # The bundled optional binary works without running sharp's install script.
+  sharp: false
 onlyBuiltDependencies:
   - esbuild

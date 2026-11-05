@@ -19,11 +19,13 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
   const memberEntry = memberDepartmentId !== undefined
   const [form] = Form.useForm<Values>()
   const semesterId = Form.useWatch('semesterId', form), weekId = Form.useWatch('weekId', form), departmentId = Form.useWatch('departmentId', form)
-  const classIds = Form.useWatch('responsibleClassIds', form) ?? editing?.details.responsibleClassIds.slice(0, 1) ?? []
-  const primaryClassId = classIds[0]
+  const dormitoryIds = Form.useWatch('responsibleDormitoryIds', form) ?? editing?.details.responsibleDormitoryIds?.slice(0, 1) ?? []
+  const primaryDormitoryId = dormitoryIds[0]
   const result = Form.useWatch('result', form) ?? editing?.details.result ?? 'QUALIFIED'
   const mutation = usePublicDormitoryHygieneMutation(), submitting = useRef(false)
   const [error, setError] = useState('')
+  // The responsibility class is never typed: it follows the selected student.
+  const [classChoice, setClassChoice] = useState<InspectionOption | undefined>(initialEditing?.responsibleClasses?.[0])
   const recordId = editing?.id
   const semesters = useInspectionContext({ purpose: 'entry', recordId, kind: 'semesters' })
   const weeks = useInspectionContext({ purpose: 'entry', recordId, kind: 'weeks', semesterId }, !!semesterId)
@@ -31,11 +33,10 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
   const scope = { semesterId, weekId, departmentId, inspectionTypeId, recordId }
   const departmentReady = isSuperAdmin || (!!departmentId && (!!editing || departments.data?.items.some(item => item.id === departmentId)))
   const ready = !!semesterId && !!weekId && departmentReady
-  const classes = useInspectionEntryOptions({ ...scope, kind: 'classes' }, ready)
-  const students = useResponsibleStudentOptions(scope, classIds, ready)
-  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'responsible-dormitories', classId: primaryClassId }, ready && !!primaryClassId)
+  const students = useResponsibleStudentOptions({ ...scope, dormitoryId: primaryDormitoryId }, ready && !!primaryDormitoryId)
+  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'responsible-dormitories' }, ready)
   const snippets = useInspectionEntryOptions({ ...scope, kind: 'situation-snippets' }, ready)
-  const coreQueries = [semesters, weeks, departments, classes, students, dormitories]
+  const coreQueries = [semesters, weeks, departments, students, dormitories]
   const failed = coreQueries.some(query => query.isError)
   const clear = (names: (keyof Values)[]) => form.setFields(names.map(name => ({ name, value: undefined, errors: [] })))
   // Keep the college default only when it is an authorized option. Never infer
@@ -67,6 +68,11 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
       setError(failure instanceof ApiError && failure.status < 500 ? failure.code === 'VERSION_CONFLICT' ? '记录已变化，请关闭并重新打开后核对。' : failure.message : '保存失败，请稍后重试。')
     } finally { submitting.current = false }
   }
+  const chooseStudent = (studentIds: string[]) => {
+    const student = students.data?.find(item => item.id === studentIds[0])
+    form.setFieldValue('responsibleClassIds', student?.classId ? [student.classId] : [])
+    setClassChoice(student?.classId ? { id: student.classId, label: student.className ?? '' } : undefined)
+  }
   const dormitoryFallback = editing?.responsibleDormitories ?? []
   const initialDepartmentId = editing ? departmentOptionId(editing.departmentId) : (isSuperAdmin ? '' : memberDepartmentId ?? COLLEGE_DEPARTMENT_OPTION_ID)
   const semesterClear: (keyof Values)[] = memberEntry ? ['weekId', 'responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'] : ['weekId', 'departmentId', 'responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds']
@@ -78,12 +84,12 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
     <Form form={form} name="public-dormitory-hygiene-record" layout="vertical" onFinish={submit} disabled={mutation.isPending}
       initialValues={editing ? { semesterId: editing.semesterId, weekId: editing.weekId, departmentId: initialDepartmentId, responsibleDormitoryIds: editing.details.responsibleDormitoryIds?.slice(0, 1) ?? editing.responsibleDormitories.slice(0, 1).map(item => item.id), date: editing.details.date, result: editing.details.result, responsibleClassIds: editing.details.responsibleClassIds.slice(0, 1), responsibleStudentIds: editing.details.responsibleStudentIds?.slice(0, 1) ?? [], description: editing.details.description ?? '', remark: editing.details.remark ?? '' } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: initialDepartmentId, result: 'QUALIFIED', responsibleDormitoryIds: [], responsibleClassIds: [], responsibleStudentIds: [] }}>
       <Row gutter={16}>
-        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => clear(semesterClear)} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
-        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>}
-        <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任班级" rules={required}><Select mode="multiple" maxCount={1} disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={choices(classes.data, editing?.responsibleClasses)} onChange={() => clear(['responsibleStudentIds', 'responsibleDormitoryIds'])} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="responsibleDormitoryIds" label="责任寝室" rules={required}><Select mode="multiple" maxCount={1} disabled={!primaryClassId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, dormitoryFallback)} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="负责学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!classIds.length} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing?.responsibleStudents)} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => { clear(semesterClear); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'responsibleDormitoryIds']); setClassChoice(undefined) }} /></Form.Item></Col>}
+        <Col xs={24} sm={12}><Form.Item name="responsibleDormitoryIds" label="责任寝室" rules={required}><Select mode="multiple" maxCount={1} disabled={!ready} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, dormitoryFallback)} onChange={() => { clear(['responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="责任学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!primaryDormitoryId} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing && editing.details.responsibleDormitoryIds?.[0] === primaryDormitoryId ? editing.responsibleStudents : [])} onChange={chooseStudent} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任学生班级" rules={required} extra="按所选学生自动带出"><Select mode="multiple" maxCount={1} disabled options={classChoice ? [{ value: classChoice.id, label: classChoice.label }] : []} /></Form.Item></Col>
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
         <Col xs={24} sm={12}><Form.Item name="result" label="检查结果" rules={required}><Select options={[{ value: 'EXCELLENT', label: '优秀' }, { value: 'QUALIFIED', label: '合格' }, { value: 'UNQUALIFIED', label: '不合格' }]} /></Form.Item></Col>
       </Row>

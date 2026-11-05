@@ -18,7 +18,7 @@ const catalog: InspectionDefinition[] = [
     "name": "晚自习",
     "extensionTable": "evening_self_study_details",
     "granularity": "STUDENT_ABSENCE_EVENT",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -97,7 +97,7 @@ const catalog: InspectionDefinition[] = [
     "name": "到课率",
     "extensionTable": "attendance_details",
     "granularity": "STUDENT_COURSE_EVENT",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -131,14 +131,8 @@ const catalog: InspectionDefinition[] = [
         "required": true
       },
       {
-        "key": "time",
-        "label": "检查时间",
-        "kind": "time",
-        "required": true
-      },
-      {
         "key": "period",
-        "label": "节次",
+        "label": "旷课节次",
         "kind": "string",
         "required": true,
         "maxLength": 64
@@ -195,7 +189,7 @@ const catalog: InspectionDefinition[] = [
     "name": "无机课堂",
     "extensionTable": "attendance_details",
     "granularity": "STUDENT_COURSE_EVENT",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -229,28 +223,6 @@ const catalog: InspectionDefinition[] = [
         "required": true
       },
       {
-        "key": "time",
-        "label": "检查时间",
-        "kind": "time",
-        "required": true
-      },
-      {
-        "key": "period",
-        "label": "节次",
-        "kind": "string",
-        "required": true,
-        "maxLength": 64
-      },
-      {
-        "key": "absenceHours",
-        "label": "旷课学时",
-        "kind": "number",
-        "required": true,
-        "minimum": 0,
-        "exclusiveMinimum": true,
-        "maximum": 24
-      },
-      {
         "key": "remark",
         "label": "备注",
         "kind": "string",
@@ -264,8 +236,7 @@ const catalog: InspectionDefinition[] = [
       "inspectionTypeId",
       "studentId",
       "courseId",
-      "occurredAt",
-      "period"
+      "date"
     ],
     "plannedActions": [
       "CREATE",
@@ -292,7 +263,7 @@ const catalog: InspectionDefinition[] = [
     "name": "教室卫生",
     "extensionTable": "classroom_hygiene_details",
     "granularity": "OBJECT_INSPECTION",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -384,7 +355,7 @@ const catalog: InspectionDefinition[] = [
     "name": "早锻炼/早签",
     "extensionTable": "morning_exercise_details",
     "granularity": "STUDENT_DAY",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -455,7 +426,7 @@ const catalog: InspectionDefinition[] = [
     "name": "宿舍卫生",
     "extensionTable": "dorm_hygiene_details",
     "granularity": "OBJECT_INSPECTION",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -547,7 +518,7 @@ const catalog: InspectionDefinition[] = [
     "name": "晚归",
     "extensionTable": "late_return_details",
     "granularity": "STUDENT_EVENT",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -615,7 +586,7 @@ const catalog: InspectionDefinition[] = [
     "name": "公共宿舍卫生",
     "extensionTable": "public_dormitory_hygiene_details",
     "granularity": "OBJECT_INSPECTION",
-    "templateVersion": 1,
+    "templateVersion": 2,
     "templateStatus": "ACTIVE",
     "fields": [
       {

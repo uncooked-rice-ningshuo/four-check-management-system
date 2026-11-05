@@ -69,7 +69,6 @@ export function EveningSelfStudyPage() {
   { title: '姓名', dataIndex: 'studentName', search: false, width: 120 },
   { title: '年级', dataIndex: 'grade', search: false, width: 90 },
   { title: '班级', dataIndex: 'className', search: false, width: 150 },
-  { title: '晚自习教室', dataIndex: 'currentClassroomName', search: false, width: 180 },
   { title: '缺勤日期', key: 'date', search: false, width: 160, render: (_, record) => record.details.date },
   { title: '节次', key: 'period', search: false, width: 100, render: () => '第 9–10 节' },
   { title: '违纪计入次数', key: 'penaltyCount', search: false, width: 120, render: (_, record) => record.details.penaltyCount ?? '历史待核对' },

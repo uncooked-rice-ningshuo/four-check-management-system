@@ -1,4 +1,4 @@
-import { ProFormDatePicker, ProFormTimePicker } from '@ant-design/pro-components'
+import { ProFormDatePicker } from '@ant-design/pro-components'
 import { Alert, Button, Col, Drawer, Form, Input, InputNumber, Row, Select, Space } from 'antd'
 import { useRef, useState } from 'react'
 import type { AttendanceFilterOptions, AttendanceRecord, ManualAttendanceInput } from '../../../entities/inspection/model/inspection'
@@ -34,7 +34,6 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
     periodEnd: initialPeriod?.end,
     classroom: editing.classroomCode,
     date: new Date(editing.occurredAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }),
-    time: new Date(editing.occurredAt).toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }),
   } : { semesterId: initialSemesterId, weekId: initialWeekId }
   const submit = async (values: FormValues) => {
     if (submitting.current) return
@@ -73,7 +72,6 @@ export function ManualAttendanceDrawer({ options, initialSemesterId, initialWeek
         <Col xs={24} sm={12}><Form.Item name="courseId" label="课程" rules={required}><CourseSelect scope={{ semesterId, weekId, departmentId, inspectionTypeId: options.inspectionType.id, recordId: editing?.id }} selectedLabel={editing?.courseName} disabled={!semesterId || !weekId || !departmentId} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="classroom" label="上课教室" rules={required}><Input maxLength={200} placeholder="例如：博学楼 101" /></Form.Item></Col>
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
-        <Col xs={24} sm={12}><ProFormTimePicker name="time" label="检查时间" rules={required} getValueFromEvent={(_time: unknown, timeString: string) => timeString || undefined} fieldProps={{ format: 'HH:mm', style: { width: '100%' } }} /></Col>
         <PeriodRangeFields startName="periodStart" endName="periodEnd" />
         <Col xs={24} sm={12}><Form.Item name="absenceHours" label="旷课学时" rules={[...required, { type: 'number', min: 0.01, max: 24, message: '请输入大于 0 且不超过 24 的学时' }]}><InputNumber min={0.01} max={24} style={{ width: '100%' }} /></Form.Item></Col>
       </Row>

@@ -32,7 +32,7 @@ async function fillForm() {
     if (label === '开始节次') await waitFor(() => expect(screen.getByRole('combobox', { name: '结束节次' })).not.toBeDisabled())
   }
   fireEvent.change(screen.getByLabelText('课程'), { target: { value: 'course-1' } })
-  for (const [label, value] of [['检查日期', '2026-09-06'], ['检查时间', '08:00']]) {
+  for (const [label, value] of [['检查日期', '2026-09-06']]) {
     const picker = screen.getByLabelText(label)
     fireEvent.change(picker, { target: { value } })
     fireEvent.keyDown(picker, { key: 'Enter' })
@@ -45,7 +45,7 @@ it('creates using the form target and server-owned snapshots then closes', async
   await fillForm()
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', courseId: 'course-1', date: '2026-09-06', time: '08:00', period: '1-2', absenceHours: 2 }))
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'dept', classId: 'class', className: '测试班', grade: '2026级', studentNo: 'S001', courseId: 'course-1', date: '2026-09-06', period: '1-2', absenceHours: 2 }))
   expect(save.mock.calls[0][0]).not.toHaveProperty('courseName')
   expect(save.mock.calls[0][0]).not.toHaveProperty('status')
 })
@@ -66,7 +66,7 @@ it('preserves the opened draft version across background refresh and requires a 
  const editing = { id: 'record', semesterId: 'semester', weekId: 'week', departmentId: 'dept', inspectionTypeId: 'type', studentNo: 'S001', studentName: '虚构同学', classId: 'class', className: '测试班', grade: '2026级', courseId: 'course', courseName: '数据结构', classroomCode: '博学楼 101', occurredAt: '2026-09-06T00:00:00Z', period: '1-2', absenceHours: 2, remark: '', status: 'DRAFT', source: 'EXCEL' as const, rowVersion: 7 }
  const { rerender } = render(<ManualAttendanceDrawer options={options} editing={editing} onClose={close} />)
  rerender(<ManualAttendanceDrawer options={options} editing={{ ...editing, rowVersion: 8 }} onClose={close} />)
- expect(screen.getByLabelText('检查时间')).toHaveValue('08:00')
+ expect(screen.queryByLabelText('检查时间')).not.toBeInTheDocument()
  fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
  expect(await screen.findByText('请填写或选择此项')).toBeInTheDocument()
  expect(update).not.toHaveBeenCalled()

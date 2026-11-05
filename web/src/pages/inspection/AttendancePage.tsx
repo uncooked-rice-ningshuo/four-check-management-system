@@ -45,7 +45,7 @@ const sourceLabels: Record<NonNullable<AttendanceFilters['source']>, string> = {
 	MIGRATION: '历史迁移',
 }
 
-const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' })
 
 export function AttendancePage() {
 	const { user } = useAuth()
@@ -170,9 +170,9 @@ export function AttendancePage() {
 			{ title: '年级', dataIndex: 'grade', width: 90, search: false, renderText: value => value ? gradeLabel(String(value)) : '—' },
 			{ title: '班级', dataIndex: 'className', width: 150, search: false },
 			{ title: '课程', dataIndex: 'courseName', width: 180, search: false, ellipsis: true },
-			{ title: '检查时间', dataIndex: 'occurredAt', width: 180, search: false, renderText: value => dateTimeFormatter.format(new Date(value)) },
+			{ title: '旷课日期', dataIndex: 'occurredAt', width: 130, search: false, renderText: value => dateFormatter.format(new Date(value)) },
 			{ title: '节次', dataIndex: 'period', width: 100, search: false },
-			{ title: '实际旷课节次数', dataIndex: 'absenceHours', width: 125, search: false },
+			{ title: '实际旷课学时', dataIndex: 'absenceHours', width: 125, search: false },
 			{ title: '违纪计入倍数', dataIndex: 'penaltyMultiplier', width: 125, search: false, render: (_, record) => record.penaltyMultiplier ? `${record.penaltyMultiplier} 倍` : '历史待核对' },
 			{ title: '违纪计入次数', dataIndex: 'penaltyHours', width: 125, search: false, render: (_, record) => record.penaltyHours ?? '历史待核对' },
 			...createInspectionProvenanceColumns<AttendanceRecord>(),

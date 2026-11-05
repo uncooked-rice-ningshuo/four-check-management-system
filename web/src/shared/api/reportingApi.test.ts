@@ -125,7 +125,7 @@ it('parses the report workflow and draft response contracts independently', asyn
     confirmedRecordCount: 0,
     rows: [{
       departmentId: '',
-      departmentName: '校级',
+      departmentName: '管理员',
       collegeLevel: true,
       inspectionTypeId: 'type-1',
       inspectionType: '到课率',

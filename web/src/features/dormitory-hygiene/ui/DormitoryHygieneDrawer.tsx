@@ -34,24 +34,29 @@ export function DormitoryHygieneDrawer({ editing: initialEditing, inspectionType
   const semesterId = Form.useWatch('semesterId', form)
   const weekId = Form.useWatch('weekId', form)
   const departmentId = Form.useWatch('departmentId', form)
-  const classIds = Form.useWatch('responsibleClassIds', form) ?? editing?.details.responsibleClassIds.slice(0, 1) ?? []
-  const primaryClassId = classIds[0]
+  const dormitoryId = Form.useWatch('dormitoryId', form)
   const result = Form.useWatch('result', form) ?? editing?.details.result ?? 'QUALIFIED'
   const mutation = useDormitoryHygieneMutation(), submitting = useRef(false)
   const [error, setError] = useState('')
+  // The responsibility class is never typed: it follows the selected student.
+  const [classChoice, setClassChoice] = useState<InspectionOption | undefined>(initialEditing?.responsibleClasses?.[0])
   const recordId = editing?.id
   const semesters = useInspectionContext({ purpose: 'entry', recordId, kind: 'semesters' })
   const weeks = useInspectionContext({ purpose: 'entry', recordId, kind: 'weeks', semesterId }, !!semesterId)
   const departments = useInspectionContext({ purpose: 'entry', recordId, kind: 'departments', semesterId, weekId }, !!semesterId && !!weekId)
   const scope = { semesterId, weekId, departmentId, inspectionTypeId, recordId }
   const ready = !!semesterId && !!weekId && (isSuperAdmin || !!departmentId)
-  const classes = useInspectionEntryOptions({ ...scope, kind: 'classes' }, ready)
-  const students = useResponsibleStudentOptions(scope, classIds, ready)
-  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'dormitory-objects', classId: primaryClassId }, ready && !!primaryClassId)
+  const students = useResponsibleStudentOptions({ ...scope, dormitoryId }, ready && !!dormitoryId)
+  const dormitories = useInspectionEntryOptions({ ...scope, kind: 'dormitory-objects' }, ready)
   const snippets = useInspectionEntryOptions({ ...scope, kind: 'situation-snippets' }, ready)
-  const coreQueries = [semesters, weeks, departments, classes, students, dormitories]
+  const coreQueries = [semesters, weeks, departments, students, dormitories]
   const failed = coreQueries.some(query => query.isError)
   const clear = (names: (keyof Values)[]) => form.setFields(names.map(name => ({ name, value: undefined, errors: [] })))
+  const chooseStudent = (studentIds: string[]) => {
+    const student = students.data?.find(item => item.id === studentIds[0])
+    form.setFieldValue('responsibleClassIds', student?.classId ? [student.classId] : [])
+    setClassChoice(student?.classId ? { id: student.classId, label: student.className ?? '' } : undefined)
+  }
   const insertSnippet = (text: string) => {
     form.setFieldValue('description', appendHygieneSituationSnippet(form.getFieldValue('description'), text))
   }
@@ -87,12 +92,12 @@ export function DormitoryHygieneDrawer({ editing: initialEditing, inspectionType
         description: editing.details.description ?? '', remark: editing.details.remark ?? '',
       } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: initialDepartmentId, result: 'QUALIFIED', responsibleClassIds: [], responsibleStudentIds: [] }}>
       <Row gutter={16}>
-        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => clear(['weekId', 'responsibleClassIds', 'responsibleStudentIds', 'dormitoryId'])} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId'])} /></Form.Item></Col>
-        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId'])} /></Form.Item></Col>}
-        <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任班级" rules={required}><Select mode="multiple" maxCount={1} disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={choices(classes.data, editing?.responsibleClasses)} onChange={() => clear(['responsibleStudentIds', 'dormitoryId'])} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="寝室" rules={required}><Select disabled={!primaryClassId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, editing ? [{ id: editing.details.dormitoryId, label: editing.currentDormitoryName }] : [])} /></Form.Item></Col>
-        <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="负责学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!classIds.length} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing?.responsibleStudents)} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => { clear(['weekId', 'responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>
+        {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => { clear(['responsibleClassIds', 'responsibleStudentIds', 'dormitoryId']); setClassChoice(undefined) }} /></Form.Item></Col>}
+        <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="宿舍" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, editing ? [{ id: editing.details.dormitoryId, label: editing.currentDormitoryName }] : [])} onChange={() => { clear(['responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="responsibleStudentIds" label="责任学生" rules={required}><Select mode="multiple" maxCount={1} disabled={!dormitoryId} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing && editing.details.dormitoryId === dormitoryId ? editing.responsibleStudents : [])} onChange={chooseStudent} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item name="responsibleClassIds" label="责任学生班级" rules={required} extra="按所选学生自动带出"><Select mode="multiple" maxCount={1} disabled options={classChoice ? [{ value: classChoice.id, label: classChoice.label }] : []} /></Form.Item></Col>
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
         <Col xs={24} sm={12}><Form.Item name="result" label="检查结果" rules={required}><Select options={[{ value: 'EXCELLENT', label: '优秀' }, { value: 'QUALIFIED', label: '合格' }, { value: 'UNQUALIFIED', label: '不合格' }]} /></Form.Item></Col>
       </Row>

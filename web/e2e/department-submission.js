@@ -380,17 +380,17 @@ async (page) => {
 
     const collegeDepartmentId='00000000-0000-0000-0000-000000000000'
     const collegeScope={...officeScope,departmentId:collegeDepartmentId}
-    await request(systemAdmin.client,systemAdmin.token,'/inspections','POST',{...collegeScope,details:{...additionalTypes[0].details,time:'12:00',remark:'校级独立批次'}},403,'FORBIDDEN_SCOPE')
+    await request(systemAdmin.client,systemAdmin.token,'/inspections','POST',{...collegeScope,details:{...additionalTypes[0].details,time:'12:00',remark:'管理员独立批次'}},403,'FORBIDDEN_SCOPE')
     await request(admin,adminToken,'/admin/users/'+systemAdmin.id+'/permission-rules','POST',{action:'INSPECTION_ENTER',effect:'ALLOW',scope:{inspectionTypeId:officeScope.inspectionTypeId},enabled:true,note:'isolated college entry'},201)
     await request(admin,adminToken,'/admin/users/'+systemAdmin.id+'/permission-rules','POST',{action:'INSPECTION_VIEW',effect:'ALLOW',scope:{inspectionTypeId:officeScope.inspectionTypeId},enabled:true,note:'isolated college view'},201)
     systemAdmin.token=(await (await request(systemAdmin.client,'','/auth/login','POST',{loginName:systemAdmin.name,password:fixture.matrixPassword})).json()).accessToken
-    const collegeRecord=await (await request(systemAdmin.client,systemAdmin.token,'/inspections','POST',{...collegeScope,details:{...additionalTypes[0].details,time:'12:00',remark:'校级独立批次'}},201)).json()
+    const collegeRecord=await (await request(systemAdmin.client,systemAdmin.token,'/inspections','POST',{...collegeScope,details:{...additionalTypes[0].details,time:'12:00',remark:'管理员独立批次'}},201)).json()
     check(collegeRecord.departmentId==='','college record did not persist null department')
     const collegeList=await (await request(systemAdmin.client,systemAdmin.token,'/inspections?inspectionTypeId='+officeScope.inspectionTypeId+'&departmentId='+collegeDepartmentId)).json()
     check(collegeList.items.some(item=>item.id===collegeRecord.id),'college-scoped list omitted record')
     await request(officeReviewer.client,officeReviewer.token,'/inspections/'+collegeRecord.id,'GET',undefined,200)
     const collegeBatch=await (await request(systemAdmin.client,systemAdmin.token,'/department-submissions','POST',{scope:collegeScope,records:[{id:collegeRecord.id,version:collegeRecord.rowVersion}],idempotencyKey:'college-independent-batch'},201)).json()
-    check(collegeBatch.scope.departmentId===''&&collegeBatch.departmentName==='校级','college submission inherited a department')
+    check(collegeBatch.scope.departmentId===''&&collegeBatch.departmentName==='管理员','college submission inherited a department')
     await request(systemAdmin.client,systemAdmin.token,'/department-submissions/'+collegeBatch.id+'/confirm','POST',{version:collegeBatch.rowVersion},403,'FORBIDDEN_SCOPE')
     await request(admin,adminToken,'/admin/users/'+systemAdmin.id+'/permission-rules','POST',{action:'INSPECTION_REVIEW',effect:'ALLOW',scope:{inspectionTypeId:officeScope.inspectionTypeId},enabled:true,note:'isolated college review'},201)
     systemAdmin.token=(await (await request(systemAdmin.client,'','/auth/login','POST',{loginName:systemAdmin.name,password:fixture.matrixPassword})).json()).accessToken
@@ -398,15 +398,15 @@ async (page) => {
     check(collegeConfirmed.status==='CONFIRMED','explicitly authorized admin could not confirm college batch')
     const collegeWorkbench=await (await request(systemAdmin.client,systemAdmin.token,'/dashboard/workbench')).json()
     check(collegeWorkbench.departmentStatuses.some(item=>item.departmentId===''&&item.inspectionTypeId===officeScope.inspectionTypeId&&item.batchConfirmed>=1),'college weekly summary omitted confirmed batch')
-    cases.push('普通管理员校级录入与审核分权；用户类型授权跨部门及校级生效，周汇总独立列示')
+    cases.push('普通管理员录入与审核分权；用户类型授权跨部门及管理员归属生效，周汇总独立列示')
     await page.goto(origin+'/inspections/morning-attendance')
     await page.getByRole('button',{name:'新增记录',exact:true}).click()
     const collegeForm=page.getByRole('dialog',{name:'新增早锻炼/早签记录'})
     await select(collegeForm,'录入学期','浏览器回归学期')
     await select(collegeForm,'录入周次',fixture.weekStart)
-    await select(collegeForm,'目标部门','校级')
+    await select(collegeForm,'目标部门','管理员')
     await select(collegeForm,'学生班级','E2E class')
-    cases.push('真实页面手工新增可选择校级归属并加载班级选项')
+    cases.push('真实页面手工新增可选择管理员归属并加载班级选项')
   } finally { for (const client of contexts) await client.close() }
   check(reportRequests.length === 0, 'phase-two page requested stage-three report API')
   cases.push('阶段二工作台无通报待办/伪进度占位，页面未请求阶段三通报接口')

@@ -22,10 +22,13 @@ export function LateReturnDrawer({ editing: initialEditing, inspectionTypeId, in
  const semesterId = Form.useWatch('semesterId',form)
  const weekId = Form.useWatch('weekId',form)
  const departmentId = Form.useWatch('departmentId',form)
- const classId = Form.useWatch('classId',form)
- const studentId = Form.useWatch('studentId',form)
+ const dormitoryId = Form.useWatch('dormitoryId',form)
  const mutation=useLateReturnMutation(), submitting=useRef(false)
  const [error,setError]=useState('')
+ // The class is never typed: it follows the student selected inside the room.
+ const [classChoice,setClassChoice]=useState<InspectionOption|undefined>(
+  initialEditing?{id:initialEditing.details.classId,label:initialEditing.className}:undefined
+ )
  const purpose='entry'
  const recordId=editing?.id
  const semesters=useInspectionContext({purpose,recordId,kind:'semesters'})
@@ -35,12 +38,18 @@ export function LateReturnDrawer({ editing: initialEditing, inspectionTypeId, in
  const memberDepartmentAvailable = !memberEntry || !weekId || !!departments.data?.items.some(item=>item.id===memberDepartmentId)
  const scope={semesterId,weekId,departmentId,inspectionTypeId,recordId:editing?.id}
  const ready=!!semesterId&&!!weekId&&(isSuperAdmin||!!departmentId)
- const classes=useInspectionEntryOptions({...scope,kind:'classes'},ready)
- const students=useInspectionEntryOptions({...scope,kind:'students',classId},ready&&!!classId)
- const dormitories=useInspectionEntryOptions({...scope,kind:'dormitories',classId,studentId},ready&&!!classId&&!!studentId)
- const queries=[semesters,weeks,departments,classes,students,dormitories]
+ // Room first, then only its current members: a late-return record always
+ // belongs to the student's own dormitory.
+ const dormitories=useInspectionEntryOptions({...scope,kind:'dormitory-objects'},ready)
+ const students=useInspectionEntryOptions({...scope,kind:'students',dormitoryId},ready&&!!dormitoryId)
+ const queries=[semesters,weeks,departments,students,dormitories]
  const failed=queries.some(query=>query.isError)
  const clear=(names:(keyof Values)[])=>form.setFields(names.map(name=>({name,value:undefined,errors:[]})))
+ const chooseStudent=(studentIdValue:string)=>{
+  const student=students.data?.find(item=>item.id===studentIdValue)
+  form.setFieldValue('classId',student?.classId)
+  setClassChoice(student?.classId?{id:student.classId,label:student.className??''}:undefined)
+ }
  const fallback=(key:keyof LateReturnDetails,label:string)=>editing?{id:String(editing.details[key]),label}:undefined
  const submit=async(values:Values)=>{
   if(submitting.current||failed)return
@@ -58,12 +67,12 @@ export function LateReturnDrawer({ editing: initialEditing, inspectionTypeId, in
  <Form name="late-return-record" form={form} layout="vertical" onFinish={submit} disabled={mutation.isPending}
  initialValues={editing?{semesterId:editing.semesterId,weekId:editing.weekId,departmentId:departmentOptionId(editing.departmentId),classId:editing.details.classId,studentId:editing.details.studentId,dormitoryId:editing.details.dormitoryId,date:editing.details.date,remark:editing.details.remark}:{semesterId:initialSemesterId,weekId:initialWeekId,departmentId:isSuperAdmin?'':memberDepartmentId}}>
  <Row gutter={16}>
- <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>clear(memberEntry?['weekId','classId','studentId','dormitoryId']:['weekId','departmentId','classId','studentId','dormitoryId'])}/></Form.Item></Col>
- <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>clear(memberEntry?['classId','studentId','dormitoryId']:['departmentId','classId','studentId','dormitoryId'])}/></Form.Item></Col>
- {isSuperAdmin?<Col span={24}><Form.Item name="departmentId" hidden><Input/></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col>:<Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items)} onChange={()=>clear(['classId','studentId','dormitoryId'])}/></Form.Item></Col>}
- <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={options(classes.data,fallback('classId',editing?.className??''))} onChange={()=>clear(['studentId','dormitoryId'])}/></Form.Item></Col>
- <Col xs={24} sm={12}><Form.Item name="studentId" label="学生" rules={required}><Select disabled={!classId} showSearch optionFilterProp="label" loading={students.isFetching} options={options(students.data,editing && editing.details.classId===classId?fallback('studentId',`${editing.studentName}（${editing.studentNumber}）`):undefined)} onChange={()=>clear(['dormitoryId'])}/></Form.Item></Col>
- <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="学生宿舍" rules={required}><Select disabled={!studentId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={options(dormitories.data,editing && editing.details.studentId===studentId?fallback('dormitoryId',editing.currentDormitoryName):undefined)}/></Form.Item></Col>
+ <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>{clear(memberEntry?['weekId','classId','studentId','dormitoryId']:['weekId','departmentId','classId','studentId','dormitoryId']);setClassChoice(undefined)}}/></Form.Item></Col>
+ <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>{clear(memberEntry?['classId','studentId','dormitoryId']:['departmentId','classId','studentId','dormitoryId']);setClassChoice(undefined)}}/></Form.Item></Col>
+ {isSuperAdmin?<Col span={24}><Form.Item name="departmentId" hidden><Input/></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col>:<Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items)} onChange={()=>{clear(['classId','studentId','dormitoryId']);setClassChoice(undefined)}}/></Form.Item></Col>}
+ <Col xs={24} sm={12}><Form.Item name="dormitoryId" label="学生宿舍" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={options(dormitories.data)} onChange={()=>{clear(['studentId','classId']);setClassChoice(undefined)}}/></Form.Item></Col>
+ <Col xs={24} sm={12}><Form.Item name="studentId" label="学生" rules={required}><Select disabled={!dormitoryId} showSearch optionFilterProp="label" loading={students.isFetching} options={options(students.data,editing && editing.details.dormitoryId===dormitoryId?fallback('studentId',`${editing.studentName}（${editing.studentNumber}）`):undefined)} onChange={chooseStudent}/></Form.Item></Col>
+ <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required} extra="按所选学生自动带出"><Select disabled options={classChoice?[{value:classChoice.id,label:classChoice.label}]:[]}/></Form.Item></Col>
  <Col xs={24} sm={12}><ProFormDatePicker name="date" label="晚归日期" rules={required} getValueFromEvent={(_date: unknown,dateString: string)=>dateString||undefined} fieldProps={{format:'YYYY-MM-DD',style:{width:'100%'}}}/></Col>
  </Row>
  {editing&&<Form.Item name="reason" label="修改原因" rules={[...required,{whitespace:true,message:'请填写修改原因'}]}><Input.TextArea maxLength={255}/></Form.Item>}

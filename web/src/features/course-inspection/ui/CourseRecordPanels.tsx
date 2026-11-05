@@ -32,7 +32,9 @@ export function CourseRecordPanel({id,mode,onClose,memberDepartmentId,isSuperAdm
  {key:'course',label:'课程（当前名称）',children:record.currentCourseName||'—'},
  {key:'room',label:'教室（当前名称）',children:record.currentClassroomName||'—'},
  {key:'date',label:'检查日期',children:record.details.time&&record.details.time!=='00:00:00'?`${record.details.date} ${record.details.time}`:record.details.date},
- {key:'period',label:'节次',children:record.details.period},{key:'hours',label:'旷课学时',children:record.details.absenceHours},
+ ...(typeCode==='ATTENDANCE_RATE'
+  ?[{key:'period',label:'节次',children:record.details.period},{key:'hours',label:'旷课学时',children:record.details.absenceHours}]
+  :[{key:'multiplier',label:'违纪计入倍数',children:record.details.penaltyMultiplier?`${record.details.penaltyMultiplier} 倍`:'待配置'},{key:'penaltyCount',label:'违纪计入次数',children:record.details.penaltyCount?`${record.details.penaltyCount} 次`:'历史待核对'}]),
  {key:'remark',label:'备注',children:record.details.remark||'—'},
  ]}/></Drawer>
 }

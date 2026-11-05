@@ -327,7 +327,7 @@ func ReportCorrectionFieldPath(field string) ([]string, bool) {
 func ReportCorrectionFieldAllowed(typeCode, field string) bool {
 	fields := map[string][]string{
 		"ATTENDANCE_RATE":          {"studentNumber", "studentName", "className", "grade", "currentCourseName", "currentClassroomName", "details.date", "details.time", "details.period", "details.absenceHours", "details.penaltyHours", "details.remark"},
-		"UNATTENDED_CLASSROOM":     {"studentNumber", "studentName", "className", "grade", "currentCourseName", "currentClassroomName", "details.date", "details.time", "details.period", "details.absenceHours", "details.penaltyHours", "details.remark"},
+		"UNATTENDED_CLASSROOM":     {"studentNumber", "studentName", "className", "grade", "currentCourseName", "currentClassroomName", "details.date", "details.penaltyCount", "details.period", "details.absenceHours", "details.penaltyHours", "details.remark"},
 		"EVENING_SELF_STUDY":       {"studentNumber", "studentName", "className", "grade", "currentClassroomName", "details.date", "details.time", "details.period", "details.penaltyCount", "details.remark"},
 		"MORNING_ATTENDANCE":       {"studentNumber", "studentName", "className", "grade", "details.date", "details.absenceCount", "details.remark"},
 		"LATE_RETURN":              {"studentNumber", "studentName", "className", "grade", "currentDormitoryName", "details.date", "details.time", "details.remark"},
@@ -355,6 +355,15 @@ func ReportCorrectionValueAllowed(typeCode, field string, raw json.RawMessage) b
 		}
 		_, err := strconv.Atoi(count.String())
 		return err == nil
+	}
+	// A violation count is a positive integer: 1 × week multiplier.
+	if field == "details.penaltyCount" {
+		var count json.Number
+		if err := json.Unmarshal(raw, &count); err != nil {
+			return false
+		}
+		value, err := strconv.Atoi(count.String())
+		return err == nil && value >= 1
 	}
 	return true
 }

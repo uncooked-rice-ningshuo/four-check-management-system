@@ -994,7 +994,10 @@ func reportRecordDetails(details inspection.InspectionDetails) RecordDetails {
 	case *inspection.AttendanceDetails:
 		return courseAbsenceRecordDetails(item.CourseAbsenceDetails)
 	case *inspection.UnattendedClassroomDetails:
-		return courseAbsenceRecordDetails(item.CourseAbsenceDetails)
+		details := courseAbsenceRecordDetails(item.CourseAbsenceDetails)
+		// 无机课堂 reports one count per record (1 × week multiplier); period and hours no longer exist.
+		details.PenaltyCount = item.PenaltyCount
+		return details
 	case *inspection.EveningSelfStudyDetails:
 		return RecordDetails{Date: item.Date, Time: item.Time, Period: item.Period, PenaltyMultiplier: item.PenaltyMultiplier, PenaltyCount: item.PenaltyCount, Remark: item.Remark}
 	case *inspection.MorningAttendanceDetails:

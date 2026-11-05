@@ -534,7 +534,7 @@ func (t *inspectionTx) Save(ctx context.Context, r inspection.InspectionRecord, 
 	if err = t.writeDetails(ctx, r, old != nil); err != nil {
 		return r, err
 	}
-	if r.TypeCode == inspection.InspectionTypeAttendance {
+	if r.TypeCode == inspection.InspectionTypeAttendance || r.TypeCode == inspection.InspectionTypeUnattended {
 		stored, readErr := t.readDetails(ctx, r)
 		if readErr != nil {
 			return r, readErr
@@ -565,7 +565,9 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	case *inspection.AttendanceDetails:
 		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.UnattendedClassroomDetails:
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, nil)
+		// One violation per record: the week multiplier is written to both penalty_multiplier
+		// and penalty_count so reports and discipline totals read the stored count.
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.EveningSelfStudyDetails:
 		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count) VALUES($1,NULLIF($2,'')::uuid,$3,$4,$5) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=NULL,penalty_hours=NULL,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`
 		args = []any{r.ID, v.ClassroomID, v.Period, v.PenaltyMultiplier, v.PenaltyCount}

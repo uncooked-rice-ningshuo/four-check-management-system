@@ -30,7 +30,7 @@ it('does not reveal internal IDs or codes when a referenced label is missing', (
 
 it.each([
   ['MORNING_ATTENDANCE', { date: '2026-09-12', absenceCount: 1 }, ['2026-09-12', '1']],
-  ['UNATTENDED_CLASSROOM', { date: '2026-09-12', time: '14:00:00', period: '5-6', absenceHours: 2 }, ['2026-09-12', '14:00:00', '5-6']],
+  ['UNATTENDED_CLASSROOM', { date: '2026-09-12', time: '00:00:00', penaltyMultiplier: 2, penaltyCount: 2 }, ['2026-09-12', '2 倍', '2']],
   ['EVENING_SELF_STUDY', { date: '2026-09-12', period: '9-10', absenceHours: 2, penaltyMultiplier: 2, penaltyCount: 2 }, ['2026-09-12', '9-10', '2 倍']],
 ] as const)('shows type-specific fields for %s', (typeCode, details, values) => {
   render(<Table rowKey="id" pagination={false} columns={submissionRecordColumns(typeCode)} dataSource={[{ ...base, typeCode, details }]} />)

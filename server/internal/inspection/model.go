@@ -147,6 +147,12 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 	input.GradeSnapshot = strings.TrimSpace(input.GradeSnapshot)
 	input.PeriodText = strings.TrimSpace(input.PeriodText)
 	input.Remark = strings.TrimSpace(input.Remark)
+	// 到课率 identifies one student/class/period event; 无机课堂 counts one student/course/day.
+	// Both paths must share the key or a manual record and its imported twin slip past each other.
+	dedupKey := attendanceDedupKey(input)
+	if typeCode == InspectionTypeUnattended {
+		dedupKey = courseAbsenceDedupKey(input)
+	}
 	return AttendanceRecord{
 		ID: uuid.NewString(), InspectionTypeID: input.InspectionTypeID, SemesterID: input.SemesterID, WeekID: input.WeekID,
 		DepartmentID: input.DepartmentID, StudentID: input.StudentID, StudentNoSnapshot: input.StudentNoSnapshot,
@@ -154,7 +160,7 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 		GradeSnapshot: input.GradeSnapshot, CourseID: input.CourseID, ClassroomID: input.ClassroomID,
 		OccurredAt: input.OccurredAt, AbsenceHours: input.AbsenceHours, PeriodText: input.PeriodText, Remark: input.Remark,
 		Source: RecordSourceExcel, Status: RecordStatusDraft, ImportBatchID: input.ImportBatchID,
-		DedupKey: attendanceDedupKey(input), RowVersion: 1, CreatedBy: input.CreatedBy,
+		DedupKey: dedupKey, RowVersion: 1, CreatedBy: input.CreatedBy,
 	}, nil
 }
 
@@ -211,6 +217,16 @@ func AttendanceDedupKey(record AttendanceRecord) string {
 	return attendanceDedupKey(AttendanceInput{
 		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
 		ClassID: record.ClassID, StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
+	})
+}
+
+// UnattendedDedupKey restores the 无机课堂 identity (student + course + business date)
+// after a normalized import row is decoded. It must stay identical to the key the
+// manual entry path stores, otherwise the two paths cannot detect each other.
+func UnattendedDedupKey(record AttendanceRecord) string {
+	return courseAbsenceDedupKey(AttendanceInput{
+		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
+		StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt,
 	})
 }
 

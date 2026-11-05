@@ -132,12 +132,14 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 	if err != nil {
 		return AttendanceValidationResult{}, fmt.Errorf("load attendance references: %w", err)
 	}
-	if scope.TypeCode == inspection.InspectionTypeAttendance && references.WeekPenaltyMultiplier == nil {
+	if (scope.TypeCode == inspection.InspectionTypeAttendance || scope.TypeCode == inspection.InspectionTypeUnattended) && references.WeekPenaltyMultiplier == nil {
 		return AttendanceValidationResult{}, inspection.ErrAttendancePenaltyUnconfigured
 	}
 	recordLabel := "到课率"
+	duplicateHint := "核对学生、日期和规范化节次，保留正确的一行"
 	if scope.TypeCode == "UNATTENDED_CLASSROOM" {
 		recordLabel = "无机课堂"
+		duplicateHint = "核对学生、课程和日期，保留正确的一行"
 	}
 	result := AttendanceValidationResult{Rows: make([]AttendanceValidationRow, 0, len(rows))}
 	keys := make([]string, 0, len(rows))
@@ -147,7 +149,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 		validated := a.validateRow(scope, references, row)
 		if len(validated.Errors) == 0 {
 			if firstRow, exists := seen[validated.Record.DedupKey]; exists {
-				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与本文件第 %d 行重复", row.RowNo, firstRow), "核对学生、日期和规范化节次，保留正确的一行"))
+				validated.Errors = append(validated.Errors, validationError(ErrorDuplicateInBatch, "student_no", fmt.Sprintf("第 %d 行与本文件第 %d 行重复", row.RowNo, firstRow), duplicateHint))
 			} else {
 				seen[validated.Record.DedupKey] = row.RowNo
 				if scope.TypeCode == inspection.InspectionTypeAttendance {
@@ -176,7 +178,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 		row := &result.Rows[index]
 		if row.Record.DedupKey != "" {
 			if _, exists := existing[row.Record.DedupKey]; exists {
-				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有%s记录重复", row.RowNo, recordLabel), "按学生、班级、日期和规范化节次核对有权查看的记录；需修正时编辑原记录，不要重复导入"))
+				row.Errors = append(row.Errors, validationError(ErrorRecordAlreadyExists, "student_no", fmt.Sprintf("第 %d 行与系统中已有%s记录重复", row.RowNo, recordLabel), duplicateHint+"; 需修正时编辑原记录，不要重复导入"))
 			}
 		}
 		if len(row.Errors) == 0 {

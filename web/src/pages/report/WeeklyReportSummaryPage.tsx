@@ -86,7 +86,8 @@ function periodLabel(period: ReportingPeriod): string {
 
 function displayRecordDate(record: ReportingRecord): string {
   const date = record.details.date ? displayDate(record.details.date) : '—'
-  const time = record.details.time
+  // 无机课堂 is a date-level record; its stored clock is a fixed midnight placeholder.
+  const time = record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : record.details.time
   return time ? `${date} ${time}` : date
 }
 
@@ -94,7 +95,7 @@ function recordSummary(record: ReportingRecord): string {
   const { details } = record
   const parts: string[] = []
   if (details.result) parts.push(inspectionResultLabel(details.result))
-  if (details.period) parts.push(`${details.period}节`)
+  if (record.typeCode !== 'UNATTENDED_CLASSROOM' && details.period) parts.push(`${details.period}节`)
   const absence = absenceSummary(record)
   if (absence) parts.push(absence)
   if (details.absenceCount !== undefined) parts.push(`缺勤 ${details.absenceCount} 次`)
@@ -141,11 +142,12 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
     ['学号', record.studentNumber],
     ['年级', record.grade],
     ['检查日期', details.date],
-    ['发生时间', details.time],
-    ['节次', details.period],
+    // 无机课堂 has no clock time, period or hours: it counts 1 次 × 周倍数.
+    ['发生时间', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.time],
+    ['节次', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.period],
     ['检查轮次', details.round],
-    [record.typeCode === 'ATTENDANCE_RATE' ? '缺课节次数' : '缺课学时', details.absenceHours],
-    [record.typeCode === 'ATTENDANCE_RATE' ? '违纪计入次数' : '计入学时', details.penaltyHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '缺课节次数' : '缺课学时', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.absenceHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '违纪计入次数' : '计入学时', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.penaltyHours],
     ['违纪计入次数', details.penaltyCount],
     ['缺勤次数', details.absenceCount],
     ['检查结果', details.result ? inspectionResultLabel(details.result) : undefined],

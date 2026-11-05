@@ -36,16 +36,16 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	if scope.TypeCode == inspection.InspectionTypeEveningSelfStudy && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classrooms" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" && q.Kind != "dormitory-objects" {
+	if scope.TypeCode == inspection.InspectionTypeLateReturn && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitories" && q.Kind != "dormitory-objects" && q.Kind != "dormitory-areas" && q.Kind != "dormitory-buildings" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypeDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitory-objects" && q.Kind != "situation-snippets" {
+	if scope.TypeCode == inspection.InspectionTypeDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "dormitory-objects" && q.Kind != "dormitory-areas" && q.Kind != "dormitory-buildings" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
 	if scope.TypeCode == inspection.InspectionTypeClassroomHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "classroom-objects" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
-	if scope.TypeCode == inspection.InspectionTypePublicDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "responsible-dormitories" && q.Kind != "situation-snippets" {
+	if scope.TypeCode == inspection.InspectionTypePublicDormitoryHygiene && q.Kind != "classes" && q.Kind != "students" && q.Kind != "responsible-dormitories" && q.Kind != "dormitory-areas" && q.Kind != "dormitory-buildings" && q.Kind != "situation-snippets" {
 		return result, inspection.ErrInspectionRequest
 	}
 	owner := a.ActorID
@@ -118,12 +118,32 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		args = append(args, q.StudentID)
 		where += fmt.Sprintf(" AND s.id=$%d::uuid AND s.enabled AND d.enabled AND b.enabled AND da.enabled", len(args))
 		columns = "d.id,da.name || ' ' || b.name || ' ' || d.room_no AS label"
+	case "dormitory-areas":
+		base += " CROSS JOIN dormitory_areas da "
+		where += " AND da.enabled"
+		columns = "da.id,da.name AS label"
+	case "dormitory-buildings":
+		base += " CROSS JOIN dormitory_buildings b JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
+		where += " AND b.enabled AND da.enabled"
+		args = append(args, q.DormitoryAreaID)
+		where += fmt.Sprintf(" AND da.id=$%d::uuid", len(args))
+		columns = "b.id,b.name AS label"
 	case "dormitory-objects":
 		// A hygiene record is scoped by every selected responsibility class.
 		// The object itself need not currently house a particular student.
 		base += " CROSS JOIN dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
 		where += " AND d.enabled AND b.enabled AND da.enabled"
-		columns = "d.id,da.name || ' ' || b.name || ' ' || d.room_no AS label"
+		if q.DormitoryAreaID != "" {
+			args = append(args, q.DormitoryAreaID)
+			where += fmt.Sprintf(" AND b.dormitory_area_id=$%d::uuid", len(args))
+		}
+		if q.DormitoryBuildingID != "" {
+			args = append(args, q.DormitoryBuildingID)
+			where += fmt.Sprintf(" AND d.dormitory_building_id=$%d::uuid", len(args))
+		}
+		// The area and building are chosen separately, so the room list only
+		// needs the room number inside the already narrowed building.
+		columns = "d.id,d.room_no AS label"
 	case "situation-snippets":
 		args = append(args, scope.TypeCode+"_SITUATION_SNIPPET")
 		base += fmt.Sprintf(" JOIN dictionary_types dt ON dt.code=$%d JOIN dictionary_items di ON di.type_id=dt.id ", len(args))
@@ -136,7 +156,15 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	case "responsible-dormitories":
 		base += " JOIN dormitories d ON true JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id "
 		where += " AND d.enabled AND b.enabled AND da.enabled"
-		columns = "d.id,da.name || ' ' || b.name || ' ' || d.room_no AS label"
+		if q.DormitoryAreaID != "" {
+			args = append(args, q.DormitoryAreaID)
+			where += fmt.Sprintf(" AND b.dormitory_area_id=$%d::uuid", len(args))
+		}
+		if q.DormitoryBuildingID != "" {
+			args = append(args, q.DormitoryBuildingID)
+			where += fmt.Sprintf(" AND d.dormitory_building_id=$%d::uuid", len(args))
+		}
+		columns = "d.id,d.room_no AS label"
 	default:
 		return result, inspection.ErrInspectionRequest
 	}

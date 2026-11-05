@@ -9,20 +9,22 @@ import (
 // EntryOptionQuery selects references within an explicit destination scope.
 // RecordID enables draft editing options using the original record's ownership.
 type EntryOptionQuery struct {
-	SemesterID       string `form:"semesterId"`
-	WeekID           string `form:"weekId"`
-	InspectionTypeID string `form:"inspectionTypeId"`
-	DepartmentID     string `form:"departmentId"`
-	RecordID         string `form:"recordId"`
-	ClassID          string `form:"classId"`
-	StudentID        string `form:"studentId"`
-	DormitoryID      string `form:"dormitoryId"`
-	CourseID         string `form:"courseId"`
-	ClassroomID      string `form:"classroomId"`
-	Keyword          string `form:"keyword"`
-	Kind             string `form:"kind"`
-	Page             int    `form:"page"`
-	PageSize         int    `form:"pageSize"`
+	SemesterID          string `form:"semesterId"`
+	WeekID              string `form:"weekId"`
+	InspectionTypeID    string `form:"inspectionTypeId"`
+	DepartmentID        string `form:"departmentId"`
+	RecordID            string `form:"recordId"`
+	ClassID             string `form:"classId"`
+	StudentID           string `form:"studentId"`
+	DormitoryID         string `form:"dormitoryId"`
+	DormitoryAreaID     string `form:"dormitoryAreaId"`
+	DormitoryBuildingID string `form:"dormitoryBuildingId"`
+	CourseID            string `form:"courseId"`
+	ClassroomID         string `form:"classroomId"`
+	Keyword             string `form:"keyword"`
+	Kind                string `form:"kind"`
+	Page                int    `form:"page"`
+	PageSize            int    `form:"pageSize"`
 }
 
 // EntryOption contains only the identifier and human-readable selection label.
@@ -74,7 +76,7 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 		return EntryOptionPage{}, ErrInspectionRequest
 	}
 	q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID = input.SemesterID, input.WeekID, input.InspectionTypeID, input.DepartmentID
-	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.DormitoryID, &q.ClassroomID, &q.RecordID} {
+	for _, id := range []*string{&q.ClassID, &q.CourseID, &q.StudentID, &q.DormitoryID, &q.DormitoryAreaID, &q.DormitoryBuildingID, &q.ClassroomID, &q.RecordID} {
 		if *id != "" {
 			v, ok := canonicalDetailID(*id)
 			if !ok {
@@ -100,6 +102,15 @@ func (s *EntryOptionService) EntryOptions(ctx context.Context, actor ManualActor
 		// The room catalog does not depend on a responsibility class: entry
 		// selects the room first and derives the class from its student.
 		if q.StudentID != "" || q.CourseID != "" || q.ClassroomID != "" {
+			return EntryOptionPage{}, ErrInspectionRequest
+		}
+	case "dormitory-areas":
+		if q.DormitoryID != "" || q.DormitoryBuildingID != "" || q.StudentID != "" {
+			return EntryOptionPage{}, ErrInspectionRequest
+		}
+	case "dormitory-buildings":
+		// Buildings are always scoped to a selected area.
+		if q.DormitoryAreaID == "" || q.DormitoryID != "" || q.StudentID != "" {
 			return EntryOptionPage{}, ErrInspectionRequest
 		}
 	case "classroom-objects":

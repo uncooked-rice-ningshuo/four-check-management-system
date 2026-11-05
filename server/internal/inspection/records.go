@@ -38,9 +38,12 @@ type InspectionRecord struct {
 	CanDelete bool `json:"canDelete"`
 	// Current reference labels are live master-data names, never historical snapshots.
 	CurrentDormitoryName string `json:"currentDormitoryName"`
-	CurrentCourseName    string `json:"currentCourseName"`
-	CurrentClassroomName string `json:"currentClassroomName"`
-	CurrentAreaName      string `json:"currentAreaName,omitempty"`
+	// Housing identifiers let entry preselect the area and building of a room.
+	CurrentDormitoryAreaID     string `json:"currentDormitoryAreaId,omitempty"`
+	CurrentDormitoryBuildingID string `json:"currentDormitoryBuildingId,omitempty"`
+	CurrentCourseName          string `json:"currentCourseName"`
+	CurrentClassroomName       string `json:"currentClassroomName"`
+	CurrentAreaName            string `json:"currentAreaName,omitempty"`
 	// Responsibility labels are persisted snapshots, so later master-data renames do not rewrite history.
 	ResponsibleClasses  []EntryOption `json:"responsibleClasses,omitempty"`
 	ResponsibleStudents []EntryOption `json:"responsibleStudents,omitempty"`

@@ -618,6 +618,7 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	}
 	return nil
 }
+
 // courseDetailSQL writes the shared course-absence row. 无机课堂 no longer collects a
 // period or hours: the server owns one violation per record, so an empty period becomes
 // NULL and absence_hours falls back to 1 while penalty_count carries the week multiplier.
@@ -652,16 +653,24 @@ func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord
 // currentReferenceLabels runs only after record authorization or validated writes.
 // Disabled referenced objects remain readable; these labels do not enter audit snapshots.
 func (t *inspectionTx) currentReferenceLabels(ctx context.Context, r *inspection.InspectionRecord) error {
-	_, _, course, classroom, dormitory, area, _, _ := inspection.InspectionDetailReferences(r.Details)
-	if course == "" && classroom == "" && dormitory == "" && area == "" {
+	_, _, course, classroom, dormitory, area, _, rooms := inspection.InspectionDetailReferences(r.Details)
+	// Public dormitory hygiene stores its responsible room as a relation; use the
+	// first room so entry can preselect the same area and building.
+	dormitoryRef := dormitory
+	if dormitoryRef == "" && len(rooms) > 0 {
+		dormitoryRef = rooms[0]
+	}
+	if course == "" && classroom == "" && dormitoryRef == "" && area == "" {
 		return nil
 	}
 	return t.tx.QueryRow(ctx, `SELECT
  COALESCE((SELECT name FROM courses WHERE id=NULLIF($1,'')::uuid),''),
  COALESCE((SELECT b.name || ' ' || cr.room_no FROM classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE cr.id=NULLIF($2,'')::uuid),''),
  COALESCE((SELECT a.name || ' ' || b.name || ' ' || d.room_no FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas a ON a.id=b.dormitory_area_id WHERE d.id=NULLIF($3,'')::uuid),''),
+ COALESCE((SELECT b.dormitory_area_id::text FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id WHERE d.id=NULLIF($3,'')::uuid),''),
+ COALESCE((SELECT d.dormitory_building_id::text FROM dormitories d WHERE d.id=NULLIF($3,'')::uuid),''),
  COALESCE((SELECT b.name || ' ' || cr.room_no || ' / ' || ar.name FROM classroom_hygiene_areas ar JOIN classrooms cr ON cr.id=ar.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='CLASSROOM_HYGIENE'),
- (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitory, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentAreaName)
+ (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitoryRef, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentDormitoryAreaID, &r.CurrentDormitoryBuildingID, &r.CurrentAreaName)
 }
 
 // responsibilityLabels reads only snapshots attached to an already authorized record.

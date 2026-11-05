@@ -594,6 +594,23 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || !containsOption(page.Items, rf("12")) {
 			t.Fatal("room catalog", page, err)
 		}
+		// Housing entry walks area → building → room.
+		q.Kind, q.DormitoryAreaID, q.DormitoryBuildingID = "dormitory-areas", "", ""
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("10")) {
+			t.Fatal("housing areas", page, err)
+		}
+		q.Kind, q.DormitoryAreaID = "dormitory-buildings", rf("10")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("11")) {
+			t.Fatal("housing buildings", page, err)
+		}
+		q.Kind, q.DormitoryAreaID, q.DormitoryBuildingID = "dormitory-objects", "", rf("11")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != rf("12") || page.Items[0].Label != "101" {
+			t.Fatal("building rooms", page, err)
+		}
+		q.DormitoryBuildingID = ""
 		q.Kind, q.DormitoryID = "students", rf("12")
 		page, err = options.EntryOptions(ctx, member, q)
 		memberOption, found := inspection.EntryOption{}, false
@@ -802,11 +819,24 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				if def.Code == inspection.InspectionTypeClassroomHygiene {
 					classroom = "Fixture teaching building 101"
 				}
-				if def.Code == inspection.InspectionTypeLateReturn || def.Code == inspection.InspectionTypeDormitoryHygiene {
+				housing := def.Code == inspection.InspectionTypeLateReturn || def.Code == inspection.InspectionTypeDormitoryHygiene || def.Code == inspection.InspectionTypePublicDormitoryHygiene
+				if housing {
 					dormitory = "Fixture dormitory area Fixture dormitory building 101"
 				}
 				if fields["currentDormitoryName"] != dormitory {
 					t.Fatal("current dormitory label missing or incorrect", fields["currentDormitoryName"])
+				}
+				// Housing entry preselects area -> building by these identifiers; public
+				// dormitory hygiene resolves them from its responsible room.
+				areaID, buildingID := "", ""
+				if housing {
+					areaID, buildingID = rf("10"), rf("11")
+				}
+				if gotArea, _ := fields["currentDormitoryAreaId"].(string); gotArea != areaID {
+					t.Fatal("current dormitory area missing or incorrect", fields["currentDormitoryAreaId"])
+				}
+				if gotBuilding, _ := fields["currentDormitoryBuildingId"].(string); gotBuilding != buildingID {
+					t.Fatal("current dormitory building missing or incorrect", fields["currentDormitoryBuildingId"])
 				}
 				if fields["canEdit"] != true {
 					t.Fatal("editable draft capability missing")

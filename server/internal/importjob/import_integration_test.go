@@ -125,7 +125,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 	}
 	schoolBatch, err := imports.CreateBatch(ctx, importjob.CreateBatchInput{
 		InspectionTypeID: integrationInspectionTypeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID,
-		SourceFile: sourceFile, TemplateID: templateID, TemplateVersion: 1, CreatedBy: fixture.accountID,
+		SourceFile: sourceFile, TemplateID: templateID, TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID,
 	})
 	if err != nil {
 		t.Fatal("create college import", err)
@@ -148,7 +148,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 		t.Fatal("college import ownership", collegeRecords, err)
 	}
 	rolledBack, err := importjob.NewRollbackService(database, nil).Rollback(ctx, inspection.ManualActor{ID: fixture.accountID, IsSuperAdmin: true},
-		importjob.RollbackInput{BatchID: schoolBatch.ID, Version: schoolConfirmed.Version, Reason: "独立校级批次回归"}, metadata)
+		importjob.RollbackInput{BatchID: schoolBatch.ID, Version: schoolConfirmed.Version, Reason: "独立管理员批次回归"}, metadata)
 	if err != nil || rolledBack.RolledBackRows != 2 {
 		t.Fatal("rollback college import", rolledBack, err)
 	}
@@ -158,7 +158,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 
 	created, err := imports.CreateBatch(ctx, importjob.CreateBatchInput{
 		InspectionTypeID: integrationInspectionTypeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID,
-		DepartmentID: integrationDepartmentID, SourceFile: sourceFile, TemplateID: templateID, TemplateVersion: 1, CreatedBy: fixture.accountID,
+		DepartmentID: integrationDepartmentID, SourceFile: sourceFile, TemplateID: templateID, TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 	t.Cleanup(func() { _ = objects.Remove(ctx, tamperedFile.ObjectKey) })
 	tamperedBatch, err := imports.CreateBatch(ctx, importjob.CreateBatchInput{
 		InspectionTypeID: integrationInspectionTypeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID,
-		DepartmentID: integrationDepartmentID, SourceFile: tamperedFile, TemplateID: templateID, TemplateVersion: 1, CreatedBy: fixture.accountID,
+		DepartmentID: integrationDepartmentID, SourceFile: tamperedFile, TemplateID: templateID, TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID,
 	})
 	if err != nil {
 		t.Fatal(err)

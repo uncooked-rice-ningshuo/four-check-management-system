@@ -9,13 +9,11 @@ export function useInspectionContext(query: InspectionQuery, enabled=true) {
 export function useInspectionEntryOptions(query: InspectionQuery, enabled=true) {
  return useQuery({queryKey:['public-dormitory-hygienes','entry-options',query],queryFn:()=>publicDormitoryHygieneApi.entryOptions(query),enabled})
 }
-/** Merge scoped student choices across every selected responsibility class. */
-export function useResponsibleStudentOptions(query: InspectionQuery, classIds: string[], enabled=true) {
- return useQuery({queryKey:['public-dormitory-hygienes','responsible-students',query,classIds],
-  queryFn:async()=>{
-   const pages=await Promise.all(classIds.map(classId=>publicDormitoryHygieneApi.entryOptions({...query,kind:'students',classId})))
-   return pages.flat()
-  },enabled:enabled&&classIds.length>0})
+/** Student choices inside the selected room; the class follows the student. */
+export function useResponsibleStudentOptions(query: InspectionQuery, enabled=true) {
+ return useQuery({queryKey:['public-dormitory-hygienes','responsible-students',query],
+  queryFn:()=>publicDormitoryHygieneApi.entryOptions({...query,kind:'students'}),
+  enabled})
 }
 /** Cache record lists by their full structured filter. */
 export function usePublicDormitoryHygieneRecords(query: InspectionQuery, enabled=true) {

@@ -1,10 +1,10 @@
 import { ApiError, apiRequest } from './httpClient'
-export type InspectionOption = { id: string; label: string; grade?: string; attendancePenaltyMultiplier?: 1 | 2 }
+export type InspectionOption = { id: string; label: string; grade?: string; classId?: string; className?: string; attendancePenaltyMultiplier?: 1 | 2 }
 export type InspectionQuery = Record<string, string | number | undefined>
 export type ContextOptions = { items: InspectionOption[]; inspectionTypeId: string }
 export const badResponse = () => new ApiError(502, 'INVALID_RESPONSE', '服务返回的数据不完整，请刷新或联系管理员。')
 export function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
-function option(value: unknown): value is InspectionOption { return object(value) && typeof value.id === 'string' && typeof value.label === 'string' && (value.grade === undefined || typeof value.grade === 'string') && (value.attendancePenaltyMultiplier === undefined || value.attendancePenaltyMultiplier === 1 || value.attendancePenaltyMultiplier === 2) }
+function option(value: unknown): value is InspectionOption { return object(value) && typeof value.id === 'string' && typeof value.label === 'string' && (value.grade === undefined || typeof value.grade === 'string') && (value.classId === undefined || typeof value.classId === 'string') && (value.className === undefined || typeof value.className === 'string') && (value.attendancePenaltyMultiplier === undefined || value.attendancePenaltyMultiplier === 1 || value.attendancePenaltyMultiplier === 2) }
 export function queryString(query: InspectionQuery) {
  const params = new URLSearchParams()
  for (const [key,value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key,String(value))

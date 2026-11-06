@@ -68,7 +68,7 @@ describe('周通报汇总缓存状态', () => {
   it('同一检查类型跨来源只显示一行，同时可核对各单位明细与未完成应交项', async () => {
     vi.mocked(reportingApi.summary).mockReset().mockResolvedValue({
       ...summary,
-      rows: [summary.rows[0], { ...summary.rows[0], departmentId: '', departmentName: '校级', collegeLevel: true,
+      rows: [summary.rows[0], { ...summary.rows[0], departmentId: '', departmentName: '管理员', collegeLevel: true,
         submissionCount: 1, confirmedBatchCount: 0, confirmedRecordCount: 0, isRequired: true }],
     })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -84,7 +84,7 @@ describe('周通报汇总缓存状态', () => {
     expect(within(typeSection).getByText('待完成应交项')).toBeVisible()
     fireEvent.click(within(typeSection).getByRole('button', { name: '查看提交与记录' }))
     expect(await screen.findByText('各单位提交汇总')).toBeVisible()
-    expect(screen.getAllByText('校级').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('管理员').length).toBeGreaterThan(0)
   })
 
   it('在草稿中用中文展示来源状态、审核动作和修正字段，未知值不暴露内部代码', async () => {

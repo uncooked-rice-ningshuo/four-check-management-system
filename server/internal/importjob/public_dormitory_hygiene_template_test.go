@@ -17,8 +17,8 @@ func TestPublicDormitoryHygieneTemplateContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	fields := []string{"responsible_dormitory_name", "inspection_date", "result", "responsible_class_names", "responsible_student_no", "description", "remark"}
-	values := []string{"示例区 示例楼 101", "2026-10-01", "不合格", "示例班", "000001", "卫生情况说明", "备注"}
+	fields := []string{"responsible_dormitory_name", "inspection_date", "result", "responsible_student_no", "responsible_student_name", "responsible_class_names", "description", "remark"}
+	values := []string{"示例区 示例楼 101", "2026-10-01", "不合格", "000001", "虚构学生", "示例班", "卫生情况说明", "备注"}
 	for i, field := range fields {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
 		got, err := book.GetCellValue("公共宿舍卫生导入", cell)

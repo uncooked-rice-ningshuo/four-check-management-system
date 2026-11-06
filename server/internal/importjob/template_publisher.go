@@ -44,8 +44,8 @@ func NewInspectionTemplatePublisher(repository TemplatePublicationRepository, fi
 	return &AttendanceTemplatePublisher{repository: repository, files: files, typeCode: typeCode}
 }
 
-// Publish installs only the supported v1 template, never overwriting an existing
-// version. Even an idempotent retry rereads and verifies the private object.
+// Publish installs the current template version. An older published version is
+// superseded (never overwritten); an already current version is re-verified.
 func (p *AttendanceTemplatePublisher) Publish(ctx context.Context, metadata audit.Metadata) (Template, error) {
 	definition, err := InspectionTemplate(p.typeCode)
 	if err != nil {
@@ -55,7 +55,7 @@ func (p *AttendanceTemplatePublisher) Publish(ctx context.Context, metadata audi
 		return Template{}, err
 	}
 	if strings.TrimSpace(metadata.Reason) == "" {
-		metadata.Reason = "初始化" + definition.Name + " v1"
+		metadata.Reason = fmt.Sprintf("初始化%s v%d", definition.Name, CurrentTemplateVersion)
 	}
 	content, err := BuildInspectionTemplate(p.typeCode)
 	if err != nil {
@@ -70,12 +70,15 @@ func (p *AttendanceTemplatePublisher) Publish(ctx context.Context, metadata audi
 	}
 	existing, err := p.repository.FindInspectionTemplate(ctx, p.typeCode)
 	if err == nil {
-		if existing.Code != definition.Code || existing.Version != 1 || existing.Status != "PUBLISHED" {
+		if existing.Code != definition.Code || existing.Status != "PUBLISHED" || existing.Version > CurrentTemplateVersion {
 			return Template{}, ErrTemplatePublicationConflict
 		}
-		return p.verify(ctx, existing, content, metadata)
-	}
-	if !errors.Is(err, ErrTemplateNotFound) {
+		if existing.Version == CurrentTemplateVersion {
+			return p.verify(ctx, existing, content, metadata)
+		}
+		// An older version stays live until the repository retires it atomically
+		// together with the new publication below.
+	} else if !errors.Is(err, ErrTemplateNotFound) {
 		return Template{}, err
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(content))

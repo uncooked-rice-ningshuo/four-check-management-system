@@ -418,7 +418,7 @@ func (t *inspectionTx) readDetails(ctx context.Context, r inspection.InspectionR
 	switch r.TypeCode {
 	case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
 		table = "attendance_details"
-		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours)`
+		extra = personal + ` || jsonb_build_object('courseId',d.course_id,'classroomId',d.classroom_id,'absenceHours',d.absence_hours,'period',COALESCE(d.period_text,''),'penaltyMultiplier',d.penalty_multiplier,'penaltyHours',d.penalty_hours,'penaltyCount',d.penalty_count)`
 	case inspection.InspectionTypeEveningSelfStudy:
 		table = "evening_self_study_details"
 		extra = personal + ` || jsonb_build_object('classroomId',d.classroom_id,'period',d.period_text,'penaltyMultiplier',d.penalty_multiplier,'penaltyCount',d.penalty_count)`
@@ -534,7 +534,7 @@ func (t *inspectionTx) Save(ctx context.Context, r inspection.InspectionRecord, 
 	if err = t.writeDetails(ctx, r, old != nil); err != nil {
 		return r, err
 	}
-	if r.TypeCode == inspection.InspectionTypeAttendance {
+	if r.TypeCode == inspection.InspectionTypeAttendance || r.TypeCode == inspection.InspectionTypeUnattended {
 		stored, readErr := t.readDetails(ctx, r)
 		if readErr != nil {
 			return r, readErr
@@ -565,7 +565,9 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	case *inspection.AttendanceDetails:
 		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.UnattendedClassroomDetails:
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, nil)
+		// One violation per record: the week multiplier is written to both penalty_multiplier
+		// and penalty_count so reports and discipline totals read the stored count.
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
 	case *inspection.EveningSelfStudyDetails:
 		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count) VALUES($1,NULLIF($2,'')::uuid,$3,$4,$5) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=NULL,penalty_hours=NULL,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`
 		args = []any{r.ID, v.ClassroomID, v.Period, v.PenaltyMultiplier, v.PenaltyCount}
@@ -618,8 +620,24 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	}
 	return nil
 }
+
+// courseDetailSQL writes the shared course-absence row. 无机课堂 no longer collects a
+// period or hours: the server owns one violation per record, so an empty period becomes
+// NULL and absence_hours falls back to 1 while penalty_count carries the week multiplier.
 func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *int) (string, []any) {
-	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier`, []any{id, v.CourseID, v.ClassroomID, v.AbsenceHours, v.Period, multiplier}
+	hours := v.AbsenceHours
+	if hours <= 0 {
+		hours = 1
+	}
+	var period any
+	if strings.TrimSpace(v.Period) != "" {
+		period = strings.TrimSpace(v.Period)
+	}
+	var penaltyCount any
+	if period == nil && multiplier != nil {
+		penaltyCount = *multiplier
+	}
+	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier,penalty_count) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`, []any{id, v.CourseID, v.ClassroomID, hours, period, multiplier, penaltyCount}
 }
 func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord, a inspection.MutationAccess) error {
 	args := []any{r.ID, r.RowVersion}
@@ -637,16 +655,24 @@ func (t *inspectionTx) Delete(ctx context.Context, r inspection.InspectionRecord
 // currentReferenceLabels runs only after record authorization or validated writes.
 // Disabled referenced objects remain readable; these labels do not enter audit snapshots.
 func (t *inspectionTx) currentReferenceLabels(ctx context.Context, r *inspection.InspectionRecord) error {
-	_, _, course, classroom, dormitory, area, _, _ := inspection.InspectionDetailReferences(r.Details)
-	if course == "" && classroom == "" && dormitory == "" && area == "" {
+	_, _, course, classroom, dormitory, area, _, rooms := inspection.InspectionDetailReferences(r.Details)
+	// Public dormitory hygiene stores its responsible room as a relation; use the
+	// first room so entry can preselect the same area and building.
+	dormitoryRef := dormitory
+	if dormitoryRef == "" && len(rooms) > 0 {
+		dormitoryRef = rooms[0]
+	}
+	if course == "" && classroom == "" && dormitoryRef == "" && area == "" {
 		return nil
 	}
 	return t.tx.QueryRow(ctx, `SELECT
  COALESCE((SELECT name FROM courses WHERE id=NULLIF($1,'')::uuid),''),
  COALESCE((SELECT b.name || ' ' || cr.room_no FROM classrooms cr JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE cr.id=NULLIF($2,'')::uuid),''),
  COALESCE((SELECT a.name || ' ' || b.name || ' ' || d.room_no FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id JOIN dormitory_areas a ON a.id=b.dormitory_area_id WHERE d.id=NULLIF($3,'')::uuid),''),
+ COALESCE((SELECT b.dormitory_area_id::text FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id WHERE d.id=NULLIF($3,'')::uuid),''),
+ COALESCE((SELECT d.dormitory_building_id::text FROM dormitories d WHERE d.id=NULLIF($3,'')::uuid),''),
  COALESCE((SELECT b.name || ' ' || cr.room_no || ' / ' || ar.name FROM classroom_hygiene_areas ar JOIN classrooms cr ON cr.id=ar.classroom_id JOIN teaching_buildings b ON b.id=cr.teaching_building_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='CLASSROOM_HYGIENE'),
- (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitory, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentAreaName)
+ (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitoryRef, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentDormitoryAreaID, &r.CurrentDormitoryBuildingID, &r.CurrentAreaName)
 }
 
 // responsibilityLabels reads only snapshots attached to an already authorized record.

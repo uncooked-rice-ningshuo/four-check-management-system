@@ -21,6 +21,15 @@ const recordFixturePrefix = "a0000000-0000-0000-0000-"
 
 func rf(n string) string { return recordFixturePrefix + "0000000000" + n }
 
+func containsOption(items []inspection.EntryOption, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 type recordPermissions struct {
 	rules []permission.EffectivePermission
 }
@@ -99,14 +108,20 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	makeInput := func(code string, extra map[string]any) inspection.InspectionInput {
 		fields := map[string]any{"date": "2026-09-03", "remark": "Synthetic private text"}
 		switch code {
-		case inspection.InspectionTypeAttendance, inspection.InspectionTypeUnattended:
+		case inspection.InspectionTypeAttendance:
+			// 到课率 keeps the period and hour columns; the clock time is no longer collected.
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
 			fields["courseId"] = rf("13")
 			fields["classroomId"] = rf("09")
-			fields["time"] = "08:00"
 			fields["period"] = "1-2"
 			fields["absenceHours"] = 2
+		case inspection.InspectionTypeUnattended:
+			// 无机课堂 records one violation per day: the server owns period and hours.
+			fields["studentId"] = rf("07")
+			fields["classId"] = rf("06")
+			fields["courseId"] = rf("13")
+			fields["classroomId"] = rf("09")
 		case inspection.InspectionTypeEveningSelfStudy:
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
@@ -187,7 +202,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || err2 != nil || first.Total != 2 || second.Total != 2 || len(first.Items) != 1 || len(second.Items) != 1 || first.Items[0].ID == second.Items[0].ID {
 			t.Fatal("context pagination", err, err2)
 		}
-		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, err := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, nil), audit.Metadata{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -320,7 +335,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if e != nil || page.Total != 0 {
 			t.Fatal("manage enabled creation", e)
 		}
-		record, e := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, map[string]any{"time": "09:00"}), audit.Metadata{})
+		record, e := departmentSvc.Create(ctx, departmentActor, makeInput(inspection.InspectionTypeUnattended, nil), audit.Metadata{})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -572,7 +587,47 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 		}
 		perms.rules = []permission.EffectivePermission{allow}
-		q.StudentID = rf("01")
+		// Room-first entry: the room catalog is class-independent, and student
+		// options carry the class that entry derives from the chosen student.
+		q.Kind, q.StudentID, q.ClassID = "dormitory-objects", "", ""
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("12")) {
+			t.Fatal("room catalog", page, err)
+		}
+		// Housing entry walks area → building → room.
+		q.Kind, q.DormitoryAreaID, q.DormitoryBuildingID = "dormitory-areas", "", ""
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("10")) {
+			t.Fatal("housing areas", page, err)
+		}
+		q.Kind, q.DormitoryAreaID = "dormitory-buildings", rf("10")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || !containsOption(page.Items, rf("11")) {
+			t.Fatal("housing buildings", page, err)
+		}
+		q.Kind, q.DormitoryAreaID, q.DormitoryBuildingID = "dormitory-objects", "", rf("11")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != rf("12") || page.Items[0].Label != "101" {
+			t.Fatal("building rooms", page, err)
+		}
+		q.DormitoryBuildingID = ""
+		q.Kind, q.DormitoryID = "students", rf("12")
+		page, err = options.EntryOptions(ctx, member, q)
+		memberOption, found := inspection.EntryOption{}, false
+		for _, item := range page.Items {
+			if item.ID == rf("07") {
+				memberOption, found = item, true
+			}
+		}
+		if err != nil || !found || memberOption.ClassID != rf("06") {
+			t.Fatal("dormitory members with class", page, err)
+		}
+		q.DormitoryID = rf("11")
+		page, err = options.EntryOptions(ctx, member, q)
+		if err != nil || page.Total != 0 {
+			t.Fatal("non-resident student", page, err)
+		}
+		q.Kind, q.DormitoryID, q.StudentID, q.ClassID = "dormitories", "", rf("01"), rf("06")
 		page, err = options.EntryOptions(ctx, member, q)
 		if err != nil || page.Total != 0 {
 			t.Fatal("unrelated student", page, err)
@@ -582,12 +637,15 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if _, err = options.EntryOptions(ctx, member, q); !errors.Is(err, inspection.ErrInspectionRequest) {
 			t.Fatal("late return course options accepted", err)
 		}
-		q.Kind = "dormitories"
 		q.InspectionTypeID = types[inspection.InspectionTypeUnattended]
-		if _, err = options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
-			t.Fatal("unattended housing options accepted", err)
+		for _, kind := range []string{"dormitories", "dormitory-objects"} {
+			q.Kind = kind
+			if _, err = options.EntryOptions(ctx, admin, q); !errors.Is(err, inspection.ErrInspectionRequest) {
+				t.Fatal("unattended housing options accepted", err)
+			}
 		}
 		q.InspectionTypeID = types[inspection.InspectionTypeLateReturn]
+		q.Kind = "dormitories"
 		if _, err = pool.Exec(ctx, "UPDATE dormitories SET enabled=false WHERE id=$1", rf("12")); err != nil {
 			t.Fatal(err)
 		}
@@ -665,7 +723,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		const primary = "10000000-0000-0000-0000-000000000002"
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: primary, InspectionTypeID: types[inspection.InspectionTypeAttendance], ClassID: rf("06")}}}
 		actor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: primary}
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"time": "09:45", "remark": "member attribution"})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"remark": "member attribution"})
 		input.DepartmentID = "10000000-0000-0000-0000-000000000003"
 		if _, err := svc.Create(ctx, actor, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
 			t.Fatalf("member chose another department: %v", err)
@@ -761,11 +819,24 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 				if def.Code == inspection.InspectionTypeClassroomHygiene {
 					classroom = "Fixture teaching building 101"
 				}
-				if def.Code == inspection.InspectionTypeLateReturn || def.Code == inspection.InspectionTypeDormitoryHygiene {
+				housing := def.Code == inspection.InspectionTypeLateReturn || def.Code == inspection.InspectionTypeDormitoryHygiene || def.Code == inspection.InspectionTypePublicDormitoryHygiene
+				if housing {
 					dormitory = "Fixture dormitory area Fixture dormitory building 101"
 				}
 				if fields["currentDormitoryName"] != dormitory {
 					t.Fatal("current dormitory label missing or incorrect", fields["currentDormitoryName"])
+				}
+				// Housing entry preselects area -> building by these identifiers; public
+				// dormitory hygiene resolves them from its responsible room.
+				areaID, buildingID := "", ""
+				if housing {
+					areaID, buildingID = rf("10"), rf("11")
+				}
+				if gotArea, _ := fields["currentDormitoryAreaId"].(string); gotArea != areaID {
+					t.Fatal("current dormitory area missing or incorrect", fields["currentDormitoryAreaId"])
+				}
+				if gotBuilding, _ := fields["currentDormitoryBuildingId"].(string); gotBuilding != buildingID {
+					t.Fatal("current dormitory building missing or incorrect", fields["currentDormitoryBuildingId"])
 				}
 				if fields["canEdit"] != true {
 					t.Fatal("editable draft capability missing")
@@ -889,7 +960,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 	})
 	t.Run("administrator records stay outside department workflows", func(t *testing.T) {
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-06", "time": "09:45", "remark": "admin independent"})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-06", "remark": "admin independent"})
 		input.DepartmentID = ""
 		adminRecord, err := svc.Create(ctx, admin, input, audit.Metadata{})
 		if err != nil || adminRecord.AttributionMode != inspection.AttributionModeAdministrator || adminRecord.DepartmentID != "" {
@@ -933,7 +1004,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			t.Fatalf("business manager capabilities for independent record: %+v %v", managed, err)
 		}
 		managerEdit := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-06", "time": "09:45", "remark": "manager corrected independent record",
+			"date": "2026-09-06", "remark": "manager corrected independent record",
 		})
 		managerEdit.DepartmentID = ""
 		updated, err := svc.Update(ctx, manager, adminRecord.ID, inspection.InspectionEdit{
@@ -1108,7 +1179,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		}
 	}
 	t.Run("college record is independent of department", func(t *testing.T) {
-		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "time": "10:00", "classId": rf("16"), "studentId": rf("23")})
+		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "classId": rf("16"), "studentId": rf("23")})
 		input.DepartmentID = inspection.CollegeDepartmentOptionID
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "10000000-0000-0000-0000-000000000002", InspectionTypeID: input.InspectionTypeID, ClassID: rf("16")}}}
 		if _, err := svc.Create(ctx, member, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
@@ -1201,7 +1272,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 	})
 	t.Run("student number sort uses snapshots and preserves time default", func(t *testing.T) {
 		firstInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-05", "studentId": rf("07"), "classId": rf("06"), "time": "08:00",
+			"date": "2026-09-05", "studentId": rf("07"), "classId": rf("06"),
 		})
 		firstInput.DepartmentID = ""
 		first, err := svc.Create(ctx, admin, firstInput, audit.Metadata{})
@@ -1209,7 +1280,7 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 			t.Fatal("create first sortable record", err)
 		}
 		secondInput := makeInput(inspection.InspectionTypeAttendance, map[string]any{
-			"date": "2026-09-06", "studentId": rf("23"), "classId": rf("16"), "time": "08:00",
+			"date": "2026-09-06", "studentId": rf("23"), "classId": rf("16"),
 		})
 		secondInput.DepartmentID = ""
 		second, err := svc.Create(ctx, admin, secondInput, audit.Metadata{})

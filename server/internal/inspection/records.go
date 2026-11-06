@@ -38,9 +38,12 @@ type InspectionRecord struct {
 	CanDelete bool `json:"canDelete"`
 	// Current reference labels are live master-data names, never historical snapshots.
 	CurrentDormitoryName string `json:"currentDormitoryName"`
-	CurrentCourseName    string `json:"currentCourseName"`
-	CurrentClassroomName string `json:"currentClassroomName"`
-	CurrentAreaName      string `json:"currentAreaName,omitempty"`
+	// Housing identifiers let entry preselect the area and building of a room.
+	CurrentDormitoryAreaID     string `json:"currentDormitoryAreaId,omitempty"`
+	CurrentDormitoryBuildingID string `json:"currentDormitoryBuildingId,omitempty"`
+	CurrentCourseName          string `json:"currentCourseName"`
+	CurrentClassroomName       string `json:"currentClassroomName"`
+	CurrentAreaName            string `json:"currentAreaName,omitempty"`
 	// Responsibility labels are persisted snapshots, so later master-data renames do not rewrite history.
 	ResponsibleClasses  []EntryOption `json:"responsibleClasses,omitempty"`
 	ResponsibleStudents []EntryOption `json:"responsibleStudents,omitempty"`
@@ -284,7 +287,19 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 			multiplier = previous.PenaltyMultiplier
 		}
 	}
-	if (c.TypeCode == InspectionTypeAttendance || c.TypeCode == InspectionTypeEveningSelfStudy) && multiplier == nil {
+	// A submitted 无机课堂 record keeps the multiplier it was counted with; only an
+	// unsubmitted or re-dated record follows the current week configuration.
+	if c.TypeCode == InspectionTypeUnattended && prior != nil && prior.HasSubmission {
+		previous, previousOK := prior.Details.(*UnattendedClassroomDetails)
+		current, currentOK := v.Details.(*UnattendedClassroomDetails)
+		if previousOK && currentOK && prior.WeekID == i.WeekID && previous.Date == current.Date {
+			if previous.PenaltyMultiplier == nil {
+				return InspectionRecord{}, ErrAttendanceLegacyRuleUnknown
+			}
+			multiplier = previous.PenaltyMultiplier
+		}
+	}
+	if (c.TypeCode == InspectionTypeAttendance || c.TypeCode == InspectionTypeUnattended || c.TypeCode == InspectionTypeEveningSelfStudy) && multiplier == nil {
 		return InspectionRecord{}, ErrAttendancePenaltyUnconfigured
 	}
 	if c.TypeCode == InspectionTypeEveningSelfStudy {
@@ -297,6 +312,16 @@ func (s *RecordService) prepare(ctx context.Context, tx InspectionTransaction, i
 			penaltyCount := *multiplier
 			evening.PenaltyCount = &penaltyCount
 		}
+	}
+	// 无机课堂 counts one violation per record, so the stored count is 1 × week multiplier.
+	if c.TypeCode == InspectionTypeUnattended {
+		unattended, ok := v.Details.(*UnattendedClassroomDetails)
+		if !ok || multiplier == nil {
+			return InspectionRecord{}, ErrInvalidAttendanceRecord
+		}
+		unattended.PenaltyMultiplier = multiplier
+		penaltyCount := *multiplier
+		unattended.PenaltyCount = &penaltyCount
 	}
 	r := InspectionRecord{ID: uuid.NewString(), SemesterID: i.SemesterID, WeekID: i.WeekID, InspectionTypeID: i.InspectionTypeID, TypeCode: c.TypeCode, DepartmentID: i.DepartmentID, AttributionMode: i.AttributionMode, Details: v.Details, Normalized: v, Status: RecordStatusDraft, Source: RecordSourceManual, RowVersion: 1, CreatedBy: a.ActorID}
 	r.PenaltyMultiplier = multiplier

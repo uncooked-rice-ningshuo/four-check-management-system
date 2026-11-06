@@ -9,12 +9,13 @@ export type LateReturnRecordInput = { semesterId: string; weekId: string; inspec
 export type LateReturnRecordDTO = Omit<LateReturnRecordInput, 'details'> & { details: LateReturnDetails } & InspectionProvenance & {
  importBatchId?: string
  id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
- currentDormitoryName: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; canEdit: boolean
+ currentDormitoryName: string; currentDormitoryAreaId?: string; currentDormitoryBuildingId?: string; status: string; source: string; rowVersion: number; createdBy: string; submitterName: string; canEdit: boolean
 }
 function record(value: unknown): LateReturnRecordDTO {
 	if (!object(value) || !object(value.details) || !validInspectionProvenance(value)) throw badResponse()
  if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
  for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentDormitoryName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
+ for (const key of ['currentDormitoryAreaId','currentDormitoryBuildingId']) if (value[key] !== undefined && typeof value[key] !== 'string') throw badResponse()
  for (const key of ['classId','studentId','dormitoryId','date']) if (typeof value.details[key] !== 'string') throw badResponse()
  if(value.details.time!==undefined&&typeof value.details.time!=='string')throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()

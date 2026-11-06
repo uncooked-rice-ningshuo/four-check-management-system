@@ -7,4 +7,8 @@ describe('到课率缺课摘要', () => {
     const record: ReportingRecord = { id: 'r', typeCode: 'ATTENDANCE_RATE', studentNumber: '', studentName: '', className: '', grade: '', currentDormitoryName: '', currentCourseName: '', currentClassroomName: '', details: { absenceHours: 2 } }
     expect(absenceSummary(record)).toBe('缺课 2 节次')
   })
+  it('无机课堂不按学时展示缺课数量', () => {
+    const record: ReportingRecord = { id: 'r', typeCode: 'UNATTENDED_CLASSROOM', studentNumber: '', studentName: '', className: '', grade: '', currentDormitoryName: '', currentCourseName: '', currentClassroomName: '', details: { absenceHours: 1, penaltyCount: 2 } }
+    expect(absenceSummary(record)).toBeUndefined()
+  })
 })

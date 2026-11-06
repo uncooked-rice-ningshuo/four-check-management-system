@@ -442,10 +442,43 @@ func TestDuplicateKeyComponents(t *testing.T) {
 }
 
 func TestValidateDetailsStoragePrecision(t *testing.T) {
-	for _, code := range []string{InspectionTypeAttendance, InspectionTypeUnattended} {
-		fields := validDetails(code)
-		fields["absenceHours"] = json.RawMessage(`0.001`)
-		_, issues := validateFixture(code, fields)
-		requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
+	fields := validDetails(InspectionTypeAttendance)
+	fields["absenceHours"] = json.RawMessage(`0.001`)
+	_, issues := validateFixture(InspectionTypeAttendance, fields)
+	requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
+}
+
+// 无机课堂 must use one identity for manual entry and Excel import: student + course + date.
+// A class-level key silently rejects a second course on the same day and lets the other
+// entry path insert the same event twice.
+func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
+	manual, issues := validateFixture(InspectionTypeUnattended, validDetails(InspectionTypeUnattended))
+	if len(issues) != 0 {
+		t.Fatal(issues)
+	}
+	day := time.Date(2026, 9, 2, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*3600))
+	imported, err := NewAttendanceRecord(AttendanceInput{
+		InspectionTypeID: detailID, InspectionTypeCode: InspectionTypeUnattended,
+		SemesterID: detailID, WeekID: detailID, StudentID: detailID, StudentNoSnapshot: "2026001",
+		StudentNameSnapshot: "学生甲", ClassID: detailID, ClassNameSnapshot: "班级甲", GradeSnapshot: "2026",
+		CourseID: detailID, ClassroomID: detailID, OccurredAt: day,
+		WeekStart: time.Date(2026, 9, 1, 0, 0, 0, 0, day.Location()), WeekEnd: time.Date(2026, 9, 7, 0, 0, 0, 0, day.Location()),
+		CreatedBy: detailID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.DedupKey != manual.DuplicateKey || UnattendedDedupKey(imported) != manual.DuplicateKey {
+		t.Fatal("import identity differs from manual identity")
+	}
+	// The same student on the same day in another course is a different event.
+	otherCourse := imported
+	otherCourse.CourseID = "abcdefab-0000-4000-8000-000000000002"
+	if UnattendedDedupKey(otherCourse) == manual.DuplicateKey {
+		t.Fatal("course missing from 无机课堂 identity")
+	}
+	// 到课率 keeps its class/period identity, so the two types cannot collide by accident.
+	if AttendanceDedupKey(imported) == manual.DuplicateKey {
+		t.Fatal("无机课堂 identity fell back to the 到课率 key")
 	}
 }

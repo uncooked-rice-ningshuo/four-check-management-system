@@ -71,9 +71,9 @@ export function UnattendedClassroomPage() {
   {title:'班级',dataIndex:'className',search:false,width:150},
   {title:'课程（当前名称）',dataIndex:'currentCourseName',search:false,width:180},
   {title:'教室（当前名称）',dataIndex:'currentClassroomName',search:false,width:180},
-  {title:'检查时间',key:'date',search:false,width:180,render:(_,record)=>`${record.details.date} ${record.details.time}`},
-  {title:'节次',key:'period',search:false,width:90,render:(_,record)=>record.details.period},
-  {title:'旷课学时',key:'hours',search:false,width:100,render:(_,record)=>record.details.absenceHours},
+  {title:'检查日期',key:'date',search:false,width:140,render:(_,record)=>record.details.date},
+  
+  
   ...createInspectionProvenanceColumns<CourseRecord>(),
   {title:'操作',valueType:'option',fixed:'right',width:280,render:(_,record)=><Space>{record.importBatchId&&record.canEdit&&<Button type="link" onClick={()=>{setImportBatchId(record.importBatchId);setImporting(true)}}>导入批次</Button>}<Button type="link" onClick={()=>setPanel({id:record.id,mode:'detail'})}>详情</Button>{record.canEdit&&<Button type="link" onClick={()=>setPanel({id:record.id,mode:'edit'})}>编辑</Button>}{record.canDelete&&<Button type="link" danger onClick={()=>setDeleting([record])}>删除</Button>}</Space>},
  ]

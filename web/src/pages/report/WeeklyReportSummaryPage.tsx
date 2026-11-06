@@ -27,12 +27,12 @@ function WeeklyObligationManagement({ period }: { period: ReportingPeriod }) {
   const options = optionsQuery.data
   const eligibleTargets = options?.departmentScopes.filter(item => item.inspectionTypeId === inspectionTypeId) ?? []
   const targetOptions = inspectionTypeId ? [
-    { label: '校级', value: collegeTarget },
+    { label: '管理员', value: collegeTarget },
     ...eligibleTargets.map(item => ({ label: item.departmentName, value: item.departmentId })),
   ] : []
   const configured = obligationsQuery.data ?? []
   const columns: ColumnsType<ReportObligation> = [
-    { title: '范围', key: 'scope', render: (_value, item) => item.collegeLevel ? '校级' : item.departmentName },
+    { title: '范围', key: 'scope', render: (_value, item) => item.collegeLevel ? '管理员' : item.departmentName },
     { title: '检查类型', dataIndex: 'inspectionTypeName' },
     { title: '适格状态', key: 'eligible', render: (_value, item) => item.eligible ? <Tag color="green">有效</Tag> : <Tag color="orange">需清理</Tag> },
     { title: '操作', key: 'action', render: (_value, item) => <Popconfirm title="移除本周应交项？" description="历史提交和零回执不会删除。" okText="移除" cancelText="取消" onConfirm={() => remove.mutate({ id: item.id, version: item.version }, {
@@ -51,7 +51,7 @@ function WeeklyObligationManagement({ period }: { period: ReportingPeriod }) {
         <Select aria-label="应交检查类型" placeholder="选择检查类型" style={{ minWidth: 190 }} loading={optionsQuery.isFetching}
           value={inspectionTypeId || undefined} options={options?.inspectionTypes.map(item => ({ label: item.name, value: item.id })) ?? []}
           onChange={value => { setInspectionTypeId(value); setTarget('') }} />
-        <Select aria-label="应交部门或校级范围" placeholder="选择部门或校级范围" style={{ minWidth: 220 }} disabled={!inspectionTypeId}
+        <Select aria-label="应交部门或管理员范围" placeholder="选择部门或管理员范围" style={{ minWidth: 220 }} disabled={!inspectionTypeId}
           value={target || undefined} options={targetOptions} onChange={setTarget} />
         <Button type="primary" disabled={!inspectionTypeId || !target || optionsQuery.isError} loading={create.isPending}
           onClick={() => {
@@ -86,7 +86,8 @@ function periodLabel(period: ReportingPeriod): string {
 
 function displayRecordDate(record: ReportingRecord): string {
   const date = record.details.date ? displayDate(record.details.date) : '—'
-  const time = record.details.time
+  // 无机课堂 is a date-level record; its stored clock is a fixed midnight placeholder.
+  const time = record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : record.details.time
   return time ? `${date} ${time}` : date
 }
 
@@ -94,7 +95,7 @@ function recordSummary(record: ReportingRecord): string {
   const { details } = record
   const parts: string[] = []
   if (details.result) parts.push(inspectionResultLabel(details.result))
-  if (details.period) parts.push(`${details.period}节`)
+  if (record.typeCode !== 'UNATTENDED_CLASSROOM' && details.period) parts.push(`${details.period}节`)
   const absence = absenceSummary(record)
   if (absence) parts.push(absence)
   if (details.absenceCount !== undefined) parts.push(`缺勤 ${details.absenceCount} 次`)
@@ -141,11 +142,12 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
     ['学号', record.studentNumber],
     ['年级', record.grade],
     ['检查日期', details.date],
-    ['发生时间', details.time],
-    ['节次', details.period],
+    // 无机课堂 has no clock time, period or hours: it counts 1 次 × 周倍数.
+    ['发生时间', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.time],
+    ['节次', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.period],
     ['检查轮次', details.round],
-    [record.typeCode === 'ATTENDANCE_RATE' ? '缺课节次数' : '缺课学时', details.absenceHours],
-    [record.typeCode === 'ATTENDANCE_RATE' ? '违纪计入次数' : '计入学时', details.penaltyHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '缺课节次数' : '缺课学时', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.absenceHours],
+    [record.typeCode === 'ATTENDANCE_RATE' ? '违纪计入次数' : '计入学时', record.typeCode === 'UNATTENDED_CLASSROOM' ? undefined : details.penaltyHours],
     ['违纪计入次数', details.penaltyCount],
     ['缺勤次数', details.absenceCount],
     ['检查结果', details.result ? inspectionResultLabel(details.result) : undefined],
@@ -382,7 +384,7 @@ export function WeeklyReportSummaryPage() {
             <Typography.Title level={5}>待完成应交项</Typography.Title>
             <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
               dataSource={incompleteCells} columns={[
-                { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '校级' : row.departmentName },
+                { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '管理员' : row.departmentName },
                 { title: '检查类型', dataIndex: 'inspectionTypeName' },
                 { title: '状态', key: 'state', render: (_value, row) => requiredCellState(row) },
               ]} />
@@ -428,7 +430,7 @@ export function WeeklyReportSummaryPage() {
           <Button size="small" onClick={() => { setSelectedCell(typeRows.find(row => row.inspectionTypeId === visibleTypeId) ?? null); setRecordPage(1) }}>查看此类全部已确认记录</Button>
           <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
             dataSource={sourceCells} columns={[
-              { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '校级' : row.departmentName },
+              { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '管理员' : row.departmentName },
               { title: '提交批次', dataIndex: 'submissionCount' },
               { title: '已确认批次', dataIndex: 'confirmedBatchCount' },
               { title: '已确认记录', dataIndex: 'confirmedRecordCount' },
@@ -436,7 +438,7 @@ export function WeeklyReportSummaryPage() {
               { title: '记录', key: 'records', render: (_value, row) => row.confirmedRecordCount > 0
                 ? <Button type="link" onClick={() => { setSelectedCell(row); setRecordPage(1) }}>查看记录</Button> : '—' },
             ]} />
-          {selectedCell && <Typography.Text strong>{selectedCell.departmentId || selectedCell.collegeLevel ? selectedCell.collegeLevel ? '校级' : selectedCell.departmentName : '全部来源'} · 已确认记录</Typography.Text>}
+          {selectedCell && <Typography.Text strong>{selectedCell.departmentId || selectedCell.collegeLevel ? selectedCell.collegeLevel ? '管理员' : selectedCell.departmentName : '全部来源'} · 已确认记录</Typography.Text>}
           {selectedCell && <>
           <Alert
             type="info"

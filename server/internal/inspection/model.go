@@ -110,19 +110,28 @@ type AttendanceRecord struct {
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
-// NewAttendanceRecord enforces the invariants shared by manual and imported attendance drafts.
+// NewAttendanceRecord enforces the invariants shared by manual and imported drafts.
+// 无机课堂 reuses the course-absence storage but records one violation per day, so the
+// server owns both the period and the hour count instead of accepting them as input.
 func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
-	if strings.TrimSpace(input.InspectionTypeCode) != InspectionTypeAttendance {
+	typeCode := strings.TrimSpace(input.InspectionTypeCode)
+	if typeCode != InspectionTypeAttendance && typeCode != InspectionTypeUnattended {
 		return AttendanceRecord{}, ErrInspectionTypeMismatch
 	}
-	if missingAttendanceContext(input) || input.OccurredAt.IsZero() || input.WeekStart.IsZero() || input.WeekEnd.IsZero() ||
-		math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
-		strings.TrimSpace(input.PeriodText) == "" {
+	if missingAttendanceContext(input) || input.OccurredAt.IsZero() || input.WeekStart.IsZero() || input.WeekEnd.IsZero() {
 		return AttendanceRecord{}, ErrInvalidAttendanceRecord
 	}
-	actualHours, validPeriod := AttendanceHoursForPeriod(input.PeriodText)
-	if !validPeriod || input.AbsenceHours != actualHours {
-		return AttendanceRecord{}, ErrInvalidAttendanceRecord
+	if typeCode == InspectionTypeUnattended {
+		input.AbsenceHours, input.PeriodText = 1, ""
+	} else {
+		if math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
+			strings.TrimSpace(input.PeriodText) == "" {
+			return AttendanceRecord{}, ErrInvalidAttendanceRecord
+		}
+		actualHours, validPeriod := AttendanceHoursForPeriod(input.PeriodText)
+		if !validPeriod || input.AbsenceHours != actualHours {
+			return AttendanceRecord{}, ErrInvalidAttendanceRecord
+		}
 	}
 	weekStart, weekEnd, occurredDate := attendanceBusinessDates(input)
 	if weekStart.After(weekEnd) {
@@ -138,6 +147,12 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 	input.GradeSnapshot = strings.TrimSpace(input.GradeSnapshot)
 	input.PeriodText = strings.TrimSpace(input.PeriodText)
 	input.Remark = strings.TrimSpace(input.Remark)
+	// 到课率 identifies one student/class/period event; 无机课堂 counts one student/course/day.
+	// Both paths must share the key or a manual record and its imported twin slip past each other.
+	dedupKey := attendanceDedupKey(input)
+	if typeCode == InspectionTypeUnattended {
+		dedupKey = courseAbsenceDedupKey(input)
+	}
 	return AttendanceRecord{
 		ID: uuid.NewString(), InspectionTypeID: input.InspectionTypeID, SemesterID: input.SemesterID, WeekID: input.WeekID,
 		DepartmentID: input.DepartmentID, StudentID: input.StudentID, StudentNoSnapshot: input.StudentNoSnapshot,
@@ -145,7 +160,7 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 		GradeSnapshot: input.GradeSnapshot, CourseID: input.CourseID, ClassroomID: input.ClassroomID,
 		OccurredAt: input.OccurredAt, AbsenceHours: input.AbsenceHours, PeriodText: input.PeriodText, Remark: input.Remark,
 		Source: RecordSourceExcel, Status: RecordStatusDraft, ImportBatchID: input.ImportBatchID,
-		DedupKey: attendanceDedupKey(input), RowVersion: 1, CreatedBy: input.CreatedBy,
+		DedupKey: dedupKey, RowVersion: 1, CreatedBy: input.CreatedBy,
 	}, nil
 }
 
@@ -185,10 +200,12 @@ func attendanceDedupKey(input AttendanceInput) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// courseAbsenceDedupKey identifies one student/course/day event. 无机课堂 records one
+// violation per day, so the key ignores any clock time and the fixed period.
 func courseAbsenceDedupKey(input AttendanceInput) string {
+	localDate := input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
 	canonical := strings.Join([]string{
-		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID,
-		input.OccurredAt.UTC().Format(time.RFC3339Nano), strings.TrimSpace(input.PeriodText),
+		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID, localDate,
 	}, "\x1f")
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])
@@ -200,6 +217,16 @@ func AttendanceDedupKey(record AttendanceRecord) string {
 	return attendanceDedupKey(AttendanceInput{
 		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
 		ClassID: record.ClassID, StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
+	})
+}
+
+// UnattendedDedupKey restores the 无机课堂 identity (student + course + business date)
+// after a normalized import row is decoded. It must stay identical to the key the
+// manual entry path stores, otherwise the two paths cannot detect each other.
+func UnattendedDedupKey(record AttendanceRecord) string {
+	return courseAbsenceDedupKey(AttendanceInput{
+		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
+		StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt,
 	})
 }
 

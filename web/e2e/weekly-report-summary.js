@@ -98,7 +98,7 @@ async (page) => {
   check(cells[1] === '2' && cells[5] === '2' && cells[6] === '4', `Type summary did not combine current confirmed revisions: ${cells.join('|')}`)
   check(await page.getByRole('cell', { name: '教室卫生', exact: true }).count() === 0, 'Paused inspection type appeared in reporting summary')
   check(await attendanceRow.count() === 1, 'One type should occupy only one summary row')
-  cases.push('自动选中当前工作周并按检查类型合并部门与校级来源，保留已确认记录口径和暂停类型排除')
+  cases.push('自动选中当前工作周并按检查类型合并部门与管理员来源，保留已确认记录口径和暂停类型排除')
 
   const recordResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/v1/reports/records?') && response.url().includes('weekId=b0000000-0000-0000-0000-000000000003'))
@@ -127,10 +127,10 @@ async (page) => {
   check(collegeRecordPage.total === 2 && collegeRecordPage.items.some(item => item.studentName === 'E2E student A') &&
     collegeRecordPage.items.some(item => item.studentName === 'E2E student B'),
   `College-level records endpoint returned unexpected records: ${JSON.stringify(collegeRecordPage)}`)
-  await sourceDrawer.getByText('校级 · 已确认记录').waitFor()
+  await sourceDrawer.getByText('管理员 · 已确认记录').waitFor()
   await sourceDrawer.getByRole('row').filter({ hasText: 'E2E student B' }).waitFor()
   await sourceDrawer.getByRole('button', { name: 'Close', exact: true }).click()
-  cases.push('类型汇总抽屉展示跨来源记录，并可按提交归属查看校级记录')
+  cases.push('类型汇总抽屉展示跨来源记录，并可按提交归属查看管理员记录')
 
   const cachedSummaryFailure = async route => {
     if (route.request().url().includes('weekId=b0000000-0000-0000-0000-000000000003')) {

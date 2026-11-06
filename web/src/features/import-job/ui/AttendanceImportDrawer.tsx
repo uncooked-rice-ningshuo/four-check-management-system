@@ -32,11 +32,19 @@ type AttendanceImportDrawerProps = {
 
 const terminalStatuses = new Set(['CONFIRMED', 'CANCELLED', 'ROLLED_BACK'])
 
-function saveTemplate(file: Blob, label: string) {
+// An unpublished template never recovers by retrying; do not present it as a transient outage.
+function templateErrorTitle(error: unknown) {
+  if (error instanceof ApiError && error.status === 403) return '当前类型或导入归属部门无权限，请联系管理员'
+  if (error instanceof ApiError && (error.code === 'IMPORT_TEMPLATE_NOT_FOUND' || error.status === 404)) return '当前检查类型尚未发布导入模板，请联系管理员发布后再导入'
+  return '无法获取当前导入模板，请稍后重试'
+}
+
+// The version suffix keeps a superseded download from being filled in by mistake.
+function saveTemplate(file: Blob, label: string, version: number) {
   const url = URL.createObjectURL(file)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${label.replaceAll('/', '-')}导入模板.xlsx`
+  link.download = `${label.replaceAll('/', '-')}导入模板-v${version}.xlsx`
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -73,7 +81,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   const confirm = useConfirmImport(batchId ?? '')
   const activeBatch = batch.data
   const availableDepartments = activeBatch?.departmentId === '' && !departments.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID)
-    ? [...departments, { id: COLLEGE_DEPARTMENT_OPTION_ID, name: '校级' }] : departments
+    ? [...departments, { id: COLLEGE_DEPARTMENT_OPTION_ID, name: '管理员' }] : departments
   const memberDepartmentUnavailable = memberDepartmentId !== undefined && !availableDepartments.some(item => item.id === memberDepartmentId)
   // A resumed batch owns its scope; current list filters may have changed.
   const displayScope = activeBatch ? { ...activeBatch, departmentId: activeBatch.attributionMode === 'ADMINISTRATOR' ? '' : departmentOptionId(activeBatch.departmentId) } : targetContext
@@ -241,9 +249,9 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
         {!batchId && <>
           <div className="import-template-action">
             <div><Typography.Title level={5}>1. 使用当前标准模板</Typography.Title><Typography.Text type="secondary">第 4 行为填写示例，不参与导入；从第 5 行填写真实数据。模板版本由服务端校验。</Typography.Text></div>
-            <Button icon={<DownloadOutlined />} loading={template.isLoading} disabled={!template.data || memberDepartmentUnavailable} onClick={() => template.data && saveTemplate(template.data.file, label)}>下载标准模板</Button>
+            <Button icon={<DownloadOutlined />} loading={template.isLoading} disabled={!template.data || memberDepartmentUnavailable} onClick={() => template.data && saveTemplate(template.data.file, label, template.data.template.version)}>下载标准模板</Button>
           </div>
-          {template.isError && <Alert type="error" showIcon title={template.error instanceof ApiError && template.error.status === 403 ? '当前类型或导入归属部门无权限，请联系管理员' : '无法获取当前导入模板，请稍后重试'} />}
+          {template.isError && <Alert type="error" showIcon title={templateErrorTitle(template.error)} />}
           <Upload.Dragger
             aria-label={`选择${label} XLSX 文件`}
             accept=".xlsx"

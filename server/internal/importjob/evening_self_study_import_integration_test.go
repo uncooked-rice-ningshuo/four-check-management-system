@@ -119,7 +119,7 @@ VALUES($1,'EVENING_SELF_STUDY_IMPORT','晚自习',$2,1,$3,'PUBLISHED',now(),$4)`
 		t.Helper()
 		batch, err := imports.CreateBatch(ctx, importjob.CreateBatchInput{InspectionTypeID: typeID, SemesterID: fixture.semesterID,
 			WeekID: fixture.weekID, DepartmentID: integrationDepartmentID, SourceFile: source, TemplateID: templateID,
-			TemplateVersion: 1, CreatedBy: fixture.accountID})
+			TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID})
 		if err != nil {
 			t.Fatal(err)
 		}

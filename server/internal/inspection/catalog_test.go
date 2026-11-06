@@ -15,7 +15,7 @@ func TestInspectionCatalog(t *testing.T) {
 	}
 	tables := map[string]bool{}
 	for _, d := range definitions {
-		if d.Code == "" || d.Name == "" || d.ExtensionTable == "" || d.TemplateVersion != 1 || len(d.Fields) == 0 || len(d.DuplicateKey) == 0 {
+		if d.Code == "" || d.Name == "" || d.ExtensionTable == "" || d.TemplateVersion != 2 || len(d.Fields) == 0 || len(d.DuplicateKey) == 0 {
 			t.Fatalf("incomplete %s", d.Code)
 		}
 		tables[d.ExtensionTable] = true
@@ -40,8 +40,28 @@ func TestInspectionCatalog(t *testing.T) {
 	if !reflect.DeepEqual(u.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || u.TemplateStatus != "ACTIVE" {
 		t.Fatal("unattended import capability missing")
 	}
-	if a.ExtensionTable != u.ExtensionTable || !reflect.DeepEqual(a.Fields, u.Fields) {
-		t.Fatal("course absence schemas drifted")
+	// Both course types share storage but no longer share the input contract:
+	// 无机课堂 collects one violation per day and owns the period/hours server-side.
+	if a.ExtensionTable != u.ExtensionTable {
+		t.Fatal("course absence storage drifted")
+	}
+	for _, forbidden := range []string{"time", "period", "absenceHours"} {
+		for _, f := range u.Fields {
+			if f.Key == forbidden {
+				t.Fatalf("unattended still exposes %s", forbidden)
+			}
+		}
+	}
+	for _, required := range []string{"studentId", "classId", "courseId", "classroomId", "date"} {
+		found := false
+		for _, f := range u.Fields {
+			if f.Key == required {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("unattended missing %s", required)
+		}
 	}
 	c, _ := LookupInspectionDefinition("CLASSROOM_HYGIENE")
 	if !reflect.DeepEqual(c.AvailableActions, []string{"CREATE", "LIST", "EDIT", "SOFT_DELETE", "BATCH_DELETE", "IMPORT"}) || c.TemplateStatus != "ACTIVE" {

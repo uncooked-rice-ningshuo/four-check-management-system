@@ -21,7 +21,7 @@ func TestUnattendedTemplateIsDistinctFromAttendance(t *testing.T) {
 	}
 	parser := NewUnattendedXLSXParser(16 << 20)
 	parsed, err := parser.Parse("unattended.xlsx", content)
-	if err != nil || parsed.TemplateCode != "UNATTENDED_CLASSROOM_IMPORT" || parsed.TemplateVersion != 1 || len(parsed.Fields) != 10 {
+	if err != nil || parsed.TemplateCode != "UNATTENDED_CLASSROOM_IMPORT" || parsed.TemplateVersion != 2 || len(parsed.Fields) != 7 {
 		t.Fatalf("template %+v %v", parsed, err)
 	}
 	if _, err = NewAttendanceXLSXParser(16<<20).Parse("unattended.xlsx", content); err == nil {
@@ -32,7 +32,7 @@ func TestUnattendedTemplateIsDistinctFromAttendance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	row := []any{"000001", "虚构学生", "示例班", "示例课", "2026-10-01", "08:00", "1-2", "2", "示例楼 101", ""}
+	row := []any{"000001", "虚构学生", "示例班", "2026-10-01", "示例课", "示例楼 101", ""}
 	if err = book.SetSheetRow("无机课堂导入", "A5", &row); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestUnattendedTemplateIsDistinctFromAttendance(t *testing.T) {
 	if err != nil || len(parsed.Rows) != 1 || parsed.Rows[0].Values["student_no"] != "000001" {
 		t.Fatal("lost text fields", err)
 	}
-	if err = book.SetCellFormula("无机课堂导入", "J5", "1+1"); err != nil {
+	if err = book.SetCellFormula("无机课堂导入", "G5", "1+1"); err != nil {
 		t.Fatal(err)
 	}
 	filled, err = book.WriteToBuffer()

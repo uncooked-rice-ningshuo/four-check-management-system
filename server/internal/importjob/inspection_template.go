@@ -6,22 +6,22 @@ import "four-check-management-system/server/internal/inspection"
 // Other catalog types remain unavailable until their import path is verified.
 func InspectionTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "CLASSROOM_HYGIENE_IMPORT", Name: "教室卫生导入模板", Sheet: "教室卫生导入", Filename: "classroom-hygiene-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "CLASSROOM_HYGIENE_IMPORT", Name: "教室卫生导入模板", Sheet: "教室卫生导入", Filename: "classroom-hygiene-v2.xlsx"}, nil
 	}
 	if typeCode == inspection.InspectionTypePublicDormitoryHygiene {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "PUBLIC_DORMITORY_HYGIENE_IMPORT", Name: "公共宿舍卫生导入模板", Sheet: "公共宿舍卫生导入", Filename: "public-dormitory-hygiene-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "PUBLIC_DORMITORY_HYGIENE_IMPORT", Name: "公共宿舍卫生导入模板", Sheet: "公共宿舍卫生导入", Filename: "public-dormitory-hygiene-v2.xlsx"}, nil
 	}
 	if typeCode == inspection.InspectionTypeDormitoryHygiene {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "DORMITORY_HYGIENE_IMPORT", Name: "宿舍卫生导入模板", Sheet: "宿舍卫生导入", Filename: "dormitory-hygiene-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "DORMITORY_HYGIENE_IMPORT", Name: "宿舍卫生导入模板", Sheet: "宿舍卫生导入", Filename: "dormitory-hygiene-v2.xlsx"}, nil
 	}
 	if typeCode == inspection.InspectionTypeLateReturn {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "LATE_RETURN_IMPORT", Name: "晚归导入模板", Sheet: "晚归导入", Filename: "late-return-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "LATE_RETURN_IMPORT", Name: "晚归导入模板", Sheet: "晚归导入", Filename: "late-return-v2.xlsx"}, nil
 	}
 	if typeCode == inspection.InspectionTypeMorning {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "MORNING_ATTENDANCE_IMPORT", Name: "早锻炼/早签导入模板", Sheet: "早锻炼早签导入", Filename: "morning-attendance-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "MORNING_ATTENDANCE_IMPORT", Name: "早锻炼/早签导入模板", Sheet: "早锻炼早签导入", Filename: "morning-attendance-v2.xlsx"}, nil
 	}
 	if typeCode == inspection.InspectionTypeEveningSelfStudy {
-		return CourseTemplateDefinition{TypeCode: typeCode, Code: "EVENING_SELF_STUDY_IMPORT", Name: "晚自习导入模板", Sheet: "晚自习导入", Filename: "evening-self-study-v1.xlsx"}, nil
+		return CourseTemplateDefinition{TypeCode: typeCode, Code: "EVENING_SELF_STUDY_IMPORT", Name: "晚自习导入模板", Sheet: "晚自习导入", Filename: "evening-self-study-v2.xlsx"}, nil
 	}
 	return CourseTemplate(typeCode)
 }
@@ -57,6 +57,9 @@ func NewInspectionXLSXParser(typeCode string, maxBytes int64) (*XLSXParser, erro
 	}
 	config := NewAttendanceXLSXParser(maxBytes).config
 	config.ExpectedTemplateCode, config.ExpectedSheetName = definition.Code, definition.Sheet
+	if typeCode == inspection.InspectionTypeUnattended {
+		config.Fields = append([]TemplateField(nil), unattendedImportFields...)
+	}
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
 		config.Fields = append([]TemplateField(nil), classroomHygieneImportFields...)
 	}

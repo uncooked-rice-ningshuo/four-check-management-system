@@ -43,7 +43,7 @@ it('keeps a member on their own department instead of the unavailable college op
   const field = screen.getByRole('combobox', { name: '录入归属部门' })
   expect(field).toBeDisabled()
   await waitFor(() => expect(field.parentElement).toHaveTextContent('宿管部'))
-  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'classes', departmentId: 'dorm' }), expect.anything()))
+  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'responsible-dormitories', departmentId: 'dorm' }), expect.anything()))
   expect(entryOptions.mock.calls.some(call => call[0].departmentId === college && call[1] === true)).toBe(false)
 })
 
@@ -56,7 +56,7 @@ it('requires an explicit department when the college option is unavailable', asy
   fireEvent.mouseDown(field)
   fireEvent.click(screen.getByText('宿管部', { selector: '.ant-select-item-option-content' }))
   await waitFor(() => expect(field.parentElement).toHaveTextContent('宿管部'))
-  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'classes', departmentId: 'dorm' }), expect.anything()))
+  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'responsible-dormitories', departmentId: 'dorm' }), expect.anything()))
   expect(entryOptions.mock.calls.some(call => call[0].departmentId === college && call[1] === true)).toBe(false)
 })
 
@@ -86,7 +86,7 @@ it('keeps a member editing record on its department when the week changes', asyn
   fireEvent.click(screen.getByText('第二周', { selector: '.ant-select-item-option-content' }))
 
   await waitFor(() => expect(departmentField.parentElement).toHaveTextContent('宿管部'))
-  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'classes', weekId: 'week-2', departmentId: 'dorm' }), expect.anything()))
+  await waitFor(() => expect(entryOptions).toHaveBeenCalledWith(expect.objectContaining({ kind: 'responsible-dormitories', weekId: 'week-2', departmentId: 'dorm' }), expect.anything()))
 })
 
 it('never assigns a department to an administrator-owned record', async () => {

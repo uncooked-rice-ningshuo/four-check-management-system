@@ -93,7 +93,7 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 	case "weeks":
 		columns = "w.id,'第' || w.week_no || '周（' || w.start_date::text || '—' || w.end_date::text || '）' AS label"
 	case "departments":
-		columns = fmt.Sprintf("COALESCE(d.id,'%s'::uuid) AS id,COALESCE(d.name,'校级') AS label", inspection.CollegeDepartmentOptionID)
+		columns = fmt.Sprintf("COALESCE(d.id,'%s'::uuid) AS id,COALESCE(d.name,'管理员') AS label", inspection.CollegeDepartmentOptionID)
 	case "classes":
 		columns = "c.id,c.name AS label"
 	case "grades":

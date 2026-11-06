@@ -68,7 +68,7 @@ async (page) => {
   await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
   await page.getByText('该周应交范围配置', { exact: true }).waitFor()
   await chooseOption('应交检查类型', '到课率')
-  await chooseOption('应交部门或校级范围', '学习部')
+  await chooseOption('应交部门或管理员范围', '学习部')
   const obligationResponsePromise = page.waitForResponse(response =>
     response.url().endsWith('/api/v1/reports/obligations') && response.request().method() === 'POST')
   await page.getByRole('button', { name: '添加应交项', exact: true }).click()

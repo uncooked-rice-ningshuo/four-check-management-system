@@ -4,7 +4,8 @@ import { validInspectionProvenance, type InspectionProvenance } from './inspecti
 export type { ContextOptions, InspectionOption, InspectionQuery } from './inspectionOptionsApi'
 
 /** Transport contracts for course-based inspection endpoints. */
-export type CourseDetails = { classId: string; studentId: string; courseId: string; classroomId: string; date: string; time: string; period: string; absenceHours: number; remark: string; penaltyMultiplier?: 1 | 2 | null; penaltyHours?: number | null }
+/** 到课率 keeps period/hours; 无机课堂 omits time, period and hours (one violation per day). */
+export type CourseDetails = { classId: string; studentId: string; courseId: string; classroomId: string; date: string; time?: string; period?: string; absenceHours?: number; remark: string; penaltyMultiplier?: 1 | 2 | null; penaltyHours?: number | null; penaltyCount?: number | null }
 export type CourseRecordInput = { semesterId: string; weekId: string; inspectionTypeId: string; departmentId: string; attributionMode?: 'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR'; details: Omit<CourseDetails, 'penaltyMultiplier' | 'penaltyHours'> }
 export type CourseRecordDTO = Omit<CourseRecordInput, 'details'> & { details: CourseDetails } & {
 	 id: string; typeCode: string; studentNumber: string; studentName: string; className: string; grade: string
@@ -15,11 +16,12 @@ function record(value: unknown): CourseRecordDTO {
 	if (!object(value) || !object(value.details) || !validInspectionProvenance(value)) throw badResponse()
  if (value.attributionMode !== undefined && !['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode))) throw badResponse()
  for (const key of ['id','typeCode','semesterId','weekId','inspectionTypeId','departmentId','studentNumber','studentName','className','grade','currentCourseName','currentClassroomName','status','source','createdBy','submitterName']) if (typeof value[key] !== 'string') throw badResponse()
- for (const key of ['classId','studentId','courseId','classroomId','date','time','period']) if (typeof value.details[key] !== 'string') throw badResponse()
+ for (const key of ['classId','studentId','courseId','classroomId','date']) if (typeof value.details[key] !== 'string') throw badResponse()
+ for (const key of ['time','period']) if (value.details[key] !== undefined && typeof value.details[key] !== 'string') throw badResponse()
  if (value.details.remark !== undefined && typeof value.details.remark !== 'string') throw badResponse()
  for (const key of ['penaltyMultiplier','penaltyHours']) if (value.details[key] !== undefined && value.details[key] !== null && typeof value.details[key] !== 'number') throw badResponse()
  if (value.importBatchId !== undefined && typeof value.importBatchId !== 'string') throw badResponse()
- if (!Number.isInteger(value.rowVersion) || typeof value.details.absenceHours !== 'number' || typeof value.canEdit !== 'boolean') throw badResponse()
+ if (!Number.isInteger(value.rowVersion) || (value.details.absenceHours !== undefined && typeof value.details.absenceHours !== 'number') || typeof value.canEdit !== 'boolean') throw badResponse()
  // Fields are checked above because older servers must fail visibly, not masquerade as empty records.
  return { ...value, details: { ...value.details, remark: value.details.remark ?? '' } } as CourseRecordDTO
 }

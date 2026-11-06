@@ -154,6 +154,10 @@ func validateHygieneRow(scope AttendanceImportScope, refs AttendanceReferences, 
 	if studentOK && classOK && student.ClassID != class.ID {
 		issue(ErrorReferenceMismatch, "responsible_student_no", "责任学生不属于所填班级", "核对学生当前所在班级")
 	}
+	// The name column is a readability aid: when filled it must match the number.
+	if studentName := value("responsible_student_name"); studentOK && studentName != "" && studentName != student.Name {
+		issue(ErrorReferenceMismatch, "responsible_student_name", "责任学生姓名与学号不一致", "使用学号对应的姓名")
+	}
 	resultValue := value("result")
 	switch resultValue {
 	case "优秀":

@@ -44,7 +44,12 @@ type AttendanceDetails struct{ CourseAbsenceDetails }
 
 func (*AttendanceDetails) inspectionDetails() {}
 
-type UnattendedClassroomDetails struct{ CourseAbsenceDetails }
+// UnattendedClassroomDetails records one violation per day. The week multiplier is a
+// server-owned snapshot: penalty_count is what reports and future discipline statistics read.
+type UnattendedClassroomDetails struct {
+	CourseAbsenceDetails
+	PenaltyCount *int `json:"penaltyCount,omitempty"`
+}
 
 func (*UnattendedClassroomDetails) inspectionDetails() {}
 

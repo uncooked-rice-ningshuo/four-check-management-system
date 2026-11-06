@@ -18,8 +18,8 @@ func TestMorningTemplateUsesStudentDayFields(t *testing.T) {
 	}
 	parser := NewMorningXLSXParser(16 << 20)
 	parsed, err := parser.Parse("morning.xlsx", content)
-	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "检查日期"}, {Code: "remark", Header: "备注"}}
-	if err != nil || parsed.TemplateCode != "MORNING_ATTENDANCE_IMPORT" || parsed.TemplateVersion != 1 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
+	expected := []TemplateField{{Code: "student_no", Header: "学号"}, {Code: "student_name", Header: "姓名"}, {Code: "class_name", Header: "班级"}, {Code: "inspection_date", Header: "缺勤日期"}, {Code: "remark", Header: "备注"}}
+	if err != nil || parsed.TemplateCode != "MORNING_ATTENDANCE_IMPORT" || parsed.TemplateVersion != 2 || !reflect.DeepEqual(parsed.Fields, expected) || len(parsed.Rows) != 0 {
 		t.Fatalf("invalid template %+v %v", parsed, err)
 	}
 	book, err := excelize.OpenReader(bytes.NewReader(content))

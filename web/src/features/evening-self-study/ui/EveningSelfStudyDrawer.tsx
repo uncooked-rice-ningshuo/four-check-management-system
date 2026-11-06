@@ -50,7 +50,8 @@ export function EveningSelfStudyDrawer({ editing: initialEditing, readOnly = fal
   submitting.current = true
   setError('')
   const { semesterId, weekId, departmentId, reason } = values
-  const details = { classId: values.classId, studentId: values.studentId, classroomId: values.classroomId ?? '', date: values.date, remark: values.remark ?? '' }
+  // 晚自习不再采集教室；详情接口允许为空。
+  const details = { classId: values.classId, studentId: values.studentId, classroomId: '', date: values.date, remark: values.remark ?? '' }
   try {
    await mutation.mutateAsync({ id: editing?.id, version: editing?.rowVersion, reason, record: { semesterId, weekId, departmentId: isSuperAdmin && editing?.attributionMode === 'ADMINISTRATOR' ? '' : departmentId, inspectionTypeId, ...(!editing && isSuperAdmin ? { attributionMode: 'ADMINISTRATOR' as const } : {}), details } })
    onClose()
@@ -78,7 +79,6 @@ export function EveningSelfStudyDrawer({ editing: initialEditing, readOnly = fal
     {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={readOnly || !weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items, editing ? fallback(editing.departmentId, '原记录部门') : undefined)} onChange={() => clear(['classId', 'studentId', 'classroomId'])} /></Form.Item></Col>}
     <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={choices(classes.data, editing ? fallback(editing.details.classId, editing.className) : undefined)} onChange={() => clear(['studentId'])} /></Form.Item></Col>
     <Col xs={24} sm={12}><Form.Item name="studentId" label="缺勤学生" rules={required}><Select disabled={!classId} showSearch optionFilterProp="label" loading={students.isFetching} options={choices(students.data, editing && editing.details.classId === classId ? fallback(editing.details.studentId, `${editing.studentName}（${editing.studentNumber}）`) : undefined)} /></Form.Item></Col>
-    <Col xs={24} sm={12}><Form.Item name="classroomId" label="晚自习教室（选填）"><Select allowClear disabled={!ready} showSearch optionFilterProp="label" loading={classrooms.isFetching} options={choices(classrooms.data, editing ? fallback(editing.details.classroomId, editing.currentClassroomName) : undefined)} /></Form.Item></Col>
     <Col xs={24} sm={12}><ProFormDatePicker name="date" label="缺勤日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
     <Col xs={24}><Form.Item label="检查节次"><Tag color="blue">第 9–10 节</Tag></Form.Item></Col>
     <Col xs={24}><Form.Item label="基础缺勤次数"><Tag color="blue">1 次</Tag></Form.Item></Col>

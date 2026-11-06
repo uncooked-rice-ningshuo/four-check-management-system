@@ -1909,6 +1909,14 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 	if totalRows <= 0 || invalidRows != 0 || validRows != totalRows {
 		return importjob.ConfirmResult{}, importjob.ErrBatchHasErrors
 	}
+	// The type code decides the dedup identity below, so the context is locked before rows are read.
+	lockedContext, err := lockInspectionImportContext(ctx, tx, input.Scope)
+	if err != nil {
+		return importjob.ConfirmResult{}, err
+	}
+	if (lockedContext.TypeCode == inspection.InspectionTypeAttendance || lockedContext.TypeCode == inspection.InspectionTypeUnattended || lockedContext.TypeCode == inspection.InspectionTypeEveningSelfStudy) && lockedContext.AttendancePenaltyMultiplier == nil {
+		return importjob.ConfirmResult{}, inspection.ErrAttendancePenaltyUnconfigured
+	}
 	rows, err := tx.Query(ctx, `SELECT id,normalized_data_json FROM import_rows
 		WHERE batch_id=$1 AND validation_status='VALID' ORDER BY row_no FOR UPDATE`, input.BatchID)
 	if err != nil {
@@ -1945,6 +1953,9 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 				return importjob.ConfirmResult{}, fmt.Errorf("decode normalized import row: %w", err)
 			}
 			row.record.DedupKey = inspection.AttendanceDedupKey(row.record)
+			if lockedContext.TypeCode == inspection.InspectionTypeUnattended {
+				row.record.DedupKey = inspection.UnattendedDedupKey(row.record)
+			}
 			if !confirmationRecordMatches(row.record, input) {
 				rows.Close()
 				return importjob.ConfirmResult{}, importjob.ErrBatchScopeMismatch
@@ -1959,13 +1970,6 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 	rows.Close()
 	if len(confirmedRows) != validRows {
 		return importjob.ConfirmResult{}, importjob.ErrBatchHasErrors
-	}
-	lockedContext, err := lockInspectionImportContext(ctx, tx, input.Scope)
-	if err != nil {
-		return importjob.ConfirmResult{}, err
-	}
-	if (lockedContext.TypeCode == inspection.InspectionTypeAttendance || lockedContext.TypeCode == inspection.InspectionTypeEveningSelfStudy) && lockedContext.AttendancePenaltyMultiplier == nil {
-		return importjob.ConfirmResult{}, inspection.ErrAttendancePenaltyUnconfigured
 	}
 	for i := range confirmedRows {
 		row := &confirmedRows[i]
@@ -2007,12 +2011,21 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 			}
 			return importjob.ConfirmResult{}, err
 		}
+		// 无机课堂 has no period or hours: the week multiplier is snapshotted into both
+		// penalty_multiplier and penalty_count so statistics can read one stored number.
 		var multiplier *int
+		var penaltyCount any
 		if lockedContext.TypeCode == inspection.InspectionTypeAttendance {
 			multiplier = lockedContext.AttendancePenaltyMultiplier
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier)
-			VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6)`, record.ID, record.CourseID, record.AbsenceHours, record.PeriodText, record.ClassroomID, multiplier); err != nil {
+		if lockedContext.TypeCode == inspection.InspectionTypeUnattended {
+			multiplier = lockedContext.AttendancePenaltyMultiplier
+			if multiplier != nil {
+				penaltyCount = *multiplier
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier,penalty_count)
+			VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,$6,$7)`, record.ID, record.CourseID, record.AbsenceHours, record.PeriodText, record.ClassroomID, multiplier, penaltyCount); err != nil {
 			return importjob.ConfirmResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE import_rows SET record_id=$2 WHERE id=$1 AND batch_id=$3`, row.id, record.ID, input.BatchID); err != nil {

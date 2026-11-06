@@ -11,7 +11,7 @@ export type DormitoryHygieneDetails = {
 }
 export type DormitoryHygieneInput = {semesterId:string;weekId:string;inspectionTypeId:string;departmentId:string;attributionMode?:'DEPARTMENT'|'COLLEGE'|'ADMINISTRATOR';details:DormitoryHygieneDetails}
 export type DormitoryHygieneRecordDTO = DormitoryHygieneInput & InspectionProvenance & {
- id:string;importBatchId?:string;typeCode:'DORMITORY_HYGIENE';currentDormitoryName:string;currentReasonLabel?:string
+ id:string;importBatchId?:string;typeCode:'DORMITORY_HYGIENE';currentDormitoryName:string;currentDormitoryAreaId?:string;currentDormitoryBuildingId?:string;currentReasonLabel?:string
  responsibleClasses:InspectionOption[];responsibleStudents:InspectionOption[]
  status:string;source:string;rowVersion:number;createdBy:string;submitterName:string;canEdit:boolean
 }
@@ -21,6 +21,7 @@ function record(value:unknown):DormitoryHygieneRecordDTO {
  if(value.attributionMode!==undefined&&!['DEPARTMENT','COLLEGE','ADMINISTRATOR'].includes(String(value.attributionMode)))throw badResponse()
  if(value.importBatchId!==undefined&&typeof value.importBatchId!=='string')throw badResponse()
  for(const key of ['id','semesterId','weekId','inspectionTypeId','departmentId','currentDormitoryName','status','source','createdBy','submitterName'])if(typeof value[key]!=='string')throw badResponse()
+ for(const key of ['currentDormitoryAreaId','currentDormitoryBuildingId'])if(value[key]!==undefined&&typeof value[key]!=='string')throw badResponse()
  for(const key of ['dormitoryId','date'])if(typeof value.details[key]!=='string')throw badResponse()
  for(const key of ['time','round','reasonCode','description','remark'])if(value.details[key]!==undefined&&typeof value.details[key]!=='string')throw badResponse()
  if(!['EXCELLENT','QUALIFIED','UNQUALIFIED'].includes(String(value.details.result))||!Array.isArray(value.details.responsibleClassIds)||!value.details.responsibleClassIds.length||!value.details.responsibleClassIds.every(item=>typeof item==='string'))throw badResponse()

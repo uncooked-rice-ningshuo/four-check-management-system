@@ -12,16 +12,20 @@ import (
 // BuildAttendanceTemplate builds the empty, version-locked workbook accepted by
 // NewAttendanceXLSXParser. ZIP ordering and timestamps are fixed for stable hashes.
 func BuildAttendanceTemplate() ([]byte, error) {
-	return buildCourseTemplate("到课率导入", "ATTENDANCE_IMPORT")
+	return buildCourseTemplate("到课率导入", "ATTENDANCE_IMPORT",
+		"填写说明：请保留前四行，从第5行填写；日期YYYY-MM-DD，节次填写如“第1-2节”，学时为实际旷课节次数量，地点为教学楼名称及教室号。",
+		attendanceImportFields)
 }
 
-// BuildUnattendedTemplate preserves the shared course fields with a distinct type marker.
+// BuildUnattendedTemplate keeps a distinct field contract: no time, period or hours.
 func BuildUnattendedTemplate() ([]byte, error) {
-	return buildCourseTemplate("无机课堂导入", "UNATTENDED_CLASSROOM_IMPORT")
+	return buildCourseTemplate("无机课堂导入", "UNATTENDED_CLASSROOM_IMPORT",
+		"填写说明：请保留前四行，从第5行填写；日期YYYY-MM-DD，地点为教学楼名称及教室号。每条记录固定计 1 次违纪，不填写节次与学时。",
+		unattendedImportFields)
 }
 
-func buildCourseTemplate(sheet, code string) ([]byte, error) {
-	return buildImportTemplate(sheet, code, "填写说明：请保留前四行，从第5行填写；日期YYYY-MM-DD，时间HH:mm，地点为教学楼名称及教室号。", attendanceImportFields)
+func buildCourseTemplate(sheet, code, instructions string, fields []TemplateField) ([]byte, error) {
+	return buildImportTemplate(sheet, code, instructions, fields)
 }
 
 func buildImportTemplate(sheet, code, instructions string, fields []TemplateField) ([]byte, error) {
@@ -34,7 +38,7 @@ func buildImportTemplate(sheet, code, instructions string, fields []TemplateFiel
 	if err := book.SetSheetName("Sheet1", sheet); err != nil {
 		return nil, err
 	}
-	rows := [][]any{{"template_code", code, "template_version", 1}, {}, {}, {instructions}}
+	rows := [][]any{{"template_code", code, "template_version", CurrentTemplateVersion}, {}, {}, {instructions}}
 	for _, field := range fields {
 		rows[1] = append(rows[1], field.Code)
 		rows[2] = append(rows[2], field.Header)

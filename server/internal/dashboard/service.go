@@ -213,7 +213,7 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 		}
 		scope := Scope{InspectionTypeID: inspectionType.ID}
 		authorized = append(authorized, scope)
-		capabilities[scope] = DepartmentStatus{DepartmentName: "校级", InspectionTypeID: inspectionType.ID,
+		capabilities[scope] = DepartmentStatus{DepartmentName: "管理员", InspectionTypeID: inspectionType.ID,
 			InspectionTypeCode: inspectionType.Code, InspectionTypeName: inspectionType.Name,
 			CanEnter:  actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionEnter, requested),
 			CanReview: actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionReview, requested)}

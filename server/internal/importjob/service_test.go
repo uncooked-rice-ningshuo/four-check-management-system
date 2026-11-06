@@ -149,7 +149,7 @@ func previewBatch(status string) Batch {
 	location := time.FixedZone("CST", 8*60*60)
 	return Batch{
 		ID: "batch-1", InspectionTypeID: "inspection-attendance", SemesterID: "semester-1", WeekID: "week-1",
-		DepartmentID: "department-study", OriginalFileID: "file-1", TemplateID: "template-1", TemplateVersion: 1,
+		DepartmentID: "department-study", OriginalFileID: "file-1", TemplateID: "template-1", TemplateVersion: CurrentTemplateVersion,
 		Status: status, Version: 1, CreatedBy: "account-1",
 		WeekStart: time.Date(2026, 6, 15, 0, 0, 0, 0, location), WeekEnd: time.Date(2026, 6, 21, 0, 0, 0, 0, location), Location: location,
 	}
@@ -206,7 +206,7 @@ func TestCreateBatchRequiresVerifiedAvailableUploadMetadata(t *testing.T) {
 	valid := CreateBatchInput{
 		InspectionTypeID: "inspection-attendance", SemesterID: "semester-1", WeekID: "week-1", DepartmentID: "department-study",
 		SourceFile: storage.File{ID: "file-1", Status: storage.StatusAvailable, SHA256: strings.Repeat("a", 64)},
-		TemplateID: "template-1", TemplateVersion: 1, CreatedBy: "account-1",
+		TemplateID: "template-1", TemplateVersion: CurrentTemplateVersion, CreatedBy: "account-1",
 	}
 	repository := &memoryImportRepository{}
 	batch, err := serviceFor(repository).CreateBatch(context.Background(), valid)
@@ -242,7 +242,7 @@ func TestCreateBatchRejectsIncompleteContextAndPropagatesPersistenceFailure(t *t
 	_, err := service.CreateBatch(context.Background(), CreateBatchInput{
 		InspectionTypeID: "type", SemesterID: "semester", WeekID: "week", DepartmentID: "department",
 		SourceFile: storage.File{ID: "file", Status: storage.StatusAvailable, SHA256: strings.Repeat("a", 64)},
-		TemplateID: "template", TemplateVersion: 1, CreatedBy: "actor",
+		TemplateID: "template", TemplateVersion: CurrentTemplateVersion, CreatedBy: "actor",
 	})
 	if err == nil || repository.createCalls != 1 {
 		t.Fatalf("persistence error/calls = %v / %d", err, repository.createCalls)
@@ -252,7 +252,7 @@ func TestCreateBatchRejectsIncompleteContextAndPropagatesPersistenceFailure(t *t
 func TestParseBatchStoresPreviewRowsAndExplicitStates(t *testing.T) {
 	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded)}
 	reader := &fakeVerifiedFileReader{file: storage.File{ID: "file-1", OriginalName: "attendance.xlsx", Status: storage.StatusAvailable, SHA256: "verified"}, content: []byte("xlsx")}
-	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateCode: "ATTENDANCE_IMPORT", TemplateVersion: 1, Rows: []ParsedRow{{RowNo: 5, Values: map[string]string{"student_no": "S20260001"}}}}}
+	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateCode: "ATTENDANCE_IMPORT", TemplateVersion: CurrentTemplateVersion, Rows: []ParsedRow{{RowNo: 5, Values: map[string]string{"student_no": "S20260001"}}}}}
 	validator := &fakeAttendanceValidator{result: AttendanceValidationResult{Rows: []AttendanceValidationRow{{RowNo: 5}}, ValidCount: 1}}
 	service := NewService(repository, reader, parser, validator)
 
@@ -327,7 +327,7 @@ func TestCancelBatchAllowsOnlyRecoverableIdleStates(t *testing.T) {
 func TestParseBatchMarksSafeFailureWhenPreviewTransactionRollsBack(t *testing.T) {
 	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded), replaceErr: errors.New("transaction rolled back")}
 	reader := &fakeVerifiedFileReader{file: storage.File{ID: "file-1", OriginalName: "attendance.xlsx", Status: storage.StatusAvailable}, content: []byte("xlsx")}
-	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: 1}}
+	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: CurrentTemplateVersion}}
 	validator := &fakeAttendanceValidator{result: AttendanceValidationResult{}}
 	_, err := NewService(repository, reader, parser, validator).ParseBatch(context.Background(), ParseBatchInput{BatchID: "batch-1", ExpectedVersion: 1})
 	if err == nil {
@@ -341,7 +341,7 @@ func TestParseBatchMarksSafeFailureWhenPreviewTransactionRollsBack(t *testing.T)
 func TestParseBatchRejectsValidatorResultThatDoesNotMatchParsedRows(t *testing.T) {
 	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded)}
 	reader := &fakeVerifiedFileReader{file: storage.File{ID: "file-1", OriginalName: "attendance.xlsx", Status: storage.StatusAvailable}, content: []byte("xlsx")}
-	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: 1, Rows: []ParsedRow{{RowNo: 5, Values: map[string]string{"student_no": "S20260001"}}}}}
+	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: CurrentTemplateVersion, Rows: []ParsedRow{{RowNo: 5, Values: map[string]string{"student_no": "S20260001"}}}}}
 	validator := &fakeAttendanceValidator{result: AttendanceValidationResult{Rows: nil}}
 
 	_, err := NewService(repository, reader, parser, validator).ParseBatch(context.Background(), ParseBatchInput{BatchID: "batch-1", ExpectedVersion: 1})

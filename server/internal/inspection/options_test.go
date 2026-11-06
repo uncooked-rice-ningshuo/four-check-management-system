@@ -15,10 +15,14 @@ func TestEntryOptionsRejectInvalidScopeBeforeRepository(t *testing.T) {
 		func(q *EntryOptionQuery) { q.Page = -1 },
 		func(q *EntryOptionQuery) { q.PageSize = 201 },
 		func(q *EntryOptionQuery) { q.Kind = "students" },
+		func(q *EntryOptionQuery) { q.Kind = "students"; q.ClassID = detailID; q.DormitoryID = "invalid" },
 		func(q *EntryOptionQuery) { q.Kind = "dormitories"; q.ClassID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "dormitories"; q.StudentID = detailID },
 		func(q *EntryOptionQuery) { q.StudentID = "invalid" },
-		func(q *EntryOptionQuery) { q.Kind = "dormitory-objects" },
+		func(q *EntryOptionQuery) { q.Kind = "dormitory-objects"; q.StudentID = detailID },
+		func(q *EntryOptionQuery) { q.Kind = "dormitory-buildings" },
+		func(q *EntryOptionQuery) { q.Kind = "dormitory-buildings"; q.DormitoryAreaID = "invalid" },
+		func(q *EntryOptionQuery) { q.Kind = "dormitory-areas"; q.DormitoryBuildingID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "situation-snippets"; q.StudentID = detailID },
 		func(q *EntryOptionQuery) { q.Kind = "classroom-objects" },
 		func(q *EntryOptionQuery) { q.Kind = "classroom-areas"; q.ClassID = detailID },
@@ -44,6 +48,19 @@ func TestEntryOptionsRejectInvalidScopeBeforeRepository(t *testing.T) {
 		if _, err := s.EntryOptions(context.Background(), ManualActor{ID: detailID, IsSuperAdmin: true}, q); !errors.Is(err, ErrInspectionRequest) {
 			t.Fatalf("invalid query accepted: %v", err)
 		}
+	}
+}
+
+func TestStudentOptionsAcceptDormitoryScopeWithoutClass(t *testing.T) {
+	repository := &optionRepositoryStub{}
+	service := NewEntryOptionService(repository, nil)
+	query := EntryOptionQuery{SemesterID: detailID, WeekID: detailID, InspectionTypeID: detailID, DepartmentID: detailID,
+		Kind: "students", DormitoryID: detailID}
+	if _, err := service.EntryOptions(context.Background(), ManualActor{ID: detailID, IsSuperAdmin: true}, query); err != nil {
+		t.Fatal(err)
+	}
+	if repository.query.DormitoryID != detailID || repository.query.ClassID != "" {
+		t.Fatalf("dormitory scope dropped: %+v", repository.query)
 	}
 }
 

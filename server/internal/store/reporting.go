@@ -116,7 +116,7 @@ func (p *Postgres) ReportSummary(ctx context.Context, semesterID, weekID string,
  JOIN weekly_report_obligations o ON o.semester_id=period.semester_id AND o.week_id=period.week_id
  WHERE o.department_id IS NULL AND o.removed_at IS NULL
 ), college_cells AS (
- SELECT NULL::uuid AS department_id,'校级'::text AS department_name,TRUE AS college_level,
+ SELECT NULL::uuid AS department_id,'管理员'::text AS department_name,TRUE AS college_level,
         it.id AS inspection_type_id,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
  FROM period
  JOIN college_scope_candidates candidate ON TRUE
@@ -217,7 +217,7 @@ func (p *Postgres) ReportSourceDetails(ctx context.Context, recordIDs []string) 
 		args[index] = id
 	}
 	rows, err := p.Pool.Query(ctx, `SELECT record.id::text,submission.id::text,revision.revision_no,
- COALESCE(department.name,'校级'),submitter.name,revision.submitted_at
+ COALESCE(department.name,'管理员'),submitter.name,revision.submitted_at
  FROM inspection_records record
  JOIN department_submissions submission ON submission.id=record.submission_id AND submission.status='CONFIRMED'
  JOIN department_submission_revisions revision ON revision.submission_id=submission.id AND revision.revision_no=submission.revision_no
@@ -351,7 +351,7 @@ func (p *Postgres) ListReportObligations(ctx context.Context, semesterID, weekID
 	access := reportObligationPermissionPredicate(permissions, reportScopeColumns{
 		academicYear: "ay.id", semester: "sem.id", week: "w.id", inspectionType: "it.id", department: "d.id",
 	}, &args)
-	query := `SELECT o.id,o.semester_id,o.week_id,ay.id,COALESCE(o.department_id::text,''),COALESCE(d.name,'校级'),
+	query := `SELECT o.id,o.semester_id,o.week_id,ay.id,COALESCE(o.department_id::text,''),COALESCE(d.name,'管理员'),
 		(o.department_id IS NULL),it.id,it.name,
 		COALESCE(it.enabled AND it.participates_in_report AND (o.department_id IS NULL OR (d.enabled AND dis.enabled AND dis.can_enter)),FALSE),
 		o.version,o.created_at,o.updated_at
@@ -363,7 +363,7 @@ func (p *Postgres) ListReportObligations(ctx context.Context, semesterID, weekID
 		LEFT JOIN department_inspection_scopes dis ON dis.department_id=o.department_id AND dis.inspection_type_id=o.inspection_type_id
 		JOIN inspection_types it ON it.id=o.inspection_type_id
 		WHERE o.semester_id=$1::uuid AND o.week_id=$2::uuid AND o.removed_at IS NULL AND ` + access + `
-		ORDER BY it.sort_order,(o.department_id IS NULL),COALESCE(d.name,'校级'),o.id`
+		ORDER BY it.sort_order,(o.department_id IS NULL),COALESCE(d.name,'管理员'),o.id`
 	rows, err := p.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -408,7 +408,7 @@ func (p *Postgres) CreateReportObligation(ctx context.Context, id string, input 
 	} else if err != nil {
 		return reporting.ReportObligation{}, err
 	}
-	departmentName := "校级"
+	departmentName := "管理员"
 	collegeLevel := input.DepartmentID == ""
 	if !collegeLevel {
 		if err := tx.QueryRow(ctx, `SELECT d.name FROM departments d
@@ -446,7 +446,7 @@ func (p *Postgres) CreateReportObligation(ctx context.Context, id string, input 
 
 func (p *Postgres) GetReportObligation(ctx context.Context, id string) (reporting.ReportObligation, error) {
 	item, err := scanReportObligation(p.Pool.QueryRow(ctx, `SELECT o.id,o.semester_id,o.week_id,ay.id,
-		COALESCE(o.department_id::text,''),COALESCE(d.name,'校级'),(o.department_id IS NULL),
+		COALESCE(o.department_id::text,''),COALESCE(d.name,'管理员'),(o.department_id IS NULL),
 		it.id,it.name,COALESCE(it.enabled AND it.participates_in_report AND (o.department_id IS NULL OR (d.enabled AND dis.enabled AND dis.can_enter)),FALSE),
 		o.version,o.created_at,o.updated_at
 		FROM weekly_report_obligations o
@@ -470,7 +470,7 @@ func (p *Postgres) RemoveReportObligation(ctx context.Context, id string, versio
 	}
 	defer tx.Rollback(ctx)
 	before, err := scanReportObligation(tx.QueryRow(ctx, `SELECT o.id,o.semester_id,o.week_id,ay.id,
-		COALESCE(o.department_id::text,''),COALESCE(d.name,'校级'),(o.department_id IS NULL),
+		COALESCE(o.department_id::text,''),COALESCE(d.name,'管理员'),(o.department_id IS NULL),
 		it.id,it.name,COALESCE(it.enabled AND it.participates_in_report AND (o.department_id IS NULL OR (d.enabled AND dis.enabled AND dis.can_enter)),FALSE),
 		o.version,o.created_at,o.updated_at
 		FROM weekly_report_obligations o

@@ -72,7 +72,7 @@ func TestMorningImportPostgres(t *testing.T) {
 	}
 	source := storage.File{ID: fileID, OriginalName: "source.xlsx", Status: storage.StatusAvailable, SHA256: strings.Repeat("a", 64)}
 	service := importjob.NewInspectionImportService(db, rollbackFileReader{source, filled.Bytes()}, importjob.NewAttendanceAdapter(db), importjob.NewMorningAdapter(db), importjob.NewLateReturnAdapter(db), importjob.NewDormitoryHygieneAdapter(db), importjob.NewClassroomHygieneAdapter(db), 16<<20)
-	batch, err := service.CreateBatch(ctx, importjob.CreateBatchInput{InspectionTypeID: typeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID, DepartmentID: departmentID, SourceFile: source, TemplateID: templateID, TemplateVersion: 1, CreatedBy: fixture.accountID})
+	batch, err := service.CreateBatch(ctx, importjob.CreateBatchInput{InspectionTypeID: typeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID, DepartmentID: departmentID, SourceFile: source, TemplateID: templateID, TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestMorningImportPostgres(t *testing.T) {
 		t.Fatal("morning rollback", result, err)
 	}
 	collegeBatch, err := service.CreateBatch(ctx, importjob.CreateBatchInput{InspectionTypeID: typeID, SemesterID: fixture.semesterID, WeekID: fixture.weekID,
-		DepartmentID: inspection.CollegeDepartmentOptionID, SourceFile: source, TemplateID: templateID, TemplateVersion: 1, CreatedBy: fixture.accountID})
+		DepartmentID: inspection.CollegeDepartmentOptionID, SourceFile: source, TemplateID: templateID, TemplateVersion: importjob.CurrentTemplateVersion, CreatedBy: fixture.accountID})
 	if err != nil || collegeBatch.DepartmentID != "" {
 		t.Fatal("create college morning batch", collegeBatch, err)
 	}

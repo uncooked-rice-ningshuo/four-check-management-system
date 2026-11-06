@@ -46,6 +46,8 @@ function quantity(key: string, label: string, value: number | undefined | null, 
 }
 
 function checkDateTime(record: ReportingRecord) {
+  // 无机课堂 counts one violation per day: the stored clock is a fixed midnight placeholder.
+  if (record.typeCode === 'UNATTENDED_CLASSROOM') return text(record.details.date) || emptyValue
   return [record.details.date, record.details.time].map(text).filter(Boolean).join(' ') || emptyValue
 }
 
@@ -128,10 +130,9 @@ function personEventFields(record: ReportingRecord, snapshot = false): ReportRec
       ].filter((item): item is ReportRecordDisplayField => Boolean(item))
     case 'UNATTENDED_CLASSROOM':
       return [
-        requiredField('period', '检查节次', record.details.period),
-        requiredField('absenceHours', '缺课学时', record.details.absenceHours === undefined ? undefined : `${record.details.absenceHours} 小时`),
+        { key: 'basePenaltyCount', label: '单次基础次数', value: '1 次' },
         multiplier,
-        requiredField('penaltyHours', '违纪计入学时', record.details.penaltyHours === undefined || record.details.penaltyHours === null ? undefined : `${record.details.penaltyHours} 小时`),
+        requiredField('penaltyCount', '违纪计入次数', record.details.penaltyCount === undefined || record.details.penaltyCount === null ? undefined : `${record.details.penaltyCount} 次`),
       ].filter((item): item is ReportRecordDisplayField => Boolean(item))
     case 'EVENING_SELF_STUDY':
       return [
@@ -165,7 +166,9 @@ function noteFields(record: ReportingRecord, includeDescription: boolean): Repor
 }
 
 function personRecordSections(record: ReportingRecord): ReportRecordDisplaySection[] {
-  const dateTitle = record.typeCode === 'LATE_RETURN' ? '晚归时间' : record.typeCode === 'MORNING_ATTENDANCE' ? '检查日期' : '检查时间'
+  const dateTitle = record.typeCode === 'LATE_RETURN' ? '晚归时间'
+    : record.typeCode === 'MORNING_ATTENDANCE' || record.typeCode === 'UNATTENDED_CLASSROOM' ? '检查日期'
+      : '检查时间'
   const sections: ReportRecordDisplaySection[] = [
     { key: 'person', title: '基本信息', fields: personInformationFields(record) },
     { key: 'time', title: dateTitle, fields: [{ key: 'dateTime', label: dateTitle, value: checkDateTime(record) }] },
@@ -276,7 +279,7 @@ function personColumns(recordTypeCode: string): ColumnsType<ReportingRecord> {
     { title: '年级', dataIndex: 'grade', key: 'grade', width: 88, render: value => tableValue(text(value) || emptyValue) },
   ])
   const timeColumn = {
-    title: recordTypeCode === 'LATE_RETURN' ? '晚归时间' : '检查时间',
+    title: recordTypeCode === 'LATE_RETURN' ? '晚归时间' : recordTypeCode === 'UNATTENDED_CLASSROOM' ? '检查日期' : '检查时间',
     key: 'dateTime', width: 175,
     render: (_value: unknown, record: ReportingRecord) => tableValue(checkDateTime(record)),
   }

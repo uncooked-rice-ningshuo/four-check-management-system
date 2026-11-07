@@ -1,5 +1,5 @@
 import { ProFormDatePicker } from '@ant-design/pro-components'
-import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space } from 'antd'
+import { Alert, Button, Col, Divider, Drawer, Form, Input, Row, Select, Space } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { PublicDormitoryHygieneRecord, HygieneResult, InspectionOption } from '../../../entities/inspection/model/publicDormitoryHygieneRecord'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
@@ -81,17 +81,21 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
   const dormitoryFallback = editing?.responsibleDormitories ?? []
   const initialDepartmentId = editing ? departmentOptionId(editing.departmentId) : (isSuperAdmin ? '' : memberDepartmentId ?? COLLEGE_DEPARTMENT_OPTION_ID)
   const semesterClear: (keyof Values)[] = memberEntry ? ['weekId', 'dormitoryAreaId', 'dormitoryBuildingId', 'responsibleDormitoryIds', 'responsibleClassIds', 'responsibleStudentIds'] : ['weekId', 'departmentId', 'dormitoryAreaId', 'dormitoryBuildingId', 'responsibleDormitoryIds', 'responsibleClassIds', 'responsibleStudentIds']
-  return <Drawer open title={editing ? '编辑公共宿舍卫生记录' : '新增公共宿舍卫生记录'} size={760}
+  return <Drawer open title={editing ? '编辑公共宿舍卫生记录' : '新增公共宿舍卫生记录'} size={760} className="inspection-entry-drawer"
     onClose={() => { if (!submitting.current) onClose() }} closable={!mutation.isPending} maskClosable={!mutation.isPending}
     footer={<Space><Button onClick={onClose} disabled={mutation.isPending}>取消</Button><Button type="primary" loading={mutation.isPending} disabled={failed} onClick={() => form.submit()}>{editing ? '保存修改' : '保存草稿'}</Button></Space>}>
     {error && <Alert type="error" showIcon title={error} />}
     {failed && <Alert type="error" showIcon title="录入选项加载失败，请重试。" action={<Button onClick={() => coreQueries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} />}
     <Form form={form} name="public-dormitory-hygiene-record" layout="vertical" onFinish={submit} disabled={mutation.isPending}
       initialValues={editing ? { semesterId: editing.semesterId, weekId: editing.weekId, departmentId: initialDepartmentId, responsibleDormitoryIds: editing.details.responsibleDormitoryIds?.slice(0, 1) ?? editing.responsibleDormitories.slice(0, 1).map(item => item.id), dormitoryAreaId: editing.currentDormitoryAreaId, dormitoryBuildingId: editing.currentDormitoryBuildingId, date: editing.details.date, result: editing.details.result, responsibleClassIds: editing.details.responsibleClassIds.slice(0, 1), responsibleStudentIds: editing.details.responsibleStudentIds?.slice(0, 1) ?? [], description: editing.details.description ?? '', remark: editing.details.remark ?? '' } : { semesterId: initialSemesterId, weekId: initialWeekId, departmentId: initialDepartmentId, result: 'QUALIFIED', responsibleDormitoryIds: [], responsibleClassIds: [], responsibleStudentIds: [] }}>
+      <Divider titlePlacement="start" plain>录入范围</Divider>
       <Row gutter={16}>
         <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={choices(semesters.data?.items)} onChange={() => { clear(semesterClear); setClassChoice(undefined) }} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={choices(weeks.data?.items)} onChange={() => { clear(['dormitoryAreaId', 'dormitoryBuildingId', 'responsibleDormitoryIds', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
         {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry ? '录入归属部门' : '业务归属部门'} rules={required}><Select disabled={!weekId || memberEntry} loading={departments.isFetching} options={choices(departments.data?.items)} onChange={() => { clear(['dormitoryAreaId', 'dormitoryBuildingId', 'responsibleDormitoryIds', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>}
+      </Row>
+      <Divider titlePlacement="start" plain>检查对象与结果</Divider>
+      <Row gutter={16}>
         <Col xs={24} sm={12}><Form.Item name="dormitoryAreaId" label="宿舍区"><Select disabled={!ready} showSearch optionFilterProp="label" loading={areas.isFetching} options={choices(areas.data)} onChange={() => { clear(['dormitoryBuildingId', 'responsibleDormitoryIds', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="dormitoryBuildingId" label="宿舍栋"><Select disabled={!dormitoryAreaId} showSearch optionFilterProp="label" loading={buildings.isFetching} options={choices(buildings.data)} onChange={() => { clear(['responsibleDormitoryIds', 'responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
         <Col xs={24} sm={12}><Form.Item name="responsibleDormitoryIds" label="房间号" rules={required}><Select mode="multiple" maxCount={1} disabled={!dormitoryBuildingId} showSearch optionFilterProp="label" loading={dormitories.isFetching} options={choices(dormitories.data, dormitoryFallback)} onChange={() => { clear(['responsibleStudentIds', 'responsibleClassIds']); setClassChoice(undefined) }} /></Form.Item></Col>
@@ -100,6 +104,7 @@ export function PublicDormitoryHygieneDrawer({ editing: initialEditing, inspecti
         <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown, dateString: string) => dateString || undefined} fieldProps={{ format: 'YYYY-MM-DD', style: { width: '100%' } }} /></Col>
         <Col xs={24} sm={12}><Form.Item name="result" label="检查结果" rules={required}><Select options={[{ value: 'EXCELLENT', label: '优秀' }, { value: 'QUALIFIED', label: '合格' }, { value: 'UNQUALIFIED', label: '不合格' }]} /></Form.Item></Col>
       </Row>
+      <Divider titlePlacement="start" plain>现场说明</Divider>
       <Form.Item name="description" label="情况说明" rules={result === 'UNQUALIFIED' ? [{ required: true, whitespace: true, message: '不合格时请填写情况说明' }] : undefined}><Input.TextArea maxLength={1000} rows={3} /></Form.Item>
       <HygieneSituationSnippets items={snippets.data} loading={snippets.isFetching} failed={snippets.isError} onChoose={insertSnippet} />
       {editing && <Form.Item name="reason" label="修改原因" rules={[...required, { whitespace: true, message: '请填写修改原因' }]}><Input.TextArea maxLength={255} /></Form.Item>}

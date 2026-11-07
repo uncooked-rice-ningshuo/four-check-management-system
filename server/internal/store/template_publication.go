@@ -117,6 +117,10 @@ func (p *Postgres) PublishInspectionTemplate(ctx context.Context, typeCode strin
 	if err != nil {
 		return importjob.Template{}, err
 	}
+	templateVersion, err := importjob.InspectionTemplateVersion(typeCode)
+	if err != nil {
+		return importjob.Template{}, err
+	}
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
 		return importjob.Template{}, err
@@ -150,13 +154,13 @@ func (p *Postgres) PublishInspectionTemplate(ctx context.Context, typeCode strin
 		if published.Code != definition.Code || published.InspectionTypeID != typeID {
 			return importjob.Template{}, importjob.ErrTemplatePublicationConflict
 		}
-		if published.Version > importjob.CurrentTemplateVersion {
+		if published.Version > templateVersion {
 			return importjob.Template{}, importjob.ErrTemplatePublicationConflict
 		}
-		if published.Version == importjob.CurrentTemplateVersion {
+		if published.Version == templateVersion {
 			// Idempotent retry: the requested version is already live.
 			for _, template := range templates {
-				if template.Version >= importjob.CurrentTemplateVersion && template.ID != published.ID {
+				if template.Version >= templateVersion && template.ID != published.ID {
 					return importjob.Template{}, importjob.ErrTemplatePublicationConflict
 				}
 			}
@@ -168,7 +172,7 @@ func (p *Postgres) PublishInspectionTemplate(ctx context.Context, typeCode strin
 	}
 	// A superseded draft already occupying the target version blocks the publish.
 	for _, template := range templates {
-		if template.Version == importjob.CurrentTemplateVersion && template.ID != retiredID {
+		if template.Version == templateVersion && template.ID != retiredID {
 			return importjob.Template{}, importjob.ErrTemplatePublicationConflict
 		}
 	}
@@ -176,7 +180,7 @@ func (p *Postgres) PublishInspectionTemplate(ctx context.Context, typeCode strin
 		if _, err = tx.Exec(ctx, `UPDATE import_templates SET status='RETIRED', updated_at=now() WHERE id=$1`, retiredID); err != nil {
 			return importjob.Template{}, err
 		}
-		retired := audit.Entry{Action: audit.Action("IMPORT_TEMPLATE_RETIRED"), ResourceType: "import_template", ResourceID: retiredID, Before: map[string]any{"version": retiredVersion, "status": "PUBLISHED"}, After: map[string]any{"version": retiredVersion, "status": "RETIRED", "supersededBy": importjob.CurrentTemplateVersion}}
+		retired := audit.Entry{Action: audit.Action("IMPORT_TEMPLATE_RETIRED"), ResourceType: "import_template", ResourceID: retiredID, Before: map[string]any{"version": retiredVersion, "status": "PUBLISHED"}, After: map[string]any{"version": retiredVersion, "status": "RETIRED", "supersededBy": templateVersion}}
 		if err = insertAuditTx(ctx, tx, metadata, retired); err != nil {
 			return importjob.Template{}, err
 		}
@@ -189,7 +193,7 @@ func (p *Postgres) PublishInspectionTemplate(ctx context.Context, typeCode strin
 	if err != nil {
 		return importjob.Template{}, err
 	}
-	result := importjob.Template{ID: uuid.NewString(), Code: definition.Code, Name: definition.Name, InspectionTypeID: typeID, Version: importjob.CurrentTemplateVersion, FileID: file.ID, Status: "PUBLISHED"}
+	result := importjob.Template{ID: uuid.NewString(), Code: definition.Code, Name: definition.Name, InspectionTypeID: typeID, Version: templateVersion, FileID: file.ID, Status: "PUBLISHED"}
 	if _, err = tx.Exec(ctx, `INSERT INTO import_templates(id,code,name,inspection_type_id,version_no,file_id,field_definition_json,status,published_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,'PUBLISHED',now(),$8)`, result.ID, result.Code, result.Name, typeID, result.Version, file.ID, fieldDefinition, actor); err != nil {
 		return importjob.Template{}, err
 	}

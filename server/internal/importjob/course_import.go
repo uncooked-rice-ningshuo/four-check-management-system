@@ -20,7 +20,7 @@ func CourseTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	case "ATTENDANCE_RATE":
 		return CourseTemplateDefinition{typeCode, "ATTENDANCE_IMPORT", "到课率导入模板", "到课率导入", "attendance-v2.xlsx"}, nil
 	case "UNATTENDED_CLASSROOM":
-		return CourseTemplateDefinition{typeCode, "UNATTENDED_CLASSROOM_IMPORT", "无机课堂导入模板", "无机课堂导入", "unattended-classroom-v2.xlsx"}, nil
+		return CourseTemplateDefinition{typeCode, "UNATTENDED_CLASSROOM_IMPORT", "无机课堂导入模板", "无机课堂导入", "unattended-classroom-v3.xlsx"}, nil
 	default:
 		return CourseTemplateDefinition{}, ErrInvalidBatch
 	}

@@ -320,6 +320,14 @@ async (page) => {
   const draftCreated = await draftResponse
   const draftState = await draftCreated.json()
   check(draftState.status === 'DRAFT' && draftState.versionNo === 1, `Unexpected generated draft state: ${JSON.stringify(draftState)}`)
+  const attendanceRate = draftState.content?.indicators?.totals?.attendanceRate
+  check(draftState.content?.indicators?.inputs?.classes?.[0]?.expectedStudentCount === 2
+    && attendanceRate?.violationStudentCount === 2
+    && attendanceRate.expectedStudentCount === 2
+    && attendanceRate.attendedStudentCount === 0
+    && attendanceRate.rate === 0,
+  `Draft did not freeze the expected two-student attendance calculation: ${JSON.stringify(attendanceRate)}`)
+  cases.push('生成草稿时冻结班级人数与已确认到课违纪，按公式保存班级及全周指标快照')
   await page.waitForFunction(() => document.body.innerText.includes('草稿 · V1')
     || document.body.innerText.includes('操作未完成') || document.body.innerText.includes('服务返回的数据不完整'))
   const draftGenerationError = page.getByText(/操作未完成|服务返回的数据不完整/)

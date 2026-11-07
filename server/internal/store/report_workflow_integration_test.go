@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"four-check-management-system/server/internal/academic"
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/reporting"
@@ -74,8 +75,24 @@ func TestWeeklyReportVersionWorkflowPostgres(t *testing.T) {
 	)
 	var eveningTypeID string
 	if _, err := pool.Exec(ctx, `UPDATE inspection_records SET student_no_snapshot='20260001',student_name_snapshot='Fixture student',
- class_name_snapshot='计算机 1 班',grade_snapshot='2026级' WHERE id=$1`, recordID); err != nil {
+ class_name_snapshot='Fixture class',grade_snapshot='2026' WHERE id=$1`, recordID); err != nil {
 		t.Fatal("prepare searchable report fixture:", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO students(id,student_no,name,grade_id,class_id,enrollment_status)
+VALUES('a0000000-0000-0000-0000-000000000017','S-UNASSIGNED','Unassigned fixture student',
+ 'a0000000-0000-0000-0000-000000000005',NULL,'ENROLLED'),
+ ('a0000000-0000-0000-0000-000000000018','S-SUSPENDED','Suspended fixture student',
+ 'a0000000-0000-0000-0000-000000000005','a0000000-0000-0000-0000-000000000006','SUSPENDED')`); err != nil {
+		t.Fatal("prepare grade-wide roster fixture:", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO grades(id,name) VALUES('a0000000-0000-0000-0000-000000000025','2025级');
+INSERT INTO classes(id,name,grade_id) VALUES('a0000000-0000-0000-0000-000000000026','Historical class','a0000000-0000-0000-0000-000000000025');
+INSERT INTO students(id,student_no,name,grade_id,class_id,enrollment_status)
+VALUES('a0000000-0000-0000-0000-000000000027','S-HISTORICAL','Historical student','a0000000-0000-0000-0000-000000000025','a0000000-0000-0000-0000-000000000026','ENROLLED')`); err != nil {
+		t.Fatal("prepare out-of-semester historical roster:", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE inspection_records SET student_id='a0000000-0000-0000-0000-000000000007',class_id='a0000000-0000-0000-0000-000000000006' WHERE id=$1`, recordID); err != nil {
+		t.Fatal("link attendance fixture to roster:", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT id FROM inspection_types WHERE code='EVENING_SELF_STUDY' AND participates_in_report`).Scan(&eveningTypeID); err != nil {
 		t.Fatal("load evening self-study report type:", err)
@@ -111,9 +128,9 @@ VALUES($1,$2,$3,$4,$5,'CONFIRMED',1,2,$6,$6,$6,repeat('b',64),now(),now())`, eve
 	}
 	if _, err = eveningTx.Exec(ctx, `INSERT INTO inspection_records(
  id,inspection_type_id,semester_id,week_id,department_id,student_id,student_no_snapshot,student_name_snapshot,class_id,
- class_name_snapshot,grade_snapshot,occurred_at,occurrence_kind,violation_count,remark,source,status,submission_id,dedup_key,row_version,created_by)
+ class_name_snapshot,grade_snapshot,inspection_date,occurred_at,occurrence_kind,violation_count,remark,source,status,submission_id,dedup_key,row_version,created_by)
 SELECT $1,it.id,source.semester_id,source.week_id,source.department_id,source.student_id,source.student_no_snapshot,source.student_name_snapshot,
- source.class_id,source.class_name_snapshot,source.grade_snapshot,'2026-09-02 20:15+08'::timestamptz,'TIME',1,'晚自习缺勤','MANUAL','CONFIRMED',$2,repeat('b',64),2,source.created_by
+ source.class_id,source.class_name_snapshot,source.grade_snapshot,'2026-09-02'::date,NULL,'DATE',1,'晚自习缺勤','MANUAL','CONFIRMED',$2,repeat('b',64),2,source.created_by
 FROM inspection_records source JOIN inspection_types it ON it.code='EVENING_SELF_STUDY' WHERE source.id=$3`, eveningID, eveningSubmissionID, recordID); err == nil {
 		_, err = eveningTx.Exec(ctx, `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count)
 VALUES($1,'a0000000-0000-0000-0000-000000000009','9-10',1,1)`, eveningID)
@@ -146,6 +163,17 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	if err := database.Ready(ctx); err != nil {
 		t.Fatal("reporting migrations did not satisfy database readiness:", err)
 	}
+	gradeScope, err := database.GetReportGrades(ctx, semesterID)
+	if err != nil || gradeScope.Version != 1 || len(gradeScope.GradeIDs) != 1 {
+		t.Fatalf("seeded grade scope = %+v, err=%v", gradeScope, err)
+	}
+	updatedScope, err := database.ReplaceReportGrades(ctx, gradeScope, audit.Metadata{ActorID: actorID, Reason: "Verify semester report scope"})
+	if err != nil || updatedScope.Version != 2 {
+		t.Fatalf("replace grade scope = %+v, err=%v", updatedScope, err)
+	}
+	if _, err := database.ReplaceReportGrades(ctx, gradeScope, audit.Metadata{ActorID: actorID}); !errors.Is(err, academic.ErrReportGradesConflict) {
+		t.Fatalf("stale grade scope write = %v, want version conflict", err)
+	}
 	service := reporting.NewService(database, reportWorkflowPermissionStub{permissions: permissions})
 	draft, err := service.GenerateDraft(ctx, actorID, reporting.GenerateDraftInput{SemesterID: semesterID, WeekID: weekID}, audit.Metadata{})
 	if err != nil {
@@ -153,6 +181,18 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	}
 	if draft.VersionNo != 1 || draft.RowVersion != 1 || draft.Content.ConfirmedRecordCount != 2 || len(draft.Content.Rows) < 2 {
 		t.Fatalf("draft count-only snapshot = %+v", draft)
+	}
+	if draft.Content.Indicators == nil || len(draft.Content.Indicators.Inputs.Grades) != 1 ||
+		draft.Content.Indicators.Inputs.Grades[0].ExpectedStudentCount != 2 ||
+		draft.Content.Indicators.Totals.ExpectedStudentCount != 2 {
+		t.Fatalf("grade-wide enrolled-student snapshot = %+v, want two active students including the unassigned student", draft.Content.Indicators)
+	}
+	classRosterSizes := make(map[string]int, len(draft.Content.Indicators.Inputs.Classes))
+	for _, class := range draft.Content.Indicators.Inputs.Classes {
+		classRosterSizes[class.ClassName] = class.ExpectedStudentCount
+	}
+	if classRosterSizes["Fixture class"] != 1 || classRosterSizes["Other fixture class"] != 0 {
+		t.Fatalf("class roster snapshot = %+v, want 1 and 0 active students", classRosterSizes)
 	}
 	var foundAttendance, foundEvening bool
 	for _, row := range draft.Content.Rows {
@@ -310,11 +350,30 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 	if snapshotRecord.StudentNumber == "" || snapshotRecord.ClassName == "" || snapshotRecord.Grade == "" || snapshotRecord.Source == "" {
 		t.Fatalf("fixture report snapshot is missing searchable personal fields: %+v", snapshotRecord)
 	}
-	if versionRecords.FilterOptions == nil || !slices.Contains(versionRecords.FilterOptions.StudentNumbers, snapshotRecord.StudentNumber) ||
-		!slices.Contains(versionRecords.FilterOptions.StudentNames, snapshotRecord.StudentName) ||
-		!slices.Contains(versionRecords.FilterOptions.ClassNames, snapshotRecord.ClassName) ||
-		!slices.Contains(versionRecords.FilterOptions.Grades, snapshotRecord.Grade) {
-		t.Fatalf("version filter choices were not derived from its frozen records: %+v", versionRecords.FilterOptions)
+	if versionRecords.FilterOptions == nil || !slices.Contains(versionRecords.FilterOptions.StudentNumbers, "S-UNASSIGNED") ||
+		!slices.Contains(versionRecords.FilterOptions.StudentNames, "Unassigned fixture student") ||
+		!slices.Contains(versionRecords.FilterOptions.ClassNames, "Fixture class") ||
+		!slices.Contains(versionRecords.FilterOptions.Grades, "2026") ||
+		slices.Contains(versionRecords.FilterOptions.StudentNumbers, "S-SUSPENDED") {
+		t.Fatalf("filter choices were not loaded from the full active student roster and master data: %+v", versionRecords.FilterOptions)
+	}
+	scopedVersionRecords, err := database.ListReportVersionRecords(ctx, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		InspectionTypeID: attendanceID, Page: 1, PageSize: 10,
+	}, []permission.EffectivePermission{{
+		Action: permission.ActionReportView, Effect: permission.EffectAllow,
+		Scope: permission.Scope{InspectionTypeID: attendanceID},
+	}})
+	if err != nil || scopedVersionRecords.Total != 1 || scopedVersionRecords.FilterOptions == nil ||
+		!slices.Contains(scopedVersionRecords.FilterOptions.StudentNumbers, snapshotRecord.StudentNumber) ||
+		slices.Contains(scopedVersionRecords.FilterOptions.StudentNumbers, "S-UNASSIGNED") {
+		t.Fatalf("scoped filter choices must stay within the accessible version records: %+v, %v", scopedVersionRecords, err)
+	}
+	emptyCellRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
+		InspectionTypeID: eveningTypeID, StudentNumber: "S-UNASSIGNED", Page: 1, PageSize: 10,
+	})
+	if err != nil || emptyCellRecords.Total != 0 || emptyCellRecords.FilterOptions == nil ||
+		!slices.Contains(emptyCellRecords.FilterOptions.StudentNumbers, "S-UNASSIGNED") {
+		t.Fatalf("master data filter options disappeared when the selected cell had no matching records: %+v, %v", emptyCellRecords, err)
 	}
 	filteredRecords, err := service.ReportVersionRecords(ctx, actorID, semesterID, weekID, 4, reporting.ReportVersionRecordsQuery{
 		StudentNumber: " " + snapshotRecord.StudentNumber + " ", StudentName: " " + strings.ToLower(snapshotRecord.StudentName) + " ", ClassName: snapshotRecord.ClassName,

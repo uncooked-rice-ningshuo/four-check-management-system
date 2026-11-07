@@ -62,6 +62,13 @@ export type AttendanceFilterOptions = {
 	weeks: CurrentAcademicWeek[]
 	classes: { id: string; name: string; grade: string }[]
 	grades: string[]
+	listFilterOptions?: {
+		semesters: { id: string; label: string }[]
+		weeks: { id: string; label: string }[]
+		departments: { id: string; label: string }[]
+		grades: { id: string; label: string }[]
+		classes: { id: string; label: string; grade?: string }[]
+	}
 }
 
 // ManualAttendanceInput uses business names; snapshots and state are server-owned.

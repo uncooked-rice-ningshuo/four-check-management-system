@@ -31,6 +31,7 @@ type SummaryRow struct {
 	DepartmentName                     string `json:"departmentName"`
 	CollegeLevel                       bool   `json:"collegeLevel"`
 	InspectionTypeID                   string `json:"inspectionTypeId"`
+	InspectionTypeCode                 string `json:"inspectionTypeCode"`
 	InspectionTypeName                 string `json:"inspectionTypeName"`
 	IsRequired                         bool   `json:"isRequired"`
 	SubmissionCount                    int    `json:"submissionCount"`
@@ -65,6 +66,10 @@ type RecordsQuery struct {
 	DepartmentID     string `form:"departmentId"`
 	CollegeLevel     bool   `form:"collegeLevel"`
 	InspectionTypeID string `form:"inspectionTypeId"`
+	StudentNumber    string `form:"studentNumber"`
+	StudentName      string `form:"studentName"`
+	ClassName        string `form:"className"`
+	Grade            string `form:"grade"`
 	Page             int    `form:"page"`
 	PageSize         int    `form:"pageSize"`
 }
@@ -88,7 +93,7 @@ type RecordSourceDetails struct {
 	SubmittedAt    time.Time
 }
 
-// ReportVersionRecordFilterOptions contains values present in one frozen report cell.
+// ReportVersionRecordFilterOptions contains authorized current-roster choices for report record filters.
 type ReportVersionRecordFilterOptions struct {
 	StudentNumbers []string `json:"studentNumbers"`
 	StudentNames   []string `json:"studentNames"`
@@ -226,14 +231,15 @@ type GenerateDraftInput struct {
 }
 
 type ReportCountRow struct {
-	DepartmentID     string `json:"departmentId"`
-	DepartmentName   string `json:"departmentName"`
-	CollegeLevel     bool   `json:"collegeLevel"`
-	InspectionTypeID string `json:"inspectionTypeId"`
-	InspectionType   string `json:"inspectionType"`
-	RecordCount      int    `json:"recordCount"`
-	ZeroReceiptCount int    `json:"confirmedZeroReceiptCount"`
-	DataStatus       string `json:"dataStatus"`
+	DepartmentID       string `json:"departmentId"`
+	DepartmentName     string `json:"departmentName"`
+	CollegeLevel       bool   `json:"collegeLevel"`
+	InspectionTypeID   string `json:"inspectionTypeId"`
+	InspectionTypeCode string `json:"inspectionTypeCode,omitempty"`
+	InspectionType     string `json:"inspectionType"`
+	RecordCount        int    `json:"recordCount"`
+	ZeroReceiptCount   int    `json:"confirmedZeroReceiptCount"`
+	DataStatus         string `json:"dataStatus"`
 }
 
 type IncompleteReportCell struct {
@@ -244,18 +250,103 @@ type IncompleteReportCell struct {
 	InspectionType   string `json:"inspectionType"`
 }
 
-// ReportVersionContent freezes only approved count and detail-navigation data.
-// Formal Word/Excel layout and other derived metrics are deliberately absent.
+// ReportVersionContent freezes approved count, detail-navigation, and weekly
+// indicator data. Word and Excel files are later renderings of this snapshot.
 type ReportVersionContent struct {
 	Period                PeriodOption              `json:"period"`
 	ScopeLimited          bool                      `json:"scopeLimited"`
 	StatisticsRuleVersion string                    `json:"statisticsRuleVersion"`
 	ConfirmedRecordCount  int                       `json:"confirmedRecordCount"`
 	Rows                  []ReportCountRow          `json:"rows"`
+	Indicators            *ReportIndicators         `json:"indicators,omitempty"`
 	IncompleteCells       []IncompleteReportCell    `json:"incompleteCells"`
 	Corrections           []ReportCorrectionSummary `json:"corrections"`
 	Adjustments           []ReportAdjustmentSummary `json:"adjustments"`
 	GeneratedAt           time.Time                 `json:"generatedAt"`
+}
+
+// ReportMetricInputs freezes the mutable values used to calculate one report version.
+type ReportMetricInputs struct {
+	WeekMultiplier          int                       `json:"weekMultiplier"`
+	MorningPlannedDates     []string                  `json:"morningPlannedDates"`
+	ReportGradeScopeVersion int                       `json:"reportGradeScopeVersion,omitempty"`
+	Grades                  []ReportGradeSizeSnapshot `json:"grades,omitempty"`
+	Classes                 []ReportClassSizeSnapshot `json:"classes"`
+}
+
+// ReportGradeSizeSnapshot records the active enrolled student count for a grade at draft generation.
+type ReportGradeSizeSnapshot struct {
+	GradeID              string `json:"gradeId,omitempty"`
+	Grade                string `json:"grade"`
+	ExpectedStudentCount int    `json:"expectedStudentCount"`
+}
+
+// ReportClassSizeSnapshot is the expected class size captured at draft generation.
+type ReportClassSizeSnapshot struct {
+	ClassID              string `json:"classId,omitempty"`
+	GradeID              string `json:"gradeId,omitempty"`
+	Grade                string `json:"grade"`
+	ClassName            string `json:"className"`
+	ExpectedStudentCount int    `json:"expectedStudentCount"`
+}
+
+// ReportIndicators contains calculations derived only from one version's frozen inputs and records.
+type ReportIndicators struct {
+	Inputs            ReportMetricInputs      `json:"inputs"`
+	IncludedTypeCodes []string                `json:"includedTypeCodes"`
+	Classes           []ReportClassIndicators `json:"classes"`
+	Totals            ReportIndicatorValues   `json:"totals"`
+}
+
+type ReportClassIndicators struct {
+	ClassID   string `json:"classId,omitempty"`
+	Grade     string `json:"grade"`
+	ClassName string `json:"className"`
+	ReportIndicatorValues
+}
+
+// ReportIndicatorValues is shared by class rows and the whole-week aggregate.
+type ReportIndicatorValues struct {
+	ExpectedStudentCount     int                            `json:"expectedStudentCount"`
+	AttendanceRate           *ReportAttendanceRateMetric    `json:"attendanceRate,omitempty"`
+	UnattendedClassroom      *ReportUnattendedMetric        `json:"unattendedClassroom,omitempty"`
+	MorningAttendance        *ReportMorningAttendanceMetric `json:"morningAttendance,omitempty"`
+	EveningSelfStudy         *ReportCountMetric             `json:"eveningSelfStudy,omitempty"`
+	ClassroomHygiene         *ReportCountMetric             `json:"classroomHygiene,omitempty"`
+	DormitoryPersonalHygiene *ReportCountMetric             `json:"dormitoryPersonalHygiene,omitempty"`
+	DormitoryPublicHygiene   *ReportCountMetric             `json:"dormitoryPublicHygiene,omitempty"`
+	DormitoryHygieneTotal    *ReportCountMetric             `json:"dormitoryHygieneTotal,omitempty"`
+	LateReturn               *ReportCountMetric             `json:"lateReturn,omitempty"`
+}
+
+type ReportAttendanceRateMetric struct {
+	ViolationStudentCount int      `json:"violationStudentCount"`
+	ExpectedStudentCount  int      `json:"expectedStudentCount"`
+	AttendedStudentCount  int      `json:"attendedStudentCount"`
+	Rate                  *float64 `json:"rate"`
+}
+
+type ReportUnattendedMetric struct {
+	RawRecordCount           int `json:"rawRecordCount"`
+	ViolationCount           int `json:"violationCount"`
+	ViolationPersonTimeCount int `json:"violationPersonTimeCount"`
+	ViolatingStudentCount    int `json:"violatingStudentCount"`
+}
+
+// ReportCountMetric preserves raw records and the week-multiplied count.
+type ReportCountMetric struct {
+	RawRecordCount  int  `json:"rawRecordCount"`
+	Count           int  `json:"count"`
+	PersonTimeCount *int `json:"personTimeCount,omitempty"`
+}
+
+type ReportMorningAttendanceMetric struct {
+	PlannedDayCount     int      `json:"plannedDayCount"`
+	ExpectedPersonTimes int      `json:"expectedPersonTimes"`
+	AbsencePersonTimes  int      `json:"absencePersonTimes"`
+	AttendedPersonTimes int      `json:"attendedPersonTimes"`
+	PenaltyCount        int      `json:"penaltyCount"`
+	Rate                *float64 `json:"rate"`
 }
 
 type ReportCorrectionSummary struct {

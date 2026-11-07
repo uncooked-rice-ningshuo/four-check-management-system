@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Descriptions, Drawer, Select, Space, Table, Tag, Timeline, Typography } from 'antd'
+import { ArrowLeftOutlined } from '@ant-design/icons'
+import { ProTable, type ProColumns } from '@ant-design/pro-components'
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Space, Table, Tag, Timeline, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
 import type { ReportArchiveEntry, ReportArchiveQuery, ReportArchiveStatus, ReportCorrectionLog, ReportReview, ReportVersion, ReportWorkflow } from '../../entities/reporting/model/reporting'
@@ -38,7 +40,10 @@ function ArchiveWorkflowDetail({ workflow, period, drawerWidth, onAccessDenied }
     if (version) setSelectedVersion(version)
   }
   const versionColumns: ColumnsType<ReportVersion> = [
-    { title: '版本', dataIndex: 'versionNo', width: 74, render: value => `V${value}` },
+    { title: '版本', dataIndex: 'versionNo', width: 124, render: (value: number) => <Space size={6}>
+      <Typography.Text strong>V{value}</Typography.Text>
+      {value === current?.versionNo && <Tag color="blue">当前</Tag>}
+    </Space> },
     { title: '确认记录数', key: 'count', align: 'right', render: (_value, item) => item.content.confirmedRecordCount },
     { title: '数据单元', key: 'cells', align: 'right', render: (_value, item) => item.content.rows.length },
     { title: '生成时间', key: 'createdAt', render: (_value, item) => displayTime(item.createdAt) },
@@ -89,7 +94,9 @@ function ArchiveWorkflowDetail({ workflow, period, drawerWidth, onAccessDenied }
         <Typography.Title id="report-archive-versions-title" level={5}>版本快照</Typography.Title>
         <Typography.Text type="secondary">选择版本查看当时保存的记录内容。</Typography.Text>
       </div>
-      <Table<ReportVersion> rowKey="id" size="small" pagination={false} columns={versionColumns} dataSource={workflow.versions} scroll={{ x: 860 }} />
+      <Table<ReportVersion> className="report-archive-version-table" rowKey="id" size="small" pagination={false} columns={versionColumns}
+        dataSource={workflow.versions} rowClassName={item => item.versionNo === current?.versionNo ? 'report-archive-version-current-row' : ''}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该周次尚无可查看的版本快照" /> }} scroll={{ x: 900 }} />
     </section>
     {workflow.corrections.length > 0 && <>
       <Typography.Text strong>追加修正记录</Typography.Text>
@@ -98,9 +105,33 @@ function ArchiveWorkflowDetail({ workflow, period, drawerWidth, onAccessDenied }
     <Alert type="info" showIcon title="归档快照为只读记录" description="Word/Excel 控件已按版本预留，文件生成功能后续开放；归档中的生成操作不会修改历史数据。" />
     <Drawer rootClassName="weekly-report-version-detail-drawer" classNames={{ wrapper: 'weekly-report-version-detail-drawer-wrapper' }}
       styles={{ wrapper: { maxWidth: '100vw' } }}
-      title={selectedVersion ? `V${selectedVersion.versionNo} · 数据明细` : '数据明细'}
+      title="归档版本明细"
       size={Math.min(960, drawerWidth)} open={Boolean(selectedVersion)} onClose={() => setSelectedVersion(null)}>
-      {selectedVersion && <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} />}
+      {selectedVersion && <Space className="report-version-detail-layout" orientation="vertical" size="middle" style={{ display: 'flex' }}>
+        <Button className="report-version-detail-back" type="link" icon={<ArrowLeftOutlined />} aria-label="返回历史版本" onClick={() => setSelectedVersion(null)}>
+          返回历史版本
+        </Button>
+        <section className="report-version-detail-context" role="group" aria-label="归档版本上下文">
+          <div className="report-version-detail-context-heading">
+            <div>
+              <Typography.Text type="secondary">正在查看归档快照</Typography.Text>
+              <Typography.Title level={4}>V{selectedVersion.versionNo} · 数据明细</Typography.Title>
+            </div>
+            {selectedVersion.versionNo === current?.versionNo && <Tag color="blue">当前版本</Tag>}
+          </div>
+          <Typography.Text className="report-version-detail-period">
+            {period.academicYearName} · {period.semesterName} · 第 {period.weekNo} 周
+          </Typography.Text>
+          <div className="report-version-detail-metadata">
+            <div><Typography.Text type="secondary">确认记录</Typography.Text><Typography.Text strong>{selectedVersion.content.confirmedRecordCount} 条</Typography.Text></div>
+            <div><Typography.Text type="secondary">数据单元</Typography.Text><Typography.Text strong>{selectedVersion.content.rows.length} 个</Typography.Text></div>
+            <div><Typography.Text type="secondary">生成时间</Typography.Text><Typography.Text strong>{displayTime(selectedVersion.createdAt)}</Typography.Text></div>
+            <div><Typography.Text type="secondary">数据范围</Typography.Text><Typography.Text strong>{selectedVersion.content.scopeLimited ? '授权范围快照' : '完整可见范围'}</Typography.Text></div>
+          </div>
+          <Typography.Text className="report-version-detail-readonly" type="secondary">此处展示版本生成时保存的只读内容；关闭明细或点击“返回历史版本”可回到版本列表。</Typography.Text>
+        </section>
+        <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} />
+      </Space>}
     </Drawer>
   </Space>
 }
@@ -131,17 +162,23 @@ export function WeeklyReportArchivePage() {
   const archiveQuery = useReportArchive(query, clearArchiveScope)
   const workflowQuery = useReportArchiveWorkflow(selected?.period.semesterId ?? '', selected?.period.weekId ?? '', Boolean(selected), clearArchiveScope)
 
-  const columns: ColumnsType<ReportArchiveEntry> = [
-    { title: '学年 / 学期 / 周次', key: 'period', render: (_value, item) => displayPeriod(item) },
-    { title: '状态', dataIndex: 'status', width: 110, render: (value: ReportArchiveStatus) => <Tag color={value === 'ARCHIVED' ? 'green' : 'blue'}>{reportStatusLabel(value)}</Tag> },
-    { title: '当前版本', dataIndex: 'versionNo', width: 96, render: value => `V${value}` },
-    { title: '版本数', dataIndex: 'versionCount', width: 80, align: 'right' },
-    { title: '确认记录', dataIndex: 'confirmedRecordCount', width: 100, align: 'right' },
-    { title: '零记录回执', dataIndex: 'confirmedZeroReceiptCount', width: 105, align: 'right' },
-    { title: '数据单元', dataIndex: 'cellCount', width: 90, align: 'right' },
-    { title: '状态更新时间', dataIndex: 'updatedAt', width: 170, render: displayTime },
-    { title: '范围', dataIndex: 'scopeLimited', width: 130, render: value => value ? <Tag color="orange">局部授权范围</Tag> : <Tag>完整可见范围</Tag> },
-    { title: '操作', key: 'action', width: 230, render: (_value, item) => {
+  const columns: ProColumns<ReportArchiveEntry>[] = [
+    { title: '通报状态', dataIndex: 'status', hideInTable: true, valueType: 'select', order: 1,
+      fieldProps: { options: [
+        { value: 'DRAFT', label: '草稿' }, { value: 'PENDING_REVIEW', label: '待审核' },
+        { value: 'RETURNED', label: '已退回' }, { value: 'FINALIZING', label: '审核通过，待定稿确认' },
+        { value: 'FINALIZED', label: '已定稿' }, { value: 'PUBLISHED', label: '已发布' }, { value: 'ARCHIVED', label: '已归档' },
+      ], allowClear: true, placeholder: '全部历史状态' } },
+    { title: '学年 / 学期 / 周次', key: 'period', search: false, render: (_value, item) => displayPeriod(item) },
+    { title: '状态', dataIndex: 'status', search: false, width: 110, render: (_value, item) => <Tag color={item.status === 'ARCHIVED' ? 'green' : 'blue'}>{reportStatusLabel(item.status)}</Tag> },
+    { title: '当前版本', dataIndex: 'versionNo', search: false, width: 96, render: (_value, item) => `V${item.versionNo}` },
+    { title: '版本数', dataIndex: 'versionCount', search: false, width: 80, align: 'right' },
+    { title: '确认记录', dataIndex: 'confirmedRecordCount', search: false, width: 100, align: 'right' },
+    { title: '零记录回执', dataIndex: 'confirmedZeroReceiptCount', search: false, width: 105, align: 'right' },
+    { title: '数据单元', dataIndex: 'cellCount', search: false, width: 90, align: 'right' },
+    { title: '状态更新时间', dataIndex: 'updatedAt', search: false, width: 170, render: (_value, item) => displayTime(item.updatedAt) },
+    { title: '范围', dataIndex: 'scopeLimited', search: false, width: 130, render: (_value, item) => item.scopeLimited ? <Tag color="orange">局部授权范围</Tag> : <Tag>完整可见范围</Tag> },
+    { title: '操作', key: 'action', search: false, width: 230, render: (_value, item) => {
       const isFinalized = ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(item.status)
       const stage = ['DRAFT', 'RETURNED'].includes(item.status) || isFinalized ? 1 : 2
       return <Space wrap>
@@ -164,21 +201,22 @@ export function WeeklyReportArchivePage() {
     </div>
 
     {accessChanged && <Alert type="warning" showIcon title="你的归档查看权限已变化，页面已清除旧范围数据。请重新进入后重试。" />}
-    <Space wrap>
-      <Select aria-label="归档状态筛选" style={{ minWidth: 190 }} value={status || undefined} placeholder="全部历史状态"
-        options={[{ value: '', label: '全部状态' }, { value: 'DRAFT', label: '草稿' }, { value: 'PENDING_REVIEW', label: '待审核' }, { value: 'RETURNED', label: '已退回' }, { value: 'FINALIZING', label: '审核通过，待定稿确认' }, { value: 'FINALIZED', label: '已定稿' }, { value: 'PUBLISHED', label: '已发布' }, { value: 'ARCHIVED', label: '已归档' }]}
-        onChange={value => { setStatus(value as ReportArchiveStatus | ''); setPage(1) }} />
-      <Button onClick={() => void archiveQuery.refetch()} loading={archiveQuery.isFetching}>刷新归档</Button>
-    </Space>
     {archiveQuery.isError && <Alert type="error" showIcon title="历史通报加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void archiveQuery.refetch()}>重试</Button>} />}
-    <Table<ReportArchiveEntry>
+    <ProTable<ReportArchiveEntry>
+      className="weekly-report-archive-table"
       rowKey="id"
       size="middle"
+      cardBordered
       columns={columns}
       dataSource={archiveQuery.data?.items ?? []}
       loading={archiveQuery.isPending || archiveQuery.isFetching}
       locale={{ emptyText: archiveQuery.isError ? '通报归档加载失败' : '暂无生成过草稿的周通报' }}
       scroll={{ x: 1100 }}
+      headerTitle={<Space size={10}><span>周通报列表</span><Tag variant="filled" color="blue">共 {archiveQuery.data?.total ?? 0} 周通报</Tag></Space>}
+      search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false }}
+      onSubmit={values => { setStatus((values.status as ReportArchiveStatus | undefined) ?? ''); setPage(1) }}
+      onReset={() => { setStatus(''); setPage(1) }}
+      options={{ reload: () => void archiveQuery.refetch(), density: false, setting: false, fullScreen: false }}
       pagination={{ current: page, pageSize, total: archiveQuery.data?.total ?? 0, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: total => `共 ${total} 周通报`, onChange: (nextPage, nextPageSize) => { if (nextPageSize !== pageSize) { setPageSize(nextPageSize); setPage(1) } else setPage(nextPage) } }}
     />
 

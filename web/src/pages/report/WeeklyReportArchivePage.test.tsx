@@ -58,6 +58,16 @@ describe('WeeklyReportArchivePage', () => {
     await waitFor(() => expect(mocks.useReportArchiveWorkflow).toHaveBeenCalledWith(period.semesterId, period.weekId, true, expect.any(Function)))
   })
 
+  it('把归档状态筛选放在 ProTable 表单中并将周通报列表置于其下方', () => {
+    renderPage()
+
+    expect(screen.getByRole('combobox', { name: /通报状态/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /查\s*询/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /重\s*置/ })).toBeVisible()
+    expect(screen.getByText('周通报列表')).toBeVisible()
+    expect(document.querySelector('.anticon-reload')).toBeVisible()
+  })
+
   it('shows before and after values in correction history without a department confirmation column', async () => {
     mocks.useReportArchiveWorkflow.mockReturnValue({
       data: { ...archiveWorkflow, reviews: [
@@ -103,6 +113,14 @@ describe('WeeklyReportArchivePage', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看版本' }))
 
     fireEvent.click(await screen.findByRole('button', { name: '查看 V1 数据明细' }))
+    const versionContext = await screen.findByRole('group', { name: '归档版本上下文' })
+    expect(within(versionContext).getByRole('heading', { name: 'V1 · 数据明细' })).toBeVisible()
+    expect(within(versionContext).getByText('2025-2026学年 · 第二学期 · 第 2 周')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '返回历史版本' }))
+    await waitFor(() => expect(screen.queryByRole('group', { name: '归档版本上下文' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '查看 V1 数据明细' })).toBeVisible()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 V1 数据明细' }))
     const snapshotRegion = await screen.findByRole('region', { name: 'V1 数据明细' })
     expect(within(snapshotRegion).getByRole('tab', { name: /宿舍卫生/ })).toBeVisible()
     const snapshotRow = within(snapshotRegion).getAllByRole('row').find(row => row.textContent?.includes('3舍 204'))

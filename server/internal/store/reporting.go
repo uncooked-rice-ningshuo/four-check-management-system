@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -99,7 +100,7 @@ func (p *Postgres) ReportSummary(ctx context.Context, semesterID, weekID string,
  WHERE o.department_id IS NOT NULL AND o.removed_at IS NULL
 ), department_cells AS (
  SELECT d.id AS department_id,d.name AS department_name,FALSE AS college_level,
-        it.id AS inspection_type_id,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
+	        it.id AS inspection_type_id,it.code AS inspection_type_code,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
  FROM period
  JOIN department_scope_candidates candidate ON TRUE
  JOIN departments d ON d.id=candidate.department_id
@@ -117,7 +118,7 @@ func (p *Postgres) ReportSummary(ctx context.Context, semesterID, weekID string,
  WHERE o.department_id IS NULL AND o.removed_at IS NULL
 ), college_cells AS (
  SELECT NULL::uuid AS department_id,'管理员'::text AS department_name,TRUE AS college_level,
-        it.id AS inspection_type_id,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
+	        it.id AS inspection_type_id,it.code AS inspection_type_code,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
  FROM period
  JOIN college_scope_candidates candidate ON TRUE
  JOIN inspection_types it ON it.id=candidate.inspection_type_id AND it.enabled AND it.participates_in_report
@@ -130,7 +131,7 @@ func (p *Postgres) ReportSummary(ctx context.Context, semesterID, weekID string,
 )
 SELECT period.academic_year_id,period.academic_year_name,period.semester_id,period.semester_name,
        period.week_id,period.week_no,period.start_date,period.end_date,
-       COALESCE(c.department_id::text,''),c.department_name,c.college_level,c.inspection_type_id,c.inspection_type_name,
+	       COALESCE(c.department_id::text,''),c.department_name,c.college_level,c.inspection_type_id,c.inspection_type_code,c.inspection_type_name,
        EXISTS(SELECT 1 FROM weekly_report_obligations required
         WHERE required.semester_id=period.semester_id AND required.week_id=period.week_id
           AND required.department_id IS NOT DISTINCT FROM c.department_id
@@ -152,7 +153,7 @@ LEFT JOIN department_submissions ds ON ds.semester_id=period.semester_id AND ds.
 LEFT JOIN department_submission_revisions rev ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
 GROUP BY period.academic_year_id,period.academic_year_name,period.semester_id,period.semester_name,
          period.week_id,period.week_no,period.start_date,period.end_date,
-         c.department_id,c.department_name,c.college_level,c.inspection_type_id,c.inspection_type_name,c.inspection_type_order
+	         c.department_id,c.department_name,c.college_level,c.inspection_type_id,c.inspection_type_code,c.inspection_type_name,c.inspection_type_order
 ORDER BY c.inspection_type_order,c.college_level,c.department_name`
 	rows, err := p.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -166,7 +167,7 @@ ORDER BY c.inspection_type_order,c.college_level,c.department_name`
 			&result.Period.SemesterID, &result.Period.SemesterName, &result.Period.WeekID,
 			&result.Period.WeekNo, &result.Period.StartDate, &result.Period.EndDate,
 			&row.DepartmentID, &row.DepartmentName, &row.CollegeLevel, &row.InspectionTypeID,
-			&row.InspectionTypeName, &row.IsRequired, &row.SubmissionCount, &row.DraftBatchCount,
+			&row.InspectionTypeCode, &row.InspectionTypeName, &row.IsRequired, &row.SubmissionCount, &row.DraftBatchCount,
 			&row.PendingReviewBatchCount, &row.ReturnedBatchCount, &row.ConfirmedBatchCount,
 			&row.ConfirmedRecordCount, &row.PendingReviewOrReturnedRecordCount,
 			&row.ZeroRecordPendingReviewBatchCount, &row.ZeroRecordReturnedBatchCount,
@@ -176,6 +177,163 @@ ORDER BY c.inspection_type_order,c.college_level,c.department_name`
 		result.Rows = append(result.Rows, row)
 	}
 	return result, rows.Err()
+}
+
+// ReportIndicatorInputs reads the live enrolled-student roster, week multiplier,
+// and morning plan that GenerateDraft snapshots into its immutable report version.
+func (p *Postgres) ReportIndicatorInputs(ctx context.Context, semesterID, weekID string) (reporting.ReportMetricInputs, error) {
+	return reportIndicatorInputs(ctx, p.Pool, semesterID, weekID, false)
+}
+
+type reportIndicatorInputQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func reportIndicatorInputs(ctx context.Context, queryer reportIndicatorInputQueryer, semesterID, weekID string, lockRows bool) (reporting.ReportMetricInputs, error) {
+	var inputs reporting.ReportMetricInputs
+	var startDate, endDate string
+	var plannedDates []time.Time
+	var scheduleVersion int
+	weekLock := ""
+	if lockRows {
+		weekLock = " FOR SHARE OF w"
+	}
+	err := queryer.QueryRow(ctx, `SELECT w.start_date::text,w.end_date::text,COALESCE(w.attendance_penalty_multiplier,1)
+FROM semester_weeks w WHERE w.id=$1::uuid AND w.semester_id=$2::uuid AND w.enabled`+weekLock, weekID, semesterID).Scan(
+		&startDate, &endDate, &inputs.WeekMultiplier)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reporting.ReportMetricInputs{}, reporting.ErrInvalidPeriod
+	}
+	if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	scheduleLock := ""
+	if lockRows {
+		scheduleLock = " FOR SHARE"
+	}
+	err = queryer.QueryRow(ctx, `SELECT planned_dates,version FROM morning_attendance_week_schedules WHERE week_id=$1::uuid`+scheduleLock,
+		weekID).Scan(&plannedDates, &scheduleVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		inputs.MorningPlannedDates = inspection.DefaultMorningPlannedDates(startDate, endDate)
+	} else if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	} else {
+		inputs.MorningPlannedDates = make([]string, 0, len(plannedDates))
+		for _, date := range plannedDates {
+			inputs.MorningPlannedDates = append(inputs.MorningPlannedDates, date.Format("2006-01-02"))
+		}
+	}
+	scopeLock := ""
+	if lockRows {
+		scopeLock = " FOR SHARE"
+	}
+	err = queryer.QueryRow(ctx, `SELECT version FROM semester_report_grade_scopes WHERE semester_id=$1::uuid`+scopeLock, semesterID).Scan(&inputs.ReportGradeScopeVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
+	}
+	if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	var configuredGradeCount, enabledGradeCount int
+	if err := queryer.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE grade.enabled)
+FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
+WHERE scope.semester_id=$1::uuid`, semesterID).Scan(&configuredGradeCount, &enabledGradeCount); err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	if configuredGradeCount == 0 || configuredGradeCount != enabledGradeCount {
+		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
+	}
+	classLock := ""
+	if lockRows {
+		classLock = " FOR SHARE OF class,grade"
+	}
+	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name
+FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
+JOIN classes class ON class.grade_id=grade.id
+WHERE scope.semester_id=$1::uuid AND class.enabled AND grade.enabled
+ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
+	if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	classPositions := make(map[string]int)
+	inputs.Classes = make([]reporting.ReportClassSizeSnapshot, 0)
+	for rows.Next() {
+		var classID string
+		var class reporting.ReportClassSizeSnapshot
+		if err := rows.Scan(&classID, &class.GradeID, &class.Grade, &class.ClassName); err != nil {
+			rows.Close()
+			return reporting.ReportMetricInputs{}, err
+		}
+		class.ClassID = classID
+		classPositions[classID] = len(inputs.Classes)
+		inputs.Classes = append(inputs.Classes, class)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return reporting.ReportMetricInputs{}, err
+	}
+	rows.Close()
+
+	studentLock := ""
+	if lockRows {
+		studentLock = " FOR SHARE OF student,grade"
+	}
+	rosterRows, err := queryer.Query(ctx, `SELECT grade.id::text,COALESCE(class.id::text,'')
+FROM semester_report_grades scope
+JOIN grades grade ON grade.id=scope.grade_id AND grade.enabled
+JOIN students student ON student.grade_id=grade.id
+LEFT JOIN classes class ON class.id=student.class_id AND class.grade_id=grade.id AND class.enabled
+WHERE scope.semester_id=$1::uuid AND student.enabled AND student.enrollment_status='ENROLLED'
+ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
+	if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	gradeCounts := make(map[string]int)
+	classCounts := make(map[string]int, len(classPositions))
+	for rosterRows.Next() {
+		var gradeID, classID string
+		if err := rosterRows.Scan(&gradeID, &classID); err != nil {
+			rosterRows.Close()
+			return reporting.ReportMetricInputs{}, err
+		}
+		gradeCounts[gradeID]++
+		if classID != "" {
+			classCounts[classID]++
+		}
+	}
+	if err := rosterRows.Err(); err != nil {
+		rosterRows.Close()
+		return reporting.ReportMetricInputs{}, err
+	}
+	rosterRows.Close()
+
+	gradeRows, err := queryer.Query(ctx, `SELECT grade.id::text,grade.name FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id WHERE scope.semester_id=$1::uuid AND grade.enabled ORDER BY grade.name,grade.id`, semesterID)
+	if err != nil {
+		return reporting.ReportMetricInputs{}, err
+	}
+	inputs.Grades = make([]reporting.ReportGradeSizeSnapshot, 0)
+	for gradeRows.Next() {
+		var gradeID, gradeName string
+		if err := gradeRows.Scan(&gradeID, &gradeName); err != nil {
+			gradeRows.Close()
+			return reporting.ReportMetricInputs{}, err
+		}
+		inputs.Grades = append(inputs.Grades, reporting.ReportGradeSizeSnapshot{GradeID: gradeID, Grade: gradeName, ExpectedStudentCount: gradeCounts[gradeID]})
+	}
+	if err := gradeRows.Err(); err != nil {
+		gradeRows.Close()
+		return reporting.ReportMetricInputs{}, err
+	}
+	gradeRows.Close()
+	if len(inputs.Grades) == 0 {
+		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
+	}
+	sort.Slice(inputs.Grades, func(i, j int) bool { return inputs.Grades[i].Grade < inputs.Grades[j].Grade })
+	for classID, position := range classPositions {
+		inputs.Classes[position].ExpectedStudentCount = classCounts[classID]
+	}
+	return inputs, nil
 }
 
 // ReportRecords reuses the inspection read model after translating only the
@@ -196,12 +354,101 @@ func (p *Postgres) ReportRecords(ctx context.Context, accountID string, query re
 		CollegeOnly: query.CollegeLevel, ConfirmedSubmissionOnly: true,
 		SemesterID: query.SemesterID, WeekID: query.WeekID, DepartmentID: query.DepartmentID,
 		InspectionTypeID: query.InspectionTypeID, Status: inspection.RecordStatusConfirmed,
+		StudentNumber: query.StudentNumber, StudentName: query.StudentName,
+		ClassName: query.ClassName, Grade: query.Grade,
 		Page: query.Page, PageSize: query.PageSize,
 	}, inspection.MutationAccess{ActorID: accountID, ReportScopeValidated: true, Permissions: inspectionPermissions})
 	if err != nil {
 		return nil, 0, err
 	}
 	return page.Items, page.Total, nil
+}
+
+// ReportRecordFilterOptions returns searchable choices from the enabled roster,
+// independent of whether the selected week currently has confirmed records.
+func (p *Postgres) ReportRecordFilterOptions(ctx context.Context, query reporting.RecordsQuery,
+	permissions []permission.EffectivePermission) (reporting.ReportVersionRecordFilterOptions, error) {
+	options := reporting.ReportVersionRecordFilterOptions{
+		StudentNumbers: []string{}, StudentNames: []string{}, ClassNames: []string{}, Grades: []string{},
+	}
+	args := []any{query.SemesterID}
+	classPredicate := reportRosterOptionsPredicate(query, permissions, "cls", "grd", "sem", &args)
+	rosterPredicate := reportRosterOptionsPredicate(query, permissions, "class", "grade", "semester", &args)
+	sql := `WITH visible_classes AS (
+	 SELECT cls.id,cls.name,grd.name AS grade_name
+	 FROM classes cls JOIN grades grd ON grd.id=cls.grade_id AND grd.enabled
+	 JOIN semesters sem ON sem.id=$1::uuid
+	 WHERE cls.enabled AND (` + classPredicate + `)
+), visible_roster AS (
+	 SELECT student.student_no,student.name,class.name AS class_name,grade.name AS grade_name
+	 FROM students student JOIN grades grade ON grade.id=student.grade_id AND grade.enabled
+	 LEFT JOIN classes class ON class.id=student.class_id AND class.grade_id=grade.id AND class.enabled
+	 JOIN semesters semester ON semester.id=$1::uuid
+	 WHERE student.enabled AND student.enrollment_status='ENROLLED' AND (` + rosterPredicate + `)
+)
+SELECT
+	COALESCE((SELECT array_agg(student_number ORDER BY student_number) FROM (SELECT DISTINCT student_no AS student_number FROM visible_roster WHERE student_no<>'') option_values),ARRAY[]::text[]),
+	COALESCE((SELECT array_agg(student_name ORDER BY student_name) FROM (SELECT DISTINCT name AS student_name FROM visible_roster WHERE name<>'') option_values),ARRAY[]::text[]),
+	COALESCE((SELECT array_agg(class_name ORDER BY class_name) FROM (SELECT DISTINCT name AS class_name FROM visible_classes) option_values),ARRAY[]::text[]),
+	COALESCE((SELECT array_agg(grade_name ORDER BY grade_name) FROM (
+	 SELECT grade_name FROM visible_classes UNION SELECT grade_name FROM visible_roster
+	) option_values),ARRAY[]::text[])`
+	if err := p.Pool.QueryRow(ctx, sql, args...).Scan(&options.StudentNumbers, &options.StudentNames, &options.ClassNames, &options.Grades); err != nil {
+		return reporting.ReportVersionRecordFilterOptions{}, err
+	}
+	return options, nil
+}
+
+func reportRosterOptionsPredicate(query reporting.RecordsQuery, permissions []permission.EffectivePermission,
+	classAlias, gradeAlias, semesterAlias string, args *[]any) string {
+	allows, denies := make([]string, 0), make([]string, 0)
+	for _, item := range permissions {
+		if item.Action != permission.ActionReportView || !reportRosterScopeMatchesCell(item.Scope, query) {
+			continue
+		}
+		clauses := make([]string, 0, 3)
+		if item.Scope.AcademicYearID != "" {
+			*args = append(*args, item.Scope.AcademicYearID)
+			clauses = append(clauses, fmt.Sprintf("%s.academic_year_id=$%d::uuid", semesterAlias, len(*args)))
+		}
+		if item.Scope.ClassID != "" {
+			*args = append(*args, item.Scope.ClassID)
+			clauses = append(clauses, fmt.Sprintf("%s.id=$%d::uuid", classAlias, len(*args)))
+		}
+		if item.Scope.Grade != "" {
+			*args = append(*args, item.Scope.Grade)
+			clauses = append(clauses, fmt.Sprintf("%s.name=$%d::text", gradeAlias, len(*args)))
+		}
+		predicate := "TRUE"
+		if len(clauses) > 0 {
+			predicate = "(" + strings.Join(clauses, " AND ") + ")"
+		}
+		if item.Effect == permission.EffectAllow {
+			allows = append(allows, predicate)
+		} else if item.Effect == permission.EffectDeny && (len(clauses) > 0 || query.DepartmentID != "" || query.CollegeLevel) {
+			denies = append(denies, predicate)
+		}
+	}
+	if len(allows) == 0 {
+		return "FALSE"
+	}
+	predicate := "(" + strings.Join(allows, " OR ") + ")"
+	if len(denies) > 0 {
+		predicate += " AND NOT (" + strings.Join(denies, " OR ") + ")"
+	}
+	return predicate
+}
+
+func reportRosterScopeMatchesCell(scope permission.Scope, query reporting.RecordsQuery) bool {
+	if (scope.SemesterID != "" && scope.SemesterID != query.SemesterID) ||
+		(scope.WeekID != "" && scope.WeekID != query.WeekID) ||
+		(scope.InspectionTypeID != "" && scope.InspectionTypeID != query.InspectionTypeID) {
+		return false
+	}
+	if query.CollegeLevel {
+		return scope.DepartmentID == ""
+	}
+	return query.DepartmentID == "" || scope.DepartmentID == "" || scope.DepartmentID == query.DepartmentID
 }
 
 // ReportSourceDetails enriches only record IDs already authorized and paged by ReportRecords.

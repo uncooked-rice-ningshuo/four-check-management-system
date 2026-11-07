@@ -21,8 +21,15 @@ func TestUnattendedTemplateIsDistinctFromAttendance(t *testing.T) {
 	}
 	parser := NewUnattendedXLSXParser(16 << 20)
 	parsed, err := parser.Parse("unattended.xlsx", content)
-	if err != nil || parsed.TemplateCode != "UNATTENDED_CLASSROOM_IMPORT" || parsed.TemplateVersion != 2 || len(parsed.Fields) != 7 {
+	if err != nil || parsed.TemplateCode != "UNATTENDED_CLASSROOM_IMPORT" || parsed.TemplateVersion != UnattendedTemplateVersion || len(parsed.Fields) != 8 {
 		t.Fatalf("template %+v %v", parsed, err)
+	}
+	publisherParser, err := NewInspectionXLSXParser("UNATTENDED_CLASSROOM", 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published, err := publisherParser.Parse("unattended-classroom-v3.xlsx", content); err != nil || published.TemplateVersion != UnattendedTemplateVersion {
+		t.Fatalf("publication parser rejected the current template: %+v %v", published, err)
 	}
 	if _, err = NewAttendanceXLSXParser(16<<20).Parse("unattended.xlsx", content); err == nil {
 		t.Fatal("cross-type template accepted")
@@ -32,7 +39,7 @@ func TestUnattendedTemplateIsDistinctFromAttendance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer book.Close()
-	row := []any{"000001", "虚构学生", "示例班", "2026-10-01", "示例课", "示例楼 101", ""}
+	row := []any{"000001", "虚构学生", "示例班", "2026-10-01", "示例课", "第1-2节", "示例楼 101", ""}
 	if err = book.SetSheetRow("无机课堂导入", "A5", &row); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +81,9 @@ func TestCourseImportDispatchUsesAuthoritativeBatchType(t *testing.T) {
 	} {
 		repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded)}
 		repository.batch.TypeCode, repository.batch.TemplateCode = test.typeCode, test.templateCode
+		if test.typeCode == "UNATTENDED_CLASSROOM" {
+			repository.batch.TemplateVersion = UnattendedTemplateVersion
+		}
 		validator := &fakeAttendanceValidator{result: AttendanceValidationResult{Rows: []AttendanceValidationRow{}}}
 		service := NewCourseImportService(repository, &fakeVerifiedFileReader{file: storage.File{OriginalName: "source.xlsx"}, content: unattended}, validator, 16<<20)
 		_, err := service.ParseBatch(context.Background(), ParseBatchInput{BatchID: repository.batch.ID, ExpectedVersion: repository.batch.Version})

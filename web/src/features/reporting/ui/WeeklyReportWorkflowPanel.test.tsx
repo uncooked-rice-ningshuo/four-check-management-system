@@ -27,6 +27,48 @@ const workflow: ReportWorkflow = {
   } }], reviews: [], corrections: [],
 }
 
+function workflowWithTwoVersions(): ReportWorkflow {
+  const baseReport = workflow.report
+  if (!baseReport) throw new Error('测试工作流缺少通报状态')
+  const currentVersion = {
+    ...workflow.versions[0],
+    id: 'version-2',
+    versionNo: 2,
+    createdAt: '2026-03-02',
+    content: { ...workflow.versions[0].content, generatedAt: '2026-03-02', confirmedRecordCount: 2 },
+  }
+  return {
+    ...workflow,
+    report: { ...baseReport, versionNo: 2, rowVersion: 2, updatedAt: '2026-03-02' },
+    versions: [currentVersion, workflow.versions[0]],
+  }
+}
+
+function workflowWithIndicatorSnapshot(classCount = 1): ReportWorkflow {
+  const result = structuredClone(workflow)
+  const attendanceRate = { expectedStudentCount: 26, violationStudentCount: 0, attendedStudentCount: 26, rate: 100 }
+  const morningAttendance = {
+    plannedDayCount: 5, expectedPersonTimes: 130, absencePersonTimes: 0,
+    attendedPersonTimes: 130, penaltyCount: 0, rate: 100,
+  }
+  const classes = Array.from({ length: classCount }, (_, index) => ({
+    grade: '2026级', className: `测试班级${index + 1}`, expectedStudentCount: 26,
+    attendanceRate, morningAttendance, dormitoryPersonalHygiene: { rawRecordCount: 0, count: 0 },
+  }))
+  result.versions[0].content.indicators = {
+    inputs: {
+      weekMultiplier: 1,
+      morningPlannedDates: ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05', '2026-03-06'],
+      grades: [{ grade: '2026级', expectedStudentCount: 26 }],
+      classes: classes.map(({ grade, className, expectedStudentCount }) => ({ grade, className, expectedStudentCount })),
+    },
+    includedTypeCodes: ['ATTENDANCE_RATE', 'MORNING_ATTENDANCE'],
+    classes,
+    totals: { expectedStudentCount: 26, attendanceRate, morningAttendance, dormitoryPersonalHygiene: { rawRecordCount: 0, count: 0 } },
+  }
+  return result
+}
+
 describe('通报记录修正', () => {
   it('草稿明细按基本信息列展示，并合并时间、课程地点和检查情况', async () => {
     const attendanceWorkflow = structuredClone(workflow)
@@ -66,13 +108,34 @@ describe('通报记录修正', () => {
       fireEvent.mouseDown(within(filterForm).getByRole('combobox', { name: label }))
       fireEvent.click(screen.getByText(value, { selector: '.ant-select-item-option-content' }))
     }
-    fireEvent.click(within(filterForm).getByRole('button', { name: /筛\s*选/ }))
+    expect(within(filterForm).getByRole('button', { name: '筛选' })).toBeVisible()
+    expect(within(filterForm).getByRole('button', { name: '重置' })).toBeVisible()
+    fireEvent.click(within(filterForm).getByRole('button', { name: '筛选' }))
 
     await waitFor(() => expect(mocks.records).toHaveBeenLastCalledWith(expect.objectContaining({
       semesterId: period.semesterId, weekId: period.weekId, versionNo: 1,
       inspectionTypeId: 'type-1',
       studentNumber: '20260001', studentName: '测试学生', className: '测试班级', grade: '2026级', page: 1,
     }), true, expect.any(Function)))
+  })
+
+  it('本版没有记录时仍使用完整名册筛选选项', async () => {
+    const attendanceWorkflow = structuredClone(workflow)
+    attendanceWorkflow.versions[0].content.rows[0].inspectionType = '到课率'
+    mocks.workflow.mockReturnValue({ data: attendanceWorkflow, isError: false, isPending: false })
+    mocks.records.mockReturnValue({ data: {
+      items: [], total: 0, filterOptions: {
+        studentNumbers: ['20260001', '20260002'], studentNames: ['测试学生', '其他学生'],
+        classNames: ['测试班级', '其他班级'], grades: ['2026级', '2025级'],
+      },
+    }, isError: false, isPending: false, isFetching: false })
+    render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage="draft" />)
+    fireEvent.click(screen.getAllByRole('button', { name: '查看明细' })[0])
+
+    const filterForm = await screen.findByRole('form', { name: '筛选本版记录' })
+    expect(within(filterForm).getAllByRole('combobox')).toHaveLength(4)
+    fireEvent.mouseDown(within(filterForm).getByRole('combobox', { name: '学号' }))
+    expect(await screen.findByText('20260002', { selector: '.ant-select-item-option-content' })).toBeInTheDocument()
   })
 
   it('修正生成新版本后清除旧版本筛选，仍能看到修正后的记录', async () => {
@@ -130,51 +193,89 @@ describe('通报记录修正', () => {
     expect(onStageChange).toHaveBeenCalledWith(1)
   })
 
-  it('草稿阶段只显示一次当前版本，版本历史按需展开', () => {
-    mocks.workflow.mockReturnValue({ data: workflow, isError: false, isPending: false })
+  it('版本记录只读展示各版本摘要，并保留归档入口', () => {
+    mocks.workflow.mockReturnValue({ data: workflowWithTwoVersions(), isError: false, isPending: false })
     mocks.records.mockReturnValue({ isError: false, isPending: false, isFetching: false })
     render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage="draft" />)
 
-    expect(screen.getByText('草稿 · V1')).toBeVisible()
-    expect(screen.getByText('版本与操作记录').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('草稿 · V2')).toBeVisible()
     expect(screen.getByRole('region', { name: '按检查类型分类' })).toBeVisible()
-    fireEvent.click(screen.getByText('版本与操作记录'))
-    expect(screen.getByText('版本与操作记录').closest('details')).toHaveAttribute('open')
-    expect(screen.getByRole('columnheader', { name: '生成时间' })).toBeVisible()
-    expect(screen.getByText('V1')).toBeVisible()
+    const archiveEntry = screen.getByRole('group', { name: '版本记录' })
+    expect(within(archiveEntry).getByText('版本记录 · 2 个版本')).toBeVisible()
+    expect(within(archiveEntry).getByRole('link', { name: '打开通报归档' })).toHaveAttribute('href', '/reports/archive')
+    expect(within(archiveEntry).getByText('V1')).toBeVisible()
+    expect(within(archiveEntry).getByText('V2')).toBeVisible()
+    expect(within(archiveEntry).getByText('当前版本')).toBeVisible()
+    expect(within(archiveEntry).queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('操作记录中的版本链接可查看当时保存的表格快照', async () => {
-    const historicalRecord: ReportingRecord = {
-      ...record,
-      currentDormitoryName: '1舍 203',
-      currentAreaName: '宿舍楼',
-      details: { date: '2026-03-02', round: '第一轮', result: 'UNQUALIFIED', description: '版本一保存的检查说明', remark: '版本一保存的备注' },
+  it('第二阶段和定稿阶段都在本版主视图显示指标卡片', () => {
+    mocks.workflow.mockReturnValue({ data: workflowWithIndicatorSnapshot(), isError: false, isPending: false })
+    mocks.records.mockReturnValue({ isError: false, isPending: false, isFetching: false })
+
+    for (const stage of ['draft', 'final'] as const) {
+      const { unmount } = render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage={stage} />)
+      const indicatorRegion = screen.getByRole('region', { name: 'V1 周指标' })
+      const summaryCards = within(indicatorRegion).getByLabelText('全周指标汇总')
+      expect(within(indicatorRegion).getByText('本版指标')).toBeVisible()
+      expect(within(summaryCards).getAllByText('100.00%', { exact: true })).toHaveLength(2)
+      expect(within(indicatorRegion).getByText('实到 26 / 26 人')).toBeVisible()
+      expect(within(indicatorRegion).getByText('早锻炼/早签出勤率')).toBeVisible()
+      expect(within(indicatorRegion).getByText('个人卫生不合格')).toBeVisible()
+      expect(within(indicatorRegion).getByText('出勤 130 / 130 人次')).toBeVisible()
+      expect(within(indicatorRegion).getByText(/实际早签天数 5 天/)).toBeVisible()
+      expect(within(indicatorRegion).queryByText(/早签计划日期/)).not.toBeInTheDocument()
+      expect(within(indicatorRegion).queryByText(/冻结班级/)).not.toBeInTheDocument()
+      fireEvent.click(within(indicatorRegion).getByRole('button', { name: '班级明细' }))
+      const detailDrawer = document.querySelector<HTMLElement>('.report-version-indicator-drawer')
+      expect(detailDrawer).toBeInTheDocument()
+      expect(within(detailDrawer as HTMLElement).getByRole('tab', { name: '到课率' })).toBeVisible()
+      expect(within(detailDrawer as HTMLElement).getByRole('form', { name: '筛选班级指标' })).toBeVisible()
+      expect(within(detailDrawer as HTMLElement).getByRole('combobox', { name: '筛选年级' })).toBeVisible()
+      expect(within(detailDrawer as HTMLElement).getByRole('combobox', { name: '筛选班级' })).toBeVisible()
+      expect(within(detailDrawer as HTMLElement).getByText(/显示 1 \/ 1 个班级/)).toBeVisible()
+      expect(within(indicatorRegion).queryByRole('region', { name: 'V1 数据明细' })).not.toBeInTheDocument()
+      unmount()
     }
-    mocks.workflow.mockReturnValue({ data: { ...workflow, corrections: [{
-      id: 'correction-1', versionNo: 1, recordId: historicalRecord.id, field: 'details.description',
-      beforeValue: '旧说明', afterValue: '新说明', reason: '现场记录复核后修正', correctedBy: 'office-user', correctedAt: '2026-03-02',
-    }] }, isError: false, isPending: false })
-    mocks.records.mockReturnValue({ data: { items: [historicalRecord], total: 1, filterOptions }, isError: false, isPending: false, isFetching: false })
+  })
+
+  it('班级指标明细展示本版完整班级数据并分页滚动查看', () => {
+    mocks.workflow.mockReturnValue({ data: workflowWithIndicatorSnapshot(25), isError: false, isPending: false })
+    mocks.records.mockReturnValue({ isError: false, isPending: false, isFetching: false })
     render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage="draft" />)
 
-    fireEvent.click(screen.getByText('版本与操作记录'))
-    fireEvent.click(screen.getByRole('button', { name: '查看 V1 数据明细' }))
-    const snapshotRegion = screen.getByRole('region', { name: 'V1 数据明细' })
-    const snapshotRow = within(snapshotRegion).getAllByRole('row').find(candidate => candidate.textContent?.includes('1舍 203'))
-    expect(snapshotRow).toBeDefined()
-    if (!snapshotRow) throw new Error('V1 快照中没有宿舍卫生记录')
-    expect(await within(snapshotRow).findByText('2026-03-02')).toBeVisible()
-    expect(within(snapshotRegion).getByRole('columnheader', { name: '寝室' })).toBeVisible()
-    for (const value of ['1舍 203', '轮次', '第一轮', '不合格']) {
-      expect(within(snapshotRow).getByText(value, { exact: true })).toBeVisible()
-    }
-    for (const irrelevantValue of ['课程', '教室', '区域', '宿舍楼']) {
-      expect(within(snapshotRow).queryByText(irrelevantValue, { exact: true })).not.toBeInTheDocument()
-    }
-    expect(within(snapshotRegion).queryByRole('button', { name: 'Expand row' })).not.toBeInTheDocument()
-    expect(within(snapshotRegion).getByText(/版本一保存的检查说明/)).toBeVisible()
-    expect(within(snapshotRegion).getByText('版本一保存的备注')).toBeVisible()
+    const indicatorRegion = screen.getByRole('region', { name: 'V1 周指标' })
+    fireEvent.click(within(indicatorRegion).getByRole('button', { name: '班级明细' }))
+    const drawer = document.querySelector<HTMLElement>('.report-version-indicator-drawer')
+    expect(drawer).toBeInTheDocument()
+    const detailDrawer = within(drawer as HTMLElement)
+    expect(detailDrawer.getByText('本版共 25 个班级')).toBeVisible()
+    expect(detailDrawer.getByText('显示 25 / 25 个班级 · 本版保存数据')).toBeVisible()
+    expect(detailDrawer.getByText('测试班级20')).toBeVisible()
+    expect(detailDrawer.queryByText('测试班级21')).not.toBeInTheDocument()
+    expect(drawer?.querySelector('.ant-table-body')).toHaveStyle({ maxHeight: '440px' })
+
+    const nextPage = drawer?.querySelector<HTMLButtonElement>('.ant-pagination-next button')
+    expect(nextPage).toBeEnabled()
+    fireEvent.click(nextPage as HTMLButtonElement)
+    expect(detailDrawer.getByText('测试班级21')).toBeVisible()
+    expect(detailDrawer.getByText('测试班级25')).toBeVisible()
+  })
+
+  it('版本和修正轨迹只显示归档提示，不在工作台重复呈现明细', () => {
+    mocks.workflow.mockReturnValue({ data: { ...workflowWithTwoVersions(), corrections: [{
+      id: 'correction-1', versionNo: 1, recordId: record.id, field: 'details.description',
+      beforeValue: '旧说明', afterValue: '新说明', reason: '现场记录复核后修正', correctedBy: 'office-user', correctedAt: '2026-03-02',
+    }] }, isError: false, isPending: false })
+    mocks.records.mockReturnValue({ data: { items: [record], total: 1, filterOptions }, isError: false, isPending: false, isFetching: false })
+    render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage="draft" />)
+
+    const archiveEntry = screen.getByRole('group', { name: '版本记录' })
+    expect(within(archiveEntry).getByText('版本记录 · 2 个版本')).toBeVisible()
+    expect(within(archiveEntry).getByRole('link', { name: '打开通报归档' })).toBeVisible()
+    expect(screen.queryByText('现场记录复核后修正')).not.toBeInTheDocument()
+    expect(screen.queryByText('新说明')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'V1 数据明细' })).not.toBeInTheDocument()
   })
 
   it('定稿核对保留分类明细，审核和退回集中在底栏', () => {
@@ -212,7 +313,7 @@ describe('通报记录修正', () => {
     expect(screen.getByRole('region', { name: '按检查类型分类' })).toBeVisible()
   })
 
-  it('退回草稿时直接显示最近退回原因，保留展开的历史记录', () => {
+  it('退回草稿时直接显示最近原因，详细操作轨迹跳转归档查看', () => {
     mocks.workflow.mockReturnValue({ data: { ...workflow, report: { ...workflow.report, status: 'RETURNED' }, reviews: [
       { id: 'review-1', versionNo: 1, action: 'RETURNED', comment: '请核对旧数据', actorId: 'actor', createdAt: '2026-03-01' },
       { id: 'review-2', versionNo: 1, action: 'RETURNED', comment: '请补充本周记录', actorId: 'actor', createdAt: '2026-03-02' },
@@ -221,9 +322,8 @@ describe('通报记录修正', () => {
     render(<WeeklyReportWorkflowPanel period={period} summaryRows={[summaryRow]} permissions={[]} onAccessDenied={vi.fn()} stage="draft" />)
 
     expect(screen.getByText('退回原因：请补充本周记录')).toBeVisible()
-    expect(screen.getByText('版本与操作记录').closest('details')).not.toHaveAttribute('open')
-    fireEvent.click(screen.getByText('版本与操作记录'))
-    expect(screen.getByText(/请核对旧数据/)).toBeVisible()
+    expect(screen.queryByText(/请核对旧数据/)).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '版本记录' })).toBeVisible()
   })
 
   it('按类型展示整条记录并一次提交多个直接编辑字段', async () => {

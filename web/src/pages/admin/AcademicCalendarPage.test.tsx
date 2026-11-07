@@ -4,7 +4,7 @@ import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
-import { getAcademicCalendar, getMorningScheduleCalendar, updateAcademicYear } from '../../shared/api/adminApi'
+import { getAcademicCalendar, getMorningScheduleCalendar, getSemesterReportGrades, replaceSemesterReportGrades, updateAcademicYear } from '../../shared/api/adminApi'
 import { AcademicCalendarPage } from './AcademicCalendarPage'
 
 const accessState = vi.hoisted(() => ({
@@ -20,6 +20,9 @@ vi.mock('../../shared/api/adminApi', () => ({
   }),
   createAcademicYear: vi.fn(), createSemester: vi.fn(), createWeek: vi.fn(),
   updateAcademicYear: vi.fn(), updateSemester: vi.fn(), updateWeek: vi.fn(),
+  getMasterData: vi.fn().mockResolvedValue({ items: [{ id: 'g1', kind: 'grades', name: '2025级', enabled: true }], total: 1, page: 1, pageSize: 100 }),
+  getSemesterReportGrades: vi.fn().mockResolvedValue({ semesterId: 's1', gradeIds: ['g1'], version: 3 }),
+  replaceSemesterReportGrades: vi.fn().mockResolvedValue({ semesterId: 's1', gradeIds: ['g1'], version: 4 }),
   getMorningScheduleCalendar: vi.fn().mockResolvedValue({
     academicYears: [{ id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
     semesters: [{ id: 's1', academicYearId: 'y1', code: 'FIRST', name: '2025-2026学年上学期', startDate: '2025-09-03T00:00:00Z', endDate: '2026-01-30T00:00:00Z', enabled: true }],
@@ -37,6 +40,16 @@ function setup() {
 }
 
 describe('学期周次交互', () => {
+  it('学期适用年级使用已保存集合和版本提交', async () => {
+    setup()
+    fireEvent.click(await screen.findByRole('tab', { name: '学期' }))
+    fireEvent.click(screen.getByRole('button', { name: '通报适用年级' }))
+    const dialog = await screen.findByRole('dialog', { name: /通报适用年级/ })
+    await waitFor(() => expect(getSemesterReportGrades).toHaveBeenCalledWith('s1'))
+    await waitFor(() => expect(within(dialog).getByText('2025级')).toBeVisible())
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(replaceSemesterReportGrades).toHaveBeenCalledWith({ semesterId: 's1', gradeIds: ['g1'], version: 3 }))
+  }, 30_000)
   it('校历加载失败时提供重试，不显示未配置空状态', async () => {
     vi.mocked(getAcademicCalendar).mockRejectedValueOnce(new Error('network unavailable'))
     setup()

@@ -1,6 +1,6 @@
 import { absenceSummary } from './recordSummary'
 import { useCallback, useMemo, useState } from 'react'
-import { InfoCircleOutlined, SyncOutlined } from '@ant-design/icons'
+import { InfoCircleOutlined, SyncOutlined, TeamOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, Descriptions, Drawer, Empty, Popconfirm, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,6 +10,7 @@ import type { ReportObligation, ReportingPeriod, ReportingRecord, ReportingRecor
 import { useWorkContext } from '../../features/work-context/useWorkContext'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { WeeklyReportWorkflowPanel } from '../../features/reporting/ui/WeeklyReportWorkflowPanel'
+import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from '../../features/reporting/ui/ReportVersionRecordFilters'
 import { inspectionResultLabel } from '../../features/reporting/model/labels'
 import { groupSummaryRows } from '../../features/reporting/model/groupReportRows'
 
@@ -181,6 +182,8 @@ export function WeeklyReportSummaryPage() {
   const [selectedTypePeriodKey, setSelectedTypePeriodKey] = useState('')
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(20)
+  const [recordFilters, setRecordFilters] = useState<ReportVersionRecordFiltersValue>({})
+  const [recordFilterRevision, setRecordFilterRevision] = useState(0)
   const [reportScopeChanged, setReportScopeChanged] = useState(false)
   const workContextQuery = useWorkContext()
   const permissionQuery = useAttendancePermissions()
@@ -219,6 +222,11 @@ export function WeeklyReportSummaryPage() {
     setManualPeriodSelection(true)
     setSearchParams({}, { replace: true })
   }, [queryClient, setSearchParams])
+  const resetSourceFilters = useCallback(() => {
+    setRecordFilters({})
+    setRecordFilterRevision(revision => revision + 1)
+    setRecordPage(1)
+  }, [])
   const summaryQuery = useReportingSummary(
     selectedPeriod?.semesterId ?? '',
     selectedPeriod?.weekId ?? '',
@@ -236,34 +244,48 @@ export function WeeklyReportSummaryPage() {
     departmentId: selectedCell?.departmentId ?? '',
     collegeLevel: selectedCell?.collegeLevel ?? false,
     inspectionTypeId: selectedCell?.inspectionTypeId ?? '',
+    studentNumber: recordFilters.studentNumber,
+    studentName: recordFilters.studentName,
+    className: recordFilters.className,
+    grade: recordFilters.grade,
     page: recordPage,
     pageSize: recordPageSize,
-  }), [selectedCell, selectedPeriod, recordPage, recordPageSize])
+  }), [selectedCell, selectedPeriod, recordFilters, recordPage, recordPageSize])
   const recordsQuery = useReportingRecords(recordsQueryArgs, Boolean(visibleTypeId && selectedCell && selectedPeriod), clearReportScope)
   const typeRows = useMemo(() => groupSummaryRows(summaryQuery.data?.rows ?? []), [summaryQuery.data?.rows])
   const sourceCells = (summaryQuery.data?.rows ?? []).filter(row => row.inspectionTypeId === visibleTypeId)
   const incompleteCells = (summaryQuery.data?.rows ?? []).filter(row => row.isRequired && row.confirmedBatchCount === 0 && row.zeroRecordConfirmedBatchCount === 0)
 
   const columns: ColumnsType<ReportingSummaryRow> = [
-    { title: '检查类型', dataIndex: 'inspectionTypeName', width: 190 },
-    { title: '提交批次', dataIndex: 'submissionCount', width: 92, align: 'right' },
-    { title: '草稿', dataIndex: 'draftBatchCount', width: 76, align: 'right' },
-    { title: '待审核', dataIndex: 'pendingReviewBatchCount', width: 76, align: 'right' },
-    { title: '退回', dataIndex: 'returnedBatchCount', width: 68, align: 'right' },
-    { title: '已确认批次', dataIndex: 'confirmedBatchCount', width: 102, align: 'right' },
     {
-      title: '已确认记录', dataIndex: 'confirmedRecordCount', width: 105, align: 'right',
-      render: (count: number) => count > 0 ? <Tag color="green">{count}</Tag> : count,
+      title: '检查类型', dataIndex: 'inspectionTypeName', width: 170,
     },
-    { title: '已确认零回执', dataIndex: 'zeroRecordConfirmedBatchCount', width: 125, align: 'right' },
-    { title: '未完成应交项', key: 'incomplete', width: 120, align: 'right', render: (_value, row) => incompleteCells.filter(item => item.inspectionTypeId === row.inspectionTypeId).length },
+    {
+      title: '提交情况', key: 'submissions', width: 280,
+      render: (_value, row) => {
+        const incompleteCount = incompleteCells.filter(item => item.inspectionTypeId === row.inspectionTypeId).length
+        return <Space size={[4, 4]} wrap>
+          {row.submissionCount > 0 ? <Tag>已提交 {row.submissionCount} 批</Tag> : <Typography.Text type="secondary">暂无提交</Typography.Text>}
+          {row.draftBatchCount > 0 && <Tag>草稿 {row.draftBatchCount}</Tag>}
+          {row.pendingReviewBatchCount > 0 && <Tag color="gold">待审核 {row.pendingReviewBatchCount}</Tag>}
+          {row.returnedBatchCount > 0 && <Tag color="red">已退回 {row.returnedBatchCount}</Tag>}
+          {incompleteCount > 0 && <Tag color="orange">未完成应交 {incompleteCount}</Tag>}
+        </Space>
+      },
+    },
+    {
+      title: '确认数据', key: 'confirmed', width: 220,
+      render: (_value, row) => row.confirmedBatchCount > 0 || row.zeroRecordConfirmedBatchCount > 0
+        ? <Typography.Text>{row.confirmedBatchCount} 批 · {row.confirmedRecordCount} 条记录 · 零回执 {row.zeroRecordConfirmedBatchCount}</Typography.Text>
+        : <Typography.Text type="secondary">尚无确认数据</Typography.Text>,
+    },
     {
       title: '来源明细', key: 'action', width: 145, fixed: 'right',
       render: (_value, row) => <Button type="link" size="small" onClick={() => {
         setSelectedTypeId(row.inspectionTypeId)
         setSelectedTypePeriodKey(effectivePeriodKey)
-        setSelectedCell(row)
-        setRecordPage(1)
+        setSelectedCell(typeRows.find(item => item.inspectionTypeId === row.inspectionTypeId) ?? null)
+        resetSourceFilters()
       }}>查看提交与记录</Button>,
     },
   ]
@@ -291,6 +313,13 @@ export function WeeklyReportSummaryPage() {
   const periodOptions = periods.map(period => ({ value: `${period.semesterId}:${period.weekId}`, label: periodLabel(period) }))
   const selectedCellTitle = typeRows.find(row => row.inspectionTypeId === visibleTypeId)?.inspectionTypeName ?? '来源明细'
   const records = recordsQuery.data?.items ?? []
+  const sourceConfirmedRecordCount = sourceCells.reduce((total, row) => total + row.confirmedRecordCount, 0)
+  const submittedUnitCount = sourceCells.filter(row => row.submissionCount > 0).length
+  const sourceConfirmedBatchCount = sourceCells.reduce((total, row) => total + row.confirmedBatchCount + row.zeroRecordConfirmedBatchCount, 0)
+  const aggregateSourceCell = typeRows.find(row => row.inspectionTypeId === visibleTypeId) ?? null
+  const selectedSourceName = selectedCell?.departmentId || selectedCell?.collegeLevel
+    ? selectedCell.collegeLevel ? '管理员' : selectedCell.departmentName
+    : '全部来源'
 
   return (
     <section className="attendance-page weekly-report-summary-page" aria-labelledby="weekly-report-summary-title">
@@ -374,7 +403,7 @@ export function WeeklyReportSummaryPage() {
               columns={columns}
               dataSource={typeRows}
               pagination={false}
-              scroll={{ x: 1300 }}
+              scroll={{ x: 815 }}
               loading={summaryQuery.isFetching}
               className="weekly-report-summary-table"
               rowClassName={() => 'weekly-report-inspection-row'}
@@ -419,63 +448,109 @@ export function WeeklyReportSummaryPage() {
       {selectedPeriod && canManageObligations && activeStage === 0 && <WeeklyObligationManagement period={selectedPeriod} />}
       <Drawer
         className="weekly-report-record-drawer"
-        title={<span className="weekly-report-drawer-title">{selectedCellTitle}</span>}
+        title={<span className="weekly-report-drawer-title">来源明细 · {selectedCellTitle}</span>}
         open={Boolean(visibleTypeId)}
         size={1040}
         styles={{ body: { overflowX: 'hidden' } }}
-        onClose={() => { setSelectedCell(null); setSelectedTypeId('') }}
+        onClose={() => { setSelectedCell(null); setSelectedTypeId(''); resetSourceFilters() }}
       >
-        <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-          <Typography.Title level={5}>各单位提交汇总</Typography.Title>
-          <Button size="small" onClick={() => { setSelectedCell(typeRows.find(row => row.inspectionTypeId === visibleTypeId) ?? null); setRecordPage(1) }}>查看此类全部已确认记录</Button>
-          <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
-            dataSource={sourceCells} columns={[
-              { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '管理员' : row.departmentName },
-              { title: '提交批次', dataIndex: 'submissionCount' },
-              { title: '已确认批次', dataIndex: 'confirmedBatchCount' },
-              { title: '已确认记录', dataIndex: 'confirmedRecordCount' },
-              { title: '零记录回执', dataIndex: 'zeroRecordConfirmedBatchCount' },
-              { title: '记录', key: 'records', render: (_value, row) => row.confirmedRecordCount > 0
-                ? <Button type="link" onClick={() => { setSelectedCell(row); setRecordPage(1) }}>查看记录</Button> : '—' },
-            ]} />
-          {selectedCell && <Typography.Text strong>{selectedCell.departmentId || selectedCell.collegeLevel ? selectedCell.collegeLevel ? '管理员' : selectedCell.departmentName : '全部来源'} · 已确认记录</Typography.Text>}
-          {selectedCell && <>
-          <Alert
-            type="info"
-            showIcon
-            title="以下为当前确认修订中的实际提交记录"
-            description="这里不包含草稿、待审核或已退回记录。需要修正数据时，请回到平台的业务记录流程处理后再刷新通报汇总。"
-          />
-          {recordsQuery.isError && records.length > 0 && (
-            <Alert type="warning" showIcon title="记录刷新失败，仍显示最近一次成功加载的内容。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
-          )}
-          {recordsQuery.isError && records.length === 0 && (
-            <Alert type="error" showIcon title="已确认记录加载失败" description="请检查网络或权限后重试。" action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>} />
-          )}
-          <Table<ReportingRecord>
-            rowKey="id"
-            size="small"
-            columns={recordColumns}
-            dataSource={records}
-            loading={recordsQuery.isFetching}
-            locale={{ emptyText: recordsQuery.isError ? '记录加载失败' : '本项暂无已确认的提交记录' }}
-            expandable={{ expandedRowRender: record => <RecordDetailsView record={record} />, expandRowByClick: false }}
-            scroll={{ x: 760 }}
-            pagination={{
-              current: recordPage,
-              pageSize: recordPageSize,
-              total: recordsQuery.data?.total ?? 0,
-              showSizeChanger: true,
-              pageSizeOptions: [10, 20, 50, 100],
-              showTotal: total => `共 ${total} 条已确认记录`,
-              onChange: (page, pageSize) => {
-                if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) }
-                else setRecordPage(page)
-              },
-            }}
-          />
-          </>}
-        </Space>
+        <div className="weekly-report-source-drawer">
+          <div className="weekly-report-source-overview" aria-label="来源数据概况">
+            <div><Typography.Text type="secondary">提交单位</Typography.Text><Typography.Text strong>{sourceCells.length}</Typography.Text></div>
+            <div><Typography.Text type="secondary">已提交单位</Typography.Text><Typography.Text strong>{submittedUnitCount}</Typography.Text></div>
+            <div><Typography.Text type="secondary">已确认批次</Typography.Text><Typography.Text strong>{sourceConfirmedBatchCount}</Typography.Text></div>
+            <div><Typography.Text type="secondary">已确认记录</Typography.Text><Typography.Text strong>{sourceConfirmedRecordCount}</Typography.Text></div>
+          </div>
+          <div className="weekly-report-source-workspace">
+            <section className="weekly-report-source-panel" aria-labelledby="weekly-report-submission-list-title">
+              <header className="weekly-report-source-panel-heading">
+                <div>
+                  <Typography.Text id="weekly-report-submission-list-title" strong>提交情况</Typography.Text>
+                  <Typography.Text type="secondary">按单位核对状态</Typography.Text>
+                </div>
+              </header>
+              <Table<ReportingSummaryRow>
+                rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`}
+                className="weekly-report-source-submissions-table"
+                size="small"
+                pagination={false}
+                dataSource={sourceCells}
+                rowClassName={row => selectedCell?.departmentId === row.departmentId && selectedCell.collegeLevel === row.collegeLevel ? 'weekly-report-source-selected-row' : ''}
+                columns={[
+                  { title: '提交单位', key: 'unit', width: 120, render: (_value, row) => row.collegeLevel ? '管理员' : row.departmentName },
+                  { title: '提交状态', key: 'status', render: (_value, row) => <Space size={[4, 4]} wrap>
+                    {row.submissionCount > 0 ? <Tag color="blue">已提交 {row.submissionCount} 批</Tag> : <Tag>未提交</Tag>}
+                    {row.pendingReviewBatchCount > 0 && <Tag color="gold">待审核 {row.pendingReviewBatchCount}</Tag>}
+                    {row.returnedBatchCount > 0 && <Tag color="red">已退回 {row.returnedBatchCount}</Tag>}
+                  </Space> },
+                  { title: '确认记录', key: 'confirmed', width: 100, align: 'right', render: (_value, row) => row.confirmedRecordCount },
+                  { title: '操作', key: 'action', width: 90, align: 'right', render: (_value, row) => <Button
+                    type="link"
+                    size="small"
+                    aria-label={`查看${row.collegeLevel ? '管理员' : row.departmentName}记录`}
+                    onClick={() => { setSelectedCell(row); resetSourceFilters() }}
+                  >查看记录</Button> },
+                ]}
+                scroll={{ x: 560 }}
+              />
+            </section>
+            <section className="weekly-report-source-panel weekly-report-source-records-panel" aria-labelledby="weekly-report-confirmed-records-title">
+              <header className="weekly-report-source-panel-heading weekly-report-source-records-heading">
+                <div>
+                  <Typography.Text id="weekly-report-confirmed-records-title" strong>已确认记录</Typography.Text>
+                  <Typography.Text type="secondary">{selectedSourceName} · 结果仅含已确认记录，筛选项来自当前在籍名册</Typography.Text>
+                </div>
+                {selectedCell?.departmentId || selectedCell?.collegeLevel ? <Button
+                  className="weekly-report-source-all-button"
+                  icon={<TeamOutlined aria-hidden="true" />}
+                  onClick={() => {
+                  setSelectedCell(aggregateSourceCell)
+                  resetSourceFilters()
+                }}>全部来源</Button> : <Tag color="blue">全部来源</Tag>}
+              </header>
+              <div className="weekly-report-source-record-filters">
+                <ReportVersionRecordFilters
+                  key={recordFilterRevision}
+                  className="weekly-report-source-record-filter-controls"
+                  ariaLabel="筛选已确认记录"
+                  filterOptions={recordsQuery.data?.filterOptions}
+                  onApply={filters => { setRecordFilters(filters); setRecordPage(1) }}
+                />
+                <Typography.Text type="secondary" className="weekly-report-source-record-filter-count">
+                  {Object.values(recordFilters).some(Boolean) ? '筛选结果' : '全部记录'} · 共 {recordsQuery.data?.total ?? 0} 条
+                </Typography.Text>
+              </div>
+              {recordsQuery.isError && <Alert
+                type={records.length > 0 ? 'warning' : 'error'}
+                showIcon
+                title={records.length > 0 ? '记录刷新失败，仍显示最近一次成功加载的内容。' : '已确认记录加载失败'}
+                action={<Button onClick={() => void recordsQuery.refetch()}>重试</Button>}
+              />}
+              <Table<ReportingRecord>
+                rowKey="id"
+                size="small"
+                columns={recordColumns}
+                dataSource={records}
+                loading={recordsQuery.isFetching}
+                locale={{ emptyText: recordsQuery.isError ? '记录加载失败' : selectedCell?.departmentId || selectedCell?.collegeLevel ? '该单位暂无已确认记录' : '当前检查类型暂无已确认记录' }}
+                expandable={{ expandedRowRender: record => <RecordDetailsView record={record} />, expandRowByClick: false }}
+                scroll={{ x: 1000, y: records.length > 8 ? 420 : undefined }}
+                pagination={{
+                  current: recordPage,
+                  pageSize: recordPageSize,
+                  total: recordsQuery.data?.total ?? 0,
+                  showSizeChanger: true,
+                  pageSizeOptions: [10, 20, 50, 100],
+                  showTotal: total => `共 ${total} 条已确认记录`,
+                  onChange: (page, pageSize) => {
+                    if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) }
+                    else setRecordPage(page)
+                  },
+                }}
+              />
+            </section>
+          </div>
+        </div>
       </Drawer>
     </section>
   )

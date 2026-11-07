@@ -111,8 +111,7 @@ type AttendanceRecord struct {
 }
 
 // NewAttendanceRecord enforces the invariants shared by manual and imported drafts.
-// 无机课堂 reuses the course-absence storage but records one violation per day, so the
-// server owns both the period and the hour count instead of accepting them as input.
+// 无机课堂 shares attendance storage but identifies a weekly event by student and course section.
 func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 	typeCode := strings.TrimSpace(input.InspectionTypeCode)
 	if typeCode != InspectionTypeAttendance && typeCode != InspectionTypeUnattended {
@@ -122,7 +121,12 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 		return AttendanceRecord{}, ErrInvalidAttendanceRecord
 	}
 	if typeCode == InspectionTypeUnattended {
-		input.AbsenceHours, input.PeriodText = 1, ""
+		first, last, validPeriod := ParseCoursePeriod(input.PeriodText)
+		if !validPeriod {
+			return AttendanceRecord{}, ErrInvalidAttendanceRecord
+		}
+		input.AbsenceHours = 1
+		input.PeriodText = strconv.Itoa(first) + "-" + strconv.Itoa(last)
 	} else {
 		if math.IsNaN(input.AbsenceHours) || math.IsInf(input.AbsenceHours, 0) || input.AbsenceHours <= 0 ||
 			strings.TrimSpace(input.PeriodText) == "" {
@@ -147,11 +151,10 @@ func NewAttendanceRecord(input AttendanceInput) (AttendanceRecord, error) {
 	input.GradeSnapshot = strings.TrimSpace(input.GradeSnapshot)
 	input.PeriodText = strings.TrimSpace(input.PeriodText)
 	input.Remark = strings.TrimSpace(input.Remark)
-	// 到课率 identifies one student/class/period event; 无机课堂 counts one student/course/day.
-	// Both paths must share the key or a manual record and its imported twin slip past each other.
+	// Both paths normalize course sections before constructing a student-based identity.
 	dedupKey := attendanceDedupKey(input)
 	if typeCode == InspectionTypeUnattended {
-		dedupKey = courseAbsenceDedupKey(input)
+		dedupKey = unattendedDedupKey(input)
 	}
 	return AttendanceRecord{
 		ID: uuid.NewString(), InspectionTypeID: input.InspectionTypeID, SemesterID: input.SemesterID, WeekID: input.WeekID,
@@ -189,10 +192,7 @@ func missingAttendanceContext(input AttendanceInput) bool {
 
 func attendanceDedupKey(input AttendanceInput) string {
 	localDate := input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
-	period := strings.TrimSpace(input.PeriodText)
-	if first, last, ok := ParseCoursePeriod(period); ok {
-		period = strconv.Itoa(first) + "-" + strconv.Itoa(last)
-	}
+	period := normalizedCoursePeriod(input.PeriodText)
 	canonical := strings.Join([]string{
 		input.SemesterID, input.WeekID, input.InspectionTypeID, input.ClassID, input.StudentID, localDate, period,
 	}, "\x1f")
@@ -200,15 +200,22 @@ func attendanceDedupKey(input AttendanceInput) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// courseAbsenceDedupKey identifies one student/course/day event. 无机课堂 records one
-// violation per day, so the key ignores any clock time and the fixed period.
-func courseAbsenceDedupKey(input AttendanceInput) string {
-	localDate := input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02")
+// unattendedDedupKey identifies one student and normalized course section within the week.
+func unattendedDedupKey(input AttendanceInput) string {
+	period := normalizedCoursePeriod(input.PeriodText)
 	canonical := strings.Join([]string{
-		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.CourseID, localDate,
+		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, period,
 	}, "\x1f")
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])
+}
+
+func normalizedCoursePeriod(value string) string {
+	period := strings.TrimSpace(value)
+	if first, last, ok := ParseCoursePeriod(period); ok {
+		return strconv.Itoa(first) + "-" + strconv.Itoa(last)
+	}
+	return period
 }
 
 // AttendanceDedupKey restores the internal idempotency key after a normalized
@@ -220,13 +227,13 @@ func AttendanceDedupKey(record AttendanceRecord) string {
 	})
 }
 
-// UnattendedDedupKey restores the 无机课堂 identity (student + course + business date)
+// UnattendedDedupKey restores the 无机课堂 identity (student + course section)
 // after a normalized import row is decoded. It must stay identical to the key the
 // manual entry path stores, otherwise the two paths cannot detect each other.
 func UnattendedDedupKey(record AttendanceRecord) string {
-	return courseAbsenceDedupKey(AttendanceInput{
+	return unattendedDedupKey(AttendanceInput{
 		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
-		StudentID: record.StudentID, CourseID: record.CourseID, OccurredAt: record.OccurredAt,
+		StudentID: record.StudentID, PeriodText: record.PeriodText,
 	})
 }
 

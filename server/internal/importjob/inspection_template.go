@@ -26,6 +26,17 @@ func InspectionTemplate(typeCode string) (CourseTemplateDefinition, error) {
 	return CourseTemplate(typeCode)
 }
 
+// InspectionTemplateVersion returns the version bound to the selected import contract.
+func InspectionTemplateVersion(typeCode string) (int, error) {
+	if _, err := InspectionTemplate(typeCode); err != nil {
+		return 0, err
+	}
+	if typeCode == inspection.InspectionTypeUnattended {
+		return UnattendedTemplateVersion, nil
+	}
+	return CurrentTemplateVersion, nil
+}
+
 // BuildInspectionTemplate generates a supported immutable template version.
 func BuildInspectionTemplate(typeCode string) ([]byte, error) {
 	if typeCode == inspection.InspectionTypeClassroomHygiene {
@@ -57,6 +68,10 @@ func NewInspectionXLSXParser(typeCode string, maxBytes int64) (*XLSXParser, erro
 	}
 	config := NewAttendanceXLSXParser(maxBytes).config
 	config.ExpectedTemplateCode, config.ExpectedSheetName = definition.Code, definition.Sheet
+	config.ExpectedTemplateVersion, err = InspectionTemplateVersion(typeCode)
+	if err != nil {
+		return nil, err
+	}
 	if typeCode == inspection.InspectionTypeUnattended {
 		config.Fields = append([]TemplateField(nil), unattendedImportFields...)
 	}

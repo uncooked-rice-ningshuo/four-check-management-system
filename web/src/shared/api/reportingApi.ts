@@ -1,4 +1,4 @@
-import type { AddReportAdjustmentInput, AddReportCorrectionInput, CreateReportObligationInput, GenerateReportDraftInput, ReportAdjustmentSummary, ReportAdjustmentResult, ReportArchiveEntry, ReportArchivePage, ReportArchiveQuery, ReportCorrectionLog, ReportCorrectionResult, ReportDraft, ReportObligation, ReportObligationDepartmentScope, ReportObligationInspectionType, ReportObligationOptions, ReportReview, ReportState, ReportTransitionAction, ReportTransitionInput, ReportVersion, ReportWorkflow, ReportVersionContent, ReportVersionRecordsQuery, ReportingPeriod, ReportingPeriodPage, ReportingRecord, ReportingRecordPage, ReportingRecordsQuery, ReportingSummary, ReportingSummaryRow, ReportingSummaryTotals } from '../../entities/reporting/model/reporting'
+import type { AddReportAdjustmentInput, AddReportCorrectionInput, CreateReportObligationInput, GenerateReportDraftInput, ReportAdjustmentSummary, ReportAdjustmentResult, ReportArchiveEntry, ReportArchivePage, ReportArchiveQuery, ReportCorrectionLog, ReportCorrectionResult, ReportCountMetric, ReportDraft, ReportObligation, ReportObligationDepartmentScope, ReportObligationInspectionType, ReportObligationOptions, ReportReview, ReportState, ReportTransitionAction, ReportTransitionInput, ReportVersion, ReportWorkflow, ReportVersionContent, ReportVersionRecordsQuery, ReportingPeriod, ReportingPeriodPage, ReportingRecord, ReportingRecordPage, ReportingRecordsQuery, ReportingSummary, ReportingSummaryRow, ReportingSummaryTotals } from '../../entities/reporting/model/reporting'
 import { apiRequest } from './httpClient'
 import { badResponse, object } from './inspectionOptionsApi'
 
@@ -38,6 +38,63 @@ function isTotals(value: unknown): value is ReportingSummaryTotals {
   return object(value)
     && ['submissionCount', 'draftBatchCount', 'pendingReviewBatchCount', 'returnedBatchCount', 'confirmedBatchCount', 'confirmedRecordCount', 'pendingReviewOrReturnedRecordCount', 'zeroRecordPendingReviewBatchCount', 'zeroRecordReturnedBatchCount', 'zeroRecordConfirmedBatchCount']
       .every(key => Number.isInteger(value[key]) && Number(value[key]) >= 0)
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0
+}
+
+function isNullableRate(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100)
+}
+
+function isReportCountMetric(value: unknown): value is ReportCountMetric {
+  return object(value) && isNonNegativeInteger(value.rawRecordCount) && isNonNegativeInteger(value.count)
+    && (value.personTimeCount === undefined || isNonNegativeInteger(value.personTimeCount))
+}
+
+function isOptionalMetric<T>(value: unknown, validate: (candidate: unknown) => candidate is T): boolean {
+  return value === undefined || value === null || validate(value)
+}
+
+function isReportIndicatorValues(value: unknown): boolean {
+  return object(value)
+    && isNonNegativeInteger(value.expectedStudentCount)
+    && isOptionalMetric(value.attendanceRate, (metric): metric is NonNullable<typeof value.attendanceRate> => object(metric)
+      && isNonNegativeInteger(metric.violationStudentCount) && isNonNegativeInteger(metric.expectedStudentCount)
+      && isNonNegativeInteger(metric.attendedStudentCount) && isNullableRate(metric.rate))
+    && isOptionalMetric(value.unattendedClassroom, (metric): metric is NonNullable<typeof value.unattendedClassroom> => object(metric)
+      && isNonNegativeInteger(metric.rawRecordCount) && isNonNegativeInteger(metric.violationCount)
+      && isNonNegativeInteger(metric.violationPersonTimeCount)
+      && isNonNegativeInteger(metric.violatingStudentCount))
+    && isOptionalMetric(value.morningAttendance, (metric): metric is NonNullable<typeof value.morningAttendance> => object(metric)
+      && isNonNegativeInteger(metric.plannedDayCount) && isNonNegativeInteger(metric.expectedPersonTimes)
+      && isNonNegativeInteger(metric.absencePersonTimes) && isNonNegativeInteger(metric.attendedPersonTimes)
+      && isNonNegativeInteger(metric.penaltyCount) && isNullableRate(metric.rate))
+    && isOptionalMetric(value.eveningSelfStudy, isReportCountMetric)
+    && isOptionalMetric(value.classroomHygiene, isReportCountMetric)
+    && isOptionalMetric(value.dormitoryPersonalHygiene, isReportCountMetric)
+    && isOptionalMetric(value.dormitoryPublicHygiene, isReportCountMetric)
+    && isOptionalMetric(value.dormitoryHygieneTotal, isReportCountMetric)
+    && isOptionalMetric(value.lateReturn, isReportCountMetric)
+}
+
+function isReportIndicators(value: unknown): boolean {
+  return object(value) && object(value.inputs)
+    && (value.inputs.weekMultiplier === 1 || value.inputs.weekMultiplier === 2)
+    && Array.isArray(value.inputs.morningPlannedDates)
+    && value.inputs.morningPlannedDates.every(date => typeof date === 'string'
+      && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)))
+    && Array.isArray(value.inputs.classes)
+    && value.inputs.classes.every(item => object(item) && typeof item.grade === 'string'
+      && typeof item.className === 'string' && isNonNegativeInteger(item.expectedStudentCount))
+    && (value.inputs.grades === undefined || (Array.isArray(value.inputs.grades)
+      && value.inputs.grades.every(item => object(item) && typeof item.grade === 'string'
+        && isNonNegativeInteger(item.expectedStudentCount))))
+    && Array.isArray(value.includedTypeCodes) && value.includedTypeCodes.every(code => typeof code === 'string')
+    && Array.isArray(value.classes) && value.classes.every(item => object(item)
+      && typeof item.grade === 'string' && typeof item.className === 'string' && isReportIndicatorValues(item))
+    && isReportIndicatorValues(value.totals)
 }
 
 function isRecordReference(value: unknown): boolean {
@@ -131,9 +188,11 @@ function isReportVersionContent(value: unknown): value is ReportVersionContent {
     || !Array.isArray(value.corrections) || !value.corrections.every(item => object(item)
       && typeof item.id === 'string' && typeof item.recordId === 'string' && typeof item.field === 'string')
     || (value.adjustments !== undefined && value.adjustments !== null && (!Array.isArray(value.adjustments) || !value.adjustments.every(isReportAdjustmentSummary)))
+    || (value.indicators !== undefined && value.indicators !== null && !isReportIndicators(value.indicators))
     || typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))) return false
   return value.rows.every(row => object(row) && typeof row.departmentId === 'string' && typeof row.departmentName === 'string'
     && typeof row.collegeLevel === 'boolean' && typeof row.inspectionTypeId === 'string' && typeof row.inspectionType === 'string'
+    && (row.inspectionTypeCode === undefined || typeof row.inspectionTypeCode === 'string')
     && Number.isInteger(row.recordCount) && Number(row.recordCount) >= 0
     && Number.isInteger(row.confirmedZeroReceiptCount) && Number(row.confirmedZeroReceiptCount) >= 0
     && typeof row.dataStatus === 'string')
@@ -304,10 +363,15 @@ export const reportingApi = {
       page: String(query.page),
       pageSize: String(query.pageSize),
     })
+    if (query.studentNumber) params.set('studentNumber', query.studentNumber)
+    if (query.studentName) params.set('studentName', query.studentName)
+    if (query.className) params.set('className', query.className)
+    if (query.grade) params.set('grade', query.grade)
     const value = await apiRequest<unknown>(`/reports/records?${params.toString()}`)
     if (!object(value) || !Array.isArray(value.items) || !value.items.every(isReportingRecord)
       || !Number.isInteger(value.total) || Number(value.total) < 0
-      || value.page !== query.page || value.pageSize !== query.pageSize) throw badResponse()
+      || value.page !== query.page || value.pageSize !== query.pageSize
+      || (value.filterOptions !== undefined && !isReportVersionRecordFilterOptions(value.filterOptions))) throw badResponse()
     return value as ReportingRecordPage
   },
   async obligationOptions(semesterId: string, weekId: string): Promise<ReportObligationOptions> {

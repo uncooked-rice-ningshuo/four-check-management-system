@@ -252,6 +252,10 @@ func (h *handler) writeReportError(c *gin.Context, err error) {
 		writeError(c, http.StatusNotFound, "REPORT_CORRECTION_NOT_FOUND", "未找到通报修正记录")
 	case errors.Is(err, reporting.ErrReportSourceChanged):
 		writeError(c, http.StatusConflict, "REPORT_SOURCE_CHANGED", "确认数据在通报生成后发生变化，请重新生成新版本")
+	case errors.Is(err, reporting.ErrReportGradesUnconfigured):
+		writeError(c, http.StatusConflict, "REPORT_GRADES_UNCONFIGURED", "该学期尚未配置通报适用年级")
+	case errors.Is(err, reporting.ErrReportMetricScopeInvalid):
+		writeError(c, http.StatusConflict, "REPORT_METRIC_SCOPE_INVALID", "通报记录与学期适用班级或人数不一致，请核对来源数据")
 	case errors.Is(err, reporting.ErrInvalidPeriod):
 		writeError(c, http.StatusBadRequest, "INVALID_REPORT_PERIOD", "请选择有效的学期和周次")
 	case errors.Is(err, reporting.ErrInvalidRecordsQuery):

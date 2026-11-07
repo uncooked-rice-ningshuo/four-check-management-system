@@ -8,7 +8,7 @@ import type { ReportWorkflow, ReportingPeriod, ReportingSummary } from '../../en
 import { WeeklyReportSummaryPage } from './WeeklyReportSummaryPage'
 
 vi.mock('../../shared/api/reportingApi', () => ({
-  reportingApi: { periods: vi.fn(), summary: vi.fn(), workflow: vi.fn() },
+  reportingApi: { periods: vi.fn(), summary: vi.fn(), workflow: vi.fn(), records: vi.fn() },
 }))
 
 const period: ReportingPeriod = {
@@ -62,6 +62,8 @@ beforeEach(() => {
     .mockResolvedValueOnce(summary)
     .mockRejectedValueOnce(new Error('synthetic refresh failure'))
   vi.mocked(reportingApi.workflow).mockReset().mockResolvedValue({ report: null, versions: [], reviews: [], corrections: [] })
+  vi.mocked(reportingApi.records).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20,
+    filterOptions: { studentNumbers: ['20260001'], studentNames: ['李同学'], classNames: ['计算机一班'], grades: ['2026级'] } })
 })
 
 describe('周通报汇总缓存状态', () => {
@@ -83,11 +85,26 @@ describe('周通报汇总缓存状态', () => {
     expect(within(typeTable as HTMLElement).getAllByRole('row').filter(row => row.textContent?.includes('到课率'))).toHaveLength(1)
     expect(within(typeSection).getByText('待完成应交项')).toBeVisible()
     fireEvent.click(within(typeSection).getByRole('button', { name: '查看提交与记录' }))
-    expect(await screen.findByText('各单位提交汇总')).toBeVisible()
+    expect(await screen.findByRole('region', { name: '提交情况' })).toBeVisible()
     expect(screen.getAllByText('管理员').length).toBeGreaterThan(0)
+    expect(screen.getByRole('region', { name: '已确认记录' })).toBeVisible()
+    expect(await screen.findByText('全部来源')).toBeVisible()
+    expect(reportingApi.records).toHaveBeenCalledWith(expect.objectContaining({ inspectionTypeId: 'type-1', page: 1 }))
+
+    const recordFilter = screen.getByRole('form', { name: '筛选已确认记录' })
+    for (const [label, value] of [['学号', '20260001'], ['姓名', '李同学'], ['班级', '计算机一班'], ['年级', '2026级']]) {
+      fireEvent.mouseDown(within(recordFilter).getByRole('combobox', { name: label }))
+      fireEvent.click(await screen.findByText(value, { selector: '.ant-select-item-option-content' }))
+    }
+    expect(within(recordFilter).getByRole('button', { name: '筛选' })).toBeVisible()
+    expect(within(recordFilter).getByRole('button', { name: '重置' })).toBeVisible()
+    fireEvent.click(within(recordFilter).getByRole('button', { name: '筛选' }))
+    await waitFor(() => expect(reportingApi.records).toHaveBeenLastCalledWith(expect.objectContaining({
+      studentNumber: '20260001', studentName: '李同学', className: '计算机一班', grade: '2026级', page: 1, pageSize: 20,
+    })))
   })
 
-  it('在草稿中用中文展示来源状态、审核动作和修正字段，未知值不暴露内部代码', async () => {
+  it('在草稿中展示来源状态，并将版本与操作轨迹导向归档', async () => {
     const statuses = ['NO_CONFIRMED_DATA', 'CONFIRMED_RECORDS', 'CONFIRMED_ZERO_RECORD_RECEIPT', 'CONFIRMED_RECORDS_AND_ZERO_RECEIPT', 'FUTURE_STATUS']
     const workflow: ReportWorkflow = {
       report: { id: 'report-1', semesterId: period.semesterId, weekId: period.weekId, status: 'DRAFT', versionNo: 1, rowVersion: 1, updatedAt: '2026-03-16T08:00:00Z' },
@@ -110,9 +127,11 @@ describe('周通报汇总缓存状态', () => {
     expect(screen.getByRole('columnheader', { name: '检查类型' })).toBeVisible()
     expect(screen.getByText('草稿 · V1')).toBeVisible()
     expect(screen.getByRole('combobox', { name: '选择通报学期和周次' }).closest('.ant-select')).toHaveTextContent('2025-2026下学期 · 第 2 周')
-    fireEvent.click(screen.getByText('版本与操作记录'))
-    expect(screen.getByText('检查结果')).toBeVisible()
-    expect(screen.getByText(/确认定稿 · V1/)).toBeVisible()
+    const archiveEntry = screen.getByRole('group', { name: '版本记录' })
+    expect(within(archiveEntry).getByText('版本记录 · 1 个版本')).toBeVisible()
+    expect(within(archiveEntry).getByRole('link', { name: '打开通报归档' })).toHaveAttribute('href', '/reports/archive')
+    expect(screen.queryByText('检查结果')).not.toBeInTheDocument()
+    expect(screen.queryByText(/确认定稿 · V1/)).not.toBeInTheDocument()
     expect(screen.queryByText('待部门重确认')).not.toBeInTheDocument()
     for (const code of [...statuses, 'details.result', 'FINALIZED', 'REQUIRED']) expect(screen.queryByText(code)).not.toBeInTheDocument()
   })
@@ -134,14 +153,15 @@ describe('周通报汇总缓存状态', () => {
     expect(container.querySelector('.weekly-report-summary-table')?.closest('.ant-card')).toBeNull()
     expect(container.querySelector('.weekly-report-kpi-card')).toBeNull()
     expect(screen.getAllByText(/2026年3月9日—2026年3月15日/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('columnheader', { name: '待审核' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '提交情况' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '确认数据' })).toBeVisible()
     expect(screen.queryByRole('columnheader', { name: '未确认记录' })).not.toBeInTheDocument()
-    expect(screen.getAllByText('42').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/42 条记录/).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇总' }))
     await screen.findByText('本次刷新失败，以下为最近一次成功加载的数据。请重试确认最新状态。')
 
-    expect(screen.getAllByText('42').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/42 条记录/).length).toBeGreaterThan(0)
     expect(reportingApi.summary).toHaveBeenCalledTimes(2)
   })
 
@@ -157,7 +177,7 @@ describe('周通报汇总缓存状态', () => {
     fireEvent.mouseDown(selector)
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
     await screen.findByText('按检查类型汇总', { exact: true })
-    expect(screen.getAllByText('42').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/42 条记录/).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇总' }))
 
@@ -165,7 +185,7 @@ describe('周通报汇总缓存状态', () => {
     expect(screen.queryByText('按检查类型汇总', { exact: true })).not.toBeInTheDocument()
     await waitFor(() => expect(client.getQueryData(['reports', 'summary', 'semester-1', 'week-2'])).toBeUndefined())
     expect(screen.queryByText('按检查类型汇总', { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByText('42')).not.toBeInTheDocument()
+    expect(screen.queryByText(/42 条记录/)).not.toBeInTheDocument()
     expect(reportingApi.summary).toHaveBeenCalledTimes(2)
   })
 
@@ -182,7 +202,7 @@ describe('周通报汇总缓存状态', () => {
     fireEvent.click(screen.getByText(/第 2 周/, { selector: '.ant-select-item-option-content' }))
 
     expect(await screen.findByRole('heading', { name: '按检查类型汇总' })).toBeVisible()
-    expect(screen.getAllByText('42').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/42 条记录/).length).toBeGreaterThan(0)
     expect(screen.getByText('当前账号无权查看完整通报版本')).toBeVisible()
     expect(screen.getByText(/2026年3月9日—2026年3月15日/)).toBeVisible()
     expect(screen.queryByText('你的通报查看权限已变化，系统已清除本地汇总数据。请重新选择当前可查看的周期。')).not.toBeInTheDocument()

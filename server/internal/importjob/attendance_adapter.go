@@ -17,6 +17,7 @@ const (
 	ErrorReferenceMismatch   ErrorCode = "REFERENCE_MISMATCH"
 	ErrorInvalidDate         ErrorCode = "INVALID_DATE"
 	ErrorInvalidTime         ErrorCode = "INVALID_TIME"
+	ErrorInvalidPeriod       ErrorCode = "INVALID_PERIOD"
 	ErrorOccurredOutsideWeek ErrorCode = "OCCURRED_OUTSIDE_WEEK"
 	ErrorInvalidHours        ErrorCode = "INVALID_HOURS"
 	ErrorTextTooLong         ErrorCode = "TEXT_TOO_LONG"
@@ -139,7 +140,7 @@ func (a *AttendanceAdapter) Validate(ctx context.Context, scope AttendanceImport
 	duplicateHint := "核对学生、日期和规范化节次，保留正确的一行"
 	if scope.TypeCode == "UNATTENDED_CLASSROOM" {
 		recordLabel = "无机课堂"
-		duplicateHint = "核对学生、课程和日期，保留正确的一行"
+		duplicateHint = "核对学生学号和规范化课程节次，保留正确的一行"
 	}
 	result := AttendanceValidationResult{Rows: make([]AttendanceValidationRow, 0, len(rows))}
 	keys := make([]string, 0, len(rows))
@@ -201,8 +202,10 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		"student_no": studentNo, "student_name": studentName, "class_name": className,
 		"absence_date": value("absence_date"), "classroom_code": classroomCode,
 	}
-	if !unattended {
-		// 到课率 keeps the period and hour contract; 无机课堂 no longer collects either.
+	if unattended {
+		requiredFields["period"] = period
+	} else {
+		// 到课率 additionally records the absence hours derived from its section range.
 		requiredFields["period"], requiredFields["absence_hours"] = period, value("absence_hours")
 	}
 	for field, fieldValue := range requiredFields {
@@ -281,6 +284,11 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 			result.Errors = append(result.Errors, validationError(ErrorInvalidHours, "absence_hours", "实际旷课学时与节次不一致", "每节课按 1 学时填写，核对缺课节次"))
 		}
 	}
+	if unattended && period != "" {
+		if _, _, validPeriod := inspection.ParseCoursePeriod(period); !validPeriod {
+			result.Errors = append(result.Errors, validationError(ErrorInvalidPeriod, "period", "课程节次格式无效", "填写如“第1-2节”的课程节次"))
+		}
+	}
 	recordType := inspection.InspectionTypeAttendance
 	if unattended {
 		recordType = inspection.InspectionTypeUnattended
@@ -303,7 +311,11 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		AbsenceHours: hours, PeriodText: period, Remark: remark, ImportBatchID: scope.ImportBatchID, CreatedBy: scope.CreatedBy,
 	})
 	if err != nil {
-		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", "到课率记录不符合当前周次规则", "核对日期、时间和业务上下文"))
+		message, suggestion := "到课率记录不符合当前周次规则", "核对日期、时间和业务上下文"
+		if unattended {
+			message, suggestion = "无机课堂记录不符合当前周次规则", "核对学生、课程节次和周次范围"
+		}
+		result.Errors = append(result.Errors, validationError(ErrorInvalidDate, "absence_date", message, suggestion))
 		return result
 	}
 	record.CourseName = course.Name

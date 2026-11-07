@@ -80,6 +80,7 @@ type XLSXParser struct {
 // CurrentTemplateVersion is written into every generated workbook and required on upload.
 // Bumping it invalidates older files by design; users must download the current template.
 const CurrentTemplateVersion = 2
+const UnattendedTemplateVersion = 3
 
 var attendanceImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"},
@@ -93,14 +94,14 @@ var attendanceImportFields = []TemplateField{
 	{Code: "remark", Header: "备注"},
 }
 
-// unattendedImportFields is the independent 无机课堂 contract: no time, period or hours.
-// The server owns one violation per record, so none of those inputs are accepted.
+// unattendedImportFields captures the course section used by the weekly duplicate key.
 var unattendedImportFields = []TemplateField{
 	{Code: "student_no", Header: "学号"},
 	{Code: "student_name", Header: "姓名"},
 	{Code: "class_name", Header: "班级"},
 	{Code: "absence_date", Header: "检查日期"},
 	{Code: "course_name", Header: "课程"},
+	{Code: "period", Header: "课程节次"},
 	{Code: "classroom_code", Header: "上课地点"},
 	{Code: "remark", Header: "备注"},
 }
@@ -118,6 +119,7 @@ func NewAttendanceXLSXParser(maxCompressedBytes int64) *XLSXParser {
 func NewUnattendedXLSXParser(maxCompressedBytes int64) *XLSXParser {
 	config := NewAttendanceXLSXParser(maxCompressedBytes).config
 	config.ExpectedTemplateCode = "UNATTENDED_CLASSROOM_IMPORT"
+	config.ExpectedTemplateVersion = UnattendedTemplateVersion
 	config.ExpectedSheetName = "无机课堂导入"
 	config.Fields = append([]TemplateField(nil), unattendedImportFields...)
 	return NewXLSXParser(config)

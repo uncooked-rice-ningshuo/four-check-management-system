@@ -54,6 +54,9 @@ func TestInspectionInvalidMutationsStopBeforeRepository(t *testing.T) {
 	if _, e := s.List(ctx, actor, InspectionFilter{Sort: "id; drop table"}); !errors.Is(e, ErrInspectionRequest) {
 		t.Fatal(e)
 	}
+	if _, e := s.List(ctx, actor, InspectionFilter{StudentName: strings.Repeat("中", 65)}); !errors.Is(e, ErrInspectionRequest) {
+		t.Fatalf("oversized student-name filter accepted: %v", e)
+	}
 	if _, e := s.Detail(ctx, ManualActor{}, detailID); !errors.Is(e, ErrScopeMismatch) {
 		t.Fatal(e)
 	}

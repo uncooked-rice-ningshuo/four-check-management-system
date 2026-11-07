@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
-import { inspectionResultLabel, reportCorrectionFieldLabel, reportReviewActionLabel, reportStatusLabel } from '../model/labels'
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd'
+import { inspectionResultLabel, reportStatusLabel } from '../model/labels'
+import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiError } from '../../../shared/api/httpClient'
 import type { EffectivePermission } from '../../../entities/permission/model/permission'
-import type { ReportAdjustmentSummary, ReportCorrectionLog, ReportCountRow, ReportReview, ReportTransitionAction, ReportVersion, ReportingPeriod, ReportingRecord, ReportingSummaryRow } from '../../../entities/reporting/model/reporting'
+import type { ReportAdjustmentSummary, ReportCountRow, ReportReview, ReportTransitionAction, ReportVersion, ReportingPeriod, ReportingRecord, ReportingSummaryRow } from '../../../entities/reporting/model/reporting'
 import { useAddReportAdjustment, useAddReportCorrection, useGenerateReportDraft, useReportTransition, useReportVersionRecords, useReportWorkflow } from '../model/queries'
 import { reportRecordColumns, reportRecordTableWidth, reportRecordTypeCodeForName, reportRecordUsesPersonFilters } from './ReportRecordTable'
 import { ReportRecordSnapshotCard } from './ReportRecordSnapshotCard'
 import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from './ReportVersionRecordFilters'
-import { ReportVersionSnapshots } from './ReportVersionSnapshots'
+import { ReportVersionIndicators } from './ReportVersionIndicators'
 import { groupVersionRows } from '../model/groupReportRows'
 
 const correctionFields = [
@@ -100,11 +100,6 @@ function permissionCoversRows(permissions: EffectivePermission[], action: string
   })
 }
 
-function displayTime(value: string) {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
-}
-
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === 'INVALID_RESPONSE') return error.message
@@ -149,7 +144,6 @@ export function WeeklyReportWorkflowPanel({
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(20)
   const [recordFilters, setRecordFilters] = useState<ReportVersionRecordFiltersValue>({})
-  const [expandedVersionKeys, setExpandedVersionKeys] = useState<string[]>([])
   useEffect(() => {
     const updateWorkflowDrawerWidth = () => setWorkflowDrawerWidth(Math.min(1040, window.innerWidth))
     updateWorkflowDrawerWidth()
@@ -200,6 +194,7 @@ export function WeeklyReportWorkflowPanel({
   }, stage !== 'source' && Boolean(currentVersion && selectedReportCell), onAccessDenied)
   const detailRecordTypeCode = versionRecordsQuery.data?.items[0]?.typeCode
     ?? reportRecordTypeCodeForName(selectedReportCell?.inspectionType)
+  const filterOptions = versionRecordsQuery.data?.filterOptions
   const visibleRecordPreview = recordPreview?.key === recordCellKey ? recordPreview.record : null
   const canEditCurrentVersion = ['DRAFT', 'RETURNED', 'FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report?.status ?? '')
 
@@ -213,19 +208,6 @@ export function WeeklyReportWorkflowPanel({
     transition.mutate({ reportId: report.id, action, body: { rowVersion: report.rowVersion, ...(comment ? { comment } : {}) } }, {
       onSuccess: () => onStageChange?.(action === 'return' ? 1 : action === 'submit' || action === 'approve' ? 2 : 2),
     })
-  }
-
-  const toggleVersionDetails = (version: ReportVersion) => {
-    setExpandedVersionKeys(current => current.includes(version.id)
-      ? current.filter(key => key !== version.id)
-      : [...current, version.id])
-  }
-
-  const showVersionDetails = (versionNo: number) => {
-    const version = workflow?.versions.find(item => item.versionNo === versionNo)
-    if (version && !expandedVersionKeys.includes(version.id)) {
-      setExpandedVersionKeys(current => current.includes(version.id) ? current : [...current, version.id])
-    }
   }
 
   const openCorrection = (record: ReportingRecord) => {
@@ -271,18 +253,6 @@ export function WeeklyReportWorkflowPanel({
     } })
   }
 
-  const versionColumns: ColumnsType<ReportVersion> = [
-    { title: '版本', dataIndex: 'versionNo', width: 70, render: value => `V${value}` },
-    { title: '确认记录数', key: 'count', align: 'right', render: (_value, item) => item.content.confirmedRecordCount },
-    { title: '统计单元', key: 'cells', align: 'right', render: (_value, item) => item.content.rows.length },
-    { title: '未完成应交项', key: 'incomplete', align: 'right', render: (_value, item) => item.content.incompleteCells.length },
-    { title: '生成时间', key: 'createdAt', render: (_value, item) => displayTime(item.createdAt) },
-    { title: '范围', key: 'scope', render: (_value, item) => item.content.scopeLimited ? <Tag color="orange">授权范围版本</Tag> : <Tag>完整可见范围</Tag> },
-    { title: '数据明细', key: 'snapshot', width: 120, align: 'right', render: (_value, item) => <Button type="link" size="small"
-      aria-expanded={expandedVersionKeys.includes(item.id)} onClick={() => toggleVersionDetails(item)}>
-      {expandedVersionKeys.includes(item.id) ? '收起明细' : '查看明细'}
-    </Button> },
-  ]
   const reportRowColumns: ColumnsType<ReportCountRow> = [
     { title: '检查类型', dataIndex: 'inspectionType', width: 115 },
     { title: '本版记录数', dataIndex: 'recordCount', align: 'right' },
@@ -294,15 +264,6 @@ export function WeeklyReportWorkflowPanel({
         setRecordFilters({})
         setRecordPage(1)
       }}>明细</Button> },
-  ]
-  const correctionColumns: ColumnsType<ReportCorrectionLog> = [
-    { title: '版本', dataIndex: 'versionNo', width: 130, render: value => <Button type="link" size="small"
-      aria-label={`查看 V${value} 数据明细`} onClick={() => showVersionDetails(value)}>V{value} · 数据明细</Button> },
-    { title: '修改内容', dataIndex: 'field', width: 190, render: reportCorrectionFieldLabel },
-    { title: '原值', dataIndex: 'beforeValue', width: 140, render: value => value === null || value === '' ? '（空）' : String(value) },
-    { title: '修正后', dataIndex: 'afterValue', width: 140, render: value => String(value) },
-    { title: '处理说明', dataIndex: 'reason' },
-    { title: '处理时间', dataIndex: 'correctedAt', width: 165, render: value => displayTime(value) },
   ]
   const detailColumns: ColumnsType<ReportingRecord> = [
     ...reportRecordColumns(detailRecordTypeCode),
@@ -318,6 +279,17 @@ export function WeeklyReportWorkflowPanel({
   ]
   const reviews: ReportReview[] = workflow?.reviews ?? []
   const latestReturn = report?.status === 'RETURNED' ? [...reviews].reverse().find(item => item.action === 'RETURNED' && item.comment) : undefined
+  const historyVersions = [...(workflow?.versions ?? [])].sort((left, right) => right.versionNo - left.versionNo)
+  const hasHistory = historyVersions.length > 0 || reviews.length > 0 || (workflow?.corrections.length ?? 0) > 0
+  const versionHistoryColumns: ColumnsType<ReportVersion> = [
+    { title: '版本', key: 'version', width: 140, render: (_value, item) => <Space size={6}>
+      <Typography.Text strong>V{item.versionNo}</Typography.Text>
+      {item.versionNo === report?.versionNo && <Tag color="blue">当前版本</Tag>}
+    </Space> },
+    { title: '生成时间', dataIndex: 'createdAt', width: 180, render: (value: string) => new Date(value).toLocaleString('zh-CN') },
+    { title: '确认记录', key: 'records', align: 'right', width: 120, render: (_value, item) => `${item.content.confirmedRecordCount} 条` },
+    { title: '数据范围', key: 'scope', width: 140, render: (_value, item) => item.content.scopeLimited ? '授权可见范围' : '全周可见数据' },
+  ]
 
   const finalized = report !== null && ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report.status)
   const correctionValidation = correctionRecord ? correctionChangesFor(correctionRecord, correctionValues) : { changes: [], invalidFields: [] }
@@ -357,6 +329,7 @@ export function WeeklyReportWorkflowPanel({
       {transition.isError && <Alert type="error" showIcon title={errorMessage(transition.error)} />}
       {addAdjustment.isError && <Alert type="error" showIcon title={errorMessage(addAdjustment.error)} />}
       {latestReturn && <Alert type="warning" showIcon title={`退回原因：${latestReturn.comment}`} />}
+      {currentVersion && <ReportVersionIndicators version={currentVersion} mode="overview" />}
       {currentVersion && <section aria-label="按检查类型分类">
         <Table<ReportCountRow> rowKey="inspectionTypeId" size="small" pagination={false} columns={reportRowColumns} dataSource={displayRows} scroll={{ x: 760 }} />
       </section>}
@@ -373,38 +346,35 @@ export function WeeklyReportWorkflowPanel({
         </>}
         {addCorrection.isError && <Alert type="error" showIcon title={errorMessage(addCorrection.error)} />}
       </>}
-      <details className="weekly-report-history">
-        <summary>版本与操作记录</summary>
-        <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-          <Table<ReportVersion> rowKey="id" size="small" pagination={false} columns={versionColumns} dataSource={workflow.versions} scroll={{ x: 850 }}
-            expandable={{ showExpandColumn: false, expandedRowKeys: expandedVersionKeys, expandedRowRender: version => <ReportVersionSnapshots
-              period={period}
-              version={version}
-              onAccessDenied={onAccessDenied}
-              editable={stage === 'draft' && canEditCurrentVersion && version.versionNo === currentVersion?.versionNo && canCorrect}
-              onCorrect={openCorrection}
-              onExclude={record => openAdjustment(record, 'EXCLUDE')}
-            /> }} />
-          {reviews.length > 0 && <>
-            <Typography.Text strong>审核与状态记录</Typography.Text>
-            <Timeline items={reviews.map(item => ({ content: <span>{reportReviewActionLabel(item.action)} · V{item.versionNo} · {displayTime(item.createdAt)}{item.comment ? ` · ${item.comment}` : ''}</span> }))} />
-          </>}
-          {workflow.corrections.length > 0 && <>
-            <Typography.Text strong>追加修正审计</Typography.Text>
-            <Table<ReportCorrectionLog> rowKey="id" size="small" pagination={false} columns={correctionColumns} dataSource={workflow.corrections} scroll={{ x: 760 }} />
-          </>}
-        </Space>
-      </details>
+      {hasHistory && <section className="weekly-report-history" role="group" aria-label="版本记录">
+        <div className="weekly-report-history-heading">
+          <div className="weekly-report-history-message">
+            <Typography.Text strong>版本记录 · {historyVersions.length} 个版本</Typography.Text>
+            <Typography.Text type="secondary">版本记录只读；完整内容和审核记录请在通报归档中查看。</Typography.Text>
+          </div>
+          <a href="/reports/archive">打开通报归档</a>
+        </div>
+        {historyVersions.length > 0 ? <Table<ReportVersion>
+          aria-label="只读版本记录"
+          className="weekly-report-history-table"
+          rowKey="id"
+          size="small"
+          pagination={false}
+          dataSource={historyVersions}
+          columns={versionHistoryColumns}
+          scroll={{ x: 580 }}
+        /> : <Typography.Text type="secondary">本周已有审核或修正记录。</Typography.Text>}
+      </section>}
     </Space>}
     <Drawer rootClassName="weekly-report-record-drawer" classNames={{ wrapper: 'weekly-report-record-drawer-wrapper' }}
       title={selectedReportCell ? `${selectedReportCell.inspectionType} · V${currentVersion?.versionNo ?? ''}` : '本版记录明细'} open={Boolean(selectedReportCell)}
       size={workflowDrawerWidth} onClose={() => { setSelectedReportCell(null); setRecordPreview(null) }} destroyOnHidden>
       {selectedReportCell && <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
         {versionRecordsQuery.isError && <Alert type="error" showIcon title="记录明细加载失败" action={<Button onClick={() => void versionRecordsQuery.refetch()}>重试</Button>} />}
-        {stage === 'draft' && <Typography.Text type="secondary">明细来自当前版本冻结快照；修正、排除和恢复纳入都会生成新版本。</Typography.Text>}
+        {stage === 'draft' && <Typography.Text type="secondary">明细来自当前版本保存的记录；修正、排除或恢复纳入后会生成新版本。</Typography.Text>}
         {!canCorrect && stage === 'draft' && <Typography.Text type="secondary">当前账号没有通报修正权限，记录仅供查看。</Typography.Text>}
         {reportRecordUsesPersonFilters(detailRecordTypeCode) && <ReportVersionRecordFilters key={`${currentVersion?.versionNo ?? 0}:${selectedReportCell.inspectionTypeId}`}
-          filterOptions={versionRecordsQuery.data?.filterOptions}
+          filterOptions={filterOptions}
           onApply={filters => { setRecordFilters(filters); setRecordPage(1) }} />}
         <Table<ReportingRecord> className="report-record-table" rowKey="id" size="middle" columns={detailColumns} dataSource={versionRecordsQuery.data?.items ?? []}
           loading={versionRecordsQuery.isPending || versionRecordsQuery.isFetching}

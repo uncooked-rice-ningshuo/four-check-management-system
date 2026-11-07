@@ -1,5 +1,5 @@
 import { ProFormDatePicker } from '@ant-design/pro-components'
-import { Alert, Button, Col, Drawer, Form, Input, Row, Select, Space } from 'antd'
+import { Alert, Button, Col, Divider, Drawer, Form, Input, Row, Select, Space } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { MorningAttendanceDetails, MorningAttendanceRecord, InspectionOption } from '../../../entities/inspection/model/morningAttendanceRecord'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
@@ -48,21 +48,26 @@ export function MorningAttendanceDrawer({ editing: initialEditing, inspectionTyp
   catch(failure){setError(failure instanceof ApiError && failure.status<500 ? failure.code==='VERSION_CONFLICT'?'记录已变化，请关闭并重新打开后核对。':failure.message:'保存失败，请稍后重试。')}
   finally{submitting.current=false}
  }
- return <Drawer open title={editing?'编辑早锻炼/早签记录':'新增早锻炼/早签记录'} size={720} onClose={()=>{if(!submitting.current)onClose()}} closable={!mutation.isPending} maskClosable={!mutation.isPending}
+ return <Drawer open title={editing?'编辑早锻炼/早签记录':'新增早锻炼/早签记录'} size={760} className="inspection-entry-drawer" onClose={()=>{if(!submitting.current)onClose()}} closable={!mutation.isPending} maskClosable={!mutation.isPending}
  footer={<Space><Button onClick={onClose} disabled={mutation.isPending}>取消</Button><Button type="primary" loading={mutation.isPending} disabled={failed||!memberDepartmentAvailable} onClick={()=>form.submit()}>{editing?'保存修改':'保存草稿'}</Button></Space>}>
  {error&&<Alert type="error" showIcon title={error} />}
  {failed&&<Alert type="error" showIcon title="录入选项加载失败，请重试。" action={<Button onClick={()=>queries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
  {!memberDepartmentAvailable && !departments.isLoading && <Alert type="warning" showIcon title="当前账号所属部门无此范围的录入权限，请联系管理员。" />}
  <Form name="morning-attendance-record" form={form} layout="vertical" onFinish={submit} disabled={mutation.isPending}
  initialValues={editing?{semesterId:editing.semesterId,weekId:editing.weekId,departmentId:departmentOptionId(editing.departmentId),...editing.details}:{semesterId:initialSemesterId,weekId:initialWeekId,departmentId:isSuperAdmin?'':memberDepartmentId}}>
+ <Divider titlePlacement="start" plain>录入范围</Divider>
  <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>clear(memberEntry?['weekId','classId','studentId']:['weekId','departmentId','classId','studentId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>clear(memberEntry?['classId','studentId']:['departmentId','classId','studentId'])}/></Form.Item></Col>
  {isSuperAdmin?<Col span={24}><Form.Item name="departmentId" hidden><Input/></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col>:<Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items)} onChange={()=>clear(['classId','studentId'])}/></Form.Item></Col>}
+ </Row>
+ <Divider titlePlacement="start" plain>检查内容</Divider>
+ <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={options(classes.data,fallback('classId',editing?.className??''))} onChange={()=>clear(['studentId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="studentId" label="学生" rules={required}><Select disabled={!classId} showSearch optionFilterProp="label" loading={students.isFetching} options={options(students.data,editing && editing.details.classId===classId?fallback('studentId',`${editing.studentName}（${editing.studentNumber}）`):undefined)}/></Form.Item></Col>
  <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown,dateString: string)=>dateString||undefined} fieldProps={{format:'YYYY-MM-DD',style:{width:'100%'}}}/></Col>
  </Row>
+ <Divider titlePlacement="start" plain>补充信息</Divider>
  {editing&&<Form.Item name="reason" label="修改原因" rules={[...required,{whitespace:true,message:'请填写修改原因'}]}><Input.TextArea maxLength={255}/></Form.Item>}
  <Form.Item name="remark" label="备注"><Input.TextArea maxLength={500} rows={3}/></Form.Item>
  </Form>

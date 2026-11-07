@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"four-check-management-system/server/internal/inspection"
@@ -10,19 +11,27 @@ import (
 )
 
 type reportingRepositoryStub struct {
-	periods     []PeriodOption
-	periodsErr  error
-	summary     Summary
-	summaryErr  error
-	periodCalls int
-	queryCalls  int
-	permissions []permission.EffectivePermission
-	semesterID  string
-	weekID      string
-	recordActor string
-	recordQuery RecordsQuery
-	records     []inspection.InspectionRecord
-	recordTotal int
+	periods       []PeriodOption
+	periodsErr    error
+	summary       Summary
+	summaryErr    error
+	periodCalls   int
+	queryCalls    int
+	permissions   []permission.EffectivePermission
+	semesterID    string
+	weekID        string
+	recordActor   string
+	recordQuery   RecordsQuery
+	records       []inspection.InspectionRecord
+	recordTotal   int
+	filterOptions ReportVersionRecordFilterOptions
+}
+
+func (r *reportingRepositoryStub) ReportRecordFilterOptions(_ context.Context, _ RecordsQuery, _ []permission.EffectivePermission) (ReportVersionRecordFilterOptions, error) {
+	if r.filterOptions.StudentNumbers == nil {
+		return ReportVersionRecordFilterOptions{StudentNumbers: []string{}, StudentNames: []string{}, ClassNames: []string{}, Grades: []string{}}, nil
+	}
+	return r.filterOptions, nil
 }
 
 func (r *reportingRepositoryStub) ListReportPeriods(_ context.Context, permissions []permission.EffectivePermission) ([]PeriodOption, error) {
@@ -42,6 +51,10 @@ func (r *reportingRepositoryStub) ReportSummary(_ context.Context, semesterID, w
 func (r *reportingRepositoryStub) ReportRecords(_ context.Context, accountID string, query RecordsQuery, permissions []permission.EffectivePermission) ([]inspection.InspectionRecord, int, error) {
 	r.recordActor, r.recordQuery, r.permissions = accountID, query, permissions
 	return r.records, r.recordTotal, nil
+}
+
+func (r *reportingRepositoryStub) ReportIndicatorInputs(context.Context, string, string) (ReportMetricInputs, error) {
+	return ReportMetricInputs{WeekMultiplier: 1, MorningPlannedDates: []string{}, Classes: []ReportClassSizeSnapshot{}}, nil
 }
 
 type reportingPermissionsStub struct {
@@ -143,6 +156,7 @@ func TestRecordsPassesAuthenticatedActorToRepositoryForReadHint(t *testing.T) {
 	repository := &reportingRepositoryStub{
 		summary: Summary{Rows: []SummaryRow{{DepartmentID: departmentID, InspectionTypeID: inspectionTypeID}}},
 		records: []inspection.InspectionRecord{{ID: "record-1"}}, recordTotal: 1,
+		filterOptions: ReportVersionRecordFilterOptions{StudentNumbers: []string{"20260001"}, StudentNames: []string{"李同学"}, ClassNames: []string{"计算机一班"}, Grades: []string{"2026级"}},
 	}
 	grant := permission.EffectivePermission{Action: permission.ActionReportView, Effect: permission.EffectAllow}
 	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{grant}}})
@@ -156,6 +170,58 @@ func TestRecordsPassesAuthenticatedActorToRepositoryForReadHint(t *testing.T) {
 	if repository.recordActor != actorID || repository.recordQuery != query || len(repository.permissions) != 1 ||
 		result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != "record-1" {
 		t.Fatalf("records query actor/query/permissions/result = %q/%+v/%+v/%+v", repository.recordActor, repository.recordQuery, repository.permissions, result)
+	}
+	if result.FilterOptions == nil || len(result.FilterOptions.StudentNumbers) != 1 || result.FilterOptions.StudentNumbers[0] != "20260001" {
+		t.Fatalf("report source filter options = %+v; want full roster choices", result.FilterOptions)
+	}
+}
+
+func TestRecordsTrimsAndBoundsFilters(t *testing.T) {
+	const (
+		semesterID       = "a0000000-0000-0000-0000-000000000003"
+		weekID           = "a0000000-0000-0000-0000-000000000004"
+		inspectionTypeID = "30000000-0000-0000-0000-000000000001"
+	)
+	grant := permission.EffectivePermission{Action: permission.ActionReportView, Effect: permission.EffectAllow}
+	repository := &reportingRepositoryStub{summary: Summary{Rows: []SummaryRow{{InspectionTypeID: inspectionTypeID}}}}
+	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{grant}}})
+
+	_, err := service.Records(context.Background(), "actor", RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
+		StudentNumber: " 20260001 ", StudentName: " 李同学 ", ClassName: " 计算机一班 ", Grade: " 2026级 ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.recordQuery.StudentNumber != "20260001" || repository.recordQuery.StudentName != "李同学" ||
+		repository.recordQuery.ClassName != "计算机一班" || repository.recordQuery.Grade != "2026级" {
+		t.Fatalf("repository filters = student number %q, name %q, class %q, grade %q; want trimmed values",
+			repository.recordQuery.StudentNumber, repository.recordQuery.StudentName, repository.recordQuery.ClassName, repository.recordQuery.Grade)
+	}
+
+	if _, err := service.Records(context.Background(), "actor", RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
+		StudentNumber: strings.Repeat("a", 33),
+	}); !errors.Is(err, ErrInvalidRecordsQuery) {
+		t.Fatalf("oversized student number error = %v, want %v", err, ErrInvalidRecordsQuery)
+	}
+	if _, err := service.Records(context.Background(), "actor", RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
+		StudentName: strings.Repeat("a", 65),
+	}); !errors.Is(err, ErrInvalidRecordsQuery) {
+		t.Fatalf("oversized student name error = %v, want %v", err, ErrInvalidRecordsQuery)
+	}
+	if _, err := service.Records(context.Background(), "actor", RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
+		ClassName: strings.Repeat("a", 97),
+	}); !errors.Is(err, ErrInvalidRecordsQuery) {
+		t.Fatalf("oversized class name error = %v, want %v", err, ErrInvalidRecordsQuery)
+	}
+	if _, err := service.Records(context.Background(), "actor", RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
+		Grade: strings.Repeat("a", 41),
+	}); !errors.Is(err, ErrInvalidRecordsQuery) {
+		t.Fatalf("oversized grade error = %v, want %v", err, ErrInvalidRecordsQuery)
 	}
 }
 

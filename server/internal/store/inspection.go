@@ -335,6 +335,18 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 		args = append(args, "%"+f.Keyword+"%")
 		where += fmt.Sprintf(" AND (ir.student_no_snapshot ILIKE $%d OR ir.student_name_snapshot ILIKE $%d OR ir.class_name_snapshot ILIKE $%d OR ir.remark ILIKE $%d)", len(args), len(args), len(args), len(args))
 	}
+	if f.StudentNumber != "" {
+		args = append(args, "%"+f.StudentNumber+"%")
+		where += fmt.Sprintf(" AND (ir.student_no_snapshot ILIKE $%d OR EXISTS(SELECT 1 FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id AND rs.student_no_snapshot ILIKE $%d))", len(args), len(args))
+	}
+	if f.StudentName != "" {
+		args = append(args, "%"+f.StudentName+"%")
+		where += fmt.Sprintf(" AND (ir.student_name_snapshot ILIKE $%d OR EXISTS(SELECT 1 FROM inspection_responsibility_students rs WHERE rs.record_id=ir.id AND rs.student_name_snapshot ILIKE $%d))", len(args), len(args))
+	}
+	if f.ClassName != "" {
+		args = append(args, "%"+f.ClassName+"%")
+		where += fmt.Sprintf(" AND (ir.class_name_snapshot ILIKE $%d OR EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND rc.class_name_snapshot ILIKE $%d))", len(args), len(args))
+	}
 	if f.SubmissionCandidatesOnly {
 		where += " AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL AND ir.attribution_mode<>'ADMINISTRATOR'"
 		where += " AND " + inspectionAccessSQL(a, "mutate", &args)
@@ -563,11 +575,10 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	var args []any
 	switch v := r.Details.(type) {
 	case *inspection.AttendanceDetails:
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier, false)
 	case *inspection.UnattendedClassroomDetails:
-		// One violation per record: the week multiplier is written to both penalty_multiplier
-		// and penalty_count so reports and discipline totals read the stored count.
-		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier)
+		// One violation per student/section record: retain the section and snapshot its count.
+		sql, args = courseDetailSQL(r.ID, v.CourseAbsenceDetails, r.PenaltyMultiplier, true)
 	case *inspection.EveningSelfStudyDetails:
 		sql = `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count) VALUES($1,NULLIF($2,'')::uuid,$3,$4,$5) ON CONFLICT(record_id) DO UPDATE SET classroom_id=excluded.classroom_id,period_text=excluded.period_text,absence_hours=NULL,penalty_hours=NULL,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`
 		args = []any{r.ID, v.ClassroomID, v.Period, v.PenaltyMultiplier, v.PenaltyCount}
@@ -621,10 +632,9 @@ func (t *inspectionTx) writeDetails(ctx context.Context, r inspection.Inspection
 	return nil
 }
 
-// courseDetailSQL writes the shared course-absence row. 无机课堂 no longer collects a
-// period or hours: the server owns one violation per record, so an empty period becomes
-// NULL and absence_hours falls back to 1 while penalty_count carries the week multiplier.
-func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *int) (string, []any) {
+// courseDetailSQL writes the shared course-absence row. 无机课堂 stores its required
+// section for weekly deduplication and carries the week multiplier in penalty_count.
+func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *int, countAsPenalty bool) (string, []any) {
 	hours := v.AbsenceHours
 	if hours <= 0 {
 		hours = 1
@@ -634,7 +644,7 @@ func courseDetailSQL(id string, v inspection.CourseAbsenceDetails, multiplier *i
 		period = strings.TrimSpace(v.Period)
 	}
 	var penaltyCount any
-	if period == nil && multiplier != nil {
+	if countAsPenalty && multiplier != nil {
 		penaltyCount = *multiplier
 	}
 	return `INSERT INTO attendance_details(record_id,course_id,classroom_id,absence_hours,period_text,penalty_multiplier,penalty_count) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(record_id) DO UPDATE SET course_id=excluded.course_id,classroom_id=excluded.classroom_id,absence_hours=excluded.absence_hours,period_text=excluded.period_text,penalty_multiplier=excluded.penalty_multiplier,penalty_count=excluded.penalty_count`, []any{id, v.CourseID, v.ClassroomID, hours, period, multiplier, penaltyCount}

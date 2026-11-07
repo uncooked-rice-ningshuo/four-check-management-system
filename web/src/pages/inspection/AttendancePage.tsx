@@ -15,7 +15,8 @@ import { canDeleteAttendance, canMutateAttendance } from '../../features/attenda
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
 import { attributionLabel } from '../../entities/inspection/model/inspectionScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn, inspectionRecordRowClassName } from '../../features/inspection-list/model/inspectionColumns'
+import { InspectionRecordOwnershipLegend } from '../../features/inspection-list/ui/InspectionRecordOwnershipLegend'
 import { ApiError } from '../../shared/api/httpClient'
 
 type AttendanceSearchValues = {
@@ -147,16 +148,20 @@ export function AttendancePage() {
 	}
 
 	const columns = useMemo<ProColumns<AttendanceRecord>[]>(() => {
-		const semesterOptions = options?.semesters.map(item => ({ id: item.id, label: item.name })) ?? []
+		const semesterOptions = options?.listFilterOptions?.semesters ?? options?.semesters.map(item => ({ id: item.id, label: item.name })) ?? []
 		const currentFilterSemester = draftSemester === undefined ? semesterId : draftSemester
 		const currentFilterGrade = selectedGrade === undefined ? grade : selectedGrade
-		const weekOptions = options?.weeks.filter(week => week.semesterId === currentFilterSemester).map(item => ({ id: item.id, label: `第 ${item.weekNo} 周` })) ?? []
+		const semesterWeeks = options?.weeks.filter(week => week.semesterId === currentFilterSemester) ?? []
+		const semesterWeekIds = new Set(semesterWeeks.map(week => week.id))
+		const weekOptions = options?.listFilterOptions
+			? options.listFilterOptions.weeks.filter(week => semesterWeekIds.has(week.id))
+			: semesterWeeks.map(item => ({ id: item.id, label: `第 ${item.weekNo} 周` }))
 		const filters = createInspectionFilterColumns<AttendanceRecord>({
 			semesters: semesterOptions,
 			weeks: weekOptions,
-			departments: options?.departments.map(item => ({ id: item.id, label: item.name })) ?? [],
-			grades: options?.grades.map(item => ({ id: item, label: gradeLabel(item) })) ?? [],
-			classes: options?.classes.map(item => ({ id: item.id, label: item.name, grade: item.grade })) ?? [],
+			departments: options?.listFilterOptions?.departments ?? options?.departments.map(item => ({ id: item.id, label: item.name })) ?? [],
+			grades: options?.listFilterOptions?.grades ?? options?.grades.map(item => ({ id: item, label: gradeLabel(item) })) ?? [],
+			classes: options?.listFilterOptions?.classes ?? options?.classes.map(item => ({ id: item.id, label: item.name, grade: item.grade })) ?? [],
 			selectedSemesterId: currentFilterSemester,
 			onSemesterChange: value => { setDraftSemester(value ?? ''); setSemesterChangeRevision(revision => revision + 1) },
 			selectedGrade: currentFilterGrade,
@@ -198,12 +203,12 @@ export function AttendancePage() {
 			key={`${attendanceTypeId}-${departmentId}-${semesterId}-${weekId}`}
 			className="attendance-records-table"
 			cardBordered
-			rowKey="id"
+			rowKey="id" rowClassName={inspectionRecordRowClassName(user?.id)}
 			columns={[...columns, { title: '操作', valueType: 'option', width: 240, fixed: 'right', render: (_, record) => canMutate(record) ? <Space>{record.importBatchId && <Button type="link" onClick={() => { updateImportBatchId(record.importBatchId); setDrawerOpen(true) }}>导入批次</Button>}<Button type="link" onClick={() => setEditId(record.id)}>编辑</Button>{canDelete(record) && <Button type="link" danger onClick={() => setDeleting([record])}>删除</Button>}</Space> : null }]}
 	      rowSelection={{ selectedRowKeys: selectedDrafts.map(record => record.id), onChange: (_, rows) => setSelection(rows), getCheckboxProps: record => ({ disabled: !canDelete(record) }) }}
 			loading={permissions.isLoading || currentWeek.isLoading || filterOptions.isLoading || records.isLoading}
 			dataSource={listReady && !records.isError ? records.data?.items ?? [] : []}
-			headerTitle={<Space size={10}><span>到课率记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag></Space>}
+			headerTitle={<Space size={10}><span>到课率记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag><InspectionRecordOwnershipLegend /></Space>}
 			search={{ labelWidth: 'auto', defaultCollapsed: false }}
 			formRef={form}
 			form={{ initialValues: searchValues }}

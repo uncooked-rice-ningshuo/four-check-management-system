@@ -6,6 +6,7 @@ import { useReportVersionRecords } from '../model/queries'
 import { reportSourceStatusLabel } from '../model/labels'
 import { reportRecordColumns, reportRecordTableWidth, reportRecordTypeCodeForName, reportRecordUsesPersonFilters } from './ReportRecordTable'
 import { ReportRecordSnapshotCard } from './ReportRecordSnapshotCard'
+import { ReportVersionIndicators } from './ReportVersionIndicators'
 import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from './ReportVersionRecordFilters'
 import { groupVersionRows } from '../model/groupReportRows'
 
@@ -58,12 +59,24 @@ function ReportVersionCellRecords({
   ]
 
   if (row.recordCount === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={row.confirmedZeroReceiptCount > 0
-      ? `此版本没有业务记录，已确认零记录回执 ${row.confirmedZeroReceiptCount} 份。`
-      : `此版本没有业务记录（${reportSourceStatusLabel(row.dataStatus)}）。`} />
+    return <div className="report-version-cell-empty">
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<Space orientation="vertical" size={2}>
+        <Typography.Text strong>当前检查类型没有业务记录</Typography.Text>
+        <Typography.Text type="secondary">{row.confirmedZeroReceiptCount > 0
+          ? `已确认零记录回执 ${row.confirmedZeroReceiptCount} 份。`
+          : `该数据单元状态：${reportSourceStatusLabel(row.dataStatus)}。`}</Typography.Text>
+      </Space>} />
+    </div>
   }
 
   const hasFilters = Object.values(filters).some(Boolean)
+  const emptyText = query.isError
+    ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="读取失败，请使用上方的重试操作。" />
+    : hasFilters
+      ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合筛选条件的本版记录。">
+        <Button type="link" onClick={() => { setFilters({}); setPage(1) }}>清除筛选</Button>
+      </Empty>
+      : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前查看范围内没有可展示的本版记录。" />
 
   return <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
     {query.isError && <Alert type="error" showIcon title="此版本的记录明细加载失败" action={<Button onClick={() => void query.refetch()}>重试</Button>} />}
@@ -77,7 +90,7 @@ function ReportVersionCellRecords({
       columns={columns}
       dataSource={query.data?.items ?? []}
       loading={query.isPending || query.isFetching}
-      locale={{ emptyText: query.isError ? '明细加载失败，请重试' : hasFilters ? '没有符合筛选条件的本版记录' : '此版本没有可展示的记录' }}
+      locale={{ emptyText }}
       scroll={{ x: reportRecordTableWidth(columns) }}
       pagination={{ current: page, pageSize, total: query.data?.total ?? 0, showSizeChanger: true,
         pageSizeOptions: [10, 20, 50], showTotal: total => `共 ${total} 条本版记录`,
@@ -95,10 +108,17 @@ function ReportVersionCellRecords({
 export function ReportVersionSnapshots({ period, version, onAccessDenied, editable = false, onCorrect, onExclude }: ReportVersionSnapshotsProps) {
   const [activeCellKey, setActiveCellKey] = useState<string | undefined>()
   const contentRows = groupVersionRows(version.content.rows)
-  if (contentRows.length === 0) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`V${version.versionNo} 没有可展示的数据单元`} />
+  if (contentRows.length === 0) return <>
+    <ReportVersionIndicators version={version} />
+    <div className="report-version-snapshots-empty">
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`V${version.versionNo} 尚无可展示的数据单元。`} />
+    </div>
+  </>
   const currentActiveCellKey = activeCellKey ?? rowKey(contentRows[0])
 
-  return <section className="report-version-snapshots" aria-label={`V${version.versionNo} 数据明细`}>
+  return <>
+    <ReportVersionIndicators version={version} />
+    <section className="report-version-snapshots" aria-label={`V${version.versionNo} 数据明细`}>
     <div className="report-version-snapshots-heading">
       <Typography.Text strong>V{version.versionNo} · {version.content.confirmedRecordCount} 条记录</Typography.Text>
       <Typography.Text type="secondary">列表字段按检查类型呈现；查看记录可核对版本中保存的完整明细。</Typography.Text>
@@ -129,5 +149,6 @@ export function ReportVersionSnapshots({ period, version, onAccessDenied, editab
         }
       })}
     />
-  </section>
+    </section>
+  </>
 }

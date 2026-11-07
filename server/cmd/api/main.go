@@ -77,7 +77,7 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 	permissionService := permission.NewService(db)
 	manualAttendance := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academicService, organizationService, permissionService)
 	return httpapi.AdminServices{
-		Organization: organizationService, Academic: academicService, Permission: permissionService,
+		Organization: organizationService, Academic: academicService, ReportGrades: academic.NewReportGradeService(db), Permission: permissionService,
 		AcademicWeekImports: academicimport.NewService(db, academicService, maxUploadBytes),
 		MasterData:          masterdata.NewService(db), MasterDataImports: masterdataimport.NewService(db, db, maxUploadBytes),
 		Dictionary: dictionary.NewService(db), Storage: storageService,

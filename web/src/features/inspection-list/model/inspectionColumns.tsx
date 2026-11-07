@@ -70,6 +70,14 @@ export function createInspectionFilterColumns<T>({
 
 type InspectionRecordProvenance = { source: string; status: string; submitterName?: string; createdByName?: string; submittedByName?: string; submittedAt?: string }
 
+/** Use the authenticated record creator ID so duplicate display names cannot misclassify rows. */
+export function inspectionRecordRowClassName(currentAccountId?: string) {
+  return (record: { createdBy?: string }) => {
+    if (!currentAccountId || !record.createdBy) return ''
+    return record.createdBy === currentAccountId ? 'inspection-record-row--mine' : 'inspection-record-row--other'
+  }
+}
+
 /** Shared sort control keeps the ordering choice identical on every inspection list. */
 export function createInspectionSortColumn<T>(): ProColumns<T> {
   return {

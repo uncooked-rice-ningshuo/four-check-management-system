@@ -62,6 +62,11 @@ func ValidateDetails(code string, context DetailContext, raw json.RawMessage) (V
 			return ValidatedDetails{}, []DetailIssue{detailIssue("details.absenceHours", "PERIOD_HOURS_MISMATCH")}
 		}
 	}
+	if code == InspectionTypeUnattended {
+		if _, _, valid := ParseCoursePeriod(detailString(values, "period")); !valid {
+			return ValidatedDetails{}, []DetailIssue{detailIssue("details.period", "INVALID_PERIOD")}
+		}
+	}
 	date := detailString(values, "date")
 	if date < context.WeekStart || date > context.WeekEnd {
 		issues = append(issues, detailIssue("details.date", "OUTSIDE_WEEK"))
@@ -311,7 +316,8 @@ func detailDuplicateKey(code string, c DetailContext, v map[string]json.RawMessa
 		return attendanceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, ClassID: detailString(v, "classId"), StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: occurred, PeriodText: detailString(v, "period")})
 	}
 	if code == InspectionTypeUnattended {
-		return courseAbsenceDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID, InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), CourseID: detailString(v, "courseId"), OccurredAt: occurred})
+		return unattendedDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID,
+			InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), PeriodText: detailString(v, "period")})
 	}
 	if code == InspectionTypeEveningSelfStudy {
 		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "classId"), detailString(v, "studentId"), r.Date}

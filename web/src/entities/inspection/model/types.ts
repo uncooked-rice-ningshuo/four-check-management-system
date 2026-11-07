@@ -189,7 +189,7 @@ const catalog: InspectionDefinition[] = [
     "name": "无机课堂",
     "extensionTable": "attendance_details",
     "granularity": "STUDENT_COURSE_EVENT",
-    "templateVersion": 2,
+    "templateVersion": 3,
     "templateStatus": "ACTIVE",
     "fields": [
       {
@@ -223,6 +223,13 @@ const catalog: InspectionDefinition[] = [
         "required": true
       },
       {
+        "key": "period",
+        "label": "课程节次",
+        "kind": "string",
+        "required": true,
+        "maxLength": 64
+      },
+      {
         "key": "remark",
         "label": "备注",
         "kind": "string",
@@ -235,8 +242,7 @@ const catalog: InspectionDefinition[] = [
       "weekId",
       "inspectionTypeId",
       "studentId",
-      "courseId",
-      "date"
+      "period"
     ],
     "plannedActions": [
       "CREATE",
@@ -255,7 +261,7 @@ const catalog: InspectionDefinition[] = [
       "IMPORT"
     ],
     "rules": [
-      "Course absence semantics match attendance; inspectionTypeId keeps records separate."
+      "One violation per student and normalized course section within the week; class, course, and date do not split this identity."
     ]
   },
   {

@@ -1,4 +1,4 @@
-import { Alert, Button, Drawer, Form, Select, Spin } from 'antd'
+import { Alert, Button, Col, Drawer, Form, Row, Select, Space, Spin, Typography } from 'antd'
 import { useState } from 'react'
 import type { InspectionContext } from '../../../entities/inspection/model/inspection'
 import { COLLEGE_DEPARTMENT_OPTION_ID, departmentOptionId } from '../../../entities/inspection/model/inspectionScope'
@@ -29,18 +29,21 @@ export function InspectionImportScopePanel({ typeCode, inspectionTypeId, memberD
   const destinationWeekId = batch.data?.weekId ?? chosen?.weekId ?? weekId
   const departments = useImportContext({ purpose, kind: 'departments', semesterId, weekId: destinationWeekId }, !!semesterId && !!destinationWeekId, typeCode)
   const queries = [current, semesters, weeks, departments, ...(batchId ? [batch] : [])]
-  if (queries.some(query => query.isError)) return <Drawer open title={`${label}导入范围`} onClose={onClose}><Alert type="error" title="导入范围加载失败，请重试。" action={<Button onClick={() => queries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} /></Drawer>
-  if (queries.some(query => query.isLoading)) return <Drawer open title={`${label}导入范围`} onClose={onClose}><Spin /></Drawer>
-  if (batch.data && batch.data.inspectionTypeId !== inspectionTypeId) return <Drawer open title={`${label}导入范围`} onClose={onClose}><Alert type="error" title={`该批次不属于${label}检查。`} /></Drawer>
+  if (queries.some(query => query.isError)) return <Drawer open title={`${label}导入范围`} width="min(560px, 100vw)" className="inspection-import-scope-drawer" onClose={onClose}><Alert type="error" showIcon title="导入范围加载失败，请重试。" action={<Button onClick={() => queries.forEach(query => { if (query.isError) void query.refetch() })}>重试</Button>} /></Drawer>
+  if (queries.some(query => query.isLoading)) return <Drawer open title={`${label}导入范围`} width="min(560px, 100vw)" className="inspection-import-scope-drawer" onClose={onClose}><Spin /></Drawer>
+  if (batch.data && batch.data.inspectionTypeId !== inspectionTypeId) return <Drawer open title={`${label}导入范围`} width="min(560px, 100vw)" className="inspection-import-scope-drawer" onClose={onClose}><Alert type="error" showIcon title={`该批次不属于${label}检查。`} /></Drawer>
   const target = batch.data ? { semesterId: batch.data.semesterId, weekId: batch.data.weekId, inspectionTypeId: batch.data.inspectionTypeId, departmentId: batch.data.attributionMode === 'ADMINISTRATOR' ? '' : departmentOptionId(batch.data.departmentId), attributionMode: batch.data.attributionMode, ...(batch.data.classId ? { classId: batch.data.classId } : {}), ...(batch.data.grade ? { grade: batch.data.grade } : {}) } : chosen
   if (target) return <AttendanceImportDrawer open typeCode={typeCode} context={target} initialImportScope={target} memberDepartmentId={memberDepartmentId} isSuperAdmin={isSuperAdmin} batchId={batchId} onBatchIdChange={id => { if (!id && batch.data) setChosen(target); onBatchIdChange(id) }} onClose={onClose}
     scopeOptions={{ inspectionType: { id: inspectionTypeId, name: label }, semesters: (semesters.data?.items ?? []).map(item => ({ id: item.id, name: item.label })), weeks: (weeks.data?.items ?? []).map(item => ({ id: item.id, semesterId: semesterId ?? '', name: item.label })) }}
     departments={(departments.data?.items ?? []).map(item => ({ id: item.id, name: item.label }))} />
-  return <Drawer open title={`${label}导入范围`} onClose={onClose}>
-    <Form layout="vertical">
-      <Form.Item label="导入学期"><Select aria-label="导入学期" value={semesterId} options={semesters.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => { setSelectedSemester(value); setSelectedWeek('') }} /></Form.Item>
-      <Form.Item label="导入周次"><Select aria-label="导入周次" disabled={!semesterId} value={weekId} options={weeks.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={setSelectedWeek} /></Form.Item>
-      <Button type="primary" disabled={!semesterId || !weekId} onClick={() => { if (semesterId && weekId) setChosen({ semesterId, weekId, inspectionTypeId, departmentId: isSuperAdmin ? '' : memberDepartmentId ?? (departments.data?.items.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : ''), ...(isSuperAdmin ? { attributionMode: 'ADMINISTRATOR' as const } : {}) }) }}>准备导入</Button>
+  return <Drawer open title={`${label}导入范围`} width="min(560px, 100vw)" className="inspection-import-scope-drawer" onClose={onClose}
+    footer={<Space><Button onClick={onClose}>取消</Button><Button type="primary" disabled={!semesterId || !weekId} onClick={() => { if (semesterId && weekId) setChosen({ semesterId, weekId, inspectionTypeId, departmentId: isSuperAdmin ? '' : memberDepartmentId ?? (departments.data?.items.some(item => item.id === COLLEGE_DEPARTMENT_OPTION_ID) ? COLLEGE_DEPARTMENT_OPTION_ID : ''), ...(isSuperAdmin ? { attributionMode: 'ADMINISTRATOR' as const } : {}) }) }}>准备导入</Button></Space>}>
+    <Typography.Paragraph className="inspection-import-scope-copy" type="secondary">选择本次导入的学期和周次。这里设置的是导入目标，不会改变列表筛选范围。</Typography.Paragraph>
+    <Form layout="vertical" className="inspection-import-scope-form">
+      <Row gutter={16}>
+        <Col xs={24} sm={12}><Form.Item label="导入学期"><Select aria-label="导入学期" value={semesterId} options={semesters.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => { setSelectedSemester(value); setSelectedWeek('') }} /></Form.Item></Col>
+        <Col xs={24} sm={12}><Form.Item label="导入周次"><Select aria-label="导入周次" disabled={!semesterId} value={weekId} options={weeks.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={setSelectedWeek} /></Form.Item></Col>
+      </Row>
     </Form>
   </Drawer>
 }

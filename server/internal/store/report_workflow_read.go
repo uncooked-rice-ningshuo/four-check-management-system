@@ -197,8 +197,8 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 			base += fmt.Sprintf(" AND record.department_id=$%d::uuid", len(args))
 		}
 	}
-	cellBase := base
-	cellArgs := append([]any(nil), args...)
+	filterOptionsBase := base
+	filterOptionsArgs := append([]any(nil), args...)
 	for _, filter := range []struct {
 		column string
 		value  string
@@ -245,12 +245,41 @@ func (p *Postgres) ListReportVersionRecords(ctx context.Context, semesterID, wee
 		return reporting.RecordPage{}, err
 	}
 	var options reporting.ReportVersionRecordFilterOptions
-	if err := p.Pool.QueryRow(ctx, `SELECT
- COALESCE(array_agg(DISTINCT nullif(included_data_json->>'studentNumber','') ORDER BY nullif(included_data_json->>'studentNumber','')) FILTER (WHERE nullif(included_data_json->>'studentNumber','') IS NOT NULL), ARRAY[]::text[]),
- COALESCE(array_agg(DISTINCT nullif(included_data_json->>'studentName','') ORDER BY nullif(included_data_json->>'studentName','')) FILTER (WHERE nullif(included_data_json->>'studentName','') IS NOT NULL), ARRAY[]::text[]),
- COALESCE(array_agg(DISTINCT nullif(included_data_json->>'className','') ORDER BY nullif(included_data_json->>'className','')) FILTER (WHERE nullif(included_data_json->>'className','') IS NOT NULL), ARRAY[]::text[]),
- COALESCE(array_agg(DISTINCT nullif(included_data_json->>'grade','') ORDER BY nullif(included_data_json->>'grade','')) FILTER (WHERE nullif(included_data_json->>'grade','') IS NOT NULL), ARRAY[]::text[])
-`+cellBase, cellArgs...).Scan(&options.StudentNumbers, &options.StudentNames, &options.ClassNames, &options.Grades); err != nil {
+	optionsQuery := `SELECT
+	 COALESCE((SELECT array_agg(student_no ORDER BY student_no) FROM (
+	  SELECT DISTINCT student_no FROM students WHERE enabled AND enrollment_status='ENROLLED'
+	 ) students), ARRAY[]::text[]),
+	 COALESCE((SELECT array_agg(name ORDER BY name) FROM (
+	  SELECT DISTINCT name FROM students WHERE enabled AND enrollment_status='ENROLLED'
+	 ) students), ARRAY[]::text[]),
+	 COALESCE((SELECT array_agg(name ORDER BY name) FROM (
+	  SELECT DISTINCT class.name FROM classes class JOIN grades grade ON grade.id=class.grade_id
+	  WHERE class.enabled AND grade.enabled
+	 ) classes), ARRAY[]::text[]),
+	 COALESCE((SELECT array_agg(name ORDER BY name) FROM (
+	  SELECT DISTINCT name FROM grades WHERE enabled
+	 ) grades), ARRAY[]::text[])
+	`
+	optionsArgs := []any(nil)
+	if !permission.AllowsWholeScope(permissions, permission.ActionReportView, permission.Scope{
+		SemesterID: semesterID, WeekID: weekID,
+	}) {
+		optionsQuery = `SELECT
+	 COALESCE(array_agg(DISTINCT student_number ORDER BY student_number) FILTER (WHERE student_number IS NOT NULL), ARRAY[]::text[]),
+	 COALESCE(array_agg(DISTINCT student_name ORDER BY student_name) FILTER (WHERE student_name IS NOT NULL), ARRAY[]::text[]),
+	 COALESCE(array_agg(DISTINCT class_name ORDER BY class_name) FILTER (WHERE class_name IS NOT NULL), ARRAY[]::text[]),
+	 COALESCE(array_agg(DISTINCT grade_name ORDER BY grade_name) FILTER (WHERE grade_name IS NOT NULL), ARRAY[]::text[])
+FROM (
+	 SELECT DISTINCT
+	  NULLIF(version_record.included_data_json->>'studentNumber','') AS student_number,
+	  NULLIF(version_record.included_data_json->>'studentName','') AS student_name,
+	  NULLIF(version_record.included_data_json->>'className','') AS class_name,
+	  NULLIF(version_record.included_data_json->>'grade','') AS grade_name
+	 ` + filterOptionsBase + `
+) visible_options`
+		optionsArgs = filterOptionsArgs
+	}
+	if err := p.Pool.QueryRow(ctx, optionsQuery, optionsArgs...).Scan(&options.StudentNumbers, &options.StudentNames, &options.ClassNames, &options.Grades); err != nil {
 		return reporting.RecordPage{}, err
 	}
 	page.FilterOptions = &options

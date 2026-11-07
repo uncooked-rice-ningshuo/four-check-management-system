@@ -117,11 +117,12 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			fields["period"] = "1-2"
 			fields["absenceHours"] = 2
 		case inspection.InspectionTypeUnattended:
-			// 无机课堂 records one violation per day: the server owns period and hours.
+			// 无机课堂 requires its course section for the weekly student/section identity.
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")
 			fields["courseId"] = rf("13")
 			fields["classroomId"] = rf("09")
+			fields["period"] = "1-2"
 		case inspection.InspectionTypeEveningSelfStudy:
 			fields["studentId"] = rf("07")
 			fields["classId"] = rf("06")

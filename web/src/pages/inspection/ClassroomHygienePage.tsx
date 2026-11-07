@@ -10,7 +10,8 @@ import { attributionLabel } from '../../entities/inspection/model/inspectionScop
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { useInspectionListScope } from '../../features/attendance/hooks/useInspectionListScope'
-import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn } from '../../features/inspection-list/model/inspectionColumns'
+import { createInspectionFilterColumns, createInspectionProvenanceColumns, createInspectionSortColumn, inspectionRecordRowClassName } from '../../features/inspection-list/model/inspectionColumns'
+import { InspectionRecordOwnershipLegend } from '../../features/inspection-list/ui/InspectionRecordOwnershipLegend'
 import { DepartmentSubmissionActions } from '../../features/department-submission/ui/DepartmentSubmissionActions'
 import { useClassroomHygieneRecords, useInspectionContext } from '../../features/classroom-hygiene/model/queries'
 import { ClassroomHygieneCreatePanel } from '../../features/classroom-hygiene/ui/ClassroomHygieneCreatePanel'
@@ -82,8 +83,8 @@ const displayColumns=attributionColumn?[...columns.slice(0,-1),attributionColumn
  <Typography.Text type="secondary">按授权范围查询教室卫生记录；新增时单独选择录入目标。</Typography.Text></div></div>
  {invalidSelection&&<Alert type="error" title="所选学期或周次已不在授权范围内，请重置筛选条件。" action={<Button onClick={()=>saveFilters({page:1,pageSize:20})}>重置筛选</Button>}/>}
  {optionError&&<Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={()=>optionQueries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
- <ProTable<ClassroomHygieneRecord> key={`${semesterId??''}-${weekId??''}`} className="attendance-records-table" cardBordered rowKey="id" columns={displayColumns} dataSource={records.isError?[]:records.data?.items??[]} loading={records.isLoading||semesters.isLoading||scope.currentWeek.isLoading}
- headerTitle={<Space size={10}><span>教室卫生记录</span><Tag color="blue">共 {records.data?.total??0} 条</Tag></Space>}
+ <ProTable<ClassroomHygieneRecord> key={`${semesterId??''}-${weekId??''}`} className="attendance-records-table" cardBordered rowKey="id" rowClassName={inspectionRecordRowClassName(user?.id)} columns={displayColumns} dataSource={records.isError?[]:records.data?.items??[]} loading={records.isLoading||semesters.isLoading||scope.currentWeek.isLoading}
+ headerTitle={<Space size={10}><span>教室卫生记录</span><Tag color="blue">共 {records.data?.total??0} 条</Tag><InspectionRecordOwnershipLegend /></Space>}
  formRef={form} form={{initialValues:filters}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{saveFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{setSelectedGrade('');saveFilters({page:1,pageSize:20});setSelected([])}}
  scroll={{x:1700}} pagination={{current:Number(filters.page),pageSize:Number(filters.pageSize),total:records.data?.total??0,showSizeChanger:true,showQuickJumper:true,showTotal:total=>`共 ${total} 条`,onChange:(page,pageSize)=>{saveFilters({...filters,page,pageSize});setSelected([])}}}
  rowSelection={{selectedRowKeys:selected,onChange:setSelected,getCheckboxProps:record=>({disabled:!record.canDelete})}}

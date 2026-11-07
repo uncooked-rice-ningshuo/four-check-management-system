@@ -43,6 +43,7 @@ export type ReportCountRow = {
   departmentName: string
   collegeLevel: boolean
   inspectionTypeId: string
+  inspectionTypeCode?: string
   inspectionType: string
   recordCount: number
   confirmedZeroReceiptCount: number
@@ -58,7 +59,81 @@ export type ReportVersionContent = {
   incompleteCells: { departmentId: string; departmentName: string; collegeLevel: boolean; inspectionTypeId: string; inspectionType: string }[]
   corrections: { id: string; recordId: string; field: string }[]
   adjustments?: ReportAdjustmentSummary[] | null
+  indicators?: ReportIndicators | null
   generatedAt: string
+}
+
+export type ReportMetricInputs = {
+  weekMultiplier: 1 | 2
+  morningPlannedDates: string[]
+  reportGradeScopeVersion?: number
+  grades?: ReportGradeSizeSnapshot[]
+  classes: ReportClassSizeSnapshot[]
+}
+
+export type ReportGradeSizeSnapshot = {
+  gradeId?: string
+  grade: string
+  expectedStudentCount: number
+}
+
+export type ReportClassSizeSnapshot = {
+  classId?: string
+  gradeId?: string
+  grade: string
+  className: string
+  expectedStudentCount: number
+}
+
+export type ReportIndicators = {
+  inputs: ReportMetricInputs
+  includedTypeCodes: string[]
+  classes: ReportClassIndicators[]
+  totals: ReportIndicatorValues
+}
+
+export type ReportClassIndicators = {
+  classId?: string
+  grade: string
+  className: string
+} & ReportIndicatorValues
+
+export type ReportIndicatorValues = {
+  expectedStudentCount: number
+  attendanceRate?: ReportAttendanceRateMetric | null
+  unattendedClassroom?: ReportUnattendedMetric | null
+  morningAttendance?: ReportMorningAttendanceMetric | null
+  eveningSelfStudy?: ReportCountMetric | null
+  classroomHygiene?: ReportCountMetric | null
+  dormitoryPersonalHygiene?: ReportCountMetric | null
+  dormitoryPublicHygiene?: ReportCountMetric | null
+  dormitoryHygieneTotal?: ReportCountMetric | null
+  lateReturn?: ReportCountMetric | null
+}
+
+export type ReportAttendanceRateMetric = {
+  violationStudentCount: number
+  expectedStudentCount: number
+  attendedStudentCount: number
+  rate: number | null
+}
+
+export type ReportUnattendedMetric = {
+  rawRecordCount: number
+  violationCount: number
+  violationPersonTimeCount: number
+  violatingStudentCount: number
+}
+
+export type ReportCountMetric = { rawRecordCount: number; count: number; personTimeCount?: number }
+
+export type ReportMorningAttendanceMetric = {
+  plannedDayCount: number
+  expectedPersonTimes: number
+  absencePersonTimes: number
+  attendedPersonTimes: number
+  penaltyCount: number
+  rate: number | null
 }
 
 export type ReportAdjustmentSummary = {
@@ -217,6 +292,10 @@ export type ReportingRecordsQuery = {
   departmentId: string
   collegeLevel: boolean
   inspectionTypeId: string
+  studentNumber?: string
+  studentName?: string
+  className?: string
+  grade?: string
   page: number
   pageSize: number
 }
@@ -230,6 +309,7 @@ export type ReportingRecordPage = {
 }
 
 export type ReportVersionRecordFilterOptions = {
+  // Filter choices use the active student roster, independent of saved version records.
   studentNumbers: string[]
   studentNames: string[]
   classNames: string[]

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"four-check-management-system/server/internal/permission"
+	"four-check-management-system/server/internal/reporting"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -50,6 +51,11 @@ func TestWeeklyReportSummaryPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, string(seed)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `INSERT INTO students(id,student_no,name,grade_id,class_id)
+VALUES('a0000000-0000-0000-0000-000000000030','S-OPTION-ONLY','Option-only student',
+'a0000000-0000-0000-0000-000000000005','a0000000-0000-0000-0000-000000000006')`); err != nil {
+		t.Fatal("insert roster-only filter option fixture:", err)
+	}
 	assertReportPermissionPredicate(t, pool)
 
 	const (
@@ -79,6 +85,11 @@ VALUES
  ('c0000000-0000-0000-0000-000000000005','b0000000-0000-0000-0000-000000000005',1,'a0000000-0000-0000-0000-000000000001',ARRAY['c0000000-0000-0000-0000-000000000051'::uuid],'[]'::jsonb)`)
 	if err != nil {
 		t.Fatal("insert immutable synthetic revisions:", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE inspection_records SET status='CONFIRMED',submission_id='b0000000-0000-0000-0000-000000000001',
+student_no_snapshot='S-FIXTURE',student_name_snapshot='Synthetic student',class_id='a0000000-0000-0000-0000-000000000006',
+class_name_snapshot='Fixture class',grade_snapshot='2026' WHERE id='a0000000-0000-0000-0000-000000000014'`); err != nil {
+		t.Fatal("confirm synthetic source record:", err)
 	}
 
 	repository := &Postgres{Pool: pool}
@@ -183,6 +194,34 @@ VALUES ('c0000000-0000-0000-0000-000000000006','b0000000-0000-0000-0000-00000000
 	}
 	if collegeRow == nil || collegeRow.SubmissionCount != 1 || collegeRow.ConfirmedBatchCount != 1 || collegeRow.ConfirmedRecordCount != 1 {
 		t.Fatalf("college-level batch summary = %+v, want one separate confirmed batch and record", collegeRow)
+	}
+
+	recordQuery := reporting.RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance,
+		StudentNumber: "FIXTURE", StudentName: "Synthetic", ClassName: "Fixture", Grade: "2026", Page: 1, PageSize: 20,
+	}
+	filteredRecords, filteredTotal, err := repository.ReportRecords(ctx, "a0000000-0000-0000-0000-000000000001", recordQuery, broadGrant)
+	if err != nil || filteredTotal != 1 || len(filteredRecords) != 1 {
+		t.Fatalf("all four report record filters = %d rows, total %d, err %v; want one", len(filteredRecords), filteredTotal, err)
+	}
+	filterOptions, err := repository.ReportRecordFilterOptions(ctx, reporting.RecordsQuery{
+		SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance,
+	}, broadGrant)
+	if err != nil || !slices.Contains(filterOptions.StudentNumbers, "S-OPTION-ONLY") ||
+		!slices.Contains(filterOptions.StudentNames, "Option-only student") || !slices.Contains(filterOptions.ClassNames, "Fixture class") ||
+		!slices.Contains(filterOptions.Grades, "2026") {
+		t.Fatalf("active-roster report filter options = %+v, err %v; want roster-only choices as well as class/grade", filterOptions, err)
+	}
+	for _, mismatch := range []reporting.RecordsQuery{
+		{SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance, StudentNumber: "NO-MATCH", Page: 1, PageSize: 20},
+		{SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance, StudentName: "NO-MATCH", Page: 1, PageSize: 20},
+		{SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance, ClassName: "NO-MATCH", Page: 1, PageSize: 20},
+		{SemesterID: semesterID, WeekID: weekID, DepartmentID: department, InspectionTypeID: attendance, Grade: "NO-MATCH", Page: 1, PageSize: 20},
+	} {
+		_, total, queryErr := repository.ReportRecords(ctx, "a0000000-0000-0000-0000-000000000001", mismatch, broadGrant)
+		if queryErr != nil || total != 0 {
+			t.Fatalf("mismatched report record filter %+v = total %d, err %v; want zero", mismatch, total, queryErr)
+		}
 	}
 
 	departmentDeny := append(append([]permission.EffectivePermission{}, broadGrant...), permission.EffectivePermission{

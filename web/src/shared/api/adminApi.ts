@@ -74,3 +74,7 @@ export const createSemester = (input: Omit<Semester, 'id' | 'enabled'>) => apiRe
 export const updateSemester = (input: Semester) => apiRequest<Semester>(`/admin/academic/semesters/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const createWeek = (input: Omit<SemesterWeek, 'id' | 'enabled'>) => apiRequest<SemesterWeek>('/admin/academic/weeks', { method: 'POST', body: JSON.stringify(input) })
 export const updateWeek = (input: SemesterWeek) => apiRequest<SemesterWeek>(`/admin/academic/weeks/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
+
+export type SemesterReportGrades = { semesterId: string; gradeIds: string[]; version: number }
+export const getSemesterReportGrades = (semesterId: string) => apiRequest<SemesterReportGrades>(`/admin/academic/semesters/${encodeURIComponent(semesterId)}/report-grades`)
+export const replaceSemesterReportGrades = (input: SemesterReportGrades) => apiRequest<SemesterReportGrades>(`/admin/academic/semesters/${encodeURIComponent(input.semesterId)}/report-grades`, { method: 'PUT', body: JSON.stringify(input) })

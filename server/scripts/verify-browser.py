@@ -224,7 +224,7 @@ INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES(
         fixture_sql = f"""
 INSERT INTO faculties(id,name) VALUES('{ids['faculty']}','E2E faculty');
 INSERT INTO grades(id,name) VALUES('{ids['grade']}','2026级');
-INSERT INTO classes(id,name,grade_id,faculty_id) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}');
+INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}',2);
 INSERT INTO teaching_buildings(id,name) VALUES('{ids['building']}','E2E building');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['room']}','{ids['building']}','101');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['roomB']}','{ids['building']}','102');

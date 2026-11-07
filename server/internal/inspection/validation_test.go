@@ -36,7 +36,7 @@ func validDetails(code string) map[string]json.RawMessage {
 		if f.Key == "result" {
 			value = `"QUALIFIED"`
 		}
-		if code == InspectionTypeAttendance && f.Key == "period" {
+		if (code == InspectionTypeAttendance || code == InspectionTypeUnattended) && f.Key == "period" {
 			value = `"1-2"`
 		}
 		if code == InspectionTypeEveningSelfStudy && f.Key == "period" {
@@ -329,8 +329,10 @@ func TestDuplicateKey(t *testing.T) {
 			}
 			f["date"] = json.RawMessage(`"2026-09-03"`)
 			b, _ = validateFixture(d.Code, f)
-			if a.DuplicateKey == b.DuplicateKey {
+			if d.Code != InspectionTypeUnattended && a.DuplicateKey == b.DuplicateKey {
 				t.Fatal("date absent from identity")
+			} else if d.Code == InspectionTypeUnattended && a.DuplicateKey != b.DuplicateKey {
+				t.Fatal("date must not split the weekly student/section identity")
 			}
 			f = validDetails(d.Code)
 			for key, value := range f {
@@ -371,7 +373,7 @@ func TestValidateDetailsBoundaries(t *testing.T) {
 				}
 			}
 			for _, field := range d.Fields {
-				if field.MaxLength > 0 && field.Key != "round" && !(d.Code == InspectionTypeAttendance && field.Key == "period") {
+				if field.MaxLength > 0 && field.Key != "round" && !((d.Code == InspectionTypeAttendance || d.Code == InspectionTypeUnattended) && field.Key == "period") {
 					f := validDetails(d.Code)
 					f[field.Key], _ = json.Marshal(strings.Repeat("字", field.MaxLength))
 					if _, issues := validateFixture(d.Code, f); len(issues) != 0 {
@@ -448,9 +450,7 @@ func TestValidateDetailsStoragePrecision(t *testing.T) {
 	requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
 }
 
-// 无机课堂 must use one identity for manual entry and Excel import: student + course + date.
-// A class-level key silently rejects a second course on the same day and lets the other
-// entry path insert the same event twice.
+// 无机课堂 uses the same weekly student/section identity in manual entry and Excel import.
 func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
 	manual, issues := validateFixture(InspectionTypeUnattended, validDetails(InspectionTypeUnattended))
 	if len(issues) != 0 {
@@ -461,7 +461,7 @@ func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
 		InspectionTypeID: detailID, InspectionTypeCode: InspectionTypeUnattended,
 		SemesterID: detailID, WeekID: detailID, StudentID: detailID, StudentNoSnapshot: "2026001",
 		StudentNameSnapshot: "学生甲", ClassID: detailID, ClassNameSnapshot: "班级甲", GradeSnapshot: "2026",
-		CourseID: detailID, ClassroomID: detailID, OccurredAt: day,
+		CourseID: detailID, ClassroomID: detailID, OccurredAt: day, PeriodText: "第1-2节",
 		WeekStart: time.Date(2026, 9, 1, 0, 0, 0, 0, day.Location()), WeekEnd: time.Date(2026, 9, 7, 0, 0, 0, 0, day.Location()),
 		CreatedBy: detailID,
 	})
@@ -471,11 +471,17 @@ func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
 	if imported.DedupKey != manual.DuplicateKey || UnattendedDedupKey(imported) != manual.DuplicateKey {
 		t.Fatal("import identity differs from manual identity")
 	}
-	// The same student on the same day in another course is a different event.
-	otherCourse := imported
-	otherCourse.CourseID = "abcdefab-0000-4000-8000-000000000002"
-	if UnattendedDedupKey(otherCourse) == manual.DuplicateKey {
-		t.Fatal("course missing from 无机课堂 identity")
+	// Class, course and date do not split the same student's section within a week.
+	otherSection := imported
+	otherSection.CourseID = "abcdefab-0000-4000-8000-000000000002"
+	otherSection.ClassID = "abcdefab-0000-4000-8000-000000000003"
+	otherSection.OccurredAt = day.Add(24 * time.Hour)
+	if UnattendedDedupKey(otherSection) != manual.DuplicateKey {
+		t.Fatal("class, course or date split the weekly student/section identity")
+	}
+	otherSection.PeriodText = "3-4"
+	if UnattendedDedupKey(otherSection) == manual.DuplicateKey {
+		t.Fatal("course section missing from 无机课堂 identity")
 	}
 	// 到课率 keeps its class/period identity, so the two types cannot collide by accident.
 	if AttendanceDedupKey(imported) == manual.DuplicateKey {

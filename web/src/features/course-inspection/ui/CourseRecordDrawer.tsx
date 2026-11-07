@@ -1,5 +1,5 @@
 import { ProFormDatePicker } from '@ant-design/pro-components'
-import { Alert, Button, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Typography } from 'antd'
+import { Alert, Button, Col, Divider, Drawer, Form, Input, InputNumber, Row, Select, Space, Typography } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type { CourseDetails, CourseRecord, InspectionOption } from '../../../entities/inspection/model/courseRecord'
 import { coursePeriodHours, formatCoursePeriod, parseCoursePeriod } from '../../../entities/inspection/model/coursePeriod'
@@ -63,7 +63,7 @@ export function CourseRecordDrawer({ editing: initialEditing, inspectionTypeId, 
  const submit=async(values:Values)=>{
   if(submitting.current||failed)return
   submitting.current=true;setError('')
-  // 到课率 owns period/hours; 无机课堂 records one violation per day and must not send them.
+  // Both course checks require a section; only 到课率 derives absence hours from it.
   const {semesterId,weekId,departmentId,reason,periodStart,periodEnd,absenceHours:submittedHours,penaltyMultiplier:_ignoredMultiplier,penaltyHours:_ignoredHours,penaltyCount:_ignoredCount,...details}=values
   void _ignoredMultiplier; void _ignoredHours; void _ignoredCount
   const attend = typeCode === 'ATTENDANCE_RATE'
@@ -71,10 +71,12 @@ export function CourseRecordDrawer({ editing: initialEditing, inspectionTypeId, 
   let normalized = { ...details, remark: details.remark ?? '' } as Record<string, unknown>
   delete normalized.time
   delete normalized.period
-  if (attend) {
+  if (attend || typeCode === 'UNATTENDED_CLASSROOM') {
     const period = formatCoursePeriod(periodStart, periodEnd)
     if (!period) { setError('请选择有效的开始和结束节次。'); submitting.current=false; return }
-    normalized = { ...normalized, period, absenceHours: submittedHours }
+    normalized = attend
+      ? { ...normalized, period, absenceHours: submittedHours }
+      : { ...normalized, period }
   }
   const administratorRecord = isSuperAdmin && !editing
   const savedDepartmentId = isSuperAdmin && editing?.attributionMode === 'ADMINISTRATOR' ? '' : departmentId
@@ -82,7 +84,7 @@ export function CourseRecordDrawer({ editing: initialEditing, inspectionTypeId, 
   catch(failure){setError(failure instanceof ApiError && failure.status<500 ? failure.code==='VERSION_CONFLICT'?'记录已变化，请关闭并重新打开后核对。':failure.message:'保存失败，请稍后重试。')}
   finally{submitting.current=false}
  }
- return <Drawer open title={`${editing?'编辑':'新增'}${title}记录`} size={720} onClose={()=>{if(!submitting.current)onClose()}} closable={!mutation.isPending} maskClosable={!mutation.isPending}
+ return <Drawer open title={`${editing?'编辑':'新增'}${title}记录`} size={760} className="inspection-entry-drawer" onClose={()=>{if(!submitting.current)onClose()}} closable={!mutation.isPending} maskClosable={!mutation.isPending}
  footer={<Space><Button onClick={onClose} disabled={mutation.isPending}>取消</Button><Button type="primary" loading={mutation.isPending} disabled={failed || !memberDepartmentAvailable || (typeCode==='ATTENDANCE_RATE' && !!weekId && !effectiveMultiplier)} onClick={()=>form.submit()}>{editing?'保存修改':'保存草稿'}</Button></Space>}>
  {error&&<Alert type="error" showIcon title={error} />}
  {failed&&<Alert type="error" showIcon title="录入选项加载失败，请重试。" action={<Button onClick={()=>queries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
@@ -92,18 +94,23 @@ export function CourseRecordDrawer({ editing: initialEditing, inspectionTypeId, 
  onValuesChange={(changed, values)=>{if(typeCode==='ATTENDANCE_RATE'&&('periodStart' in changed||'periodEnd' in changed))form.setFieldValue('absenceHours',coursePeriodHours(values.periodStart,values.periodEnd))}}>
  {typeCode==='ATTENDANCE_RATE' && weekId && (effectiveMultiplier ? <Typography.Text type="secondary" role="status">{typeof absenceHours==='number' && absenceHours>0 ? `实际旷课 ${absenceHours} 学时；${sameSubmittedOccurrence?'原记录':'本周'}按 ${effectiveMultiplier} 倍计入违纪，共 ${penaltyCountFormatter.format(absenceHours*effectiveMultiplier)} 次。` : `${sameSubmittedOccurrence?'原记录':'本周'}违纪计入倍数为 ${effectiveMultiplier}；选择节次后自动显示计入结果。`}</Typography.Text> : <Alert type="warning" showIcon title={legacyRuleUnknown?'该历史记录的违纪计入规则未知，不能按当前周次规则直接更正。':'该周到课率违纪计入规则尚未配置，请联系管理员。'} />)}
  {typeCode==='UNATTENDED_CLASSROOM' && weekId && (effectiveMultiplier ? <Typography.Text type="secondary" role="status">{`${sameSubmittedOccurrence?'原记录':'本周'}一条无机课堂记录按 1 次计入违纪，乘以 ${effectiveMultiplier} 倍，共 ${penaltyCountFormatter.format(effectiveMultiplier)} 次。`}</Typography.Text> : <Alert type="warning" showIcon title={legacyRuleUnknown?'该历史记录的违纪计入规则未知，不能按当前周次规则直接更正。':'该周违纪计入倍数尚未配置，请联系管理员。'} />)}
+ <Divider titlePlacement="start" plain>录入范围</Divider>
  <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="semesterId" label="录入学期" rules={required}><Select loading={semesters.isFetching} options={options(semesters.data?.items)} onChange={()=>clear(memberEntry?['weekId','classId','studentId','classroomId','periodStart','periodEnd']:['weekId','departmentId','classId','studentId','classroomId','periodStart','periodEnd'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="weekId" label="录入周次" rules={required}><Select disabled={!semesterId} loading={weeks.isFetching} options={options(weeks.data?.items)} onChange={()=>clear(memberEntry?['classId','studentId','classroomId','periodStart','periodEnd']:['departmentId','classId','studentId','classroomId','periodStart','periodEnd'])}/></Form.Item></Col>
  {isSuperAdmin ? <Col span={24}><Form.Item name="departmentId" hidden><Input /></Form.Item><InspectionAttributionNote editing={!!editing} administratorOwned={editing?.attributionMode === 'ADMINISTRATOR'} /></Col> : <Col xs={24} sm={12}><Form.Item name="departmentId" label={memberEntry?'录入归属部门':'业务归属部门'} rules={required}><Select disabled={!weekId||memberEntry} loading={departments.isFetching} options={options(departments.data?.items,memberEntry&&editing?{id:editing.departmentId,label:'原记录部门'}:undefined)} onChange={()=>clear(['classId','studentId','classroomId','periodStart','periodEnd'])}/></Form.Item></Col>}
+ </Row>
+ <Divider titlePlacement="start" plain>检查内容</Divider>
+ <Row gutter={16}>
  <Col xs={24} sm={12}><Form.Item name="classId" label="学生班级" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classes.isFetching} options={options(classes.data,fallback('classId',editing?.className??''))} onChange={()=>clear(['studentId'])}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="studentId" label="学生" rules={required}><Select disabled={!classId} showSearch optionFilterProp="label" loading={students.isFetching} options={options(students.data,editing && editing.details.classId===classId?fallback('studentId',`${editing.studentName}（${editing.studentNumber}）`):undefined)}/></Form.Item></Col>
  <Col xs={24} sm={12}><ProFormDatePicker name="date" label="检查日期" rules={required} getValueFromEvent={(_date: unknown,dateString: string)=>dateString||undefined} fieldProps={{format:'YYYY-MM-DD',style:{width:'100%'}}}/></Col>
  <Col xs={24} sm={12}><Form.Item name="courseId" label="课程" rules={required}><CourseSelect disabled={!ready} scope={scope} selectedLabel={editing?.currentCourseName}/></Form.Item></Col>
  <Col xs={24} sm={12}><Form.Item name="classroomId" label="教室" rules={required}><Select disabled={!ready} showSearch optionFilterProp="label" loading={classrooms.isFetching} options={options(classrooms.data,editing?fallback('classroomId',editing.currentClassroomName):undefined)}/></Form.Item></Col>
- {typeCode==='ATTENDANCE_RATE' && <PeriodRangeFields startName="periodStart" endName="periodEnd" />}
+ {(typeCode==='ATTENDANCE_RATE' || typeCode==='UNATTENDED_CLASSROOM') && <PeriodRangeFields startName="periodStart" endName="periodEnd" />}
  {typeCode==='ATTENDANCE_RATE' && <Col xs={24} sm={12}><Form.Item name="absenceHours" label="实际旷课学时（按节次自动计算）" rules={[...required,{type:'number',min:0.01,max:24,message:'学时应大于 0 且不超过 24'}]}><InputNumber disabled min={0.01} max={24} style={{width:'100%'}}/></Form.Item></Col>}
  </Row>
+ <Divider titlePlacement="start" plain>补充信息</Divider>
  {editing&&<Form.Item name="reason" label="修改原因" rules={[...required,{whitespace:true,message:'请填写修改原因'}]}><Input.TextArea maxLength={255}/></Form.Item>}
  <Form.Item name="remark" label="备注"><Input.TextArea maxLength={500} rows={3}/></Form.Item>
  </Form>

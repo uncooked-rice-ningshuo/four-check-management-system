@@ -60,7 +60,19 @@ func (h *handler) attendanceFilterOptions(c *gin.Context) {
 		}
 	}
 	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}
-	result := attendanceFilterOptionsResponse{InspectionType: kind, ResponsibleDepartments: []organization.Department{}, Departments: []organization.Department{}, Semesters: []academic.Semester{}, Weeks: []academic.Week{}, Classes: []attendanceClassOption{}, Grades: []string{}}
+	result := attendanceFilterOptionsResponse{
+		InspectionType:         kind,
+		ResponsibleDepartments: []organization.Department{},
+		Departments:            []organization.Department{},
+		Semesters:              []academic.Semester{},
+		Weeks:                  []academic.Week{},
+		Classes:                []attendanceClassOption{},
+		Grades:                 []string{},
+		ListFilterOptions: attendanceListFilterOptions{
+			Semesters: []inspection.EntryOption{}, Departments: []inspection.EntryOption{},
+			Grades: []inspection.EntryOption{}, Classes: []inspection.EntryOption{}, Weeks: []inspection.EntryOption{},
+		},
+	}
 	options := map[string]map[string]inspection.EntryOption{}
 	for _, name := range []string{"semesters", "departments", "classes", "grades"} {
 		values, e := h.authorizedAttendanceOptions(c, actor, kind.ID, name, "")
@@ -71,6 +83,16 @@ func (h *handler) attendanceFilterOptions(c *gin.Context) {
 		options[name] = map[string]inspection.EntryOption{}
 		for _, v := range values {
 			options[name][v.ID] = v
+			switch name {
+			case "semesters":
+				result.ListFilterOptions.Semesters = append(result.ListFilterOptions.Semesters, v)
+			case "departments":
+				result.ListFilterOptions.Departments = append(result.ListFilterOptions.Departments, v)
+			case "classes":
+				result.ListFilterOptions.Classes = append(result.ListFilterOptions.Classes, v)
+			case "grades":
+				result.ListFilterOptions.Grades = append(result.ListFilterOptions.Grades, v)
+			}
 			if name == "classes" {
 				result.Classes = append(result.Classes, attendanceClassOption{ID: v.ID, Name: v.Label, Grade: v.Grade})
 			}
@@ -98,6 +120,7 @@ func (h *handler) attendanceFilterOptions(c *gin.Context) {
 			writeInspectionError(c, e)
 			return
 		}
+		result.ListFilterOptions.Weeks = append(result.ListFilterOptions.Weeks, weeks...)
 		for _, w := range weeks {
 			weekIDs[w.ID] = true
 		}

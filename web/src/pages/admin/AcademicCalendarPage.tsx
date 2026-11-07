@@ -11,6 +11,7 @@ import type { AcademicYear, Semester, SemesterWeek } from '../../entities/academ
 import { academicYearOptions, buildAcademicYearDefaults, buildSemesterDefaults, currentAcademicYearStart, semesterTypeOptions, type SemesterCode } from '../../features/academic/model/academicCalendarRules'
 import { createAcademicYear, createSemester, createWeek, getAcademicCalendar, getMorningScheduleCalendar, updateAcademicYear, updateSemester, updateWeek } from '../../shared/api/adminApi'
 import { AcademicWeekImportDrawer } from '../../features/academic/ui/AcademicWeekImportDrawer'
+import { SemesterReportGradesDialog } from '../../features/academic/ui/SemesterReportGradesDialog'
 
 type WeekFilters = { academicYearId?: string; semesterId?: string; dateRange?: [string, string] }
 
@@ -32,6 +33,7 @@ export function AcademicCalendarPage() {
   const [weekPage, setWeekPage] = useState(1)
   const [importOpen, setImportOpen] = useState(false)
   const [scheduleWeekId, setScheduleWeekId] = useState<string>()
+  const [reportGradeSemester, setReportGradeSemester] = useState<Semester | null>(null)
   const [form] = Form.useForm()
   const [messageApi, messageContextHolder] = message.useMessage()
   const client = useQueryClient()
@@ -125,7 +127,7 @@ export function AcademicCalendarPage() {
     {calendar.isError && <Alert type="error" showIcon title="学期周次加载失败，请重试" action={<Button onClick={() => void calendar.refetch()}>重试</Button>} />}
     {data.academicYears.length > 0 && <Tabs items={[
       { key: 'years', label: '学年', children: <ProTable<AcademicYear> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.academicYears} scroll={{ x: 'max-content' }} columns={[{ title: '学年', dataIndex: 'name' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '状态', dataIndex: 'enabled', render: (_, record) => <Tag color={record.enabled ? 'green' : 'default'}>{record.enabled ? '启用' : '停用'}</Tag> }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('year', record)}>编辑</Button> }]} /> },
-      { key: 'semesters', label: '学期', children: <ProTable<Semester> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.semesters} scroll={{ x: 'max-content' }} columns={[{ title: '名称', dataIndex: 'name' }, { title: '编码', dataIndex: 'code' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('semester', record)}>编辑</Button> }]} /> },
+      { key: 'semesters', label: '学期', children: <ProTable<Semester> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.semesters} scroll={{ x: 'max-content' }} columns={[{ title: '名称', dataIndex: 'name' }, { title: '编码', dataIndex: 'code' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openEdit('semester', record)}>编辑</Button><Button type="link" onClick={() => setReportGradeSemester(record)}>通报适用年级</Button></Space> }]} /> },
       { key: 'weeks', label: '周次', children: <ProTable<SemesterWeek, WeekFilters> rowKey="id" loading={calendar.isLoading} search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false }} onSubmit={values => { setWeekFilters(values); setWeekPage(1) }} onReset={() => { setWeekFilters({}); setWeekPage(1) }} options={{ density: true, setting: true }} pagination={{ pageSize: 20, current: weekPage, onChange: setWeekPage }} dataSource={weekRows} scroll={{ x: 'max-content' }} columns={[
         { title: '学年', dataIndex: 'academicYearId', valueType: 'select', fieldProps: { options: data.academicYears.map(year => ({ value: year.id, label: year.name })), allowClear: true }, render: (_, week) => data.academicYears.find(year => year.id === data.semesters.find(semester => semester.id === week.semesterId)?.academicYearId)?.name ?? '—' },
         { title: '学期', dataIndex: 'semesterId', valueType: 'select', fieldProps: { options: data.semesters.map(semester => ({ value: semester.id, label: semester.name })), allowClear: true }, render: (_, week) => data.semesters.find(semester => semester.id === week.semesterId)?.name ?? '—' },
@@ -147,6 +149,7 @@ export function AcademicCalendarPage() {
         {modal === 'week' && <Form.Item name="note" label="备注"><Input /></Form.Item>}
       </Form>
     </Modal>
+    {reportGradeSemester && <SemesterReportGradesDialog semester={reportGradeSemester} onClose={() => setReportGradeSemester(null)} />}
     <AcademicWeekImportDrawer open={importOpen} calendar={data} onClose={() => setImportOpen(false)} />
     {scheduleWeekId && <MorningScheduleDialog weekId={scheduleWeekId} onClose={() => setScheduleWeekId(undefined)} />}
   </section>

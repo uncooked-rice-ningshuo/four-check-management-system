@@ -35,6 +35,7 @@ type reportingHTTPStub struct {
 	versionRecords     reporting.RecordPage
 	versionNo          int
 	versionRecordQuery reporting.ReportVersionRecordsQuery
+	recordsQuery       reporting.RecordsQuery
 	draft              reporting.ReportDraft
 	draftErr           error
 	transition         reporting.ReportState
@@ -82,8 +83,9 @@ func (s *reportingHTTPStub) ArchiveWorkflow(_ context.Context, actorID, semester
 	return s.archiveWorkflow, s.archiveWFErr
 }
 
-func (s *reportingHTTPStub) Records(context.Context, string, reporting.RecordsQuery) (reporting.RecordPage, error) {
-	return reporting.RecordPage{Items: []reporting.Record{}}, nil
+func (s *reportingHTTPStub) Records(_ context.Context, _ string, query reporting.RecordsQuery) (reporting.RecordPage, error) {
+	s.recordsQuery = query
+	return reporting.RecordPage{Items: []reporting.Record{}, Page: query.Page, PageSize: query.PageSize}, nil
 }
 
 func (s *reportingHTTPStub) GenerateDraft(_ context.Context, _ string, _ reporting.GenerateDraftInput, _ audit.Metadata) (reporting.ReportDraft, error) {
@@ -159,6 +161,14 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 	if summaryResponse.Code != http.StatusOK || !strings.Contains(summaryResponse.Body.String(), `"rows":[]`) ||
 		stub.summaryActor != admin.ID || stub.semesterID != "semester" || stub.weekID != "week" {
 		t.Fatalf("summary response = %d %s actor=%q period=%q/%q", summaryResponse.Code, summaryResponse.Body.String(), stub.summaryActor, stub.semesterID, stub.weekID)
+	}
+	confirmedRecordsResponse := performJSON(router, http.MethodGet,
+		"/api/v1/reports/records?semesterId=semester&weekId=week&inspectionTypeId=type&studentNumber=20260001&studentName=%E6%9D%8E%E5%90%8C%E5%AD%A6&className=%E8%AE%A1%E7%AE%97%E6%9C%BA%E4%B8%80%E7%8F%AD&grade=2026%E7%BA%A7&page=2&pageSize=50", nil, tokens.AccessToken)
+	if confirmedRecordsResponse.Code != http.StatusOK || stub.recordsQuery.SemesterID != "semester" ||
+		stub.recordsQuery.StudentNumber != "20260001" || stub.recordsQuery.StudentName != "李同学" ||
+		stub.recordsQuery.ClassName != "计算机一班" || stub.recordsQuery.Grade != "2026级" ||
+		stub.recordsQuery.Page != 2 || stub.recordsQuery.PageSize != 50 {
+		t.Fatalf("confirmed records response = %d %s query=%+v", confirmedRecordsResponse.Code, confirmedRecordsResponse.Body.String(), stub.recordsQuery)
 	}
 	stub.workflow = reporting.ReportWorkflow{Versions: []reporting.ReportVersion{}, Reviews: []reporting.ReportReview{}, Corrections: []reporting.ReportCorrectionLog{}}
 	workflowResponse := performJSON(router, http.MethodGet, "/api/v1/reports/workflow?semesterId=semester&weekId=week", nil, tokens.AccessToken)

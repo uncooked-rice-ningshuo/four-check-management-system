@@ -33,6 +33,7 @@ import (
 type AdminServices struct {
 	Organization             *organization.Service
 	Academic                 *academic.Service
+	ReportGrades             *academic.ReportGradeService
 	AcademicWeekImports      academicWeekImportHTTPService
 	WorkContext              *academic.WorkContextService
 	Permission               *permission.Service
@@ -132,6 +133,7 @@ type handler struct {
 	auth                       *auth.Service
 	organization               *organization.Service
 	academic                   *academic.Service
+	reportGrades               *academic.ReportGradeService
 	academicWeekImports        academicWeekImportHTTPService
 	permission                 *permission.Service
 	masterData                 *masterdata.Service
@@ -167,6 +169,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	h := &handler{auth: authService, secureCookie: secureCookie}
 	if len(dependencies) > 0 {
 		h.organization, h.academic, h.permission = dependencies[0].Organization, dependencies[0].Academic, dependencies[0].Permission
+		h.reportGrades = dependencies[0].ReportGrades
 		h.academicWeekImports = dependencies[0].AcademicWeekImports
 		h.masterData, h.dictionary = dependencies[0].MasterData, dependencies[0].Dictionary
 		h.masterDataImports = dependencies[0].MasterDataImports
@@ -225,6 +228,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.PUT("/academic/years/:id", h.updateAcademicYear)
 	admin.POST("/academic/semesters", h.createSemester)
 	admin.PUT("/academic/semesters/:id", h.updateSemester)
+	admin.GET("/academic/semesters/:id/report-grades", h.getReportGrades)
+	admin.PUT("/academic/semesters/:id/report-grades", h.replaceReportGrades)
 	admin.POST("/academic/weeks", h.createWeek)
 	admin.PUT("/academic/weeks/:id", h.updateWeek)
 	admin.GET("/academic/weeks/import-spec", h.getAcademicWeekImportSpec)
@@ -975,6 +980,15 @@ type attendanceFilterOptionsResponse struct {
 	Weeks                  []academic.Week             `json:"weeks"`
 	Classes                []attendanceClassOption     `json:"classes"`
 	Grades                 []string                    `json:"grades"`
+	ListFilterOptions      attendanceListFilterOptions `json:"listFilterOptions"`
+}
+
+type attendanceListFilterOptions struct {
+	Semesters   []inspection.EntryOption `json:"semesters"`
+	Weeks       []inspection.EntryOption `json:"weeks"`
+	Departments []inspection.EntryOption `json:"departments"`
+	Grades      []inspection.EntryOption `json:"grades"`
+	Classes     []inspection.EntryOption `json:"classes"`
 }
 
 func attendanceResponsibleDepartments(departments []organization.Department, scopes []organization.DepartmentInspectionScope, inspectionTypeID string) []organization.Department {
@@ -1659,6 +1673,12 @@ func writeDomainError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, masterdata.ErrNotFound), errors.Is(err, dictionary.ErrNotFound), errors.Is(err, auth.ErrAccountNotFound), errors.Is(err, organization.ErrUserNotFound):
 		writeError(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "记录不存在或已被删除")
+	case errors.Is(err, academic.ErrReportGradesNotFound):
+		writeError(c, http.StatusNotFound, "REPORT_GRADES_NOT_FOUND", "学期年级配置不存在")
+	case errors.Is(err, academic.ErrReportGradesConflict):
+		writeError(c, http.StatusConflict, "REPORT_GRADES_VERSION_CONFLICT", "学期年级配置已变化，请刷新后重试")
+	case errors.Is(err, academic.ErrReportGradeUnavailable):
+		writeError(c, http.StatusBadRequest, "REPORT_GRADE_UNAVAILABLE", "所选年级不存在或已停用")
 	case errors.Is(err, academic.ErrDateOverlap):
 		writeError(c, http.StatusConflict, "ACADEMIC_DATE_OVERLAP", "日期范围重叠，请核对校历")
 	case errors.Is(err, dictionary.ErrDuplicateValue):

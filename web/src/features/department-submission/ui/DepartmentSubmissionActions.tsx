@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Drawer, Input, Modal, Segmented, Select, Space, Steps, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Drawer, Empty, Input, Modal, Segmented, Select, Space, Steps, Table, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
 import type { DepartmentSubmission, DepartmentSubmissionKind, DepartmentSubmissionScope } from '../../../entities/inspection/model/departmentSubmission'
 import type { SubmissionCartRecord } from '../../../entities/inspection/model/submissionCart'
@@ -256,24 +256,27 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       onCancel={() => setDecisionFor(undefined)} onOk={() => { if (decisionFor) action.mutate({ ...decisionFor, explanation: decisionFor.kind === 'resubmit' && decisionFor.item.kind === 'ZERO_RECORD' ? reason.trim() : undefined }) }}>
       {decisionFor?.kind === 'confirm' ? `将确认${decisionFor.item.kind === 'ZERO_RECORD' ? '“已检查、确认零条”回执' : `这 ${decisionFor.item.recordIds.length} 条记录`}并纳入后续通报。` : decisionFor?.item.kind === 'ZERO_RECORD' ? <><Typography.Paragraph>将保留原回执并追加新修订，重新进入审核流程。说明可选。</Typography.Paragraph><Input.TextArea aria-label="零记录重提说明（可选）" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} rows={3} /></> : '将按当前记录版本重新提交整个原批次。'}
     </Modal>
-    <Drawer title="检查提交批次" open={open} onClose={() => setOpen(false)} width={760} destroyOnHidden>
-      <Typography.Paragraph type="secondary">按批次提交，部门与管理员归属分别按周汇总。退回后可更正记录，也可原样在原批次重提。</Typography.Paragraph>
+    <Drawer title="检查提交批次" open={open} onClose={() => setOpen(false)} width="min(920px, 100vw)" className="submission-batches-drawer" destroyOnHidden>
+      <div className="submission-batch-intro">
+        <Typography.Text strong>{typeLabels[typeCode ?? ''] ?? '检查记录'}提交批次</Typography.Text>
+        <Typography.Paragraph type="secondary">按批次查看部门或管理员范围的提交记录。退回后可更正记录，也可原样在原批次重提。</Typography.Paragraph>
+      </div>
       {list.isError && <Alert type="error" title="批次加载失败" action={<Button onClick={() => void list.refetch()}>重试</Button>} />}
       <Table rowKey="id" loading={list.isLoading} dataSource={list.isError ? [] : list.data?.items ?? []}
-        locale={{ emptyText: list.isError ? '批次加载失败，请重试' : '当前范围暂无提交批次' }}
+        locale={{ emptyText: list.isError ? '批次加载失败，请重试' : <div className="submission-batch-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前范围暂无提交批次" /><Typography.Text type="secondary">完成记录提交后，相关批次会显示在这里。</Typography.Text></div> }}
         pagination={{ current: page, pageSize: 10, total: list.data?.total ?? 0, onChange: setPage }}
-        scroll={{ x: 650 }} columns={[
-          { title: '周次范围', key: 'scope', render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.scope.departmentId ? item.departmentName || '部门名称不可用' : '管理员'}</> },
-          { title: '记录数', key: 'count', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
-          { title: '修订', dataIndex: 'revisionNo' },
-          { title: '状态', key: 'status', render: (_, item) => <Tag>{submissionStatusLabel(item.status, item.scope.departmentId)}</Tag> },
-          { title: '操作', key: 'actions', render: (_, item) => <Space wrap>
+        scroll={{ x: 760 }} columns={[
+          { title: '周次范围', key: 'scope', width: 240, render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.scope.departmentId ? item.departmentName || '部门名称不可用' : '管理员'}</> },
+          { title: '记录数', key: 'count', width: 110, align: 'center', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
+          { title: '修订', dataIndex: 'revisionNo', width: 90, align: 'center' },
+          { title: '状态', key: 'status', width: 140, render: (_, item) => <Tag>{submissionStatusLabel(item.status, item.scope.departmentId)}</Tag> },
+          { title: '操作', key: 'actions', width: 180, render: (_, item) => <Space wrap>
             {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
             {item.status === 'RETURNED' && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}
           </Space> },
         ]} expandable={{ expandedRowRender: item => <Space direction="vertical"><Typography.Text>批次创建人：{item.createdByName || '账号不可用'}</Typography.Text><Typography.Text>实际提交人：{item.submittedByName || '账号不可用'}</Typography.Text><Typography.Text>提交时间：{new Date(item.submittedAt).toLocaleString('zh-CN')}</Typography.Text><Typography.Text>{item.kind === 'ZERO_RECORD' ? '已检查并确认零条；该回执不包含记录。后续发现实际记录时，应另行提交新批次。' : `记录数：${item.recordIds.length}`}</Typography.Text>{item.returnReason && <Alert type="warning" title={`退回原因：${item.returnReason}`} />}{onOpenRecord && item.records.map((record, index) => record.status === 'RETURNED' && <Button key={record.id} type="link" onClick={() => { setOpen(false); onOpenRecord(record.id, record.status) }}>更正第 {index + 1} 条记录</Button>)}</Space> }} />
     </Drawer>
-    <Drawer title="提交检查记录" open={cartOpen} size={980} destroyOnHidden className="submission-drawer" onClose={() => {
+    <Drawer title="提交检查记录" open={cartOpen} width="min(1040px, 100vw)" destroyOnHidden className="submission-drawer" onClose={() => {
       if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
       else setCartOpen(false)
     }}>

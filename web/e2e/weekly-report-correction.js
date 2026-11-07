@@ -47,10 +47,10 @@ async (page) => {
         .map(entry => entry.name).filter(url => url.includes('/versions/') && url.includes('/records?')))
       throw new Error(`No version-record response after applying filters; observed requests: ${requests.join(' | ')}; ${error}`)
     }
-    const filterParams = new URL(recordsResponse.url()).searchParams
-    check(recordsResponse.status() === 200 && filterParams.get('studentNumber') === '000001' &&
-      filterParams.get('studentName') === studentName && filterParams.get('className') === 'E2E class' &&
-      filterParams.get('grade') === '2026级',
+    const filterParams = await page.evaluate(url => Object.fromEntries(new URL(url).searchParams.entries()), recordsResponse.url())
+    check(recordsResponse.status() === 200 && filterParams.studentNumber === '000001' &&
+      filterParams.studentName === studentName && filterParams.className === 'E2E class' &&
+      filterParams.grade === '2026级',
     `Snapshot filter request did not carry all selected values: ${recordsResponse.status()} ${recordsResponse.url()}`)
     const recordRow = versionSnapshot.getByRole('row').filter({ hasText: studentName })
       .filter({ hasText: `${expectedDate} 08:00` })
@@ -136,11 +136,11 @@ async (page) => {
     response.url().includes('/versions/1/records?'))
   await workflowFilters.locator('.report-version-record-filter-actions .ant-btn-primary').click()
   const workflowFilterResponse = await workflowFilterResponsePromise
-  const workflowFilterParams = new URL(workflowFilterResponse.url()).searchParams
+  const workflowFilterParams = await page.evaluate(url => Object.fromEntries(new URL(url).searchParams.entries()), workflowFilterResponse.url())
   const workflowFilteredRecords = await workflowFilterResponse.json()
-  check(workflowFilterResponse.status() === 200 && workflowFilterParams.get('studentNumber') === '000001' &&
-    workflowFilterParams.get('studentName') === 'E2E student A' && workflowFilterParams.get('className') === 'E2E class' &&
-    workflowFilterParams.get('grade') === '2026级' && workflowFilteredRecords.total === 2 &&
+  check(workflowFilterResponse.status() === 200 && workflowFilterParams.studentNumber === '000001' &&
+    workflowFilterParams.studentName === 'E2E student A' && workflowFilterParams.className === 'E2E class' &&
+    workflowFilterParams.grade === '2026级' && workflowFilteredRecords.total === 2 &&
     workflowFilteredRecords.items.length === 2 && workflowFilteredRecords.items.every(item => item.studentName === 'E2E student A'),
   `Workbench filter request did not carry all values or return only the matching record: ${workflowFilterResponse.status()} ${workflowFilterResponse.url()} ${JSON.stringify(workflowFilteredRecords)}`)
 

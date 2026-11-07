@@ -18,6 +18,8 @@ import (
 )
 
 var (
+	ErrReportGradesUnconfigured    = errors.New("semester report grades unconfigured")
+	ErrReportMetricScopeInvalid    = errors.New("report records do not match frozen grade scope")
 	ErrInvalidPeriod               = errors.New("invalid reporting period")
 	ErrInvalidRecordsQuery         = errors.New("invalid reporting records query")
 	ErrForbidden                   = errors.New("report summary scope unavailable")
@@ -101,6 +103,10 @@ type reportVersionRecordsRepository interface {
 
 type reportSourceDetailsRepository interface {
 	ReportSourceDetails(context.Context, []string) (map[string]RecordSourceDetails, error)
+}
+
+type reportRecordFilterOptionsRepository interface {
+	ReportRecordFilterOptions(context.Context, RecordsQuery, []permission.EffectivePermission) (ReportVersionRecordFilterOptions, error)
 }
 
 type Service struct {
@@ -569,6 +575,14 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 		}
 		query.DepartmentID = id.String()
 	}
+	query.StudentNumber = strings.TrimSpace(query.StudentNumber)
+	query.StudentName = strings.TrimSpace(query.StudentName)
+	query.ClassName = strings.TrimSpace(query.ClassName)
+	query.Grade = strings.TrimSpace(query.Grade)
+	if utf8.RuneCountInString(query.StudentNumber) > 32 || utf8.RuneCountInString(query.StudentName) > 64 ||
+		utf8.RuneCountInString(query.ClassName) > 96 || utf8.RuneCountInString(query.Grade) > 16 {
+		return RecordPage{}, ErrInvalidRecordsQuery
+	}
 	if query.Page == 0 {
 		query.Page = 1
 	}
@@ -600,7 +614,15 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 	if err != nil {
 		return RecordPage{}, err
 	}
-	page := RecordPage{Items: make([]Record, 0, len(records)), Total: total, Page: query.Page, PageSize: query.PageSize}
+	var filterOptions *ReportVersionRecordFilterOptions
+	if optionsRepository, ok := s.repository.(reportRecordFilterOptionsRepository); ok {
+		options, optionsErr := optionsRepository.ReportRecordFilterOptions(ctx, query, permissions)
+		if optionsErr != nil {
+			return RecordPage{}, optionsErr
+		}
+		filterOptions = &options
+	}
+	page := RecordPage{Items: make([]Record, 0, len(records)), Total: total, Page: query.Page, PageSize: query.PageSize, FilterOptions: filterOptions}
 	var sources map[string]RecordSourceDetails
 	if sourceRepository, ok := s.repository.(reportSourceDetailsRepository); ok && len(records) > 0 {
 		ids := make([]string, len(records))
@@ -685,7 +707,7 @@ func (s *Service) GenerateDraft(ctx context.Context, accountID string, input Gen
 	generatePermissions := actionPermissions(effective.Permissions, permission.ActionReportGenerate)
 	forcePermissions := actionPermissions(effective.Permissions, permission.ActionReportForceGenerate)
 	content := ReportVersionContent{
-		Period: summary.Period, StatisticsRuleVersion: "COUNT_DETAILS_V1",
+		Period: summary.Period, StatisticsRuleVersion: "WEEKLY_INDICATORS_V2",
 		Rows: make([]ReportCountRow, 0), IncompleteCells: make([]IncompleteReportCell, 0), Corrections: make([]ReportCorrectionSummary, 0),
 		Adjustments: make([]ReportAdjustmentSummary, 0),
 		GeneratedAt: time.Now().UTC(),
@@ -710,7 +732,7 @@ func (s *Service) GenerateDraft(ctx context.Context, accountID string, input Gen
 		}
 		content.Rows = append(content.Rows, ReportCountRow{
 			DepartmentID: row.DepartmentID, DepartmentName: row.DepartmentName, CollegeLevel: row.CollegeLevel,
-			InspectionTypeID: row.InspectionTypeID, InspectionType: row.InspectionTypeName,
+			InspectionTypeID: row.InspectionTypeID, InspectionTypeCode: row.InspectionTypeCode, InspectionType: row.InspectionTypeName,
 			RecordCount: row.ConfirmedRecordCount, ZeroReceiptCount: row.ZeroRecordConfirmedBatchCount, DataStatus: dataStatus,
 		})
 		if row.IsRequired && row.ConfirmedBatchCount == 0 && row.ZeroRecordConfirmedBatchCount == 0 {

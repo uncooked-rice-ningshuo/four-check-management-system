@@ -27,6 +27,33 @@ type reportSourceRecord struct {
 	LockedReportID string
 }
 
+type reportVersionRecordSnapshot struct {
+	ID     string
+	Record reporting.Record
+}
+
+func loadReportVersionRecordSnapshots(ctx context.Context, tx pgx.Tx, versionID string) ([]reportVersionRecordSnapshot, error) {
+	rows, err := tx.Query(ctx, `SELECT inspection_record_id::text,included_data_json::text
+FROM weekly_report_version_records WHERE report_version_id=$1::uuid ORDER BY inspection_record_id`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]reportVersionRecordSnapshot, 0)
+	for rows.Next() {
+		var item reportVersionRecordSnapshot
+		var recordJSON string
+		if err := rows.Scan(&item.ID, &recordJSON); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(recordJSON), &item.Record); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 type reportZeroReceipt struct {
 	ID               string
 	RevisionNo       int
@@ -87,10 +114,6 @@ FROM weekly_reports wr LEFT JOIN weekly_report_versions version ON version.repor
 		return reporting.ReportDraft{}, reporting.ErrInvalidReportTransition
 	}
 	versionNo := currentVersion + 1
-	contentJSON, err := json.Marshal(command.Content)
-	if err != nil {
-		return reporting.ReportDraft{}, err
-	}
 	rows := make([]reportSourceRecord, 0)
 	recordSnapshots := make(map[string]reporting.ReportRecordSnapshot, len(command.Records))
 	for _, snapshot := range command.Records {
@@ -156,6 +179,24 @@ FROM weekly_reports wr LEFT JOIN weekly_report_versions version ON version.repor
 	if currentVersion > 0 && (status == reporting.ReportStatusFinalized || status == reporting.ReportStatusPublished || status == reporting.ReportStatusArchived) &&
 		currentSourceFingerprint == fingerprintHex {
 		return reporting.ReportDraft{}, reporting.ErrInvalidReportTransition
+	}
+	if !command.Content.ScopeLimited {
+		indicatorInputs, err := reportIndicatorInputs(ctx, tx, command.Content.Period.SemesterID, command.Content.Period.WeekID, true)
+		if err != nil {
+			return reporting.ReportDraft{}, err
+		}
+		indicatorRecords := make([]reporting.Record, 0, len(recordSnapshots))
+		for _, snapshot := range command.Records {
+			indicatorRecords = append(indicatorRecords, snapshot.Record)
+		}
+		command.Content.Indicators, err = reporting.CalculateReportIndicators(indicatorInputs, command.Content.Rows, indicatorRecords)
+		if err != nil {
+			return reporting.ReportDraft{}, err
+		}
+	}
+	contentJSON, err := json.Marshal(command.Content)
+	if err != nil {
+		return reporting.ReportDraft{}, err
 	}
 	createdAt := time.Now().UTC()
 	_, err = tx.Exec(ctx, `INSERT INTO weekly_report_versions(
@@ -428,6 +469,29 @@ WHERE version_record.report_version_id=$1::uuid AND version_record.inspection_re
 		return reporting.ReportCorrectionResult{}, err
 	}
 	content.GeneratedAt = time.Now().UTC()
+	versionRecords, err := loadReportVersionRecordSnapshots(ctx, tx, currentVersionID)
+	if err != nil {
+		return reporting.ReportCorrectionResult{}, err
+	}
+	var correctedRecord reporting.Record
+	if err := json.Unmarshal(updatedRecordJSON, &correctedRecord); err != nil {
+		return reporting.ReportCorrectionResult{}, err
+	}
+	recordFound := false
+	indicatorRecords := make([]reporting.Record, 0, len(versionRecords))
+	for _, item := range versionRecords {
+		if item.ID == input.RecordID {
+			item.Record = correctedRecord
+			recordFound = true
+		}
+		indicatorRecords = append(indicatorRecords, item.Record)
+	}
+	if !recordFound {
+		return reporting.ReportCorrectionResult{}, reporting.ErrReportCorrectionNotFound
+	}
+	if err := reporting.RecalculateReportIndicators(&content, indicatorRecords); err != nil {
+		return reporting.ReportCorrectionResult{}, err
+	}
 	contentJSON, err := json.Marshal(content)
 	if err != nil {
 		return reporting.ReportCorrectionResult{}, err
@@ -644,6 +708,30 @@ ORDER BY version.version_no DESC LIMIT 1`, reportID, input.RecordID).Scan(
  AND (locked_by_report_id IS NULL OR locked_by_report_id=$2::uuid)`, input.RecordID, reportID, recordVersion); err != nil {
 			return reporting.ReportAdjustmentResult{}, err
 		}
+	}
+	versionRecords, err := loadReportVersionRecordSnapshots(ctx, tx, currentVersionID)
+	if err != nil {
+		return reporting.ReportAdjustmentResult{}, err
+	}
+	indicatorRecords := make([]reporting.Record, 0, len(versionRecords)+1)
+	adjustedRecordFound := false
+	for _, item := range versionRecords {
+		if item.ID == input.RecordID {
+			adjustedRecordFound = true
+			if input.Operation == "EXCLUDE" {
+				continue
+			}
+		}
+		indicatorRecords = append(indicatorRecords, item.Record)
+	}
+	if input.Operation == "EXCLUDE" && !adjustedRecordFound {
+		return reporting.ReportAdjustmentResult{}, reporting.ErrReportCorrectionNotFound
+	}
+	if input.Operation == "INCLUDE" {
+		indicatorRecords = append(indicatorRecords, record)
+	}
+	if err := reporting.RecalculateReportIndicators(&content, indicatorRecords); err != nil {
+		return reporting.ReportAdjustmentResult{}, err
 	}
 	change := 1
 	if input.Operation == "EXCLUDE" {

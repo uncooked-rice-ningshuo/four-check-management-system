@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/permission"
@@ -116,6 +117,9 @@ type InspectionFilter struct {
 	SubmissionCandidatesOnly bool   `form:"-"`
 	ImportBatchID            string `form:"importBatchId"`
 	Keyword                  string `form:"keyword"`
+	StudentNumber            string `form:"studentNumber"`
+	StudentName              string `form:"studentName"`
+	ClassName                string `form:"className"`
 	SemesterID               string `form:"semesterId"`
 	WeekID                   string `form:"weekId"`
 	InspectionTypeID         string `form:"inspectionTypeId"`
@@ -402,7 +406,12 @@ func (s *RecordService) List(ctx context.Context, actor ManualActor, f Inspectio
 		f.Sort = SortOccurredAtDescending
 	}
 	f.Keyword = strings.TrimSpace(f.Keyword)
-	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || len(f.Keyword) > 80 || (f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending && f.Sort != SortStudentNoAscending && f.Sort != SortStudentNoDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
+	f.StudentNumber = strings.TrimSpace(f.StudentNumber)
+	f.StudentName = strings.TrimSpace(f.StudentName)
+	f.ClassName = strings.TrimSpace(f.ClassName)
+	if f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || utf8.RuneCountInString(f.Keyword) > 80 ||
+		utf8.RuneCountInString(f.StudentNumber) > 32 || utf8.RuneCountInString(f.StudentName) > 64 || utf8.RuneCountInString(f.ClassName) > 96 ||
+		(f.Sort != SortOccurredAtAscending && f.Sort != SortOccurredAtDescending && f.Sort != SortStudentNoAscending && f.Sort != SortStudentNoDescending) || !validAttendanceStatus(f.Status) || !validAttendanceSource(f.Source) {
 		return InspectionPage{}, ErrInspectionRequest
 	}
 	a, err := s.access(ctx, actor)

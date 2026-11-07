@@ -51,11 +51,15 @@ func (p *AttendanceTemplatePublisher) Publish(ctx context.Context, metadata audi
 	if err != nil {
 		return Template{}, err
 	}
+	templateVersion, err := InspectionTemplateVersion(p.typeCode)
+	if err != nil {
+		return Template{}, err
+	}
 	if err := p.repository.CheckTemplatePublisher(ctx, metadata.ActorID); err != nil {
 		return Template{}, err
 	}
 	if strings.TrimSpace(metadata.Reason) == "" {
-		metadata.Reason = fmt.Sprintf("初始化%s v%d", definition.Name, CurrentTemplateVersion)
+		metadata.Reason = fmt.Sprintf("初始化%s v%d", definition.Name, templateVersion)
 	}
 	content, err := BuildInspectionTemplate(p.typeCode)
 	if err != nil {
@@ -70,10 +74,10 @@ func (p *AttendanceTemplatePublisher) Publish(ctx context.Context, metadata audi
 	}
 	existing, err := p.repository.FindInspectionTemplate(ctx, p.typeCode)
 	if err == nil {
-		if existing.Code != definition.Code || existing.Status != "PUBLISHED" || existing.Version > CurrentTemplateVersion {
+		if existing.Code != definition.Code || existing.Status != "PUBLISHED" || existing.Version > templateVersion {
 			return Template{}, ErrTemplatePublicationConflict
 		}
-		if existing.Version == CurrentTemplateVersion {
+		if existing.Version == templateVersion {
 			return p.verify(ctx, existing, content, metadata)
 		}
 		// An older version stays live until the repository retires it atomically

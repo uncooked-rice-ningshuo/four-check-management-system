@@ -17,10 +17,10 @@ func BuildAttendanceTemplate() ([]byte, error) {
 		attendanceImportFields)
 }
 
-// BuildUnattendedTemplate keeps a distinct field contract: no time, period or hours.
+// BuildUnattendedTemplate uses a versioned field contract that requires the course section.
 func BuildUnattendedTemplate() ([]byte, error) {
-	return buildCourseTemplate("无机课堂导入", "UNATTENDED_CLASSROOM_IMPORT",
-		"填写说明：请保留前四行，从第5行填写；日期YYYY-MM-DD，地点为教学楼名称及教室号。每条记录固定计 1 次违纪，不填写节次与学时。",
+	return buildCourseTemplateVersion("无机课堂导入", "UNATTENDED_CLASSROOM_IMPORT", UnattendedTemplateVersion,
+		"填写说明：请保留前四行，从第5行填写；日期YYYY-MM-DD，课程节次填写如“第1-2节”，地点为教学楼名称及教室号。每条记录固定计 1 次违纪。",
 		unattendedImportFields)
 }
 
@@ -28,7 +28,15 @@ func buildCourseTemplate(sheet, code, instructions string, fields []TemplateFiel
 	return buildImportTemplate(sheet, code, instructions, fields)
 }
 
+func buildCourseTemplateVersion(sheet, code string, version int, instructions string, fields []TemplateField) ([]byte, error) {
+	return buildImportTemplateVersion(sheet, code, version, instructions, fields)
+}
+
 func buildImportTemplate(sheet, code, instructions string, fields []TemplateField) ([]byte, error) {
+	return buildImportTemplateVersion(sheet, code, CurrentTemplateVersion, instructions, fields)
+}
+
+func buildImportTemplateVersion(sheet, code string, version int, instructions string, fields []TemplateField) ([]byte, error) {
 	lastColumn, err := excelize.ColumnNumberToName(len(fields))
 	if err != nil {
 		return nil, err
@@ -38,7 +46,7 @@ func buildImportTemplate(sheet, code, instructions string, fields []TemplateFiel
 	if err := book.SetSheetName("Sheet1", sheet); err != nil {
 		return nil, err
 	}
-	rows := [][]any{{"template_code", code, "template_version", CurrentTemplateVersion}, {}, {}, {instructions}}
+	rows := [][]any{{"template_code", code, "template_version", version}, {}, {}, {instructions}}
 	for _, field := range fields {
 		rows[1] = append(rows[1], field.Code)
 		rows[2] = append(rows[2], field.Header)

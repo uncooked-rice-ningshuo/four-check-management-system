@@ -53,6 +53,10 @@ func run(args []string, output io.Writer) error {
 	if err != nil {
 		return errors.New("不支持的检查类型")
 	}
+	templateVersion, err := importjob.InspectionTemplateVersion(*typeCode)
+	if err != nil {
+		return errors.New("不支持的模板版本")
+	}
 	content, err := importjob.BuildInspectionTemplate(*typeCode)
 	if err != nil {
 		return errors.New("模板生成失败")
@@ -76,7 +80,7 @@ func run(args []string, output io.Writer) error {
 		}
 	}
 	if !*apply {
-		return json.NewEncoder(output).Encode(map[string]any{"mode": "preview", "code": definition.Code, "version": importjob.CurrentTemplateVersion, "sizeBytes": len(content), "sha256": fmt.Sprintf("%x", sha256.Sum256(content))})
+		return json.NewEncoder(output).Encode(map[string]any{"mode": "preview", "code": definition.Code, "version": templateVersion, "sizeBytes": len(content), "sha256": fmt.Sprintf("%x", sha256.Sum256(content))})
 	}
 	for _, key := range []string{"DATABASE_URL", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "MINIO_USE_TLS"} {
 		if strings.TrimSpace(os.Getenv(key)) == "" {

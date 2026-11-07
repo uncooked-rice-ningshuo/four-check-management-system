@@ -1,6 +1,8 @@
-# 日常检查与通报测试数据清理
+# 日常检查与通报测试业务数据清理
 
-本说明维护腾讯云 IP 试运行库的可重复清理流程。脚本源码在 [`deploy/ip-trial/clean_test_business_data.py`](../../deploy/ip-trial/clean_test_business_data.py)，本次随 r6 更新包发布。执行清理会删除业务测试数据并清除关联 MinIO 对象版本；每次执行前都要先预览，并保留可验证的数据库和对象存储备份。
+本说明维护本机 PostgreSQL、本地 Compose 与腾讯云 IP 试运行环境的可重复清理流程。脚本源码在 [`deploy/ip-trial/clean_test_business_data.py`](../../deploy/ip-trial/clean_test_business_data.py)。所有模式都会清理日常检查/导入/提交/通报业务数据；每次执行前都要先预览并备份数据库。本机 PostgreSQL 模式只清理数据库，不访问对象存储；Compose 和 IP 试运行模式另外清理关联 MinIO 对象并备份对象存储。
+
+这里的“清理测试业务数据”不是重建数据库：账号、权限、组织/学生基础数据、学期周次、检查类型、应交配置、字典和既有审计日志都会保留。若要重建这些基础配置，应另行使用明确的本地数据库重建流程。
 
 ## 清理范围
 
@@ -9,6 +11,58 @@
 脚本保留账号及会话、角色/权限、组织和学生等主数据、学年学期周次、检查类型、卫生原因字典与区域、周报应交配置、早签周计划、主数据/校历导入批次及源文件、系统设置和既有审计日志。执行后在审计日志新增一条清理事件。清理不是删库或重建数据库。
 
 ## 执行方式
+
+### 本机 PostgreSQL（宿主机服务）
+
+适用于 PostgreSQL 直接运行在开发机上的情况，不依赖 Docker。目标固定为仓库根目录当前机器的 `/tmp` Unix socket、端口 `5432` 和数据库 `four_check`，并校验数据库 owner 仍为 `four_check`。脚本以当前 macOS 用户对应的本地 PostgreSQL 超级管理员角色连接，以便完整备份并清理由不同本地角色创建的表；它拒绝其他数据库、owner 或网络连接目标。执行前必须停止本机 API/其他数据库客户端；若检测到其他 `four_check` 会话，脚本会拒绝清理。
+
+先预览并核对迁移账本和清理表行数，再执行：
+
+```bash
+python3 deploy/ip-trial/clean_test_business_data.py --target local-postgres
+python3 deploy/ip-trial/clean_test_business_data.py \
+  --target local-postgres \
+  --apply \
+  --confirm '清理日常检查和通报测试数据' \
+  --actor-id '<本地启用中的超级管理员 UUID>'
+```
+
+此模式备份并验证 PostgreSQL dump，清理事务数据、模板/文件元数据并新增一条审计记录；账号、权限、主数据、学期周次、检查类型、应交配置、系统设置和已有审计均保留。备份默认位于 `/private/tmp/four-check-local-cleanups`。由于此模式不连接 MinIO，报告/导入/模板对象文件本身不会删除；预览和清理结果会报告留下的对象数与字节数。清空数据库文件元数据后，这些对象可能成为孤立对象，可在对象存储恢复运行后另行盘点清理。
+
+清理成功后，从仓库根目录将当前迁移应用到本机数据库：
+
+```bash
+PGHOST=/tmp PGPORT=5432 PGUSER="$(id -un)" PGDATABASE=four_check \
+  MIGRATIONS_DIR="$PWD/server/migrations" sh server/scripts/migrate.sh
+```
+
+然后按当前本机 API 启动方式重启 API；模板记录和对象都已清理，数据库迁移后还须通过 `server/cmd/publish-attendance-template` 按八类检查发布 v2 模板，并核验每类均恰好一个 `PUBLISHED` 版本。
+
+### 本地 Compose 环境
+
+本地目标仅允许当前仓库根目录、Compose 项目名 `four-check-management-system` 和本机 Unix socket Docker context。清理必须在应用迁移前完成：先停止 API/Web，再只启动 PostgreSQL 和 MinIO；不要先启动全栈，因为 Compose 会自动运行迁移 040。
+
+```bash
+docker compose stop api web
+docker compose up -d postgres minio
+```
+
+等待 PostgreSQL 与 MinIO 健康后，先预览。预览列出迁移账本、每张清理表的行数、待删文件对象数和容量；核对目标后再执行。`<本地超级管理员 UUID>` 必须是本地数据库中启用的超级管理员账号。
+
+```bash
+python3 deploy/ip-trial/clean_test_business_data.py --target local-compose
+python3 deploy/ip-trial/clean_test_business_data.py \
+  --target local-compose \
+  --apply \
+  --confirm '清理日常检查和通报测试数据' \
+  --actor-id '<本地超级管理员 UUID>'
+```
+
+脚本备份数据库和 MinIO 数据卷，校验备份后才删除对象及业务行。备份默认位于 `/private/tmp/four-check-local-cleanups`。执行成功后 API/Web 保持停止；此时再运行 `docker compose up --build`，由 `migrate` 服务应用尚未执行的迁移并启动新代码。清理会删除导入模板记录与对象，数据库升级后还须通过 `server/cmd/publish-attendance-template` 按八类检查发布 v2 模板，再核验每类均恰好一个 `PUBLISHED` 版本。
+
+如果本地 Docker daemon、PostgreSQL 或 MinIO 未就绪，`local-compose` 模式会停止而不清理；若本机 PostgreSQL 是宿主机服务，使用上方 `local-postgres` 模式。不要将其他数据库或网络主机作为本地目标。
+
+### 腾讯云 IP 试运行环境
 
 在更新包 `release` 目录先做只读预览：
 

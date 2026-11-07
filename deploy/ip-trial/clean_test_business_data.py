@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Preview or clear test inspection/report transactions on the IP trial.
+"""Preview or clear test inspection/report transactions.
 
 This is an operational-data reset, not a database rebuild. Keep this table list
 and the incoming-FK guard in sync whenever a migration adds inspection, import,
 submission, report, or file-reference tables. Master data, accounts, permissions,
 academic calendar, weekly report obligations, morning schedules, dictionaries,
-and audit logs are deliberately retained.
+and audit logs are deliberately retained. The default target remains the IP
+trial; local Compose is an explicit, separately fenced target.
 """
 
 from __future__ import annotations
 
 import argparse
 import fcntl
+import getpass
 import hashlib
 import json
 import os
@@ -27,8 +29,17 @@ import uuid
 DEFAULT_BASE = Path("/opt/four-check/ip-trial")
 DEFAULT_PROJECT = "four-check-ip-trial"
 DEFAULT_BACKUP_ROOT = Path("/opt/four-check/backups")
+LOCAL_BASE = Path(__file__).resolve().parents[2]
+LOCAL_PROJECT = LOCAL_BASE.name
+LOCAL_BACKUP_ROOT = Path("/private/tmp/four-check-local-cleanups")
+LOCAL_POSTGRES_TARGET = "__local_postgres__"
+LOCAL_POSTGRES_SOCKET = "/tmp"
+LOCAL_POSTGRES_PORT = "5432"
+LOCAL_POSTGRES_USER = getpass.getuser()
 CONFIRM_TEXT = "清理日常检查和通报测试数据"
 GIB = 1024**3
+ALL_SERVICES = ("postgres", "minio", "api", "web")
+LOCAL_SERVICES = ("postgres", "minio")
 
 # Delete children before their referenced parents. Update this list with every
 # new inspection/report transaction table; unknown incoming FKs stop the reset.
@@ -124,10 +135,17 @@ def service_container(compose: list[str], project: str, service: str) -> tuple[s
 
 
 def psql(pg_id: str, query: str, *, variables: dict[str, str] | None = None) -> str:
-    command = [
-        "docker", "exec", "-i", pg_id, "psql", "-X", "-q", "-U", "four_check",
-        "-d", "four_check", "-v", "ON_ERROR_STOP=1",
-    ]
+    if pg_id == LOCAL_POSTGRES_TARGET:
+        command = [
+            "psql", "-X", "-q", "-w", "-h", LOCAL_POSTGRES_SOCKET,
+            "-p", LOCAL_POSTGRES_PORT, "-U", LOCAL_POSTGRES_USER, "-d", "four_check",
+            "-v", "ON_ERROR_STOP=1",
+        ]
+    else:
+        command = [
+            "docker", "exec", "-i", pg_id, "psql", "-X", "-q", "-U", "four_check",
+            "-d", "four_check", "-v", "ON_ERROR_STOP=1",
+        ]
     for name, value in (variables or {}).items():
         command.extend(["-v", f"{name}={value}"])
     command.extend(["-f", "-"])
@@ -135,10 +153,18 @@ def psql(pg_id: str, query: str, *, variables: dict[str, str] | None = None) -> 
 
 
 def psql_scalar(pg_id: str, query: str) -> str:
-    return run([
-        "docker", "exec", pg_id, "psql", "-X", "-q", "-U", "four_check",
-        "-d", "four_check", "-v", "ON_ERROR_STOP=1", "-Atqc", query,
-    ]).decode().strip()
+    if pg_id == LOCAL_POSTGRES_TARGET:
+        command = [
+            "psql", "-X", "-q", "-w", "-h", LOCAL_POSTGRES_SOCKET,
+            "-p", LOCAL_POSTGRES_PORT, "-U", LOCAL_POSTGRES_USER, "-d", "four_check",
+            "-v", "ON_ERROR_STOP=1", "-Atqc", query,
+        ]
+    else:
+        command = [
+            "docker", "exec", pg_id, "psql", "-X", "-q", "-U", "four_check",
+            "-d", "four_check", "-v", "ON_ERROR_STOP=1", "-Atqc", query,
+        ]
+    return run(command).decode().strip()
 
 
 def table_names(pg_id: str) -> set[str]:
@@ -175,7 +201,7 @@ ORDER BY 1
             )
 
 
-def file_candidates(pg_id: str, existing: set[str], bucket: str) -> list[dict]:
+def file_candidates(pg_id: str, existing: set[str], bucket: str | None) -> list[dict]:
     if "files" not in existing:
         return []
     exclusions = []
@@ -201,7 +227,9 @@ ORDER BY id
             uuid.UUID(file_id)
         except ValueError as error:
             raise CleanupError("文件清理候选包含无效 ID") from error
-        if file_bucket != bucket:
+        if not re.fullmatch(r"[a-z0-9.-]{3,96}", file_bucket):
+            raise CleanupError("待清理文件包含无效 Bucket 名称")
+        if bucket is not None and file_bucket != bucket:
             raise CleanupError("待清理文件不属于目标 MinIO Bucket")
         if not object_key or any(ord(char) < 32 for char in object_key) or "\n" in object_key:
             raise CleanupError("待清理对象键格式不安全")
@@ -210,13 +238,13 @@ ORDER BY id
     return files
 
 
-def target_state(compose: list[str], project: str) -> dict:
+def target_state(compose: list[str], project: str, services: tuple[str, ...] = ALL_SERVICES) -> dict:
     base_config = json.loads(run(compose + ["config", "--format", "json"]))
     base = Path(compose[3])
     if not (base / ".env").is_file() or not (base / "compose.yaml").is_file():
         raise CleanupError("目标 .env 或 compose.yaml 不存在")
     containers = {}
-    for service in ("postgres", "minio", "api", "web"):
+    for service in services:
         cid, info = service_container(compose, project, service)
         containers[service] = {"id": cid, "info": info}
     for service, destination, volume in (
@@ -225,7 +253,7 @@ def target_state(compose: list[str], project: str) -> dict:
     ):
         mounts = [item for item in containers[service]["info"]["Mounts"] if item["Destination"] == destination]
         if len(mounts) != 1 or mounts[0].get("Name") != volume:
-            raise CleanupError(f"{service} 数据卷不是当前腾讯云试运行卷")
+            raise CleanupError(f"{service} 数据卷不属于目标 Compose 项目")
     if psql_scalar(containers["postgres"]["id"], "SELECT current_database()") != "four_check":
         raise CleanupError("目标数据库名称不是 four_check")
     api_env = base_config["services"]["api"].get("environment", {})
@@ -235,7 +263,7 @@ def target_state(compose: list[str], project: str) -> dict:
     return {"containers": containers, "bucket": bucket, "composeConfig": base_config}
 
 
-def snapshot(compose: list[str], project: str, pg_id: str, minio_id: str,
+def snapshot(compose: list[str], project: str, pg_id: str, minio_id: str | None,
              backup_root: Path, counts: dict, files: list[dict]) -> Path:
     backup_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     os.chmod(backup_root, 0o700)
@@ -247,40 +275,54 @@ def snapshot(compose: list[str], project: str, pg_id: str, minio_id: str,
     (backup / "target-files.json").write_text(json.dumps(files, ensure_ascii=False, indent=2) + "\n")
     (backup / "target-files.json").chmod(0o600)
 
-    with (backup / "database.dump.part").open("wb") as dump:
-        run(["docker", "exec", pg_id, "pg_dump", "-U", "four_check", "-d", "four_check", "-Fc"], stdout=dump)
-    with (backup / "database.dump.part").open("rb") as dump:
-        run(["docker", "exec", "-i", pg_id, "pg_restore", "--list"], input_bytes=dump.read())
+    database_dump = backup / "database.dump.part"
+    with database_dump.open("wb") as dump:
+        if pg_id == LOCAL_POSTGRES_TARGET:
+            run([
+                "pg_dump", "-w", "-h", LOCAL_POSTGRES_SOCKET, "-p", LOCAL_POSTGRES_PORT,
+                "-U", LOCAL_POSTGRES_USER, "-d", "four_check", "-Fc",
+            ], stdout=dump)
+        else:
+            run(["docker", "exec", pg_id, "pg_dump", "-U", "four_check", "-d", "four_check", "-Fc"], stdout=dump)
+    if pg_id == LOCAL_POSTGRES_TARGET:
+        run(["pg_restore", "--list", str(database_dump)])
+    else:
+        with database_dump.open("rb") as dump:
+            run(["docker", "exec", "-i", pg_id, "pg_restore", "--list"], input_bytes=dump.read())
     (backup / "database.dump.part").replace(backup / "database.dump")
 
-    run(compose + ["stop", "-t", "30", "minio"])
-    volume = f"{project}_minio_data"
-    try:
-        with (backup / "minio-data.tar.gz.part").open("wb") as archive:
-            run([
-                "docker", "run", "--rm", "--pull=never", "--network", "none", "--user", "0",
-                "--mount", f"type=volume,src={volume},dst=/data,readonly",
-                "postgres:16-alpine", "tar", "-C", "/data", "-czf", "-", ".",
-            ], stdout=archive)
-        verify_tar(backup / "minio-data.tar.gz.part")
-        (backup / "minio-data.tar.gz.part").replace(backup / "minio-data.tar.gz")
-    finally:
+    if minio_id is not None:
+        run(compose + ["stop", "-t", "30", "minio"])
+        volume = f"{project}_minio_data"
         try:
-            run(compose + ["start", "minio"])
-            wait_for_service_healthy(minio_id, "MinIO")
-        except CleanupError:
-            print(f"MinIO 未恢复到 healthy；完整备份保留于：{backup}", flush=True)
-            raise
+            with (backup / "minio-data.tar.gz.part").open("wb") as archive:
+                run([
+                    "docker", "run", "--rm", "--pull=never", "--network", "none", "--user", "0",
+                    "--mount", f"type=volume,src={volume},dst=/data,readonly",
+                    "postgres:16-alpine", "tar", "-C", "/data", "-czf", "-", ".",
+                ], stdout=archive)
+            verify_tar(backup / "minio-data.tar.gz.part")
+            (backup / "minio-data.tar.gz.part").replace(backup / "minio-data.tar.gz")
+        finally:
+            try:
+                run(compose + ["start", "minio"])
+                wait_for_service_healthy(minio_id, "MinIO")
+            except CleanupError:
+                print(f"MinIO 未恢复到 healthy；完整备份保留于：{backup}", flush=True)
+                raise
 
     metadata = {
         "database": "four_check",
-        "composeProject": project,
+        "composeProject": None if pg_id == LOCAL_POSTGRES_TARGET else project,
         "createdAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "databaseSha256": sha256(backup / "database.dump"),
-        "minioArchiveSha256": sha256(backup / "minio-data.tar.gz"),
         "databaseBytes": (backup / "database.dump").stat().st_size,
-        "minioArchiveBytes": (backup / "minio-data.tar.gz").stat().st_size,
     }
+    if minio_id is not None:
+        metadata["minioArchiveSha256"] = sha256(backup / "minio-data.tar.gz")
+        metadata["minioArchiveBytes"] = (backup / "minio-data.tar.gz").stat().st_size
+    else:
+        metadata["target"] = "host PostgreSQL over local Unix socket"
     (backup / "backup.json").write_text(json.dumps(metadata, indent=2) + "\n")
     write_checksums(backup)
     return backup
@@ -383,12 +425,7 @@ def check_actor(pg_id: str, actor_id: str) -> None:
         raise CleanupError("actor-id 必须是启用中的超级管理员")
 
 
-def inspect(base: Path, project: str) -> dict:
-    compose = compose_command(base, project)
-    state = target_state(compose, project)
-    pg_id = state["containers"]["postgres"]["id"]
-    if not (base / ".env").is_file() or not (base / "compose.yaml").is_file():
-        raise CleanupError("目标部署文件缺失")
+def inspect_database(pg_id: str, bucket: str | None) -> dict:
     existing = table_names(pg_id)
     if not REQUIRED_TABLES.issubset(existing):
         missing = sorted(REQUIRED_TABLES - existing)
@@ -413,14 +450,12 @@ def inspect(base: Path, project: str) -> dict:
         raise CleanupError("目标数据库不是 four_check")
     versions = psql_scalar(pg_id, "SELECT version FROM schema_migrations ORDER BY version").splitlines()
     counts = {name: count_table(pg_id, name, existing) for name in PURGE_ORDER}
-    file_rows = file_candidates(pg_id, existing, state["bucket"])
+    file_rows = file_candidates(pg_id, existing, bucket)
     counts["files_to_remove"] = len(file_rows)
     counts["file_object_bytes_to_remove"] = sum(item["sizeBytes"] for item in file_rows)
     counts["audit_logs_preserved"] = count_table(pg_id, "audit_logs", existing)
     counts["weekly_report_obligations_preserved"] = count_table(pg_id, "weekly_report_obligations", existing)
     return {
-        "compose": compose,
-        "state": state,
         "pgId": pg_id,
         "existingTables": existing,
         "versions": versions,
@@ -429,8 +464,62 @@ def inspect(base: Path, project: str) -> dict:
     }
 
 
-def check_space(base: Path, pg_id: str, minio_id: str) -> None:
+def inspect(base: Path, project: str, services: tuple[str, ...] = ALL_SERVICES) -> dict:
+    compose = compose_command(base, project)
+    state = target_state(compose, project, services)
+    if not (base / ".env").is_file() or not (base / "compose.yaml").is_file():
+        raise CleanupError("目标部署文件缺失")
+    target = inspect_database(state["containers"]["postgres"]["id"], state["bucket"])
+    target["compose"] = compose
+    target["state"] = state
+    return target
+
+
+def inspect_local_postgres(base: Path) -> dict:
+    if base.resolve() != LOCAL_BASE.resolve():
+        raise CleanupError("本机 PostgreSQL 清理仅允许当前仓库根目录")
+    identity = psql_scalar(
+        LOCAL_POSTGRES_TARGET,
+        """
+SELECT current_database() || '|' || current_user || '|' ||
+       CASE WHEN inet_server_addr() IS NULL THEN 'unix_socket' ELSE inet_server_addr()::text END || '|' ||
+       (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()) || '|' ||
+       (SELECT rolsuper::text FROM pg_roles WHERE rolname=current_user)
+""",
+    )
+    expected_identity = f"four_check|{LOCAL_POSTGRES_USER}|unix_socket|four_check|true"
+    if identity != expected_identity:
+        raise CleanupError(
+            "本机 PostgreSQL 身份或权限不匹配；只允许 Unix socket 上 owner 为 four_check、"
+            "且当前 macOS 用户为本地 PostgreSQL 超级用户的 four_check 库"
+        )
+    target = inspect_database(LOCAL_POSTGRES_TARGET, None)
+    target["compose"] = []
+    target["state"] = {"bucket": None, "localPostgres": True}
+    return target
+
+
+def ensure_no_competing_local_postgres_sessions(pg_id: str) -> None:
+    sessions = psql_scalar(
+        pg_id,
+        """
+SELECT count(*)
+FROM pg_stat_activity
+WHERE datname=current_database() AND pid <> pg_backend_pid()
+""",
+    )
+    if sessions != "0":
+        raise CleanupError("本机 four_check 库还有其他连接；先停止 API/客户端，再重新预览和清理")
+
+
+def check_space(base: Path, pg_id: str, minio_id: str | None, backup_root: Path | None = None) -> None:
     database_bytes = int(psql_scalar(pg_id, "SELECT pg_database_size(current_database())"))
+    if minio_id is None:
+        backup_location = backup_root or base
+        required = max(128 * 1024**2, 2 * database_bytes + 64 * 1024**2)
+        if shutil.disk_usage(backup_location.parent).free < required:
+            raise CleanupError("磁盘余量不足以制作并校验本机 PostgreSQL 备份")
+        return
     minio_kib = int(run(["docker", "exec", minio_id, "du", "-sk", "/data"]).split()[0])
     minio_bytes = minio_kib * 1024
     required = max(1024**3, 2 * (database_bytes + minio_bytes) + 512 * 1024**2)
@@ -450,37 +539,68 @@ def restore_minio(compose: list[str], project: str, backup: Path) -> None:
     run(compose + ["start", "minio"])
 
 
-def health_check(compose: list[str], project: str, url: str) -> None:
+def health_check(compose: list[str], project: str, url: str,
+                  services: tuple[str, ...] = ALL_SERVICES) -> None:
     import urllib.request
 
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(60):
         try:
-            with opener.open(url.rstrip("/") + "/health/ready", timeout=3) as response:
-                ready = response.status == 200
-            for service in ("postgres", "minio", "api", "web"):
+            ready = "api" not in services
+            if "api" in services:
+                with opener.open(url.rstrip("/") + "/health/ready", timeout=3) as response:
+                    ready = response.status == 200
+            for service in services:
                 service_container(compose, project, service)
-            if ready:
+            if "api" not in services or ready:
                 return
         except (OSError, CleanupError, ValueError):
             time.sleep(2)
     raise CleanupError("清理完成但服务未恢复到 healthy/ready；备份已保留")
 
 
+def ensure_local_compose_context() -> None:
+    if os.environ.get("DOCKER_HOST") or os.environ.get("DOCKER_CONTEXT"):
+        raise CleanupError("本地清理不接受 DOCKER_HOST/DOCKER_CONTEXT 覆盖，请使用本机 Docker context")
+    context = run(["docker", "context", "show"]).decode().strip()
+    host = run(["docker", "context", "inspect", context,
+                "--format", "{{.Endpoints.docker.Host}}"]).decode().strip()
+    if not host.startswith("unix://"):
+        raise CleanupError("本地清理只允许连接本机 Unix socket Docker context")
+
+
 def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
-                  reason: str, url: str) -> dict:
+                  reason: str, url: str, *, local_compose: bool = False,
+                  local_postgres: bool = False) -> dict:
     base.mkdir(parents=True, exist_ok=True)
-    lock_path = base / ".clean-test-business-data.lock"
+    lock_root = backup_root if local_compose or local_postgres else base
+    lock_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    lock_path = lock_root / ".clean-test-business-data.lock"
     with lock_path.open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise CleanupError("已有数据清理任务正在执行") from error
 
-        target = inspect(base, project)
+        services = LOCAL_SERVICES if local_compose else ALL_SERVICES
+        target = inspect_local_postgres(base) if local_postgres else inspect(base, project, services)
+        if local_postgres:
+            target["counts"]["file_object_bytes_not_removed"] = target["counts"].pop(
+                "file_object_bytes_to_remove"
+            )
+        if local_compose:
+            ensure_local_compose_context()
+            running_apps = [
+                service for service in ("api", "web")
+                if run(target["compose"] + ["ps", "-q", service]).decode().strip()
+            ]
+            if running_apps:
+                raise CleanupError("本地 api/web 必须保持停止状态；请先清理数据，再启动含数据库迁移的 Compose 全栈")
+        if local_postgres:
+            ensure_no_competing_local_postgres_sessions(target["pgId"])
         check_actor(target["pgId"], actor_id)
-        minio_id = target["state"]["containers"]["minio"]["id"]
-        check_space(base, target["pgId"], minio_id)
+        minio_id = None if local_postgres else target["state"]["containers"]["minio"]["id"]
+        check_space(base, target["pgId"], minio_id, backup_root if local_postgres else None)
         backup = None
         services_stopped = False
         object_removal_started = False
@@ -489,12 +609,14 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
         before_json = json.dumps(target["counts"], ensure_ascii=False, separators=(",", ":"))
         file_ids_json = json.dumps([item["id"] for item in target["files"]], separators=(",", ":"))
         try:
-            run(target["compose"] + ["stop", "-t", "30", "web", "api"])
-            services_stopped = True
+            if not local_compose and not local_postgres:
+                run(target["compose"] + ["stop", "-t", "30", "web", "api"])
+                services_stopped = True
             backup = snapshot(target["compose"], project, target["pgId"], minio_id,
                               backup_root, target["counts"], target["files"])
-            object_removal_started = bool(target["files"])
-            remove_objects(target["compose"], target["files"])
+            object_removal_started = bool(target["files"]) and not local_postgres
+            if not local_postgres:
+                remove_objects(target["compose"], target["files"])
             sql = purge_sql(target["existingTables"], [item["id"] for item in target["files"]])
             psql(target["pgId"], sql, variables={
                 "cleanup_id": cleanup_id,
@@ -520,11 +642,15 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
             }
             if remaining:
                 raise CleanupError("清理后发现业务数据未清空，备份已保留")
-            run(target["compose"] + ["up", "-d", "--no-deps", "--pull", "never", "api", "web"])
-            services_stopped = False
-            health_check(target["compose"], project, url)
+            if not local_compose and not local_postgres:
+                run(target["compose"] + ["up", "-d", "--no-deps", "--pull", "never", "api", "web"])
+                services_stopped = False
+            if not local_postgres:
+                health_check(target["compose"], project, url, services)
             result = {
-                "mode": "applied",
+                "mode": "applied-local-postgres" if local_postgres else (
+                    "applied-local-compose" if local_compose else "applied-ip-trial"
+                ),
                 "cleanupRunId": cleanup_id,
                 "database": "four_check",
                 "migrationLedger": target["versions"],
@@ -535,6 +661,20 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
                               "audit logs", "master-data/academic-week import files"],
                 "backup": str(backup),
             }
+            if local_compose:
+                result["nextStep"] = "清理已完成；现在可运行 docker compose up --build 以应用迁移并更新本地 API/Web。"
+            if local_postgres:
+                result["minioCleanupPerformed"] = False
+                result["objectsNotRemoved"] = {
+                    "count": len(target["files"]),
+                    "sizeBytes": sum(item["sizeBytes"] for item in target["files"]),
+                }
+                result["nextStep"] = (
+                    '清理已完成；从仓库根目录运行 '
+                    'PGHOST=/tmp PGPORT=5432 PGUSER="$(id -un)" PGDATABASE=four_check '
+                    'MIGRATIONS_DIR="$PWD/server/migrations" sh server/scripts/migrate.sh '
+                    "应用数据库迁移。MinIO 对象未触碰。"
+                )
             (backup / "cleanup-result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
             (backup / "cleanup-result.json").chmod(0o600)
             write_checksums(backup)
@@ -545,7 +685,7 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
                     restore_minio(target["compose"], project, backup)
                 except Exception:
                     print(f"MinIO 需要从备份手工恢复：{backup}", flush=True)
-            if services_stopped:
+            if services_stopped and not local_compose and not local_postgres:
                 subprocess.run(target["compose"] + ["up", "-d", "--no-deps", "--pull", "never", "api", "web"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if backup is not None:
@@ -555,32 +695,64 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", choices=("ip-trial", "local-compose", "local-postgres"), default="ip-trial",
+                        help="清理目标；默认仍是受严格路径保护的腾讯云 IP 试运行环境")
     parser.add_argument("--apply", action="store_true", help="备份后清除检查/通报业务数据")
     parser.add_argument("--confirm", default="", help=f"执行时必须原样填写：{CONFIRM_TEXT}")
     parser.add_argument("--actor-id", default="", help="执行审计使用的启用中超级管理员 UUID")
     parser.add_argument("--reason", default="用户授权清理测试环境日常检查和通报数据")
-    parser.add_argument("--base", type=Path, default=DEFAULT_BASE)
-    parser.add_argument("--project", default=DEFAULT_PROJECT)
-    parser.add_argument("--backup-root", type=Path, default=DEFAULT_BACKUP_ROOT)
-    parser.add_argument("--url", default="http://127.0.0.1:8088")
+    parser.add_argument("--base", type=Path)
+    parser.add_argument("--project")
+    parser.add_argument("--backup-root", type=Path)
+    parser.add_argument("--url")
     args = parser.parse_args()
     os.umask(0o077)
-    base = args.base.resolve()
-    if args.project != DEFAULT_PROJECT or base != DEFAULT_BASE:
-        raise CleanupError("此清理脚本仅允许当前腾讯云 IP 试运行部署路径和 Compose 项目")
+    if args.target == "local-postgres":
+        base = (args.base or LOCAL_BASE).resolve()
+        project = args.project or "local-postgres"
+        backup_root = (args.backup_root or LOCAL_BACKUP_ROOT).resolve()
+        url = args.url or "http://127.0.0.1:8088"
+        if (base != LOCAL_BASE.resolve() or project != "local-postgres"
+                or backup_root != LOCAL_BACKUP_ROOT.resolve()):
+            raise CleanupError("本机 PostgreSQL 清理仅允许当前仓库、本地 four_check 数据库和固定临时备份目录")
+        services = ()
+    elif args.target == "local-compose":
+        base = (args.base or LOCAL_BASE).resolve()
+        project = args.project or LOCAL_PROJECT
+        backup_root = (args.backup_root or LOCAL_BACKUP_ROOT).resolve()
+        url = args.url or "http://127.0.0.1:8088"
+        if base != LOCAL_BASE.resolve() or project != LOCAL_PROJECT:
+            raise CleanupError("本地清理仅允许当前仓库根目录和由仓库目录名确定的 Compose 项目")
+        ensure_local_compose_context()
+        services = LOCAL_SERVICES
+    else:
+        base = (args.base or DEFAULT_BASE).resolve()
+        project = args.project or DEFAULT_PROJECT
+        backup_root = (args.backup_root or DEFAULT_BACKUP_ROOT).resolve()
+        url = args.url or "http://127.0.0.1:8088"
+        if project != DEFAULT_PROJECT or base != DEFAULT_BASE:
+            raise CleanupError("此清理脚本仅允许当前腾讯云 IP 试运行部署路径和 Compose 项目")
+        services = ALL_SERVICES
     if not args.reason.strip() or len(args.reason) > 255:
         raise CleanupError("reason 必须为 1–255 字符")
-    target = inspect(base, args.project)
+    target = inspect_local_postgres(base) if args.target == "local-postgres" else inspect(base, project, services)
     if not args.apply:
+        counts = dict(target["counts"])
+        storage_note = None
+        if args.target == "local-postgres":
+            counts["file_object_bytes_left_in_object_storage"] = counts.pop("file_object_bytes_to_remove")
+            storage_note = "只清理本地 PostgreSQL 行与文件元数据；MinIO/对象存储不可通过此目标访问，相关对象会保留。"
         print(json.dumps({
-            "mode": "preview",
+            "mode": f"preview-{args.target}",
+            "composeProject": project if args.target != "local-postgres" else None,
             "database": "four_check",
             "migrations": target["versions"],
-            "counts": target["counts"],
+            "counts": counts,
             "filesByRetention": {
                 kind: sum(1 for item in target["files"] if item["retention"] == kind)
                 for kind in sorted({item["retention"] for item in target["files"]})
             },
+            "objectStorageNote": storage_note,
             "templateRepublishRequired": True,
             "willPreserve": ["accounts", "permissions", "master data", "academic calendar",
                              "inspection types", "reason dictionaries", "report obligations",
@@ -592,8 +764,9 @@ def main() -> None:
         raise CleanupError(f"执行必须提供 --confirm '{CONFIRM_TEXT}'")
     if not args.actor_id:
         raise CleanupError("执行必须提供 --actor-id")
-    result = apply_cleanup(base, args.project, args.backup_root.resolve(), args.actor_id,
-                           args.reason.strip(), args.url)
+    result = apply_cleanup(base, project, backup_root, args.actor_id,
+                           args.reason.strip(), url, local_compose=args.target == "local-compose",
+                           local_postgres=args.target == "local-postgres")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

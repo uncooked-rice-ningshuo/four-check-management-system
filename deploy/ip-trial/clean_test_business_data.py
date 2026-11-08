@@ -44,6 +44,8 @@ LOCAL_SERVICES = ("postgres", "minio")
 # Delete children before their referenced parents. Update this list with every
 # new inspection/report transaction table; unknown incoming FKs stop the reset.
 PURGE_ORDER = (
+    # Report output attempts reference both immutable report versions and files.
+    "report_output_files",
     "weekly_report_version_zero_receipts",
     "weekly_report_version_files",
     "weekly_report_version_adjustments",
@@ -86,6 +88,12 @@ PRESERVED_FILE_REFERENCES = {
     ("master_data_import_batches", "files"),
     ("academic_week_import_batches", "files"),
 }
+PRESERVED_REPORT_CONFIG_TABLES = (
+    "report_output_settings",
+    "report_output_week_dates",
+    "semester_report_grade_scopes",
+    "semester_report_grades",
+)
 
 
 class CleanupError(RuntimeError):
@@ -432,11 +440,14 @@ def inspect_database(pg_id: str, bucket: str | None) -> dict:
         raise CleanupError("当前数据库缺少必要业务表，不能按该脚本清理：" + ",".join(missing))
     preserved_prefixed_tables = {
         "inspection_types", "weekly_report_obligations", "master_data_import_batches",
-        "academic_week_import_batches",
+        "academic_week_import_batches", *PRESERVED_REPORT_CONFIG_TABLES,
     }
     unknown_prefixed = sorted(
         name for name in existing
-        if name.startswith(("weekly_report_", "department_submission_", "inspection_", "import_"))
+        if name.startswith((
+            "weekly_report_", "department_submission_", "inspection_", "import_",
+            "report_output_", "semester_report_",
+        ))
         and name not in PURGE_SET and name not in preserved_prefixed_tables
     )
     if unknown_prefixed:
@@ -455,6 +466,8 @@ def inspect_database(pg_id: str, bucket: str | None) -> dict:
     counts["file_object_bytes_to_remove"] = sum(item["sizeBytes"] for item in file_rows)
     counts["audit_logs_preserved"] = count_table(pg_id, "audit_logs", existing)
     counts["weekly_report_obligations_preserved"] = count_table(pg_id, "weekly_report_obligations", existing)
+    for table in PRESERVED_REPORT_CONFIG_TABLES:
+        counts[f"{table}_preserved"] = count_table(pg_id, table, existing)
     return {
         "pgId": pg_id,
         "existingTables": existing,
@@ -636,9 +649,11 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
             after_counts["weekly_report_obligations_preserved"] = count_table(
                 target["pgId"], "weekly_report_obligations", after_tables
             )
+            for table in PRESERVED_REPORT_CONFIG_TABLES:
+                after_counts[f"{table}_preserved"] = count_table(target["pgId"], table, after_tables)
             remaining = {
                 key: value for key, value in after_counts.items()
-                if key not in ("audit_logs_preserved", "weekly_report_obligations_preserved") and value != 0
+                if not key.endswith("_preserved") and value != 0
             }
             if remaining:
                 raise CleanupError("清理后发现业务数据未清空，备份已保留")
@@ -658,6 +673,7 @@ def apply_cleanup(base: Path, project: str, backup_root: Path, actor_id: str,
                 "templateRepublishRequired": True,
                 "preserved": ["accounts", "permissions", "master data", "academic calendar",
                               "inspection types", "reason dictionaries", "report obligations",
+                              "report output settings/week dates", "semester report grade scopes",
                               "audit logs", "master-data/academic-week import files"],
                 "backup": str(backup),
             }

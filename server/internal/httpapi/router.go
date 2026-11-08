@@ -288,6 +288,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.GET("/reports/workflow", h.reportWorkflow)
 	v1.GET("/reports/output-settings", h.requireAnyAction(permission.ActionReportGenerate), h.getReportOutputSettings)
 	v1.GET("/reports/output-settings/editor", h.requireAction(permission.ActionReportOutputSettingsManage), h.getReportOutputEditorSettings)
+	v1.GET("/reports/output-settings/week-dates", h.requireAction(permission.ActionReportOutputSettingsManage), h.listReportOutputWeekDates)
+	v1.PUT("/reports/output-settings/week-dates/:semesterId/:weekId", h.requireAction(permission.ActionReportOutputSettingsManage), h.saveReportOutputWeekDate)
 	v1.PUT("/reports/output-settings", h.requireAction(permission.ActionReportOutputSettingsManage), h.updateReportOutputSettings)
 	v1.POST("/reports/output-settings/preview", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputWord)
 	v1.POST("/reports/output-settings/preview-excel", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputExcel)

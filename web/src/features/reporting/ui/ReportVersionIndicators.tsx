@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { ApartmentOutlined } from '@ant-design/icons'
 import { Alert, Button, Drawer, Empty, Form, Select, Space, Table, Tabs, Typography } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
+import { ProTable, type ProColumns } from '@ant-design/pro-components'
+import type { ColumnType } from 'antd/es/table'
 import type { ReportIndicators, ReportVersion, ReportClassIndicators } from '../../../entities/reporting/model/reporting'
 
 type MetricRow = { key: string; grade: string; className: string; values: ReportClassIndicators }
@@ -20,6 +21,12 @@ type MetricTablePagination = {
   current: number
   pageSize: number
   onChange: (page: number, pageSize: number) => void
+}
+type ArchiveMetricFilter = {
+  gradeOptions: { value: string; label: string }[]
+  classOptions: { value: string; label: string }[]
+  onApply: (values: { grade?: string; className?: string }) => void
+  onReset: () => void
 }
 
 const countFormatter = new Intl.NumberFormat('zh-CN')
@@ -41,7 +48,7 @@ function classMetricRows(indicators: ReportIndicators): MetricRow[] {
   }))
 }
 
-function baseColumns(): ColumnsType<MetricRow> {
+function baseColumns(): ColumnType<MetricRow>[] {
   return [
     { title: '年级', dataIndex: 'grade', key: 'grade', width: 100, render: (value: string) => value || '—' },
     { title: '班级', dataIndex: 'className', key: 'className', width: 180 },
@@ -55,9 +62,29 @@ function sourceStateLabel(value: string | undefined) {
   return '来源状态不可用'
 }
 
-function tableFor(rows: MetricRow[], columns: ColumnsType<MetricRow>, pagination: MetricTablePagination, typeCode?: string, extraTypeCode?: string) {
+function tableFor(rows: MetricRow[], columns: ColumnType<MetricRow>[], pagination: MetricTablePagination, filter?: ArchiveMetricFilter, typeCode?: string, extraTypeCode?: string) {
   const sourceIncomplete = Boolean(typeCode && rows.some(row => row.values.sourceStates?.[typeCode] === 'SOURCE_INCOMPLETE' || (extraTypeCode && row.values.sourceStates?.[extraTypeCode] === 'SOURCE_INCOMPLETE')))
   const hasSourceStates = Boolean(typeCode && rows.some(row => row.values.sourceStates))
+  const metricColumns = [...(hasSourceStates ? [{ title: '来源状态', key: 'sourceState', width: 160, render: (_value: unknown, row: MetricRow) => sourceStateLabel(row.values.sourceStates?.[typeCode ?? '']) }] : []), ...(sourceIncomplete ? [] : columns)]
+  if (filter) return <ProTable<MetricRow>
+    className="report-archive-indicator-table"
+    rowKey="key"
+    size="middle"
+    columns={[
+      { title: '年级', dataIndex: 'grade', valueType: 'select', width: 120, fieldProps: { options: filter.gradeOptions, allowClear: true }, render: (_value, row) => row.grade || '—' },
+      { title: '班级', dataIndex: 'className', valueType: 'select', width: 200, fieldProps: { options: filter.classOptions, allowClear: true, showSearch: true, optionFilterProp: 'label' }, render: (_value, row) => row.className },
+      // These metric columns have static titles and row renders, shared with the plain table below.
+      ...metricColumns.map(column => ({ ...column, search: false } as ProColumns<MetricRow>)),
+    ]}
+    dataSource={rows}
+    search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false, span: 12 }}
+    onSubmit={values => filter.onApply({ grade: values.grade, className: values.className })}
+    onReset={filter.onReset}
+    options={{ density: false, setting: false, reload: false }}
+    pagination={{ ...pagination, total: rows.length, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: total => `共 ${total} 个班级` }}
+    scroll={{ x: 'max-content' }}
+    locale={{ emptyText: '当前筛选条件下没有班级指标' }}
+  />
   return rows.length > 0
     ? <Table<MetricRow>
       size="small"
@@ -70,15 +97,15 @@ function tableFor(rows: MetricRow[], columns: ColumnsType<MetricRow>, pagination
         showTotal: total => `共 ${total} 个班级`,
       }}
       rowKey="key"
-      columns={[...baseColumns(), ...(hasSourceStates ? [{ title: '来源状态', key: 'sourceState', width: 160, render: (_value: unknown, row: MetricRow) => sourceStateLabel(row.values.sourceStates?.[typeCode ?? '']) }] : []), ...(sourceIncomplete ? [] : columns)]}
+      columns={[...baseColumns(), ...metricColumns]}
       dataSource={rows}
       scroll={{ x: 'max-content', y: 440 }}
     />
     : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无班级指标明细" />
 }
 
-function countTab(rows: MetricRow[], key: CountMetricKey, title: string, pagination: MetricTablePagination, typeCode: string, personTimeTitle?: string, extraTypeCode?: string) {
-  const columns: ColumnsType<MetricRow> = [
+function countTab(rows: MetricRow[], key: CountMetricKey, title: string, pagination: MetricTablePagination, filter: ArchiveMetricFilter | undefined, typeCode: string, personTimeTitle?: string, extraTypeCode?: string) {
+  const columns: ColumnType<MetricRow>[] = [
     { title: '原始记录数', key: 'raw', width: 120, render: (_value, row) => row.values[key]?.rawRecordCount ?? '—' },
     { title: '按周倍数计入次数', key: 'count', width: 160, render: (_value, row) => row.values[key]?.count ?? '—' },
   ]
@@ -89,11 +116,11 @@ function countTab(rows: MetricRow[], key: CountMetricKey, title: string, paginat
   return {
     key,
     label: title,
-    children: tableFor(rows, columns, pagination, typeCode, extraTypeCode),
+    children: tableFor(rows, columns, pagination, filter, typeCode, extraTypeCode),
   }
 }
 
-function indicatorTabs(indicators: ReportIndicators, rows: MetricRow[], pagination: MetricTablePagination) {
+function indicatorTabs(indicators: ReportIndicators, rows: MetricRow[], pagination: MetricTablePagination, filter?: ArchiveMetricFilter) {
   const tabs = []
   if (indicators.totals.attendanceRate) tabs.push({
     key: 'attendanceRate', label: '到课率', children: tableFor(rows, [
@@ -101,7 +128,7 @@ function indicatorTabs(indicators: ReportIndicators, rows: MetricRow[], paginati
       { title: '违纪人数', key: 'violation', width: 100, render: (_value, row) => row.values.attendanceRate?.violationStudentCount ?? '—' },
       { title: '实到人数', key: 'attended', width: 100, render: (_value, row) => row.values.attendanceRate?.attendedStudentCount ?? '—' },
       { title: '到课率', key: 'rate', width: 110, render: (_value, row) => displayRate(row.values.attendanceRate?.rate) },
-    ], pagination, 'ATTENDANCE_RATE'),
+    ], pagination, filter, 'ATTENDANCE_RATE'),
   })
   if (indicators.totals.unattendedClassroom) tabs.push({
     key: 'unattendedClassroom', label: '无机课堂', children: tableFor(rows, [
@@ -109,7 +136,7 @@ function indicatorTabs(indicators: ReportIndicators, rows: MetricRow[], paginati
       { title: '违规次数', key: 'count', width: 100, render: (_value, row) => row.values.unattendedClassroom?.violationCount ?? '—' },
       { title: '违规人次', key: 'peopleTimes', width: 100, render: (_value, row) => row.values.unattendedClassroom?.violationPersonTimeCount ?? '—' },
       { title: '违规人数', key: 'people', width: 100, render: (_value, row) => row.values.unattendedClassroom?.violatingStudentCount ?? '—' },
-    ], pagination, 'UNATTENDED_CLASSROOM'),
+    ], pagination, filter, 'UNATTENDED_CLASSROOM'),
   })
   if (indicators.totals.morningAttendance) tabs.push({
     key: 'morningAttendance', label: '早锻炼/早签', children: tableFor(rows, [
@@ -119,14 +146,14 @@ function indicatorTabs(indicators: ReportIndicators, rows: MetricRow[], paginati
       { title: '出勤人次', key: 'attended', width: 100, render: (_value, row) => row.values.morningAttendance?.attendedPersonTimes ?? '—' },
       { title: '计入违纪次数', key: 'penalty', width: 120, render: (_value, row) => row.values.morningAttendance?.penaltyCount ?? '—' },
       { title: '出勤率', key: 'rate', width: 100, render: (_value, row) => displayRate(row.values.morningAttendance?.rate) },
-    ], pagination, 'MORNING_ATTENDANCE'),
+    ], pagination, filter, 'MORNING_ATTENDANCE'),
   })
-  if (indicators.totals.eveningSelfStudy) tabs.push(countTab(rows, 'eveningSelfStudy', '晚自习', pagination, 'EVENING_SELF_STUDY', '缺勤人次'))
-  if (indicators.totals.classroomHygiene) tabs.push(countTab(rows, 'classroomHygiene', '教室卫生', pagination, 'CLASSROOM_HYGIENE'))
-  if (indicators.totals.dormitoryPersonalHygiene) tabs.push(countTab(rows, 'dormitoryPersonalHygiene', '个人卫生', pagination, 'DORMITORY_HYGIENE'))
-  if (indicators.totals.dormitoryPublicHygiene) tabs.push(countTab(rows, 'dormitoryPublicHygiene', '宿舍公共卫生', pagination, 'PUBLIC_DORMITORY_HYGIENE'))
-  if (indicators.totals.dormitoryHygieneTotal) tabs.push(countTab(rows, 'dormitoryHygieneTotal', '宿舍卫生合计', pagination, 'DORMITORY_HYGIENE', undefined, 'PUBLIC_DORMITORY_HYGIENE'))
-  if (indicators.totals.lateReturn) tabs.push(countTab(rows, 'lateReturn', '晚归', pagination, 'LATE_RETURN', '晚归人次'))
+  if (indicators.totals.eveningSelfStudy) tabs.push(countTab(rows, 'eveningSelfStudy', '晚自习', pagination, filter, 'EVENING_SELF_STUDY', '缺勤人次'))
+  if (indicators.totals.classroomHygiene) tabs.push(countTab(rows, 'classroomHygiene', '教室卫生', pagination, filter, 'CLASSROOM_HYGIENE'))
+  if (indicators.totals.dormitoryPersonalHygiene) tabs.push(countTab(rows, 'dormitoryPersonalHygiene', '个人卫生', pagination, filter, 'DORMITORY_HYGIENE'))
+  if (indicators.totals.dormitoryPublicHygiene) tabs.push(countTab(rows, 'dormitoryPublicHygiene', '宿舍公共卫生', pagination, filter, 'PUBLIC_DORMITORY_HYGIENE'))
+  if (indicators.totals.dormitoryHygieneTotal) tabs.push(countTab(rows, 'dormitoryHygieneTotal', '宿舍卫生合计', pagination, filter, 'DORMITORY_HYGIENE', undefined, 'PUBLIC_DORMITORY_HYGIENE'))
+  if (indicators.totals.lateReturn) tabs.push(countTab(rows, 'lateReturn', '晚归', pagination, filter, 'LATE_RETURN', '晚归人次'))
   return tabs
 }
 
@@ -190,7 +217,7 @@ function indicatorCards(indicators: ReportIndicators): IndicatorCard[] {
   return cards
 }
 
-export function ReportVersionIndicators({ version, mode = 'detail' }: { version: ReportVersion; mode?: IndicatorView }) {
+export function ReportVersionIndicators({ version, mode = 'detail', archiveTable = false }: { version: ReportVersion; mode?: IndicatorView; archiveTable?: boolean }) {
   const [breakdownOpen, setBreakdownOpen] = useState(false)
   const [gradeFilter, setGradeFilter] = useState<string>()
   const [classFilter, setClassFilter] = useState<string>()
@@ -230,11 +257,16 @@ export function ReportVersionIndicators({ version, mode = 'detail' }: { version:
     .map(value => ({ value, label: value }))
   const visibleClassRows = allClassRows.filter(row =>
     (!gradeFilter || row.grade === gradeFilter) && (!classFilter || row.className === classFilter))
-  const tabs = indicatorTabs(indicators, mode === 'overview' ? visibleClassRows : allClassRows, {
+  const tabs = indicatorTabs(indicators, mode === 'overview' || archiveTable ? visibleClassRows : allClassRows, {
     current: classPage,
     pageSize: classPageSize,
     onChange: (page, pageSize) => { setClassPage(page); setClassPageSize(pageSize) },
-  })
+  }, archiveTable ? {
+    gradeOptions,
+    classOptions,
+    onApply: values => { setGradeFilter(values.grade); setClassFilter(values.className); setClassPage(1) },
+    onReset: () => { setGradeFilter(undefined); setClassFilter(undefined); setClassPage(1) },
+  } : undefined)
   const classBreakdown = <Tabs
     className="report-version-indicator-tabs"
     size="small"
@@ -242,9 +274,9 @@ export function ReportVersionIndicators({ version, mode = 'detail' }: { version:
     onChange={() => setClassPage(1)}
   />
 
-  return <section aria-label={`V${version.versionNo} 周指标`} className="report-version-indicators">
+  return <section aria-label={`V${version.versionNo} 周指标`} className={`report-version-indicators${archiveTable ? ' report-version-indicators-archive' : ''}`}>
     {content.statisticsRuleVersion === 'WEEKLY_INDICATORS_V2' && content.incompleteCells.length > 0 && <Alert showIcon type="warning" title="部分检查来源未完成；对应数值暂不可判定" description="班级明细保留全部适用班级，未完成来源只显示状态，不显示零值或比率。" />}
-    <header className="report-version-indicators-heading">
+    {!archiveTable && <header className="report-version-indicators-heading">
       <div>
         <Typography.Text strong>{mode === 'overview' ? '本版指标' : `V${version.versionNo} 周指标`}</Typography.Text>
         <Typography.Text type="secondary" className="report-version-indicators-meta">
@@ -259,8 +291,8 @@ export function ReportVersionIndicators({ version, mode = 'detail' }: { version:
       >
         班级明细
       </Button>}
-    </header>
-    <div className="report-version-indicator-cards" aria-label="全周指标汇总">
+    </header>}
+    {!archiveTable && <div className="report-version-indicator-cards" aria-label="全周指标汇总">
       {cards.map(card => <article key={card.key} className={`report-version-indicator-card${card.rate ? ' report-version-indicator-card-rate' : ''}`}>
         <Typography.Text type="secondary" className="report-version-indicator-label">{card.label}</Typography.Text>
         <div className="report-version-indicator-value">
@@ -270,7 +302,7 @@ export function ReportVersionIndicators({ version, mode = 'detail' }: { version:
           {card.details.map(detail => <Typography.Text key={detail} type="secondary">{detail}</Typography.Text>)}
         </div>
       </article>)}
-    </div>
+    </div>}
     {tabs.length > 0 && mode === 'detail' && <div className="report-version-indicator-breakdown">{classBreakdown}</div>}
     {tabs.length === 0 && <Alert showIcon type="info" message="本版本未纳入可计算的指标类型。" />}
     {mode === 'overview' && <Drawer

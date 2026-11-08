@@ -26,6 +26,36 @@ func (h *handler) getReportOutputEditorSettings(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"introduction": settings.Introduction, "introductionDocument": settings.IntroductionDocument, "wordTypeCodes": settings.WordTypeCodes, "excelTypeCodes": settings.ExcelTypeCodes, "version": settings.Version, "inspectionTypes": types})
 }
+func (h *handler) listReportOutputWeekDates(c *gin.Context) {
+	if h.reportOutput == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "通报输出服务尚未就绪")
+		return
+	}
+	items, err := h.reportOutput.WeekDates(c)
+	if err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+func (h *handler) saveReportOutputWeekDate(c *gin.Context) {
+	if h.reportOutput == nil {
+		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "通报输出服务尚未就绪")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var input reportoutput.WeekDate
+	if !bind(c, &input) {
+		return
+	}
+	input.SemesterID, input.WeekID = c.Param("semesterId"), c.Param("weekId")
+	result, err := h.reportOutput.SaveWeekDate(c, input, requestMetadata(c, ""))
+	if err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
 
 func (h *handler) previewReportOutputWord(c *gin.Context) {
 	if h.reportOutput == nil {
@@ -184,8 +214,14 @@ func (h *handler) writeOutputError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, reportoutput.ErrInvalidSelection):
 		writeError(c, http.StatusBadRequest, "INVALID_REPORT_OUTPUT", "文件格式或检查类型选择无效")
+	case errors.Is(err, reportoutput.ErrInvalidWeekDate):
+		writeError(c, http.StatusBadRequest, "INVALID_REPORT_OUTPUT_DATE", "文件日期无效，请填写有效日期")
+	case errors.Is(err, reportoutput.ErrWeekNotFound):
+		writeError(c, http.StatusNotFound, "REPORT_OUTPUT_WEEK_NOT_FOUND", "所选通报周次不存在")
 	case errors.Is(err, reportoutput.ErrConfigConflict):
 		writeError(c, http.StatusConflict, "REPORT_OUTPUT_CONFIG_CONFLICT", "输出设置已更新，请刷新后重试")
+	case errors.Is(err, reportoutput.ErrIssueDateMissing):
+		writeError(c, http.StatusConflict, "REPORT_OUTPUT_DATE_REQUIRED", "本周文件日期尚未配置，请在通报文件设置中保存日期后重试")
 	case errors.Is(err, reportoutput.ErrPreviewRateLimited):
 		writeError(c, http.StatusTooManyRequests, "REPORT_OUTPUT_PREVIEW_LIMIT", "预览过于频繁，请稍后再试")
 	case errors.Is(err, reportoutput.ErrNotFound), errors.Is(err, reporting.ErrReportNotFound):

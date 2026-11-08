@@ -1,57 +1,96 @@
-import { Icon } from '@iconify/react'
-import alignLeft from '@iconify-icons/lucide/align-left'
-import alignCenter from '@iconify-icons/lucide/align-center'
-import alignRight from '@iconify-icons/lucide/align-right'
 import { Node, type JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { Button } from 'antd'
-import { useEffect, useRef } from 'react'
+import { Button, Dropdown } from 'antd'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { IntroductionDocument } from '../../../shared/api/reportOutputApi'
 import { footerTemplate } from '../model/reportFooter'
 
-const PageField = Node.create({
-  name: 'reportPageField', group: 'inline', inline: true, atom: true,
-  parseHTML: () => [{ tag: 'span[data-report-page-field]' }],
-  renderHTML: () => ['span', { 'data-report-page-field': '', class: 'report-intro-page-field', contenteditable: 'false', title: '自动页码' }, '1'],
+type FooterFieldKey = 'page' | 'totalPages' | 'semesterName' | 'weekNo'
+const fieldLabels: Record<FooterFieldKey, string> = { page: '1', totalPages: '总页数', semesterName: '学期名称', weekNo: '周次' }
+
+const FooterField = Node.create({
+  name: 'reportFooterField', group: 'inline', inline: true, atom: true,
+  addAttributes: () => ({ key: { default: 'page', parseHTML: element => element.getAttribute('data-field-key'), renderHTML: attributes => ({ 'data-field-key': attributes.key }) } }),
+  parseHTML: () => [{ tag: 'span[data-report-footer-field]' }],
+  renderHTML: ({ node }) => ['span', { 'data-report-footer-field': '', 'data-field-key': node.attrs.key, class: 'report-intro-page-field', contenteditable: 'false', title: '生成文件时自动填充' }, fieldLabels[node.attrs.key as FooterFieldKey]],
 })
-const RightTab = Node.create({ name: 'reportRightTab', group: 'inline', inline: true, atom: true,
-  parseHTML: () => [{ tag: 'span[data-report-right-tab]' }],
-  renderHTML: () => ['span', { 'data-report-right-tab': '', class: 'report-intro-footer-right-tab', contenteditable: 'false' }],
+const FooterTab = Node.create({
+  name: 'reportFooterTab', group: 'inline', inline: true, atom: true,
+  parseHTML: () => [{ tag: 'span[data-report-footer-tab]' }],
+  renderHTML: () => ['span', { 'data-report-footer-tab': '', class: 'report-intro-footer-tab', contenteditable: 'false' }],
 })
 
 function footerContent(template: string): JSONContent {
-  return { type: 'doc', content: template.split('\n').map(line => ({ type: 'paragraph', content: line.split(/(\{page\}|\t)/g).filter(Boolean).map(part => part === '{page}' ? { type: 'reportPageField' } : part === '\t' ? { type: 'reportRightTab' } : { type: 'text', text: part }) })) }
+  return { type: 'doc', content: template.split('\n').map(line => ({ type: 'paragraph', content: line.split(/(\{(?:page|totalPages|semesterName|weekNo)\}|\t)/g).filter(Boolean).map(part => part === '\t' ? { type: 'reportFooterTab' } : /^\{(?:page|totalPages|semesterName|weekNo)\}$/.test(part) ? { type: 'reportFooterField', attrs: { key: part.slice(1, -1) } } : { type: 'text', text: part }) })) }
 }
 
 function footerValue(json: JSONContent): string {
-  return (json.content ?? []).map(paragraph => (paragraph.content ?? []).map(node => node.type === 'reportPageField' ? '{page}' : node.type === 'reportRightTab' ? '\t' : node.type === 'text' ? node.text ?? '' : '').join('')).join('\n')
+  return (json.content ?? []).map(paragraph => (paragraph.content ?? []).map(node => node.type === 'reportFooterField' ? `{${node.attrs?.key}}` : node.type === 'reportFooterTab' ? '\t' : node.type === 'text' ? node.text ?? '' : '').join('')).join('\n')
 }
 
-export function ReportFooterEditor({ value, onChange }: { value: IntroductionDocument; onChange: (next: IntroductionDocument) => void }) {
+export interface ReportFooterEditorHandle {
+  insertField: (key: FooterFieldKey) => void
+  insertTab: () => void
+  focus: () => void
+}
+
+export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: IntroductionDocument; onChange: (next: IntroductionDocument) => void; onFocus?: () => void }>(({ value, onChange, onFocus }, ref) => {
+  const containerRef = useRef<HTMLDivElement>(null)
   const valueRef = useRef(value)
   const changeRef = useRef(onChange)
   useEffect(() => { valueRef.current = value; changeRef.current = onChange }, [value, onChange])
   const editor = useEditor({
-    extensions: [StarterKit.configure({ heading: false, blockquote: false, bulletList: false, orderedList: false, code: false, codeBlock: false, horizontalRule: false, hardBreak: false }), PageField, RightTab], content: footerContent(footerTemplate(value)), immediatelyRender: false,
-    onUpdate: ({ editor: updated }) => changeRef.current({ ...valueRef.current, footerText: footerValue(updated.getJSON()), footerLayout: 'custom', footerAlign: valueRef.current.footerAlign ?? 'center' }),
+    extensions: [StarterKit.configure({ heading: false, blockquote: false, bulletList: false, orderedList: false, code: false, codeBlock: false, horizontalRule: false, hardBreak: false }), FooterField, FooterTab],
+    content: footerContent(footerTemplate(value)), immediatelyRender: false,
+    onUpdate: ({ editor: updated }) => changeRef.current({ ...valueRef.current, footerText: footerValue(updated.getJSON()), footerLayout: 'custom', footerAlign: valueRef.current.footerAlign ?? 'left' }),
   })
+  const centerFooterField = () => {
+    if (typeof document.createRange !== 'function') return
+    for (const paragraph of containerRef.current?.querySelectorAll('.tiptap p') ?? []) {
+      const tabs = paragraph.querySelectorAll<HTMLElement>('.report-intro-footer-tab')
+      if (tabs.length !== 2) continue
+      const left = document.createRange()
+      left.setStart(paragraph, 0)
+      left.setEndBefore(tabs[0])
+      const center = document.createRange()
+      center.setStartAfter(tabs[0])
+      center.setEndBefore(tabs[1])
+      if (typeof left.getBoundingClientRect !== 'function') continue
+      const gap = Math.max(0, paragraph.getBoundingClientRect().width / 2 - left.getBoundingClientRect().width - center.getBoundingClientRect().width / 2)
+      tabs[0].style.flex = `0 0 ${gap}px`
+      tabs[1].style.flex = '1 1 auto'
+    }
+  }
+  useLayoutEffect(() => {
+    if (!editor || !containerRef.current) return
+    centerFooterField()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(centerFooterField)
+    observer?.observe(containerRef.current)
+    editor.on('update', centerFooterField)
+    return () => { observer?.disconnect(); editor.off('update', centerFooterField) }
+  }, [editor, value])
   useEffect(() => {
     if (editor && footerValue(editor.getJSON()) !== footerTemplate(value)) editor.commands.setContent(footerContent(footerTemplate(value)), { emitUpdate: false })
   }, [editor, value])
-  const align = value.footerAlign ?? 'center'
-  const setAlign = (footerAlign: 'left' | 'center' | 'right') => onChange({ ...value, footerText: footerTemplate(value), footerLayout: 'custom', footerAlign })
-  const pageRight = () => {
-    const text = footerTemplate(value).replaceAll('{page}', '').trimEnd().replace(/\t/g, '')
-    onChange({ ...value, footerText: `${text}\t{page}`, footerLayout: 'custom', footerAlign: 'left' })
-  }
-  return <div className="report-intro-page-footer" aria-label="页尾与页码">
-    <div className="report-intro-footer-controls" role="toolbar" aria-label="页脚工具">
+  useImperativeHandle(ref, () => ({
+    insertField: key => {
+      if ((key === 'page' || key === 'totalPages') && footerTemplate(valueRef.current).includes(`{${key}}`)) return
+      editor?.chain().focus().insertContent({ type: 'reportFooterField', attrs: { key } }).run()
+    },
+    insertTab: () => editor?.chain().focus().insertContent({ type: 'reportFooterTab' }).run(),
+    focus: () => editor?.commands.focus(),
+  }), [editor])
+  return <div ref={containerRef} className="report-intro-page-footer" aria-label="页尾与页码" onFocusCapture={onFocus}>
+    <div className="report-intro-footer-local-tools" role="toolbar" aria-label="页脚快捷工具" onMouseDown={event => event.preventDefault()}>
       <span>页脚</span>
-      {(['left', 'center', 'right'] as const).map(direction => <Button key={direction} type="text" size="small" aria-label={`页脚${direction === 'left' ? '左' : direction === 'center' ? '居中' : '右'}对齐`} aria-pressed={align === direction} className={align === direction ? 'active' : ''} icon={<Icon icon={direction === 'left' ? alignLeft : direction === 'center' ? alignCenter : alignRight} />} onClick={() => setAlign(direction)} />)}
-      <Button type="text" size="small" disabled={footerTemplate(value).includes('{page}')} onClick={() => editor?.chain().focus().insertContent({ type: 'reportPageField' }).run()}>插入页码</Button>
-      <Button type="text" size="small" onClick={pageRight}>页码靠右</Button>
+      <Button type="text" size="small" onClick={() => editor?.chain().focus().insertContent({ type: 'reportFooterTab' }).run()}>分区</Button>
+      <Dropdown menu={{ items: [{ key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' }, { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }], onClick: ({ key }) => {
+        if ((key === 'page' || key === 'totalPages') && footerTemplate(valueRef.current).includes(`{${key}}`)) return
+        editor?.chain().focus().insertContent({ type: 'reportFooterField', attrs: { key } }).run()
+      } }} trigger={['click']}><Button type="text" size="small">插入字段</Button></Dropdown>
     </div>
-    <EditorContent editor={editor} className="report-intro-footer-content" aria-label="编辑页脚" style={{ textAlign: align }} />
+    <EditorContent editor={editor} className="report-intro-footer-content" aria-label="编辑页脚" />
   </div>
-}
+})
+ReportFooterEditor.displayName = 'ReportFooterEditor'

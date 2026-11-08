@@ -26,7 +26,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Button, Dropdown, InputNumber, Popover, Select } from 'antd'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { IntroductionDocument, IntroductionLineSpacingMode } from '../../../shared/api/reportOutputApi'
-import { ReportFooterEditor } from './ReportFooterEditor'
+import { ReportFooterEditor, type ReportFooterEditorHandle } from './ReportFooterEditor'
 
 const fonts = ['仿宋', '宋体', '黑体', '楷体', '微软雅黑', '华文新魏']
 const fontStacks: Record<string, string> = { 仿宋: "FangSong, '仿宋', serif", 宋体: "SimSun, '宋体', serif", 黑体: "SimHei, '黑体', sans-serif", 楷体: "KaiTi, '楷体', serif", 微软雅黑: "'Microsoft YaHei', '微软雅黑', sans-serif", 华文新魏: "STXinwei, '华文新魏', serif" }
@@ -86,11 +86,11 @@ const TemplateVariable = Node.create({
   name: 'templateVariable', group: 'inline', inline: true, atom: true,
   addAttributes() { return { key: { default: 'semesterName', parseHTML: element => element.getAttribute('data-template-variable'), renderHTML: attributes => ({ 'data-template-variable': attributes.key }) } } },
   parseHTML() { return [{ tag: 'span[data-template-variable]' }] },
-  renderHTML({ node }) { return ['span', { class: 'report-template-variable', 'data-template-variable': node.attrs.key, title: node.attrs.key === 'weekNo' ? '周次变量' : '学期变量' }, node.attrs.key === 'weekNo' ? '9' : '示例学期'] },
+  renderHTML({ node }) { return ['span', { class: 'report-template-variable', 'data-template-variable': node.attrs.key, title: node.attrs.key === 'reportDate' ? '通报文件设置中的每周文件日期' : node.attrs.key === 'weekNo' ? '周次变量' : '学期变量' }, node.attrs.key === 'reportDate' ? '文件日期' : node.attrs.key === 'weekNo' ? '9' : '示例学期'] },
 })
 
 function editorContent(document: IntroductionDocument): JSONContent {
-  return { type: 'doc', content: document.content.map(paragraph => ({ ...paragraph, content: paragraph.content?.flatMap(run => run.text.split(/(\{semesterName\}|\{weekNo\})/g).filter(Boolean).map(part => part === '{semesterName}' || part === '{weekNo}' ? { type: 'templateVariable', attrs: { key: part === '{weekNo}' ? 'weekNo' : 'semesterName' } } : { ...run, text: part })) })) }
+  return { type: 'doc', content: document.content.map(paragraph => ({ ...paragraph, content: paragraph.content?.flatMap(run => run.text.split(/(\{semesterName\}|\{weekNo\}|\{reportDate\})/g).filter(Boolean).map(part => ['{semesterName}', '{weekNo}', '{reportDate}'].includes(part) ? { type: 'templateVariable', attrs: { key: part.slice(1, -1) } } : { ...run, text: part })) })) }
 }
 
 const RestrictedFontFamily = FontFamily.extend({
@@ -135,7 +135,7 @@ function introductionFromEditor(document: JSONContent): IntroductionDocument {
       const runs: NonNullable<IntroductionDocument['content'][number]['content']> = (paragraph.content ?? [])
         .filter(run => (run.type === 'text' && typeof run.text === 'string' && run.text.length > 0) || run.type === 'templateVariable')
         .map(run => {
-          if (run.type === 'templateVariable') return { type: 'text' as const, text: run.attrs?.key === 'weekNo' ? '{weekNo}' : '{semesterName}' }
+          if (run.type === 'templateVariable') return { type: 'text' as const, text: run.attrs?.key === 'reportDate' ? '{reportDate}' : run.attrs?.key === 'weekNo' ? '{weekNo}' : '{semesterName}' }
           const marks: NonNullable<NonNullable<IntroductionDocument['content'][number]['content']>[number]['marks']> = []
           for (const mark of run.marks ?? []) {
             if (mark.type === 'bold' || mark.type === 'italic' || mark.type === 'strike' || mark.type === 'underline') marks.push({ type: mark.type })
@@ -207,6 +207,8 @@ function selectionFormatting(editor: Editor) {
 
 /** Edits the cover title, body, attachment directory, and page text accepted by the Word renderer. */
 export function ReportIntroductionEditor({ value, onChange, attachmentNames = [], toolbarAction }: { value: IntroductionDocument; onChange: (value: IntroductionDocument) => void; attachmentNames?: string[]; toolbarAction?: ReactNode }) {
+  const footerRef = useRef<ReportFooterEditorHandle>(null)
+  const [footerActive, setFooterActive] = useState(false)
   const onChangeRef = useRef(onChange)
   const documentRef = useRef(value)
   const history = useRef<{ past: IntroductionDocument[]; future: IntroductionDocument[] }>({ past: [], future: [] })
@@ -260,7 +262,7 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
     updateDocument(next)
     editor.commands.setContent(editorContent(next), { emitUpdate: false })
   }
-  const insertTitleVariable = (token: string) => { editor?.chain().focus().insertContent({ type: 'templateVariable', attrs: { key: token === '{weekNo}' ? 'weekNo' : 'semesterName' } }).run() }
+  const insertTitleVariable = (token: string) => { editor?.chain().focus().insertContent({ type: 'templateVariable', attrs: { key: token.slice(1, -1) } }).run() }
 
   return <div className="report-intro-editor" onKeyDownCapture={event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
@@ -298,16 +300,31 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       <ToolButton label="撤销" icon={<Icon icon={undoIcon} />} disabled={!historyState.canUndo} onClick={() => restore('undo')} />
       <ToolButton label="重做" icon={<Icon icon={redoIcon} />} disabled={!historyState.canRedo} onClick={() => restore('redo')} />
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
-      <div className="report-intro-inserts"><ToolButton label="插入附件文本" icon={<Icon icon={listTree} />} disabled={!editor || attachmentNames.length === 0} onClick={insertDirectory} />
-        <Dropdown menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : '{weekNo}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
+      {!footerActive && <div className="report-intro-inserts"><ToolButton label="插入附件文本" icon={<Icon icon={listTree} />} disabled={!editor || attachmentNames.length === 0} onClick={insertDirectory} />
+        <Dropdown menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }, { key: 'date', label: '每周文件日期' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : key === 'week' ? '{weekNo}' : '{reportDate}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
+      }
+      {footerActive && <div className="report-intro-footer-tools" role="toolbar" aria-label="页脚工具">
+        <span>页脚</span>
+        <ToolButton label="页脚左对齐" icon={<Icon icon={alignLeft} />} onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'left' })} />
+        <ToolButton label="页脚居中对齐" icon={<Icon icon={alignCenter} />} onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'center' })} />
+        <ToolButton label="页脚右对齐" icon={<Icon icon={alignRight} />} onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'right' })} />
+        <Button type="text" size="small" onClick={() => footerRef.current?.insertTab()}>插入分区</Button>
+        <Dropdown menu={{ items: [
+          { key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' },
+          { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' },
+        ], onClick: ({ key }) => footerRef.current?.insertField(key as 'page' | 'totalPages' | 'semesterName' | 'weekNo') }} trigger={['click']}>
+          <Button type="text" size="small">插入字段</Button>
+        </Dropdown>
+        <Button type="text" size="small" onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'left', footerText: '{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t' })}>参考页脚版式</Button>
+      </div>}
       {toolbarAction && <div className="report-intro-toolbar-action">{toolbarAction}</div>}
     </div>
     <div className="report-intro-stage" aria-label="通报正文纸张工作区">
       <div className="report-intro-page" style={{ zoom: `${zoom}%` }} aria-label="A4 页面排版参考">
         <div className="report-intro-page-corners" aria-hidden="true"><i /><i /><i /><i /></div>
-        <input className="report-intro-page-header" aria-label="编辑页首" maxLength={120} placeholder="点击编辑页首" value={value.headerText ?? ''} onChange={event => updateDocument({ ...documentRef.current, headerText: event.target.value })} />
-        <ReportFooterEditor value={value} onChange={updateDocument} />
-        <EditorContent editor={editor} className="report-intro-content" aria-label="通报正文编辑区" />
+        <input className="report-intro-page-header" aria-label="编辑页首" maxLength={120} placeholder="点击编辑页首" value={value.headerText ?? ''} onFocus={() => setFooterActive(false)} onChange={event => updateDocument({ ...documentRef.current, headerText: event.target.value })} />
+        <ReportFooterEditor ref={footerRef} value={value} onChange={updateDocument} onFocus={() => setFooterActive(true)} />
+        <div onFocusCapture={() => setFooterActive(false)}><EditorContent editor={editor} className="report-intro-content" aria-label="通报正文编辑区" /></div>
       </div>
     </div>
   </div>

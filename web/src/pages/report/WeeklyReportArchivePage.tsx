@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Space, Table, Tag, Timeline, Typography } from 'antd'
+import { Alert, Button, Drawer, Empty, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
+import { BarChartOutlined, HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useNavigate } from 'react-router-dom'
-import type { ReportArchiveEntry, ReportArchiveQuery, ReportArchiveStatus, ReportCorrectionLog, ReportReview, ReportVersion, ReportWorkflow } from '../../entities/reporting/model/reporting'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import type { ReportArchiveEntry, ReportArchiveQuery, ReportArchiveStatus, ReportCorrectionLog, ReportReview, ReportWorkflow } from '../../entities/reporting/model/reporting'
 import { useReportArchive, useReportArchiveWorkflow } from '../../features/reporting/model/queries'
 import { reportCorrectionFieldLabel, reportReviewActionLabel, reportStatusLabel } from '../../features/reporting/model/labels'
 import { ReportVersionSnapshots } from '../../features/reporting/ui/ReportVersionSnapshots'
+import { ReportVersionIndicators } from '../../features/reporting/ui/ReportVersionIndicators'
 import { ReportOutputPanel } from '../../features/reporting/ui/ReportOutputPanel'
 import { permissionCoversReportTypes } from '../../features/reporting/model/reportPermissions'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
@@ -17,6 +19,11 @@ function displayTime(value?: string) {
   if (!value) return '—'
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
+}
+
+function displayTimelineTime(value: string) {
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(parsed)
 }
 
 function displayPeriod(entry: ReportArchiveEntry) {
@@ -31,135 +38,128 @@ function displayCorrectionValue(value: string | number | null) {
   return value === null || value === '' ? '（空）' : String(value)
 }
 
-function ArchiveWorkflowDetail({ workflow, period, drawerWidth, onAccessDenied }: {
-  workflow: ReportWorkflow
-  period: ReportArchiveEntry['period']
-  drawerWidth: number
-  onAccessDenied: () => void
-}) {
-  const [selectedVersion, setSelectedVersion] = useState<ReportVersion | null>(null)
+function ArchiveWorkflowDetail({ workflow, onAccessDenied }: { workflow: ReportWorkflow; onAccessDenied: () => void }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [indicatorsOpen, setIndicatorsOpen] = useState(false)
+  const versionListRef = useRef<HTMLDivElement>(null)
   const permissionQuery = useAttendancePermissions()
   const current = workflow.report
-  const showVersionDetails = (versionNo: number) => {
-    const version = workflow.versions.find(item => item.versionNo === versionNo)
-    if (version) setSelectedVersion(version)
+  const requestedVersion = Number(searchParams.get('version'))
+  const selectedVersion = workflow.versions.find(version => version.versionNo === requestedVersion)
+    ?? workflow.versions.find(version => version.versionNo === current?.versionNo)
+    ?? workflow.versions.at(-1)
+  useEffect(() => {
+    const list = versionListRef.current
+    const selected = list?.querySelector<HTMLElement>("[aria-current='step']")
+    if (list && selected && typeof list.scrollTo === 'function') {
+      list.scrollTo({ left: selected.offsetLeft - list.clientWidth / 2 + selected.clientWidth / 2, behavior: 'smooth' })
+    }
+  }, [selectedVersion?.id])
+  const activeSection = searchParams.get('section') === 'history' ? 'history' : 'snapshot'
+  const choose = (versionNo: number, section: 'snapshot' | 'history' = activeSection) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('version', String(versionNo))
+    next.set('section', section)
+    setSearchParams(next)
   }
-  const versionColumns: ColumnsType<ReportVersion> = [
-    { title: '版本', dataIndex: 'versionNo', width: 124, render: (value: number) => <Space size={6}>
-      <Typography.Text strong>V{value}</Typography.Text>
-      {value === current?.versionNo && <Tag color="blue">当前</Tag>}
-    </Space> },
-    { title: '确认记录数', key: 'count', align: 'right', render: (_value, item) => item.content.confirmedRecordCount },
-    { title: '数据单元', key: 'cells', align: 'right', render: (_value, item) => item.content.rows.length },
-    { title: '生成时间', key: 'createdAt', render: (_value, item) => displayTime(item.createdAt) },
-    { title: '范围', key: 'scope', render: (_value, item) => item.content.scopeLimited ? <Tag color="orange">授权范围快照</Tag> : <Tag>完整可见范围</Tag> },
-    { title: '生成文件', key: 'output', width: 190, render: (_value, item) => <ReportOutputPanel key={item.id} version={item} semesterId={period.semesterId} weekId={period.weekId}
-      canGenerate={permissionCoversReportTypes(permissionQuery.data?.permissions ?? [], 'REPORT_GENERATE', period, item.content.rows)} /> },
-    { title: '数据明细', key: 'snapshot', width: 120, align: 'right', render: (_value, item) => <Button type="link" size="small"
-      aria-expanded={selectedVersion?.id === item.id} onClick={() => showVersionDetails(item.versionNo)}>
-      查看明细
-    </Button> },
-  ]
+  if (!selectedVersion) return <Empty description="该周次尚无可查看的版本快照" />
+  const period = selectedVersion.content.period
+  const orderedVersions = [...workflow.versions].sort((left, right) => left.versionNo - right.versionNo)
+  const selectedIndex = orderedVersions.findIndex(version => version.id === selectedVersion.id)
   const correctionColumns: ColumnsType<ReportCorrectionLog> = [
-    { title: '版本', dataIndex: 'versionNo', width: 130, render: value => <Button type="link" size="small"
-      aria-label={`查看 V${value} 数据明细`} onClick={() => showVersionDetails(value)}>V{value} · 数据明细</Button> },
+    { title: '版本', dataIndex: 'versionNo', width: 130, render: value => <Button type="link" size="small" onClick={() => choose(value, 'snapshot')}>V{value} · 查看快照</Button> },
     { title: '字段', dataIndex: 'field', width: 180, render: reportCorrectionFieldLabel },
     { title: '原值', dataIndex: 'beforeValue', width: 160, render: displayCorrectionValue },
     { title: '修正后', dataIndex: 'afterValue', width: 160, render: displayCorrectionValue },
     { title: '原因', dataIndex: 'reason' },
     { title: '修正时间', dataIndex: 'correctedAt', width: 170, render: displayTime },
   ]
+  return <div className="report-archive-detail-layout">
+    <nav className="report-archive-version-nav" aria-label="通报版本">
+      <Button aria-label="上一版本" icon={<LeftOutlined />} disabled={selectedIndex <= 0} onClick={() => choose(orderedVersions[selectedIndex - 1].versionNo, 'snapshot')} />
+      <div className="report-archive-version-track"><div className="report-archive-version-list" ref={versionListRef}>{orderedVersions.map(version => <Button key={version.id}
+        className="report-archive-version-option" type="text" aria-current={version.id === selectedVersion.id ? 'step' : undefined}
+        title={`V${version.versionNo} · ${displayTime(version.createdAt)}`}
+        onClick={() => choose(version.versionNo, 'snapshot')}>
+        <span className="report-archive-version-time">{displayTimelineTime(version.createdAt)}</span>
+        <span className="report-archive-version-dot" aria-hidden="true" />
+        <span className="report-archive-version-name">V{version.versionNo}{version.versionNo === current?.versionNo ? ' · 当前' : ''}</span>
+      </Button>)}</div></div>
+      <Button aria-label="下一版本" icon={<RightOutlined />} disabled={selectedIndex >= orderedVersions.length - 1} onClick={() => choose(orderedVersions[selectedIndex + 1].versionNo, 'snapshot')} />
+    </nav>
+    <div className="report-archive-detail-main">
+      <header className="report-archive-detail-header">
+        <div>
+          <Typography.Title level={3}>V{selectedVersion.versionNo} · 通报快照</Typography.Title>
+        </div>
+        <div className="report-archive-header-actions"><Tag color={selectedVersion.content.scopeLimited ? 'orange' : 'default'}>{selectedVersion.content.scopeLimited ? '授权范围快照' : '完整可见范围'}</Tag>
+          <Button icon={<BarChartOutlined aria-hidden="true" />} onClick={() => setIndicatorsOpen(true)}>周指标</Button>
+          <Button icon={<HistoryOutlined aria-hidden="true" />} onClick={() => choose(selectedVersion.versionNo, 'history')}>流程与修正记录{workflow.reviews.length + workflow.corrections.length > 0 ? ` (${workflow.reviews.length + workflow.corrections.length})` : ''}</Button>
+          <ReportOutputPanel key={selectedVersion.id} version={selectedVersion} semesterId={period.semesterId} weekId={period.weekId}
+            canGenerate={permissionCoversReportTypes(permissionQuery.data?.permissions ?? [], 'REPORT_GENERATE', period, selectedVersion.content.rows)} /></div>
+      </header>
+      {selectedVersion.content.scopeLimited && <Alert type="warning" showIcon title="此版本只覆盖生成账号当时有权查看的范围" />}
+      <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} inlineRecordDetail showIndicators={false} showHeading={false} />
+      <Drawer title="流程与修正记录" size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={activeSection === 'history'}
+        onClose={() => choose(selectedVersion.versionNo, 'snapshot')} destroyOnHidden>
+          <Tabs className="report-archive-history-tabs" items={[
+            { key: 'reviews', label: `审核与状态轨迹 (${workflow.reviews.length})`, children: <section aria-label="审核与状态轨迹" className="report-archive-history-panel">
+              <Alert type="info" showIcon title="审核通过后仍需确认定稿" description="审核通过仅表示进入待定稿确认；确认定稿后才会固定该版数据。" />
+              {workflow.reviews.length ? <Timeline items={workflow.reviews.map((item: ReportReview) => ({
+                content: <div><Button type="link" onClick={() => choose(item.versionNo, 'snapshot')}>V{item.versionNo} · {reportReviewActionLabel(item.action)}</Button><Typography.Text type="secondary">{displayTime(item.createdAt)}</Typography.Text>{item.comment && <p>{item.comment}</p>}</div>,
+              }))} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无审核记录" />}</section> },
+            { key: 'corrections', label: `追加修正记录 (${workflow.corrections.length})`, children: <section aria-label="追加修正记录" className="report-archive-history-panel">
+              <Table<ReportCorrectionLog> rowKey="id" size="small" pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50] }} columns={correctionColumns} dataSource={workflow.corrections} scroll={{ x: 760 }} locale={{ emptyText: '暂无修正记录' }} /></section> },
+          ]} />
+      </Drawer>
+      <Drawer title={`V${selectedVersion.versionNo} · 周指标`} size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={indicatorsOpen}
+        onClose={() => setIndicatorsOpen(false)} destroyOnHidden><ReportVersionIndicators version={selectedVersion} archiveTable /></Drawer>
+    </div>
+  </div>
+}
 
-  return <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-    {current && <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 4 }}>
-      <Descriptions.Item label="当前状态">{reportStatusLabel(current.status)}</Descriptions.Item>
-      <Descriptions.Item label="当前版本">V{current.versionNo}</Descriptions.Item>
-      <Descriptions.Item label="最后更新">{displayTime(current.updatedAt)}</Descriptions.Item>
-    </Descriptions>}
-    {workflow.versions.map(version => version.content.scopeLimited && <Alert key={version.id} type="warning" showIcon title={`V${version.versionNo} 只覆盖生成账号当时有权查看的范围`} />)}
-    {workflow.reviews.length > 0 && <>
-      <Card className="report-archive-review-card" size="small" title="审核与状态轨迹" extra={<Tag>{workflow.reviews.length} 次操作</Tag>}>
-        <Timeline items={workflow.reviews.map((item: ReportReview) => ({
-          color: item.action === 'RETURNED' ? 'orange' : ['APPROVED', 'FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(item.action) ? 'green' : 'blue',
-          content: <div className="report-archive-review-entry">
-            <div className="report-archive-review-entry-heading">
-              <Typography.Text strong>{reportReviewActionLabel(item.action)}</Typography.Text>
-              <Tag variant="filled">V{item.versionNo}</Tag>
-            </div>
-            <Typography.Text type="secondary">{displayTime(item.createdAt)}</Typography.Text>
-            {item.comment && <p className="report-archive-review-comment">{item.comment}</p>}
-          </div>,
-        }))} />
-      </Card>
-    </>}
-    <section className="report-archive-version-section" aria-labelledby="report-archive-versions-title">
-      <div className="report-archive-section-heading">
-        <Typography.Title id="report-archive-versions-title" level={5}>版本快照</Typography.Title>
-        <Typography.Text type="secondary">选择版本查看当时保存的记录内容。</Typography.Text>
-      </div>
-      <Table<ReportVersion> className="report-archive-version-table" rowKey="id" size="small" pagination={false} columns={versionColumns}
-        dataSource={workflow.versions} rowClassName={item => item.versionNo === current?.versionNo ? 'report-archive-version-current-row' : ''}
-        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该周次尚无可查看的版本快照" /> }} scroll={{ x: 900 }} />
-    </section>
-    {workflow.corrections.length > 0 && <>
-      <Typography.Text strong>追加修正记录</Typography.Text>
-      <Table<ReportCorrectionLog> rowKey="id" size="small" pagination={false} columns={correctionColumns} dataSource={workflow.corrections} scroll={{ x: 760 }} />
-    </>}
-    <Alert type="info" showIcon title="归档快照为只读记录" description="文件只读取所选版本的数据，不会修改通报状态。" />
-    <Drawer rootClassName="weekly-report-version-detail-drawer" classNames={{ wrapper: 'weekly-report-version-detail-drawer-wrapper' }}
-      styles={{ wrapper: { maxWidth: '100vw' } }}
-      title="归档版本明细"
-      size={Math.min(960, drawerWidth)} open={Boolean(selectedVersion)} onClose={() => setSelectedVersion(null)}>
-      {selectedVersion && <Space className="report-version-detail-layout" orientation="vertical" size="middle" style={{ display: 'flex' }}>
-        <section className="report-version-detail-context" role="group" aria-label="归档版本上下文">
-          <div className="report-version-detail-context-heading">
-            <div>
-              <Typography.Text type="secondary">正在查看归档快照</Typography.Text>
-              <Typography.Title level={4}>V{selectedVersion.versionNo} · 数据明细</Typography.Title>
-            </div>
-            {selectedVersion.versionNo === current?.versionNo && <Tag color="blue">当前版本</Tag>}
-          </div>
-          <Typography.Text className="report-version-detail-period">
-            {period.academicYearName} · {period.semesterName} · 第 {period.weekNo} 周
-          </Typography.Text>
-          <div className="report-version-detail-metadata">
-            <div><Typography.Text type="secondary">确认记录</Typography.Text><Typography.Text strong>{selectedVersion.content.confirmedRecordCount} 条</Typography.Text></div>
-            <div><Typography.Text type="secondary">数据单元</Typography.Text><Typography.Text strong>{selectedVersion.content.rows.length} 个</Typography.Text></div>
-            <div><Typography.Text type="secondary">生成时间</Typography.Text><Typography.Text strong>{displayTime(selectedVersion.createdAt)}</Typography.Text></div>
-            <div><Typography.Text type="secondary">数据范围</Typography.Text><Typography.Text strong>{selectedVersion.content.scopeLimited ? '授权范围快照' : '完整可见范围'}</Typography.Text></div>
-          </div>
-        </section>
-        <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} />
-      </Space>}
-    </Drawer>
-  </Space>
+export function WeeklyReportArchiveDetailPage() {
+  const { semesterId = '', weekId = '' } = useParams()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [accessChanged, setAccessChanged] = useState(false)
+  const clearArchiveScope = useCallback(() => {
+    queryClient.removeQueries({ queryKey: ['reports', 'archive'] })
+    queryClient.removeQueries({ queryKey: ['reports', 'archive-workflow'] })
+    setAccessChanged(true)
+  }, [queryClient])
+  const workflowQuery = useReportArchiveWorkflow(semesterId, weekId, Boolean(semesterId && weekId), clearArchiveScope)
+  const version = workflowQuery.data?.versions.find(item => item.versionNo === workflowQuery.data?.report?.versionNo)
+  const period = version?.content.period ?? workflowQuery.data?.versions[0]?.content.period
+  const isFinalized = ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(workflowQuery.data?.report?.status ?? '')
+  return <section className="attendance-page weekly-report-archive-detail-page" aria-label="周通报归档详情">
+    <div className="attendance-page-heading report-archive-page-heading"><div>
+      <Button type="link" className="report-archive-back" onClick={() => navigate('/reports/archive')}>返回通报归档</Button>
+      <Typography.Title level={2}>{period ? displayPeriod({ period } as ReportArchiveEntry) : '周通报归档详情'}</Typography.Title>
+      <Typography.Text type="secondary">只读归档</Typography.Text>
+    </div>{period && <Button onClick={() => navigate(`/reports/workbench?semesterId=${encodeURIComponent(semesterId)}&weekId=${encodeURIComponent(weekId)}&stage=${isFinalized ? 1 : 2}`)}>{isFinalized ? '基于定稿修正' : '在工作台继续'}</Button>}</div>
+    {accessChanged && <Alert type="warning" showIcon title="你的归档查看权限已变化，请返回归档重新进入" />}
+    {workflowQuery.isPending && <div role="status">正在加载通报快照</div>}
+    {workflowQuery.isError && <Alert type="error" showIcon title="历史版本读取失败" action={<Button onClick={() => void workflowQuery.refetch()}>重试</Button>} />}
+    {workflowQuery.data && !accessChanged && <ArchiveWorkflowDetail workflow={workflowQuery.data} onAccessDenied={clearArchiveScope} />}
+  </section>
 }
 
 export function WeeklyReportArchivePage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [archiveDrawerWidth, setArchiveDrawerWidth] = useState(1040)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [status, setStatus] = useState<ReportArchiveStatus | ''>('')
-  const [selected, setSelected] = useState<ReportArchiveEntry | null>(null)
   const [accessChanged, setAccessChanged] = useState(false)
-  useEffect(() => {
-    const updateArchiveDrawerWidth = () => setArchiveDrawerWidth(Math.min(1040, window.innerWidth))
-    updateArchiveDrawerWidth()
-    window.addEventListener('resize', updateArchiveDrawerWidth)
-    return () => window.removeEventListener('resize', updateArchiveDrawerWidth)
-  }, [])
   const query: ReportArchiveQuery = { page, pageSize, ...(status ? { status } : {}) }
 
   const clearArchiveScope = useCallback(() => {
     queryClient.removeQueries({ queryKey: ['reports', 'archive'] })
     queryClient.removeQueries({ queryKey: ['reports', 'archive-workflow'] })
-    setSelected(null)
     setAccessChanged(true)
   }, [queryClient])
   const archiveQuery = useReportArchive(query, clearArchiveScope)
-  const workflowQuery = useReportArchiveWorkflow(selected?.period.semesterId ?? '', selected?.period.weekId ?? '', Boolean(selected), clearArchiveScope)
 
   const columns: ProColumns<ReportArchiveEntry>[] = [
     { title: '通报状态', dataIndex: 'status', hideInTable: true, valueType: 'select', order: 1,
@@ -181,7 +181,7 @@ export function WeeklyReportArchivePage() {
       const isFinalized = ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(item.status)
       const stage = ['DRAFT', 'RETURNED'].includes(item.status) || isFinalized ? 1 : 2
       return <Space wrap>
-        <Button type="link" onClick={() => setSelected(item)}>查看版本</Button>
+        <Button type="link" onClick={() => navigate(`/reports/archive/${encodeURIComponent(item.period.semesterId)}/${encodeURIComponent(item.period.weekId)}`)}>查看详情</Button>
         <Button type="link" onClick={() => navigate(`/reports/workbench?semesterId=${encodeURIComponent(item.period.semesterId)}&weekId=${encodeURIComponent(item.period.weekId)}&stage=${stage}`)}>
           {isFinalized ? '基于定稿修正' : '在工作台继续'}
         </Button>
@@ -219,12 +219,5 @@ export function WeeklyReportArchivePage() {
       pagination={{ current: page, pageSize, total: archiveQuery.data?.total ?? 0, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: total => `共 ${total} 周通报`, onChange: (nextPage, nextPageSize) => { if (nextPageSize !== pageSize) { setPageSize(nextPageSize); setPage(1) } else setPage(nextPage) } }}
     />
 
-    <Drawer rootClassName="weekly-report-archive-drawer" classNames={{ wrapper: 'weekly-report-archive-drawer-wrapper' }}
-      styles={{ wrapper: { maxWidth: '100vw' } }}
-      title={selected ? `${displayPeriod(selected)} · 历史版本` : '历史版本'} size={archiveDrawerWidth} open={Boolean(selected)} onClose={() => setSelected(null)}>
-      {workflowQuery.isPending && <div role="status">正在加载通报快照</div>}
-      {workflowQuery.isError && <Alert type="error" showIcon title="历史版本读取失败" action={<Button onClick={() => void workflowQuery.refetch()}>重试</Button>} />}
-      {workflowQuery.data && selected && <ArchiveWorkflowDetail workflow={workflowQuery.data} period={selected.period} drawerWidth={archiveDrawerWidth} onAccessDenied={clearArchiveScope} />}
-    </Drawer>
   </section>
 }

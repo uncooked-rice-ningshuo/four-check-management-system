@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -100,14 +101,18 @@ func decodeIntroduction(raw json.RawMessage) (IntroductionDocument, error) {
 		return IntroductionDocument{}, ErrInvalidSelection
 	}
 	if document.FooterLayout == "custom" {
+		plain := strings.NewReplacer("{page}", "", "{totalPages}", "", "{semesterName}", "", "{weekNo}", "").Replace(document.FooterText)
+		if strings.ContainsAny(plain, "{}") || strings.Count(document.FooterText, "{totalPages}") > 1 {
+			return IntroductionDocument{}, ErrInvalidSelection
+		}
 		for _, line := range strings.Split(document.FooterText, "\n") {
-			if strings.Count(line, "\t") > 1 {
+			if strings.Count(line, "\t") > 2 {
 				return IntroductionDocument{}, ErrInvalidSelection
 			}
 		}
 	}
 	if document.TitleTemplate != "" {
-		check := strings.ReplaceAll(strings.ReplaceAll(document.TitleTemplate, "{semesterName}", ""), "{weekNo}", "")
+		check := strings.NewReplacer("{semesterName}", "", "{weekNo}", "", "{reportDate}", "").Replace(document.TitleTemplate)
 		if !validPageText(document.TitleTemplate) || strings.ContainsAny(check, "{}") || document.TitleTemplate == " " {
 			return IntroductionDocument{}, ErrInvalidSelection
 		}
@@ -156,6 +161,40 @@ func decodeIntroduction(raw json.RawMessage) (IntroductionDocument, error) {
 
 func validPageText(value string) bool {
 	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= 120 && !strings.ContainsAny(value, "\r\n")
+}
+
+// resolveIntroductionDate freezes the operator-selected issuing date in each
+// generated file, independently of the report data version and layout setting.
+func resolveIntroductionDate(raw json.RawMessage, issueDate string) (json.RawMessage, string, error) {
+	document, err := decodeIntroduction(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	required := strings.Contains(document.TitleTemplate, "{reportDate}")
+	for _, paragraph := range document.Content {
+		for _, run := range paragraph.Content {
+			required = required || strings.Contains(run.Text, "{reportDate}")
+		}
+	}
+	if !required {
+		return raw, "", nil
+	}
+	date, err := time.Parse("2006-01-02", issueDate)
+	if err != nil || date.Format("2006-01-02") != issueDate {
+		return nil, "", ErrInvalidSelection
+	}
+	formatted := fmt.Sprintf("%d年%d月%d日", date.Year(), date.Month(), date.Day())
+	document.TitleTemplate = strings.ReplaceAll(document.TitleTemplate, "{reportDate}", formatted)
+	for index := range document.Content {
+		for run := range document.Content[index].Content {
+			document.Content[index].Content[run].Text = strings.ReplaceAll(document.Content[index].Content[run].Text, "{reportDate}", formatted)
+		}
+	}
+	resolved, err := json.Marshal(document)
+	if err != nil {
+		return nil, "", err
+	}
+	return resolved, issueDate, nil
 }
 
 func legacyIntroduction(value string) json.RawMessage {

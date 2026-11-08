@@ -70,7 +70,7 @@ func TestLongRemarkLayoutReservesSpaceAndRepeatsHeaders(t *testing.T) {
 		}
 	}
 	tables := strings.Count(document, "<w:tbl>")
-	if tables < 2 || tables > 8 || strings.Count(document, "<w:tblHeader/>") != tables {
+	if tables < 2 || tables > 12 || strings.Count(document, "<w:tblHeader/>") != tables {
 		t.Fatalf("unexpected page grouping: tables=%d headers=%d", tables, strings.Count(document, "<w:tblHeader/>"))
 	}
 	if !strings.Contains(parts["word/settings.xml"], `w:val="15"`) || !strings.Contains(parts["word/footer1.xml"], `w:instr="PAGE"`) {

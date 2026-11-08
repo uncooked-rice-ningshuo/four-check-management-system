@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Checkbox, Drawer, Menu, message, Space, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, DatePicker, Drawer, Menu, message, Select, Space, Typography } from 'antd'
+import dayjs from 'dayjs'
 import { useState } from 'react'
-import { reportOutputApi, type IntroductionDocument, type ReportOutputEditorSettings, type ReportOutputSettings } from '../../../shared/api/reportOutputApi'
+import { reportOutputApi, type IntroductionDocument, type ReportOutputEditorSettings, type ReportOutputSettings, type ReportOutputWeekDate } from '../../../shared/api/reportOutputApi'
+import { useWorkContext } from '../../work-context/useWorkContext'
 import { ReportIntroductionEditor } from './ReportIntroductionEditor'
 import { ReportDocumentPreview } from './ReportDocumentPreview'
 
@@ -56,7 +58,43 @@ function initialDocument(settings: ReportOutputEditorSettings): IntroductionDocu
   return { ...document, content, attachmentPosition: undefined, manualAttachmentList: true }
 }
 
-type Format = 'WORD' | 'EXCEL'
+type Format = 'WORD' | 'EXCEL' | 'DATE'
+
+function WeekDateEditor({ week }: { week: ReportOutputWeekDate }) {
+  const client = useQueryClient()
+  const [messageApi, contextHolder] = message.useMessage()
+  const [issueDate, setIssueDate] = useState(week.issueDate)
+  const save = useMutation({
+    mutationFn: () => reportOutputApi.saveWeekDate({ ...week, issueDate }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['report-output-week-dates'] })
+      void messageApi.success('本周文件日期已保存')
+    },
+    onError: error => { void messageApi.error(error.message) },
+  })
+  return <div className="report-output-week-date-form">{contextHolder}
+    <DatePicker aria-label="文件日期" format="YYYY-MM-DD" placeholder="选择文件日期" value={issueDate ? dayjs(issueDate) : null} onChange={date => setIssueDate(date?.format('YYYY-MM-DD') ?? '')} />
+    <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!issueDate || issueDate === week.issueDate}>保存日期</Button>
+  </div>
+}
+
+function WeekDateSettings() {
+  const dates = useQuery({ queryKey: ['report-output-week-dates'], queryFn: reportOutputApi.weekDates })
+  const workContext = useWorkContext()
+  const [selectedWeekId, setSelectedWeekId] = useState<string>()
+  const currentWeekId = workContext.data?.week?.id
+  const effectiveWeekId = selectedWeekId ?? (dates.data?.items.some(item => item.weekId === currentWeekId) ? currentWeekId : undefined)
+  const selected = dates.data?.items.find(item => item.weekId === effectiveWeekId)
+  return <section className="report-output-config-section" aria-label="每周文件日期">
+    <div className="report-output-config-section-title"><strong>通报周次</strong></div>
+    <Typography.Paragraph type="secondary">选择通报周次并设置文件落款日期。Word 生成时使用这里保存的日期。</Typography.Paragraph>
+    {dates.isError && <Alert type="error" showIcon title="周次日期加载失败" action={<Button onClick={() => void dates.refetch()}>重试</Button>} />}
+    <Select aria-label="通报周次" placeholder="选择学期和周次" loading={dates.isLoading} value={effectiveWeekId}
+      style={{ width: '100%' }} onChange={setSelectedWeekId}
+      options={(dates.data?.items ?? []).map(item => ({ value: item.weekId, label: `${item.semesterName} · 第 ${item.weekNo} 周` }))} />
+    {selected && <WeekDateEditor key={`${selected.weekId}:${selected.version}`} week={selected} />}
+  </section>
+}
 
 function WorkbookPreview({ types }: { types: ReportOutputEditorSettings['inspectionTypes'] }) {
   const [activeCode, setActiveCode] = useState(types[0]?.code)
@@ -84,7 +122,7 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [previewError, setPreviewError] = useState('')
-  const codes = format === 'WORD' ? wordCodes : excelCodes
+  const codes = format === 'WORD' ? wordCodes : format === 'EXCEL' ? excelCodes : []
   const updateCodes = (next: string[]) => {
     if (format === 'WORD') {
       setWordCodes(next)
@@ -124,23 +162,25 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
   }
   return <div className="report-output-settings-workspace">
     <header className="report-output-settings-header">
-      <div><Typography.Title level={3}>通报文件设置</Typography.Title><Typography.Text type="secondary">分别维护 Word 附件与 Excel 工作表的默认内容</Typography.Text></div>
-      <Space><Button onClick={() => setPreviewOpen(true)}>预览</Button><Button type="primary" loading={pending} onClick={saveSettings}>保存配置</Button></Space>
+      <div><Typography.Title level={3}>通报文件设置</Typography.Title><Typography.Text type="secondary">维护 Word、Excel 与每周文件日期</Typography.Text></div>
+      {format !== 'DATE' && <Space><Button onClick={() => setPreviewOpen(true)}>预览</Button><Button type="primary" loading={pending} onClick={saveSettings}>保存配置</Button></Space>}
     </header>
     <div className="report-output-config-layout">
       <nav className="report-output-config-nav" aria-label="文件配置类型">
         <Menu mode="inline" selectedKeys={[format]} onClick={({ key }) => setFormat(key as Format)} items={[
           { key: 'WORD', label: <span>Word 配置 <Typography.Text type="secondary">{wordCodes.length} 项</Typography.Text></span> },
           { key: 'EXCEL', label: <span>Excel 配置 <Typography.Text type="secondary">{excelCodes.length} 项</Typography.Text></span> },
+          { key: 'DATE', label: '文件日期' },
         ]} />
       </nav>
       <Card className="report-output-config-detail" variant="borderless">
-        <div className="report-output-config-heading"><div><Typography.Title level={4}>{format === 'WORD' ? 'Word 配置' : 'Excel 配置'}</Typography.Title><Typography.Text type="secondary">{format === 'WORD' ? '通报前文与检查附件' : '每项检查生成一张工作表'}</Typography.Text></div><span>配置版本 {settings.version}</span></div>
+        <div className="report-output-config-heading"><div><Typography.Title level={4}>{format === 'WORD' ? 'Word 配置' : format === 'EXCEL' ? 'Excel 配置' : '每周文件日期'}</Typography.Title><Typography.Text type="secondary">{format === 'WORD' ? '通报前文与检查附件' : format === 'EXCEL' ? '每项检查生成一张工作表' : '按通报周次设置文件落款日期'}</Typography.Text></div>{format !== 'DATE' && <span>配置版本 {settings.version}</span>}</div>
+        {format === 'DATE' && <WeekDateSettings />}
         {format === 'WORD' && <section className="report-output-config-section" aria-label="Word 前文"><div className="report-output-config-section-title"><strong>通报首页</strong><Button onClick={() => setEditorOpen(true)}>编辑首页</Button></div><ReportDocumentPreview document={document} types={wordTypes} compact /></section>}
-        <div className="report-output-config-columns">
+        {format !== 'DATE' && <div className="report-output-config-columns">
           <section className="report-output-config-section" aria-label="检查类型"><div className="report-output-config-section-title"><strong>检查类型</strong><span>已选 {codes.length} 项</span></div><div className="report-output-type-grid">{settings.inspectionTypes.map(type => <label className="report-output-type-option" key={type.code}><Checkbox checked={codes.includes(type.code)} onChange={event => toggle(type.code, event.target.checked)} /> <span>{type.name}</span></label>)}</div></section>
           <section className="report-output-config-section" aria-label="文件顺序"><div className="report-output-config-section-title"><strong>{format === 'WORD' ? '附件顺序' : '工作表顺序'}</strong></div><div className="report-output-default-order">{codes.length === 0 && <p className="report-output-config-empty">选择检查类型后，在此调整顺序</p>}{codes.map((code, index) => <div className="report-output-order-row" key={code}><span>{index + 1}. {names[index]}</span><Space size={0}><Button type="text" size="small" icon={<ArrowUpOutlined />} aria-label={'上移 ' + names[index]} disabled={index === 0} onClick={() => move(index, -1)} /><Button type="text" size="small" icon={<ArrowDownOutlined />} aria-label={'下移 ' + names[index]} disabled={index === codes.length - 1} onClick={() => move(index, 1)} /></Space></div>)}</div></section>
-        </div>
+        </div>}
       </Card>
     </div>
     <Drawer title="编辑通报首页" className="report-intro-drawer" open={editorOpen} size={1100} extra={<Button type="primary" onClick={() => setEditorOpen(false)}>完成编辑</Button>} onClose={() => setEditorOpen(false)} destroyOnHidden><ReportIntroductionEditor value={document} onChange={setDocument} attachmentNames={wordTypes.map(type => type.title || type.name)} /></Drawer>

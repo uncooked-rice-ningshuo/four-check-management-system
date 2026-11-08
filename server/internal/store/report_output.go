@@ -18,6 +18,85 @@ func (p *Postgres) GetOutputSettings(ctx context.Context) (reportoutput.Settings
 	return result, err
 }
 
+func (p *Postgres) ListWeekDates(ctx context.Context) ([]reportoutput.WeekDate, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT w.semester_id::text,s.name,w.id::text,w.week_no,COALESCE(d.issue_date::text,''),COALESCE(d.version,0)
+		FROM semester_weeks w JOIN semesters s ON s.id=w.semester_id
+		LEFT JOIN report_output_week_dates d ON d.week_id=w.id
+		ORDER BY w.start_date DESC,w.week_no DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]reportoutput.WeekDate, 0)
+	for rows.Next() {
+		var item reportoutput.WeekDate
+		if err := rows.Scan(&item.SemesterID, &item.SemesterName, &item.WeekID, &item.WeekNo, &item.IssueDate, &item.Version); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (p *Postgres) GetWeekDate(ctx context.Context, semesterID, weekID string) (reportoutput.WeekDate, error) {
+	var item reportoutput.WeekDate
+	err := p.Pool.QueryRow(ctx, `SELECT w.semester_id::text,s.name,w.id::text,w.week_no,COALESCE(d.issue_date::text,''),COALESCE(d.version,0)
+		FROM semester_weeks w JOIN semesters s ON s.id=w.semester_id
+		LEFT JOIN report_output_week_dates d ON d.week_id=w.id
+		WHERE w.id=$1::uuid AND w.semester_id=$2::uuid`, weekID, semesterID).Scan(&item.SemesterID, &item.SemesterName, &item.WeekID, &item.WeekNo, &item.IssueDate, &item.Version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reportoutput.WeekDate{}, reportoutput.ErrWeekNotFound
+	}
+	return item, err
+}
+
+func (p *Postgres) SaveWeekDate(ctx context.Context, input reportoutput.WeekDate, metadata audit.Metadata) (reportoutput.WeekDate, error) {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return reportoutput.WeekDate{}, err
+	}
+	defer tx.Rollback(ctx)
+	var semesterName string
+	var weekNo int
+	if err := tx.QueryRow(ctx, `SELECT s.name,w.week_no FROM semester_weeks w JOIN semesters s ON s.id=w.semester_id WHERE w.id=$1::uuid AND w.semester_id=$2::uuid FOR KEY SHARE OF w`, input.WeekID, input.SemesterID).Scan(&semesterName, &weekNo); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return reportoutput.WeekDate{}, reportoutput.ErrWeekNotFound
+		}
+		return reportoutput.WeekDate{}, err
+	}
+	var beforeDate string
+	var version int
+	if input.Version > 0 {
+		var beforeVersion int
+		err = tx.QueryRow(ctx, `SELECT issue_date::text,version FROM report_output_week_dates WHERE week_id=$1::uuid FOR UPDATE`, input.WeekID).Scan(&beforeDate, &beforeVersion)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && beforeVersion != input.Version {
+			return reportoutput.WeekDate{}, reportoutput.ErrConfigConflict
+		}
+		if err != nil {
+			return reportoutput.WeekDate{}, err
+		}
+	}
+	if input.Version == 0 {
+		err = tx.QueryRow(ctx, `INSERT INTO report_output_week_dates(week_id,semester_id,issue_date,updated_by) VALUES($1::uuid,$2::uuid,$3::date,$4::uuid) ON CONFLICT (week_id) DO NOTHING RETURNING version`, input.WeekID, input.SemesterID, input.IssueDate, metadata.ActorID).Scan(&version)
+	} else {
+		err = tx.QueryRow(ctx, `UPDATE report_output_week_dates SET issue_date=$3::date,version=version+1,updated_by=$4::uuid,updated_at=now() WHERE week_id=$1::uuid AND semester_id=$2::uuid AND version=$5 RETURNING version`, input.WeekID, input.SemesterID, input.IssueDate, metadata.ActorID, input.Version).Scan(&version)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reportoutput.WeekDate{}, reportoutput.ErrConfigConflict
+	}
+	if err != nil {
+		return reportoutput.WeekDate{}, err
+	}
+	if err := insertAuditTx(ctx, tx, metadata, audit.Entry{Action: audit.ActionReportOutputChanged, ResourceType: "reportOutputWeekDate", ResourceID: input.WeekID, Before: map[string]any{"version": input.Version, "date": beforeDate}, After: map[string]any{"version": version, "date": input.IssueDate}}); err != nil {
+		return reportoutput.WeekDate{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return reportoutput.WeekDate{}, err
+	}
+	input.SemesterName, input.WeekNo, input.Version = semesterName, weekNo, version
+	return input, nil
+}
+
 func (p *Postgres) ListOutputTypes(ctx context.Context) ([]reportoutput.OutputType, error) {
 	rows, err := p.Pool.Query(ctx, `SELECT code,name FROM inspection_types WHERE enabled=true AND participates_in_report=true ORDER BY sort_order,code`)
 	if err != nil {
@@ -102,7 +181,7 @@ func (p *Postgres) StartReportOutput(ctx context.Context, output reportoutput.Fi
 	if len(output.IntroductionSnapshot) > 0 {
 		snapshot = string(output.IntroductionSnapshot)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO report_output_files(id,report_version_id,format,type_codes,combined,status,created_by,settings_version,layout_version,introduction_document_snapshot_json) VALUES($1::uuid,$2::uuid,$3,$4,$5,'PENDING',$6::uuid,$7,$8,$9::jsonb)`, output.ID, output.ReportVersionID, output.Format, output.TypeCodes, output.Combined, actorID, output.SettingsVersion, output.LayoutVersion, snapshot)
+	_, err = tx.Exec(ctx, `INSERT INTO report_output_files(id,report_version_id,format,type_codes,combined,status,created_by,settings_version,layout_version,introduction_document_snapshot_json,issue_date) VALUES($1::uuid,$2::uuid,$3,$4,$5,'PENDING',$6::uuid,$7,$8,$9::jsonb,NULLIF($10,'')::date)`, output.ID, output.ReportVersionID, output.Format, output.TypeCodes, output.Combined, actorID, output.SettingsVersion, output.LayoutVersion, snapshot, output.IssueDate)
 	if err != nil {
 		return err
 	}
@@ -149,11 +228,11 @@ func (p *Postgres) FailReportOutput(ctx context.Context, id, code string, metada
 }
 func scanReportOutput(row interface{ Scan(...any) error }) (reportoutput.File, error) {
 	var out reportoutput.File
-	err := row.Scan(&out.ID, &out.ReportVersionID, &out.Format, &out.TypeCodes, &out.Combined, &out.Status, &out.FileID, &out.FailureCode, &out.CreatedAt, &out.SettingsVersion, &out.LayoutVersion)
+	err := row.Scan(&out.ID, &out.ReportVersionID, &out.Format, &out.TypeCodes, &out.Combined, &out.Status, &out.FileID, &out.FailureCode, &out.CreatedAt, &out.SettingsVersion, &out.LayoutVersion, &out.IssueDate)
 	return out, err
 }
 func (p *Postgres) ListReportOutputs(ctx context.Context, versionID string) ([]reportoutput.File, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT id::text,report_version_id::text,format,type_codes,combined,status,COALESCE(file_id::text,''),failure_code,created_at,COALESCE(settings_version,0),COALESCE(layout_version,'') FROM report_output_files WHERE report_version_id=$1::uuid ORDER BY created_at DESC,id DESC`, versionID)
+	rows, err := p.Pool.Query(ctx, `SELECT id::text,report_version_id::text,format,type_codes,combined,status,COALESCE(file_id::text,''),failure_code,created_at,COALESCE(settings_version,0),COALESCE(layout_version,''),COALESCE(issue_date::text,'') FROM report_output_files WHERE report_version_id=$1::uuid ORDER BY created_at DESC,id DESC`, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +248,7 @@ func (p *Postgres) ListReportOutputs(ctx context.Context, versionID string) ([]r
 	return outputs, rows.Err()
 }
 func (p *Postgres) GetReportOutput(ctx context.Context, id string) (reportoutput.File, error) {
-	out, err := scanReportOutput(p.Pool.QueryRow(ctx, `SELECT id::text,report_version_id::text,format,type_codes,combined,status,COALESCE(file_id::text,''),failure_code,created_at,COALESCE(settings_version,0),COALESCE(layout_version,'') FROM report_output_files WHERE id=$1::uuid`, id))
+	out, err := scanReportOutput(p.Pool.QueryRow(ctx, `SELECT id::text,report_version_id::text,format,type_codes,combined,status,COALESCE(file_id::text,''),failure_code,created_at,COALESCE(settings_version,0),COALESCE(layout_version,''),COALESCE(issue_date::text,'') FROM report_output_files WHERE id=$1::uuid`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reportoutput.File{}, reportoutput.ErrNotFound
 	}

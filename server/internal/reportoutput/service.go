@@ -21,6 +21,9 @@ var (
 	ErrUnavailable        = errors.New("report output unavailable")
 	ErrConfigConflict     = errors.New("report output settings version conflict")
 	ErrPreviewRateLimited = errors.New("report output preview rate limited")
+	ErrIssueDateMissing   = errors.New("report output weekly issue date missing")
+	ErrInvalidWeekDate    = errors.New("invalid report output weekly issue date")
+	ErrWeekNotFound       = errors.New("report output week not found")
 )
 
 type Settings struct {
@@ -39,6 +42,17 @@ type GenerateInput struct {
 	Combined        bool     `json:"combined"`
 	SettingsVersion int      `json:"settingsVersion"`
 }
+
+// WeekDate is the editable file date for one academic week. Version zero means
+// that the week has not yet been configured.
+type WeekDate struct {
+	SemesterID   string `json:"semesterId"`
+	SemesterName string `json:"semesterName"`
+	WeekID       string `json:"weekId"`
+	WeekNo       int    `json:"weekNo"`
+	IssueDate    string `json:"issueDate"`
+	Version      int    `json:"version"`
+}
 type File struct {
 	ID                   string          `json:"id"`
 	ReportVersionID      string          `json:"reportVersionId"`
@@ -50,6 +64,7 @@ type File struct {
 	FailureCode          string          `json:"failureCode,omitempty"`
 	SettingsVersion      int             `json:"settingsVersion,omitempty"`
 	LayoutVersion        string          `json:"layoutVersion,omitempty"`
+	IssueDate            string          `json:"issueDate,omitempty"`
 	IntroductionSnapshot json.RawMessage `json:"-"`
 	CreatedAt            time.Time       `json:"createdAt"`
 }
@@ -57,6 +72,9 @@ type File struct {
 type Repository interface {
 	GetOutputSettings(context.Context) (Settings, error)
 	ReplaceOutputSettings(context.Context, Settings, audit.Metadata) (Settings, error)
+	ListWeekDates(context.Context) ([]WeekDate, error)
+	GetWeekDate(context.Context, string, string) (WeekDate, error)
+	SaveWeekDate(context.Context, WeekDate, audit.Metadata) (WeekDate, error)
 	StartReportOutput(context.Context, File, string, audit.Metadata) error
 	FinishReportOutput(context.Context, string, string, audit.Metadata) error
 	FailReportOutput(context.Context, string, string, audit.Metadata) error
@@ -125,6 +143,25 @@ func (s *Service) ReplaceSettings(ctx context.Context, settings Settings, metada
 	}
 	return s.repository.ReplaceOutputSettings(ctx, settings, metadata)
 }
+func (s *Service) WeekDates(ctx context.Context) ([]WeekDate, error) {
+	return s.repository.ListWeekDates(ctx)
+}
+func (s *Service) SaveWeekDate(ctx context.Context, input WeekDate, metadata audit.Metadata) (WeekDate, error) {
+	if _, err := uuid.Parse(input.SemesterID); err != nil {
+		return WeekDate{}, ErrInvalidSelection
+	}
+	if _, err := uuid.Parse(input.WeekID); err != nil {
+		return WeekDate{}, ErrInvalidSelection
+	}
+	if input.Version < 0 {
+		return WeekDate{}, ErrInvalidSelection
+	}
+	date, err := time.Parse("2006-01-02", input.IssueDate)
+	if err != nil || date.Format("2006-01-02") != input.IssueDate {
+		return WeekDate{}, ErrInvalidWeekDate
+	}
+	return s.repository.SaveWeekDate(ctx, input, metadata)
+}
 
 func (s *Service) EditorSettings(ctx context.Context) (Settings, []OutputType, error) {
 	settings, err := s.Settings(ctx)
@@ -167,7 +204,11 @@ func (s *Service) PreviewWord(ctx context.Context, document json.RawMessage, cod
 		return nil, err
 	}
 	content := reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 9}}
-	data, err := RenderWordDocument(content, nil, codes, document, true)
+	previewDocument, _, err := resolveIntroductionDate(document, "2025-06-01")
+	if err != nil {
+		return nil, err
+	}
+	data, err := RenderWordDocument(content, nil, codes, previewDocument, true)
 	if err != nil {
 		return nil, err
 	}
@@ -251,9 +292,26 @@ func (s *Service) Generate(ctx context.Context, actorID string, input GenerateIn
 	if input.SettingsVersion != settings.Version {
 		return File{}, ErrConfigConflict
 	}
-	output := File{ID: uuid.NewString(), ReportVersionID: version.ID, Format: input.Format, TypeCodes: append([]string(nil), input.TypeCodes...), Combined: input.Combined, Status: "PENDING", CreatedAt: time.Now().UTC(), SettingsVersion: settings.Version, LayoutVersion: "WORD_V2"}
+	introduction := settings.IntroductionDocument
+	issueDate := ""
 	if input.Format == "WORD" && input.Combined {
-		output.IntroductionSnapshot = settings.IntroductionDocument
+		weekDate, dateErr := s.repository.GetWeekDate(ctx, input.SemesterID, input.WeekID)
+		if dateErr != nil {
+			return File{}, dateErr
+		}
+		if weekDate.IssueDate == "" {
+			return File{}, ErrIssueDateMissing
+		}
+		issueDate = weekDate.IssueDate
+		introduction, _, err = resolveIntroductionDate(introduction, issueDate)
+		if err != nil {
+			return File{}, err
+		}
+	}
+	output := File{ID: uuid.NewString(), ReportVersionID: version.ID, Format: input.Format, TypeCodes: append([]string(nil), input.TypeCodes...), Combined: input.Combined, Status: "PENDING", CreatedAt: time.Now().UTC(), SettingsVersion: settings.Version, LayoutVersion: "WORD_V2"}
+	output.IssueDate = issueDate
+	if input.Format == "WORD" && input.Combined {
+		output.IntroductionSnapshot = introduction
 	}
 	if err := s.repository.StartReportOutput(ctx, output, actorID, metadata); err != nil {
 		return File{}, err
@@ -286,7 +344,7 @@ func (s *Service) Generate(ctx context.Context, actorID string, input GenerateIn
 	if input.Format == "EXCEL" {
 		data, err = RenderExcel(version.Content, records, input.TypeCodes)
 	} else {
-		data, err = RenderWordDocument(version.Content, records, input.TypeCodes, settings.IntroductionDocument, input.Combined)
+		data, err = RenderWordDocument(version.Content, records, input.TypeCodes, introduction, input.Combined)
 	}
 	if err != nil {
 		return fail(err)

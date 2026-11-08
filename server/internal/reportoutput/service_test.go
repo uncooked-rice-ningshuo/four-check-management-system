@@ -2,8 +2,10 @@ package reportoutput
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"four-check-management-system/server/internal/audit"
@@ -14,10 +16,63 @@ import (
 
 type outputRepositoryStub struct {
 	settings Settings
+	weekDate WeekDate
 	output   File
 	starts   int
 	previews int
 	records  []reporting.Record
+}
+
+func (r *outputRepositoryStub) ListWeekDates(context.Context) ([]WeekDate, error) {
+	return []WeekDate{r.weekDate}, nil
+}
+func (r *outputRepositoryStub) GetWeekDate(context.Context, string, string) (WeekDate, error) {
+	return r.weekDate, nil
+}
+func (r *outputRepositoryStub) SaveWeekDate(_ context.Context, input WeekDate, _ audit.Metadata) (WeekDate, error) {
+	input.Version++
+	r.weekDate = input
+	return input, nil
+}
+
+func TestGenerateRequiresAndFreezesConfiguredIssueDate(t *testing.T) {
+	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", SemesterName: "示例学期", WeekNo: 8}
+	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "NO_CONFIRMED_DATA"}}}}
+	repo := &outputRepositoryStub{settings: Settings{Version: 1, IntroductionDocument: json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)}}
+	files := &outputFilesStub{}
+	service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
+	if _, err := service.Generate(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, ErrIssueDateMissing) || repo.starts != 0 {
+		t.Fatalf("missing issue date persisted output: err=%v starts=%d", err, repo.starts)
+	}
+	repo.weekDate = WeekDate{IssueDate: "2025-06-01", Version: 1}
+	output, err := service.Generate(context.Background(), "actor", input, audit.Metadata{})
+	if err != nil || output.Status != "AVAILABLE" || output.IssueDate != repo.weekDate.IssueDate || repo.output.IssueDate != repo.weekDate.IssueDate || !strings.Contains(string(repo.output.IntroductionSnapshot), "2025年6月1日") {
+		t.Fatalf("issue date not frozen: output=%+v err=%v", output, err)
+	}
+	repo.weekDate.IssueDate = "2025-06-08"
+	if output.IssueDate != "2025-06-01" || !strings.Contains(string(repo.output.IntroductionSnapshot), "2025年6月1日") {
+		t.Fatal("changing a week date modified an existing output snapshot")
+	}
+}
+
+func TestSaveWeekDateRejectsInvalidInput(t *testing.T) {
+	service := NewService(&outputRepositoryStub{}, nil, nil, nil)
+	valid := WeekDate{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", IssueDate: "2026-03-30", Version: 0}
+	for _, input := range []WeekDate{
+		{SemesterID: "invalid", WeekID: valid.WeekID, IssueDate: valid.IssueDate},
+		{SemesterID: valid.SemesterID, WeekID: "invalid", IssueDate: valid.IssueDate},
+		{SemesterID: valid.SemesterID, WeekID: valid.WeekID, IssueDate: valid.IssueDate, Version: -1},
+	} {
+		if _, err := service.SaveWeekDate(context.Background(), input, audit.Metadata{}); !errors.Is(err, ErrInvalidSelection) {
+			t.Fatalf("invalid input accepted: %+v err=%v", input, err)
+		}
+	}
+	invalidDate := valid
+	invalidDate.IssueDate = "2026-02-30"
+	if _, err := service.SaveWeekDate(context.Background(), invalidDate, audit.Metadata{}); !errors.Is(err, ErrInvalidWeekDate) {
+		t.Fatalf("invalid date accepted: %v", err)
+	}
 }
 
 func (r *outputRepositoryStub) GetOutputSettings(context.Context) (Settings, error) {
@@ -99,7 +154,7 @@ func (w outputWorkflowStub) Workflow(context.Context, string, string, string) (r
 func TestGenerateAndDownloadUseFrozenVersion(t *testing.T) {
 	period := reporting.PeriodOption{AcademicYearID: "year", SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", SemesterName: "示例学期", WeekNo: 8}
 	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "CONFIRMED_RECORDS", RecordCount: 1}}}}
-	repo := &outputRepositoryStub{settings: Settings{Introduction: "说明", Version: 1}, records: []reporting.Record{{TypeCode: "LATE_RETURN", StudentName: "虚构学生"}}}
+	repo := &outputRepositoryStub{settings: Settings{Introduction: "说明", Version: 1}, weekDate: WeekDate{IssueDate: "2025-06-01", Version: 1}, records: []reporting.Record{{TypeCode: "LATE_RETURN", StudentName: "虚构学生"}}}
 	files := &outputFilesStub{}
 	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
 	workflow := outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}}
@@ -149,7 +204,7 @@ func TestGenerateFromEmptyFrozenVersion(t *testing.T) {
 		version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: source.status, ZeroReceiptCount: source.receipts}}}}
 		for _, format := range []string{"WORD", "EXCEL"} {
 			t.Run(source.name+"/"+format, func(t *testing.T) {
-				repo := &outputRepositoryStub{settings: Settings{Introduction: "说明", Version: 1}}
+				repo := &outputRepositoryStub{settings: Settings{Introduction: "说明", Version: 1}, weekDate: WeekDate{IssueDate: "2025-06-01", Version: 1}}
 				files := &outputFilesStub{}
 				service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
 				output, err := service.Generate(context.Background(), "actor", GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: format, TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, audit.Metadata{})

@@ -17,12 +17,15 @@ type ReportVersionSnapshotsProps = {
   editable?: boolean
   onCorrect?: (record: ReportingRecord) => void
   onExclude?: (record: ReportingRecord) => void
+  inlineRecordDetail?: boolean
+  showIndicators?: boolean
+  showHeading?: boolean
 }
 
 function rowKey(row: ReportCountRow) { return row.inspectionTypeId }
 
 function ReportVersionCellRecords({
-  period, versionNo, row, expanded, onAccessDenied, editable = false, onCorrect, onExclude,
+  period, versionNo, row, expanded, onAccessDenied, editable = false, onCorrect, onExclude, inlineRecordDetail = false,
 }: {
   period: Pick<ReportingPeriod, 'semesterId' | 'weekId'>
   versionNo: number
@@ -32,6 +35,7 @@ function ReportVersionCellRecords({
   editable?: boolean
   onCorrect?: (record: ReportingRecord) => void
   onExclude?: (record: ReportingRecord) => void
+  inlineRecordDetail?: boolean
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -98,18 +102,22 @@ function ReportVersionCellRecords({
           if (nextPageSize !== pageSize) { setPageSize(nextPageSize); setPage(1) } else setPage(nextPage)
         } }}
     />
-    <Modal className="report-record-detail-modal" title="记录明细" width={960} open={Boolean(selectedRecord)} footer={null}
+    {inlineRecordDetail && selectedRecord && <section className="report-archive-record-detail" aria-label="记录明细">
+      <div className="report-archive-record-detail-heading"><Typography.Text strong>记录明细</Typography.Text><Button onClick={() => setSelectedRecord(null)}>收起</Button></div>
+      <ReportRecordSnapshotCard record={selectedRecord} versionNo={versionNo} title={`V${versionNo} · 记录快照`} />
+    </section>}
+    {!inlineRecordDetail && <Modal className="report-record-detail-modal" title="记录明细" width={960} open={Boolean(selectedRecord)} footer={null}
       onCancel={() => setSelectedRecord(null)} destroyOnHidden>
       {selectedRecord && <ReportRecordSnapshotCard record={selectedRecord} versionNo={versionNo} title={`V${versionNo} · 记录快照`} />}
-    </Modal>
+    </Modal>}
   </Space>
 }
 
-export function ReportVersionSnapshots({ period, version, onAccessDenied, editable = false, onCorrect, onExclude }: ReportVersionSnapshotsProps) {
+export function ReportVersionSnapshots({ period, version, onAccessDenied, editable = false, onCorrect, onExclude, inlineRecordDetail = false, showIndicators = true, showHeading = true }: ReportVersionSnapshotsProps) {
   const [activeCellKey, setActiveCellKey] = useState<string | undefined>()
   const contentRows = groupVersionRows(version.content.rows)
   if (contentRows.length === 0) return <>
-    <ReportVersionIndicators version={version} />
+    {showIndicators && <ReportVersionIndicators version={version} />}
     <div className="report-version-snapshots-empty">
       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`V${version.versionNo} 尚无可展示的数据单元。`} />
     </div>
@@ -117,12 +125,12 @@ export function ReportVersionSnapshots({ period, version, onAccessDenied, editab
   const currentActiveCellKey = activeCellKey ?? rowKey(contentRows[0])
 
   return <>
-    <ReportVersionIndicators version={version} />
+    {showIndicators && <ReportVersionIndicators version={version} />}
     <section className="report-version-snapshots" aria-label={`V${version.versionNo} 数据明细`}>
-    <div className="report-version-snapshots-heading">
+    {showHeading && <div className="report-version-snapshots-heading">
       <Typography.Text strong>V{version.versionNo} · {version.content.confirmedRecordCount} 条记录</Typography.Text>
       <Typography.Text type="secondary">列表字段按检查类型呈现；查看记录可核对版本中保存的完整明细。</Typography.Text>
-    </div>
+    </div>}
     <Tabs className="report-version-snapshot-tabs" size="small"
       destroyOnHidden
       activeKey={currentActiveCellKey}
@@ -145,6 +153,7 @@ export function ReportVersionSnapshots({ period, version, onAccessDenied, editab
             editable={editable}
             onCorrect={onCorrect}
             onExclude={onExclude}
+            inlineRecordDetail={inlineRecordDetail}
           />,
         }
       })}

@@ -88,6 +88,40 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password) VALUES($1,$2,'预览测试账号',$3,'ACTIVE','SYSTEM','MEMBER',false,false)`, actorID, "preview-"+actorID, string(hash)); err != nil {
 		t.Fatal(err)
 	}
+	yearID, semesterID, weekID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO academic_years(id,name,start_date,end_date) VALUES($1,'虚构测试学年','2025-09-01','2026-08-31')`, yearID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES($1,$2,'TEST','虚构第二学期','2026-02-01','2026-07-01')`, semesterID, yearID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date) VALUES($1,$2,8,'2026-03-22','2026-03-28')`, weekID, semesterID); err != nil {
+		t.Fatal(err)
+	}
+	weekDates, err := store.ListWeekDates(ctx)
+	if err != nil || len(weekDates) != 1 || weekDates[0].IssueDate != "" || weekDates[0].Version != 0 {
+		t.Fatalf("unconfigured week dates: %+v err=%v", weekDates, err)
+	}
+	date, err := store.SaveWeekDate(ctx, reportoutput.WeekDate{SemesterID: semesterID, WeekID: weekID, IssueDate: "2026-03-30", Version: 0}, audit.Metadata{ActorID: actorID})
+	if err != nil || date.Version != 1 {
+		t.Fatalf("save week date: %+v err=%v", date, err)
+	}
+	if _, err := store.SaveWeekDate(ctx, reportoutput.WeekDate{SemesterID: semesterID, WeekID: weekID, IssueDate: "2026-04-01", Version: 0}, audit.Metadata{ActorID: actorID}); !errors.Is(err, reportoutput.ErrConfigConflict) {
+		t.Fatalf("stale week date: %v", err)
+	}
+	date.IssueDate = "2026-04-02"
+	updatedDate, err := store.SaveWeekDate(ctx, date, audit.Metadata{ActorID: actorID})
+	if err != nil || updatedDate.Version != 2 {
+		t.Fatalf("update week date: %+v err=%v", updatedDate, err)
+	}
+	readDate, err := store.GetWeekDate(ctx, semesterID, weekID)
+	if err != nil || readDate.IssueDate != "2026-04-02" || readDate.Version != 2 {
+		t.Fatalf("read week date: %+v err=%v", readDate, err)
+	}
+	var dateAudits int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE actor_id=$1::uuid AND action='REPORT_OUTPUT_CHANGED' AND resource_type='reportOutputWeekDate' AND resource_id=$2::text`, actorID, weekID).Scan(&dateAudits); err != nil || dateAudits != 2 {
+		t.Fatalf("week date audits=%d err=%v", dateAudits, err)
+	}
 	for index := 0; index < 10; index++ {
 		if err := store.RecordOutputPreview(ctx, []string{"LATE_RETURN"}, audit.Metadata{ActorID: actorID}); err != nil {
 			t.Fatalf("preview %d: %v", index, err)

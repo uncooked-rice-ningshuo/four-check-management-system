@@ -13,8 +13,9 @@ const savedSettings = {
   inspectionTypes: [{ code: 'LATE_RETURN', name: '晚归', title: '晚归检查', columns: [], excelColumns: ['时间'] }, { code: 'ATTENDANCE_RATE', name: '到课率', title: '到课率', columns: ['应到'], excelColumns: ['班级', '本周旷课学时'] }],
 }
 vi.mock('../../../shared/api/reportOutputApi', () => ({ reportOutputApi: {
-  editorSettings: vi.fn(), updateSettings: vi.fn(), previewWord: vi.fn(), previewExcel: vi.fn(),
+  editorSettings: vi.fn(), updateSettings: vi.fn(), previewWord: vi.fn(), previewExcel: vi.fn(), weekDates: vi.fn(), saveWeekDate: vi.fn(),
 } }))
+vi.mock('../../work-context/useWorkContext', () => ({ useWorkContext: () => ({ data: { week: { id: 'week-1' } } }) }))
 function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}><ReportOutputSettingsPanel /></QueryClientProvider>)
@@ -25,6 +26,8 @@ describe('ReportOutputSettingsPanel', () => {
     vi.clearAllMocks()
     vi.mocked(reportOutputApi.editorSettings).mockResolvedValue(savedSettings)
     vi.mocked(reportOutputApi.updateSettings).mockResolvedValue({ ...savedSettings, version: 4 })
+    vi.mocked(reportOutputApi.weekDates).mockResolvedValue({ items: [{ semesterId: 'semester-1', semesterName: '2025—2026 学年第二学期', weekId: 'week-1', weekNo: 8, issueDate: '', version: 0 }, { semesterId: 'semester-1', semesterName: '2025—2026 学年第二学期', weekId: 'week-2', weekNo: 9, issueDate: '2026-05-01', version: 2 }] })
+    vi.mocked(reportOutputApi.saveWeekDate).mockImplementation(async input => ({ ...input, version: input.version + 1 }))
     Object.defineProperty(Range.prototype, 'getClientRects', { value: () => ({ 0: new DOMRect(), length: 1, item: () => new DOMRect() }), configurable: true })
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', { value: () => new DOMRect(), configurable: true })
   })
@@ -64,11 +67,13 @@ describe('ReportOutputSettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '重做' }))
     expect(screen.getByRole('textbox', { name: '编辑页首' })).toHaveValue('学院页首')
     expect(screen.getAllByText('计算机科学与工程学院').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: '页码靠右' }))
+    fireEvent.focus(document.querySelector('.report-intro-footer-content .tiptap')!)
+    expect(screen.getByRole('toolbar', { name: '页脚工具' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '参考页脚版式' }))
     fireEvent.click(screen.getByRole('button', { name: '完成编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
     await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      introductionDocument: expect.objectContaining({ headerText: '学院页首', footerText: '\t{page}', footerLayout: 'custom', footerAlign: 'left', content: expect.arrayContaining([expect.objectContaining({ attrs: expect.objectContaining({ style: 'title' }) })]) }),
+      introductionDocument: expect.objectContaining({ headerText: '学院页首', footerText: '{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t', footerLayout: 'custom', footerAlign: 'left', content: expect.arrayContaining([expect.objectContaining({ attrs: expect.objectContaining({ style: 'title' }) })]) }),
     })))
   })
 
@@ -79,6 +84,35 @@ describe('ReportOutputSettingsPanel', () => {
     expect(preview).not.toBeNull()
     fireEvent.click(preview!)
     expect(await screen.findByLabelText('晚归附件预览')).toBeInTheDocument()
+  })
+
+  it('saves the selected week date separately from template settings', async () => {
+    renderSettings()
+    expect(await screen.findByRole('menuitem', { name: '文件日期' })).toBeVisible()
+    expect(screen.queryByLabelText('文件日期')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: '文件日期' }))
+    const input = await screen.findByLabelText('文件日期')
+    expect(input).toHaveValue('')
+    expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '2026-05-08' } })
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 13 })
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存日期' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '保存日期' }))
+    await waitFor(() => expect(reportOutputApi.saveWeekDate).toHaveBeenCalledWith(expect.objectContaining({ weekId: 'week-1', issueDate: '2026-05-08', version: 0 })))
+    expect(reportOutputApi.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('renders a saved file date variable with its own label', async () => {
+    vi.mocked(reportOutputApi.editorSettings).mockResolvedValue({ ...savedSettings, introductionDocument: {
+      type: 'doc', content: [
+        { type: 'paragraph', attrs: { style: 'date', textAlign: 'right' }, content: [{ type: 'text', text: '{reportDate}' }] },
+      ],
+    } })
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
+    const dateVariable = document.querySelector('.report-intro-content .report-template-variable[data-template-variable="reportDate"]')
+    expect(dateVariable).toHaveTextContent('文件日期')
+    expect(dateVariable).toHaveAttribute('title', '通报文件设置中的每周文件日期')
   })
 
   it('updates only an unchanged legacy attachment list to the reference format', async () => {

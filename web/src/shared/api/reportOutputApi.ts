@@ -5,13 +5,16 @@ export type IntroductionDocument = { type: 'doc'; titleTemplate?: string; attach
 export type ReportOutputSettings = { introduction: string; introductionDocument?: IntroductionDocument; wordTypeCodes: string[]; excelTypeCodes: string[]; version: number }
 export type ReportOutputType = { code: string; name: string; title: string; columns: string[]; excelColumns: string[] }
 export type ReportOutputEditorSettings = ReportOutputSettings & { inspectionTypes: ReportOutputType[] }
-export type ReportOutputFile = { id: string; reportVersionId: string; format: 'WORD' | 'EXCEL'; typeCodes: string[]; combined: boolean; status: 'PENDING' | 'AVAILABLE' | 'FAILED'; failureCode?: string; settingsVersion?: number; layoutVersion?: string; createdAt: string }
+export type ReportOutputFile = { id: string; reportVersionId: string; format: 'WORD' | 'EXCEL'; typeCodes: string[]; combined: boolean; status: 'PENDING' | 'AVAILABLE' | 'FAILED'; failureCode?: string; settingsVersion?: number; layoutVersion?: string; issueDate?: string; createdAt: string }
 export type ReportOutputSelection = { format: 'WORD' | 'EXCEL'; typeCodes: string[]; combined: boolean; settingsVersion?: number }
+export type ReportOutputWeekDate = { semesterId: string; semesterName: string; weekId: string; weekNo: number; issueDate: string; version: number }
 const root = (semesterId: string, weekId: string, versionNo: number) => `/reports/workflow/${encodeURIComponent(semesterId)}/${encodeURIComponent(weekId)}/versions/${versionNo}/outputs`
 export const reportOutputApi = {
   settings: () => apiRequest<ReportOutputSettings>('/reports/output-settings'),
   editorSettings: () => apiRequest<ReportOutputEditorSettings>('/reports/output-settings/editor'),
   updateSettings: (input: ReportOutputSettings) => apiRequest<ReportOutputSettings>('/reports/output-settings', { method: 'PUT', body: JSON.stringify(input) }),
+  weekDates: () => apiRequest<{ items: ReportOutputWeekDate[] }>('/reports/output-settings/week-dates'),
+  saveWeekDate: (input: ReportOutputWeekDate) => apiRequest<ReportOutputWeekDate>(`/reports/output-settings/week-dates/${encodeURIComponent(input.semesterId)}/${encodeURIComponent(input.weekId)}`, { method: 'PUT', body: JSON.stringify({ issueDate: input.issueDate, version: input.version }) }),
   previewWord: (introductionDocument: IntroductionDocument, typeCodes: string[]) => apiRequest<Blob>('/reports/output-settings/preview', { method: 'POST', body: JSON.stringify({ introductionDocument, typeCodes }) }, 'blob'),
   previewExcel: (typeCodes: string[]) => apiRequest<Blob>('/reports/output-settings/preview-excel', { method: 'POST', body: JSON.stringify({ typeCodes }) }, 'blob'),
   list: (semesterId: string, weekId: string, versionNo: number) => apiRequest<{ items: ReportOutputFile[] }>(root(semesterId, weekId, versionNo)),

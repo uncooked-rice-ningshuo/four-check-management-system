@@ -27,6 +27,23 @@ func TestRenderSelectedOutputsUseFrozenData(t *testing.T) {
 	if len(names) != 2 || names[0] != "到课率检查情况" || names[1] != "晚归检查情况" {
 		t.Fatalf("sheets=%v", names)
 	}
+	for _, cell := range []struct {
+		address string
+		size    float64
+		bold    bool
+	}{{"A1", 18, true}, {"A2", 12, true}, {"A3", 12, false}} {
+		styleID, err := book.GetCellStyle(names[0], cell.address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		style, err := book.GetStyle(styleID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if style.Font == nil || style.Font.Family != "宋体" || style.Font.Size != cell.size || style.Font.Bold != cell.bold {
+			t.Fatalf("Excel %s font style=%+v", cell.address, style.Font)
+		}
+	}
 	if got, err := book.GetCellValue(names[0], "G2"); err != nil || got != "本周旷课学时" {
 		t.Fatalf("Excel header G2=%q, err=%v", got, err)
 	}
@@ -76,7 +93,7 @@ func TestRenderSelectedOutputsUseFrozenData(t *testing.T) {
 			t.Fatalf("DOCX missing %q", value)
 		}
 	}
-	if !strings.Contains(document, `<w:vMerge w:val="continue"/>`) || !strings.Contains(document, `w:orient="landscape"`) || !strings.Contains(document, `w:eastAsia="宋体"`) {
+	if !strings.Contains(document, `<w:vMerge w:val="continue"/>`) || !strings.Contains(document, `w:orient="landscape"`) || !strings.Contains(document, `<w:rFonts w:ascii="FangSong" w:eastAsia="仿宋"/><w:sz w:val="24"/>`) || !strings.Contains(document, `<w:rFonts w:ascii="FangSong" w:eastAsia="仿宋"/><w:sz w:val="30"/><w:b/>`) {
 		t.Fatal("Word table did not preserve the confirmed grade merge, page orientation, or font")
 	}
 	if !strings.Contains(document, "HYPERLINK(") || strings.Contains(document, `w:instr="HYPERLINK`) {

@@ -77,4 +77,18 @@ describe('ReportOutputPanel', () => {
       await waitFor(() => expect(screen.queryByRole('dialog', { name: `V1 · ${format} 文件` })).not.toBeInTheDocument())
     }
   })
+
+  it('uses the configured weekly date without a generation-time input', async () => {
+    vi.mocked(reportOutputApi.settings).mockResolvedValueOnce({
+      introduction: '', wordTypeCodes: ['ATTENDANCE_RATE'], excelTypeCodes: ['ATTENDANCE_RATE'], version: 1,
+      introductionDocument: { type: 'doc', content: [{ type: 'paragraph', attrs: { style: 'date', textAlign: 'right' }, content: [{ type: 'text', text: '{reportDate}' }] }] },
+    })
+    renderActions()
+    fireEvent.click(screen.getByRole('button', { name: '生成 Word' }))
+    const dialog = await screen.findByRole('dialog', { name: 'V1 · Word 文件' })
+    expect(within(dialog).queryByLabelText('文件日期')).not.toBeInTheDocument()
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '生成 Word' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '生成 Word' }))
+    await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledWith('semester', 'week', 1, { format: 'WORD', typeCodes: ['ATTENDANCE_RATE'], combined: true, settingsVersion: 1 }))
+  })
 })

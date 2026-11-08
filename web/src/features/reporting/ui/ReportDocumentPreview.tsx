@@ -9,9 +9,10 @@ function documentText(document: IntroductionDocument) {
   return document.content.some(paragraph => paragraph.attrs.style !== 'title' && paragraph.attrs.style !== 'subtitle' && paragraph.content?.some(run => run.text.trim()))
 }
 
-function PageFooter({ document, page }: { document: IntroductionDocument; page: number }) {
+function PageFooter({ document, page, totalPages }: { document: IntroductionDocument; page: number; totalPages: number }) {
+  const renderText = (value: string) => value.replaceAll('{semesterName}', '示例学期').replaceAll('{weekNo}', '9').replaceAll('{page}', String(page)).replaceAll('{totalPages}', String(totalPages))
   if (document.footerLayout === 'custom') return <div className="report-document-page-footer custom" style={{ textAlign: document.footerAlign ?? 'center' }}>
-    {footerTemplate(document).split('\n').map((line, index) => line.includes('\t') ? <div className="report-document-footer-sides" key={index}><span>{line.split('\t')[0].replaceAll('{page}', String(page))}</span><span>{line.split('\t').slice(1).join('\t').replaceAll('{page}', String(page))}</span></div> : <div key={index}>{line.replaceAll('{page}', String(page)) || '\u00a0'}</div>)}
+    {footerTemplate(document).split('\n').map((line, index) => line.includes('\t') ? <div className="report-document-footer-sides" key={index}>{(line.split('\t').length === 2 ? [line.split('\t')[0], '', line.split('\t')[1]] : line.split('\t')).map((part, partIndex) => <span key={partIndex}>{renderText(part)}</span>)}</div> : <div key={index}>{renderText(line) || '\u00a0'}</div>)}
   </div>
   const layout = document.footerLayout || 'stacked'
   return <div className={`report-document-page-footer layout-${layout}`}>
@@ -22,7 +23,7 @@ function PageFooter({ document, page }: { document: IntroductionDocument; page: 
 
 /** Visual preview of the same cover structure and ordered attachment columns used by the DOCX renderer. */
 export function ReportDocumentPreview({ document, types, compact = false }: PreviewProps) {
-  const title = (document.titleTemplate || '{semesterName} 第{weekNo}周日常管理通报').replaceAll('{semesterName}', '示例学期').replaceAll('{weekNo}', '9')
+  const title = (document.titleTemplate || '{semesterName} 第{weekNo}周日常管理通报').replaceAll('{semesterName}', '示例学期').replaceAll('{weekNo}', '9').replaceAll('{reportDate}', '2025年6月1日')
   const hasStyledTitle = document.content.some(paragraph => paragraph.attrs.style === 'title' || paragraph.attrs.style === 'subtitle')
   const attachmentPosition = document.attachmentPosition ?? document.content.length
   const attachments = <div className="report-document-attachments">{types.map((type, index) => <p key={type.code}>{`附件${index + 1}：${type.title || type.name}`}</p>)}</div>
@@ -35,17 +36,17 @@ export function ReportDocumentPreview({ document, types, compact = false }: Prev
         {paragraph.content?.map((run, runIndex) => {
           const font = run.marks?.find(mark => mark.type === 'textStyle')
           const style = font?.type === 'textStyle' ? font.attrs : undefined
-          return <span key={runIndex} style={{ fontFamily: style?.fontFamily ? fontStacks[style.fontFamily] : undefined, fontSize: compact ? undefined : style?.fontSize, fontWeight: run.marks?.some(mark => mark.type === 'bold') ? 700 : undefined, fontStyle: run.marks?.some(mark => mark.type === 'italic') ? 'italic' : undefined, textDecoration: [run.marks?.some(mark => mark.type === 'underline') ? 'underline' : '', run.marks?.some(mark => mark.type === 'strike') ? 'line-through' : ''].filter(Boolean).join(' ') || undefined }}>{run.text.replaceAll('{semesterName}', '示例学期').replaceAll('{weekNo}', '9')}</span>
+          return <span key={runIndex} style={{ fontFamily: style?.fontFamily ? fontStacks[style.fontFamily] : undefined, fontSize: compact ? undefined : style?.fontSize, fontWeight: run.marks?.some(mark => mark.type === 'bold') ? 700 : undefined, fontStyle: run.marks?.some(mark => mark.type === 'italic') ? 'italic' : undefined, textDecoration: [run.marks?.some(mark => mark.type === 'underline') ? 'underline' : '', run.marks?.some(mark => mark.type === 'strike') ? 'line-through' : ''].filter(Boolean).join(' ') || undefined }}>{run.text.replaceAll('{semesterName}', '示例学期').replaceAll('{weekNo}', '9').replaceAll('{reportDate}', '2025年6月1日')}</span>
         })}
       </p></div>)}
       {!document.manualAttachmentList && attachmentPosition >= document.content.length && attachments}
-      <PageFooter document={document} page={1} />
+      <PageFooter document={document} page={1} totalPages={types.length + 1} />
     </article>
-    {!compact && types.map((type, index) => <article className="report-document-attachment" key={type.code} aria-label={type.name + '附件预览'}>
+    {!compact && types.map((type, index) => <article className={`report-document-attachment${['DORMITORY_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE', 'CLASSROOM_HYGIENE'].includes(type.code) ? ' hygiene' : ''}`} key={type.code} aria-label={type.name + '附件预览'}>
       <div className="report-document-page-header">{document.headerText || '　'}</div>
       <h2>{type.title || type.name}</h2>
       <table><thead><tr>{type.columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody><tr><td colSpan={type.columns.length || 1}>本周无已确认违纪记录</td></tr></tbody></table>
-      <PageFooter document={document} page={index + 2} />
+      <PageFooter document={document} page={index + 2} totalPages={types.length + 1} />
     </article>)}
   </div>
 }

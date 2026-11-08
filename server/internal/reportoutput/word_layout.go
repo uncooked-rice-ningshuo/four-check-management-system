@@ -20,15 +20,20 @@ const wordStylesXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="paragraph" w:styleId="CoverSignature"><w:name w:val="落款"/><w:basedOn w:val="CoverBody"/><w:pPr><w:jc w:val="right"/><w:ind w:firstLineChars="0"/><w:spacing w:before="260"/></w:pPr></w:style>
 <w:style w:type="paragraph" w:styleId="CoverDate"><w:name w:val="日期"/><w:basedOn w:val="CoverSignature"/></w:style>
 	<w:style w:type="paragraph" w:styleId="CoverAttachment"><w:name w:val="附件说明"/><w:basedOn w:val="CoverBody"/><w:pPr><w:ind w:firstLineChars="200"/><w:spacing w:before="0" w:after="0" w:line="540" w:lineRule="exact"/></w:pPr></w:style>
-<w:style w:type="paragraph" w:styleId="AttachmentTitle"><w:name w:val="附件标题"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="180"/></w:pPr><w:rPr><w:rFonts w:ascii="SimHei" w:eastAsia="黑体"/><w:sz w:val="32"/><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="AttachmentTitle"><w:name w:val="附件标题"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="180"/></w:pPr><w:rPr><w:rFonts w:ascii="SimSun" w:eastAsia="宋体"/><w:sz w:val="44"/><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="HygieneAttachmentTitle"><w:name w:val="卫生附件标题"/><w:basedOn w:val="AttachmentTitle"/><w:rPr><w:rFonts w:ascii="STXinwei" w:eastAsia="华文新魏"/><w:sz w:val="38"/><w:b w:val="0"/></w:rPr></w:style>
 </w:styles>`
 
 func coverTitle(value string) string {
 	return `<w:p><w:pPr><w:pStyle w:val="CoverTitle"/></w:pPr><w:r><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
 }
 
-func attachmentTitle(value string) string {
-	return `<w:p><w:pPr><w:pStyle w:val="AttachmentTitle"/></w:pPr><w:r><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
+func attachmentTitle(value, code string) string {
+	style := "AttachmentTitle"
+	if code == "DORMITORY_HYGIENE" || code == "PUBLIC_DORMITORY_HYGIENE" || code == "CLASSROOM_HYGIENE" {
+		style = "HygieneAttachmentTitle"
+	}
+	return `<w:p><w:pPr><w:pStyle w:val="` + style + `"/></w:pPr><w:r><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
 }
 
 func coverAttachmentList(types []reportType) string {
@@ -73,20 +78,39 @@ func wordFooterLayoutXML(value, layout string) string {
 	}
 }
 
-func wordFooterDocumentXML(document IntroductionDocument) string {
+func wordFooterDocumentXML(document IntroductionDocument, semesterName string, weekNo int) string {
 	if document.FooterLayout != "custom" {
 		return wordFooterLayoutXML(document.FooterText, document.FooterLayout)
 	}
 	const open = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">`
 	runs := func(value string) string {
-		parts := strings.Split(value, "{page}")
+		value = strings.NewReplacer("{semesterName}", semesterName, "{weekNo}", fmt.Sprint(weekNo)).Replace(value)
+		parts := strings.SplitAfter(value, "}")
 		var output strings.Builder
-		for index, part := range parts {
-			if part != "" {
-				output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(part) + `</w:t></w:r>`)
-			}
-			if index < len(parts)-1 {
-				output.WriteString(`<w:fldSimple w:instr="PAGE"/>`)
+		for _, part := range parts {
+			for part != "" {
+				start := strings.Index(part, "{")
+				if start < 0 {
+					output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(part) + `</w:t></w:r>`)
+					break
+				}
+				if start > 0 {
+					output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(part[:start]) + `</w:t></w:r>`)
+				}
+				field, rest, found := strings.Cut(part[start:], "}")
+				if !found {
+					output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(part[start:]) + `</w:t></w:r>`)
+					break
+				}
+				switch field + "}" {
+				case "{page}":
+					output.WriteString(`<w:fldSimple w:instr="PAGE"/>`)
+				case "{totalPages}":
+					output.WriteString(`<w:fldSimple w:instr="NUMPAGES"/>`)
+				default:
+					output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(field+"}") + `</w:t></w:r>`)
+				}
+				part = rest
 			}
 		}
 		return output.String()
@@ -101,11 +125,15 @@ func wordFooterDocumentXML(document IntroductionDocument) string {
 	var output strings.Builder
 	output.WriteString(open)
 	for _, line := range strings.Split(document.FooterText, "\n") {
-		if left, right, ok := strings.Cut(line, "\t"); ok {
-			cell := func(cellAlign, content string) string {
-				return `<w:tc><w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr>` + paragraph(cellAlign, content) + `</w:tc>`
+		if strings.Contains(line, "\t") {
+			segments := strings.Split(line, "\t")
+			if len(segments) == 2 {
+				segments = []string{segments[0], "", segments[1]}
 			}
-			output.WriteString(`<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="4500"/><w:gridCol w:w="4500"/></w:tblGrid><w:tr>` + cell("left", runs(left)) + cell("right", runs(right)) + `</w:tr></w:tbl>`)
+			cell := func(cellAlign, content string) string {
+				return `<w:tc><w:tcPr><w:tcW w:w="1666" w:type="pct"/></w:tcPr>` + paragraph(cellAlign, content) + `</w:tc>`
+			}
+			output.WriteString(`<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr>` + cell("left", runs(segments[0])) + cell("center", runs(segments[1])) + cell("right", runs(segments[2])) + `</w:tr></w:tbl>`)
 		} else {
 			output.WriteString(paragraph(align, runs(line)))
 		}
@@ -206,7 +234,7 @@ func wordColumnWidths(columns []column) []int {
 func estimatedRowHeight(values []string, widths []int) int {
 	maxLines := 1
 	for index, value := range values {
-		charsPerLine := (widths[index] - 160) / 220
+		charsPerLine := (widths[index] - 160) / 280
 		if charsPerLine < 3 {
 			charsPerLine = 3
 		}
@@ -215,7 +243,7 @@ func estimatedRowHeight(values []string, widths []int) int {
 			maxLines = lines
 		}
 	}
-	return 360 + (maxLines-1)*280
+	return 420 + (maxLines-1)*340
 }
 
 // Hard page boundaries keep grade merges from continuing into a new page.

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Modal, Radio, Select, Space, Typography, message } from 'antd'
+import { DownloadOutlined, FileExcelOutlined, FileWordOutlined } from '@ant-design/icons'
 import type { ReportVersion } from '../../../entities/reporting/model/reporting'
 import { reportOutputApi, type ReportOutputSelection } from '../../../shared/api/reportOutputApi'
 
@@ -66,8 +67,8 @@ export function ReportOutputPanel({ version, semesterId, weekId, canGenerate = f
   return <>
     {contextHolder}
     <Space className="report-output-actions" size={8} wrap>
-      <Button onClick={() => open('WORD')}>{mayGenerate && availableCodes.size > 0 ? '生成 Word' : '查看 Word 文件'}</Button>
-      <Button onClick={() => open('EXCEL')}>{mayGenerate && availableCodes.size > 0 ? '生成 Excel' : '查看 Excel 文件'}</Button>
+      <Button icon={<FileWordOutlined aria-hidden="true" />} onClick={() => open('WORD')}>{mayGenerate && availableCodes.size > 0 ? '生成 Word' : '查看 Word 文件'}</Button>
+      <Button icon={<FileExcelOutlined aria-hidden="true" />} onClick={() => open('EXCEL')}>{mayGenerate && availableCodes.size > 0 ? '生成 Excel' : '查看 Excel 文件'}</Button>
     </Space>
     <Modal className="report-output-dialog" title={'V' + version.versionNo + ' · ' + formatLabel + ' 文件'} open={activeFormat !== null}
       width={640} destroyOnHidden onCancel={() => setActiveFormat(null)}
@@ -113,9 +114,9 @@ export function ReportOutputPanel({ version, semesterId, weekId, canGenerate = f
           {visibleFiles.map(file => <div className="report-output-file" key={file.id}>
             <div>
               <Typography.Text>{file.combined ? '组合文件' : '单项文件'} · {file.typeCodes.map(code => options.find(option => option.value === code)?.label ?? code).join('、')}</Typography.Text>
-              <Typography.Text type="secondary">{file.status === 'AVAILABLE' ? '已生成' : file.status === 'FAILED' ? '生成失败' : '生成中'}</Typography.Text>
+              <Typography.Text type="secondary">{file.issueDate ? `文件日期 ${file.issueDate} · ` : ''}{file.status === 'AVAILABLE' ? '已生成' : file.status === 'FAILED' ? '生成失败' : '生成中'}</Typography.Text>
             </div>
-            {file.status === 'AVAILABLE' && <Button size="small" aria-label={'下载 ' + formatLabel + ' 文件'} loading={downloading === file.id} onClick={() => void download(file.id, file.format)}>下载</Button>}
+            {file.status === 'AVAILABLE' && <Button size="small" icon={<DownloadOutlined aria-hidden="true" />} aria-label={'下载 ' + formatLabel + ' 文件'} loading={downloading === file.id} onClick={() => void download(file.id, file.format)}>下载</Button>}
           </div>)}
         </section>
       </div>

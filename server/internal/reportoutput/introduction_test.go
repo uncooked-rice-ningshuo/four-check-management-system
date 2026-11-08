@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -98,6 +99,46 @@ func TestCoverTitleAndAttachmentPositionSurviveDocx(t *testing.T) {
 	t.Fatal("document.xml missing")
 }
 
+func TestIntroductionDateIsResolvedForGeneratedWord(t *testing.T) {
+	raw := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"signature","textAlign":"right"},"content":[{"type":"text","text":"学院学工办"}]},{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)
+	for _, date := range []string{"", "2025-02-30", "2025/06/01"} {
+		if _, _, err := resolveIntroductionDate(raw, date); err == nil {
+			t.Fatalf("invalid issue date %q accepted", date)
+		}
+	}
+	resolved, issueDate, err := resolveIntroductionDate(raw, "2025-06-01")
+	if err != nil || issueDate != "2025-06-01" || !strings.Contains(string(resolved), "2025年6月1日") || strings.Contains(string(resolved), "{reportDate}") {
+		t.Fatalf("date was not resolved: issueDate=%q err=%v", issueDate, err)
+	}
+	data, err := RenderWordDocument(reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 9}}, nil, []string{"LATE_RETURN"}, resolved, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), "2025年6月1日") || strings.Contains(string(content), "{reportDate}") {
+			t.Fatal("generated Word did not contain selected date")
+		}
+		return
+	}
+	t.Fatal("document.xml missing")
+}
+
 func TestIntroductionLineSpacingModes(t *testing.T) {
 	for _, test := range []struct{ mode, rule string }{
 		{"single", `w:line="240" w:lineRule="auto"`},
@@ -152,7 +193,7 @@ func TestWordFooterCustomEditableField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	footer := wordFooterDocumentXML(document)
+	footer := wordFooterDocumentXML(document, "示例学期", 9)
 	if !strings.Contains(footer, "学院办公室") || !strings.Contains(footer, `<w:tbl>`) || !strings.Contains(footer, `w:instr="PAGE"`) {
 		t.Fatalf("custom footer lost text or page field: %s", footer)
 	}
@@ -160,7 +201,27 @@ func TestWordFooterCustomEditableField(t *testing.T) {
 	if err != nil || ValidateGeneratedFile("WORD", data) != nil {
 		t.Fatalf("custom footer did not produce valid Word: %v", err)
 	}
-	for _, invalid := range []string{`{"type":"doc","footerLayout":"custom","footerText":"{page}{page}","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`, `{"type":"doc","footerLayout":"custom","footerAlign":"diagonal","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`, `{"type":"doc","footerLayout":"custom","footerText":"左\t中\t右","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`} {
+	threeZones := json.RawMessage(`{"type":"doc","footerLayout":"custom","footerText":"{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`)
+	threeZoneDocument, err := decodeIntroduction(threeZones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threeZoneFooter := wordFooterDocumentXML(threeZoneDocument, "2025-2026 二学期", 8)
+	for _, expected := range []string{"2025-2026 二学期", "第8周", `w:instr="PAGE"`, `w:instr="NUMPAGES"`, `<w:tbl>`} {
+		if !strings.Contains(threeZoneFooter, expected) {
+			t.Fatalf("footer missing %q: %s", expected, threeZoneFooter)
+		}
+	}
+	threeZoneFile, err := RenderWordDocument(reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "2025-2026 二学期", WeekNo: 8}}, nil, []string{"LATE_RETURN"}, threeZones, true)
+	if err != nil || ValidateGeneratedFile("WORD", threeZoneFile) != nil {
+		t.Fatalf("three-zone footer file invalid: %v", err)
+	}
+	if path := os.Getenv("REPORT_OUTPUT_FOOTER_SAMPLE_PATH"); path != "" {
+		if err := os.WriteFile(path, threeZoneFile, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, invalid := range []string{`{"type":"doc","footerLayout":"custom","footerText":"{page}{page}","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`, `{"type":"doc","footerLayout":"custom","footerAlign":"diagonal","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`, `{"type":"doc","footerLayout":"custom","footerText":"左\t中\t右\t额外","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"}}]}`} {
 		if _, err := decodeIntroduction(json.RawMessage(invalid)); err == nil {
 			t.Fatal("invalid footer accepted")
 		}

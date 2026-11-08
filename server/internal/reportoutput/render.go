@@ -235,15 +235,19 @@ func RenderExcel(content reporting.ReportVersionContent, records []reporting.Rec
 	book := excelize.NewFile()
 	defer book.Close()
 	first := book.GetSheetName(0)
-	titleStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 14, Bold: true}, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"}})
+	titleStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 18, Bold: true}, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"}})
 	if err != nil {
 		return nil, err
 	}
-	headerStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Bold: true}, Border: []excelize.Border{{Type: "bottom", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}}, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true}})
+	headerStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 12, Bold: true}, Border: []excelize.Border{{Type: "bottom", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}}, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true}})
 	if err != nil {
 		return nil, err
 	}
-	bodyStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 10}, NumFmt: 49, Alignment: &excelize.Alignment{Vertical: "center", WrapText: true}})
+	bodyStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 12}, NumFmt: 49, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true}})
+	if err != nil {
+		return nil, err
+	}
+	morningBodyStyle, err := book.NewStyle(&excelize.Style{Font: &excelize.Font{Family: "宋体", Size: 11}, NumFmt: 49, Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true}})
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +309,11 @@ func RenderExcel(content reporting.ReportVersionContent, records []reporting.Rec
 			}
 			rowNo++
 		}
-		if err := book.SetCellStyle(name, "A3", fmt.Sprintf("%s%d", last, rowNo-1), bodyStyle); err != nil {
+		itemBodyStyle := bodyStyle
+		if item.code == "MORNING_ATTENDANCE" {
+			itemBodyStyle = morningBodyStyle
+		}
+		if err := book.SetCellStyle(name, "A3", fmt.Sprintf("%s%d", last, rowNo-1), itemBodyStyle); err != nil {
 			return nil, err
 		}
 		if err := book.SetPanes(name, &excelize.Panes{Freeze: true, YSplit: 2, TopLeftCell: "A3", ActivePane: "bottomLeft"}); err != nil {
@@ -328,16 +336,28 @@ func xmlText(value string) string {
 func paragraph(value string) string {
 	return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="SimSun" w:eastAsia="宋体"/><w:sz w:val="28"/></w:rPr><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
 }
-func cell(value string, width int, merge string) string {
+func cell(value string, width int, merge string, header bool, hygiene bool) string {
 	property := ""
 	if merge != "" {
 		property = `<w:vMerge w:val="` + merge + `"/>`
 	}
-	return fmt.Sprintf(`<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/>%s</w:tcPr><w:p><w:r><w:rPr><w:rFonts w:ascii="SimSun" w:eastAsia="宋体"/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">`, width, property) + xmlText(value) + `</w:t></w:r></w:p></w:tc>`
+	font := "仿宋"
+	if hygiene {
+		font = "仿宋_GB2312"
+	}
+	size, bold := "24", ""
+	if header {
+		size, bold = "30", `<w:b/>`
+	}
+	return fmt.Sprintf(`<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/>%s</w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="FangSong" w:eastAsia="%s"/><w:sz w:val="%s"/>%s</w:rPr><w:t xml:space="preserve">`, width, property, font, size, bold) + xmlText(value) + `</w:t></w:r></w:p></w:tc>`
 }
-func row(values []string, widths []int, gradeMerge string, header bool) string {
+func row(values []string, widths []int, gradeMerge string, header bool, hygiene bool) string {
 	var b strings.Builder
-	b.WriteString(`<w:tr><w:trPr><w:trHeight w:val="360" w:hRule="atLeast"/>`)
+	minimumHeight := 420
+	if header {
+		minimumHeight = 520
+	}
+	b.WriteString(fmt.Sprintf(`<w:tr><w:trPr><w:trHeight w:val="%d" w:hRule="atLeast"/>`, minimumHeight))
 	if header {
 		b.WriteString(`<w:tblHeader/>`)
 	}
@@ -353,7 +373,7 @@ func row(values []string, widths []int, gradeMerge string, header bool) string {
 				value = ""
 			}
 		}
-		b.WriteString(cell(value, widths[index], merge))
+		b.WriteString(cell(value, widths[index], merge, header, hygiene))
 	}
 	b.WriteString(`</w:tr>`)
 	return b.String()
@@ -419,7 +439,7 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		if typeIndex > 0 {
 			document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
 		}
-		document.WriteString(attachmentTitle(item.title))
+		document.WriteString(attachmentTitle(item.title, item.code))
 		columns := wordRecordColumns(item, teachers, dormitoryCount)
 		var lines [][]string
 		if content.Indicators != nil && !outputSourceUnsubmitted(content, item.code) && (item.code == "ATTENDANCE_RATE" || item.code == "MORNING_ATTENDANCE") {
@@ -468,7 +488,7 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		for pageIndex, page := range pages {
 			if pageIndex > 0 {
 				document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
-				document.WriteString(attachmentTitle(item.title + "（续）"))
+				document.WriteString(attachmentTitle(item.title+"（续）", item.code))
 			}
 			var grid strings.Builder
 			for _, width := range widths {
@@ -479,7 +499,8 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 			for _, c := range columns {
 				headings = append(headings, c.title)
 			}
-			document.WriteString(row(headings, widths, "", true))
+			hygiene := item.code == "DORMITORY_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" || item.code == "CLASSROOM_HYGIENE"
+			document.WriteString(row(headings, widths, "", true, hygiene))
 			for index, line := range page {
 				gradeMerge := ""
 				if content.Indicators != nil && !outputSourceUnsubmitted(content, item.code) && (item.code == "ATTENDANCE_RATE" || item.code == "MORNING_ATTENDANCE") && line[0] != "本周无已确认违纪记录" {
@@ -488,7 +509,7 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 						gradeMerge = "continue"
 					}
 				}
-				document.WriteString(row(line, widths, gradeMerge, false))
+				document.WriteString(row(line, widths, gradeMerge, false, hygiene))
 			}
 			document.WriteString(`</w:tbl>`)
 		}
@@ -501,9 +522,9 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		{"_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`},
 		{"word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>`},
 		{"word/styles.xml", wordStylesXML},
-		{"word/settings.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`},
+		{"word/settings.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:updateFields w:val="true"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`},
 		{"word/header1.xml", wordHeaderXML(cover.HeaderText)},
-		{"word/footer1.xml", wordFooterDocumentXML(cover)},
+		{"word/footer1.xml", wordFooterDocumentXML(cover, content.Period.SemesterName, content.Period.WeekNo)},
 		{"word/document.xml", document.String()},
 	}
 	for _, file := range files {

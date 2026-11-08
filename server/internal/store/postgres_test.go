@@ -474,6 +474,20 @@ func openTestPostgres(t *testing.T) *Postgres {
 	return database
 }
 
+func TestListSubmissionBatchesPostgresQuery(t *testing.T) {
+	database := openTestPostgres(t)
+	page, err := database.ListSubmissionBatches(context.Background(), uuid.NewString(), importjob.SubmissionBatchQuery{
+		SemesterID: uuid.NewString(), WeekID: uuid.NewString(), InspectionTypeID: uuid.NewString(),
+		DepartmentID: uuid.NewString(), Page: 1, PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("list submission batches: %v", err)
+	}
+	if page.Total != 0 || len(page.Items) != 0 {
+		t.Fatalf("unexpected batches: %+v", page)
+	}
+}
+
 // 测试共用一次性数据库，不能用时钟取模分配有限的年级名称。
 func unusedTestGradeName(t *testing.T, database *Postgres) string {
 	t.Helper()

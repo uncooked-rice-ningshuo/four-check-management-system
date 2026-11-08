@@ -1679,7 +1679,7 @@ func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q 
 		count(ir.id) FILTER (WHERE ir.submission_id IS NOT NULL),
 		count(ir.id) FILTER (WHERE ir.submission_id IS NULL AND (ir.status<>'DRAFT' OR ir.locked_by_report_id IS NOT NULL))
 		`+from+where+`
-			GROUP BY b.id,f.original_name ORDER BY b.confirmed_at DESC,b.id LIMIT $5 OFFSET $6`, args...)
+			GROUP BY b.id,f.original_name,batch_creator.name ORDER BY b.confirmed_at DESC,b.id LIMIT $5 OFFSET $6`, args...)
 	if err != nil {
 		return page, err
 	}

@@ -1,7 +1,6 @@
 import {
   ApartmentOutlined,
   EnvironmentOutlined,
-  FileTextOutlined,
   BuildOutlined,
   AppstoreOutlined,
   BookOutlined,
@@ -25,6 +24,12 @@ import {
   UserOutlined,
 } from '@ant-design/icons'
 import { Alert, Avatar, Button, Dropdown, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
+import { Icon } from '@iconify/react'
+import filesIcon from '@iconify-icons/lucide/files'
+import filePenIcon from '@iconify-icons/lucide/file-pen-line'
+import archiveIcon from '@iconify-icons/lucide/archive'
+import fileCogIcon from '@iconify-icons/lucide/file-cog'
+import clockAlertIcon from '@iconify-icons/lucide/clock-alert'
 import { useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
@@ -82,15 +87,18 @@ export function AppLayout() {
     ...(canViewType(morningContext.data?.inspectionTypeId) ? [{ key: '/inspections/morning-attendance', icon: <SunOutlined />, label: <Link to="/inspections/morning-attendance">早锻炼/早签</Link> }] : []),
     ...(canViewType(eveningSelfStudyContext.data?.inspectionTypeId) ? [{ key: '/inspections/evening-self-study', icon: <MoonOutlined />, label: <Link to="/inspections/evening-self-study">晚自习</Link> }] : []),
     ...(canViewType(dormitoryHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/dormitory-hygiene', icon: <ClearOutlined />, label: <Link to="/inspections/dormitory-hygiene">宿舍卫生</Link> }] : []),
-    ...(canViewType(lateReturnContext.data?.inspectionTypeId) ? [{ key: '/inspections/late-return', icon: <MoonOutlined />, label: <Link to="/inspections/late-return">晚归</Link> }] : []),
+    ...(canViewType(lateReturnContext.data?.inspectionTypeId) ? [{ key: '/inspections/late-return', icon: <Icon icon={clockAlertIcon} />, label: <Link to="/inspections/late-return">晚归</Link> }] : []),
     ...(canViewType(publicHygieneContext.data?.inspectionTypeId) ? [{ key: '/inspections/public-dormitory-hygiene', icon: <EnvironmentOutlined />, label: <Link to="/inspections/public-dormitory-hygiene">公共宿舍卫生</Link> }] : []),
   ]
   const reportItems = [
     ...(user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'REPORT_VIEW') ? [
-      { key: '/reports/workbench', icon: <FileTextOutlined />, label: <Link to="/reports/workbench">通报工作台</Link> },
+      { key: '/reports/workbench', icon: <Icon icon={filePenIcon} />, label: <Link to="/reports/workbench">通报工作台</Link> },
     ] : []),
     ...(user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'ARCHIVE_VIEW') ? [
-      { key: '/reports/archive', icon: <FileTextOutlined />, label: <Link to="/reports/archive">通报归档</Link> },
+      { key: '/reports/archive', icon: <Icon icon={archiveIcon} />, label: <Link to="/reports/archive">通报归档</Link> },
+    ] : []),
+    ...(user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'REPORT_OUTPUT_SETTINGS_MANAGE') ? [
+      { key: '/reports/output-settings', icon: <Icon icon={fileCogIcon} />, label: <Link to="/reports/output-settings">通报文件设置</Link> },
     ] : []),
   ]
   const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems]
@@ -101,7 +109,7 @@ export function AppLayout() {
   if (configurationItems.length > 1) menuItems.push({ key: 'configuration', icon: <SettingOutlined />, label: '系统配置', children: configurationItems })
   if (visibleInspectionItems.length === 1) menuItems.push(visibleInspectionItems[0])
   if (visibleInspectionItems.length > 1) menuItems.push({ key: 'inspections', icon: <CheckSquareOutlined />, label: '日常检查', children: visibleInspectionItems })
-  if (reportItems.length) menuItems.push({ key: 'reports', icon: <FileTextOutlined />, label: '通报管理', children: reportItems })
+  if (reportItems.length) menuItems.push({ key: 'reports', icon: <Icon icon={filesIcon} />, label: '通报管理', children: reportItems })
   const selectedKey = location.pathname === '/'
     ? '/'
     : navItems.find(item => item.key !== '/' && location.pathname.startsWith(item.key))?.key

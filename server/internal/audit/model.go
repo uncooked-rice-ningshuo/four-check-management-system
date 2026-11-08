@@ -44,6 +44,8 @@ const (
 	ActionReportWorkflowChanged   Action = "REPORT_WORKFLOW_CHANGED"
 	ActionReportCorrectionAdded   Action = "REPORT_CORRECTION_ADDED"
 	ActionReportAdjustmentAdded   Action = "REPORT_ADJUSTMENT_ADDED"
+	ActionReportOutputChanged     Action = "REPORT_OUTPUT_CHANGED"
+	ActionReportOutputPreviewed   Action = "REPORT_OUTPUT_PREVIEWED"
 )
 
 var (

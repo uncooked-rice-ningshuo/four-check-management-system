@@ -62,6 +62,26 @@ async (page) => {
   await page.getByRole('heading', { name: '学期与周次', exact: true }).waitFor()
   await page.locator('.work-context-week').filter({ hasText: '第 1 周' }).waitFor()
 
+  lifecycleStage = 'semester report grade scope'
+  await page.getByRole('tab', { name: '学期', exact: true }).click()
+  const semesterRow = page.getByRole('row').filter({ hasText: '浏览器回归学期' })
+  await semesterRow.getByRole('button', { name: '通报适用年级', exact: true }).click()
+  let gradeDialog = page.getByRole('dialog', { name: '浏览器回归学期 · 通报适用年级' })
+  await gradeDialog.getByLabel('当前名册预览').getByText(/当前启用班级 1 个，在籍学生 2 人/).waitFor()
+  check((await gradeDialog.innerText()).includes('2026级'), 'Saved report grade was not selected')
+  const [gradeSave] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/academic/semesters/b0000000-0000-0000-0000-000000000002/report-grades') && response.request().method() === 'PUT'),
+    gradeDialog.getByRole('button', { name: /保\s*存/ }).click(),
+  ])
+  check(gradeSave.status() === 200 && (await gradeSave.json()).version === 2,
+    `Report grade scope did not save with optimistic version: ${gradeSave.status()}`)
+  await gradeDialog.waitFor({ state: 'hidden' })
+  await semesterRow.getByRole('button', { name: '通报适用年级', exact: true }).click()
+  gradeDialog = page.getByRole('dialog', { name: '浏览器回归学期 · 通报适用年级' })
+  await gradeDialog.getByLabel('当前名册预览').getByText(/当前启用班级 1 个，在籍学生 2 人/).waitFor()
+  check((await gradeDialog.innerText()).includes('2026级'), 'Report grade scope did not survive dialog reopening')
+  await close(gradeDialog)
+
   // Real browser lifecycle: create -> close -> first edit -> close -> reopen.
   for (const kind of ['学年', '学期', '周次']) {
     lifecycleStage = `create-close-edit ${kind}`

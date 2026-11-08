@@ -34,9 +34,9 @@ it('preserves initial edit values and failed input under StrictMode, then retrie
  await waitFor(()=>expect(close).toHaveBeenCalledOnce())
  expect(mutate.mock.calls[1][0]).toMatchObject({id:'one',version:2,reason:'核对',record:{details:{period:'1-2',remark:'修改内容'}}})
 })
-it('hides period and hours for 无机课堂 because one record counts as one violation',()=>{
+it('requires a course section but hides hours for 无机课堂 because one record counts as one violation',()=>{
  render(<CourseRecordDrawer inspectionTypeId="type" onClose={vi.fn()}/>)
- expect(screen.queryByRole('combobox',{name:'开始节次'})).not.toBeInTheDocument()
+ expect(screen.getByRole('combobox',{name:'开始节次'})).toBeInTheDocument()
  expect(screen.queryByRole('spinbutton',{name:/实际旷课学时/})).not.toBeInTheDocument()
  expect(screen.queryByLabelText('检查时间')).not.toBeInTheDocument()
 })

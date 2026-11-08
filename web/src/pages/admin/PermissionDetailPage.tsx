@@ -10,7 +10,7 @@ const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
   ['CONFIGURATION_VIEW', '系统配置查看'],
   ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
-  ['REPORT_VIEW', '通报工作台查看'], ['REPORT_GENERATE', '生成通报草稿'], ['REPORT_CORRECT', '通报内修正'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '通报归档查看'],
+  ['REPORT_VIEW', '通报工作台查看'], ['REPORT_GENERATE', '生成通报草稿'], ['REPORT_CORRECT', '通报内修正'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_OUTPUT_SETTINGS_MANAGE', '编辑通报文件设置'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '通报归档查看'],
 ].map(([value, label]) => ({ value, label }))
 const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value
 
@@ -26,7 +26,7 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
   const calendar = useQuery({ queryKey: ['academic-calendar'], queryFn: getAcademicCalendar, enabled: Boolean(accountId) })
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['effective-permissions', accountId] }); await client.invalidateQueries({ queryKey: ['permission-rules', accountId] }) }
   const save = useMutation({ mutationFn: (values: PermissionRule) => {
-    const scope = permissionRuleScope(values.scope)
+    const scope = values.action === 'REPORT_OUTPUT_SETTINGS_MANAGE' ? {} : permissionRuleScope(values.scope)
     return editing
       ? updatePermissionRule({ ...editing, ...values, scope })
       : createPermissionRule(accountId, { action: values.action, effect: values.effect, note: values.note ?? '', scope })
@@ -58,18 +58,22 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
         <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => {
           if (getFieldValue('action') === 'REPORT_FORCE_GENERATE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；一般通报权限不会自动包含此权限。此操作作用于整份周通报，只能按学年、学期、周次和检查类型收窄范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_OBLIGATION_MANAGE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；此权限允许维护各周应交部门和检查类型，与日常录入范围分开管理，可按学年、学期、周次和检查类型收窄。</Typography.Paragraph>
+          if (getFieldValue('action') === 'REPORT_OUTPUT_SETTINGS_MANAGE') return <Typography.Paragraph type="secondary">通报文件设置作用于全局。办公室部长、副部长默认可编辑，也可给其他账号单独授权；此权限不包含通报数据查看、生成或定稿。</Typography.Paragraph>
           if (getFieldValue('action')?.startsWith('REPORT_')) return <Typography.Paragraph type="secondary">通报动作规则可按学年、学期、周次和检查类型收窄范围；不再设置部门、班级或年级范围。</Typography.Paragraph>
           return null
         }}</Form.Item>
         <Form.Item name="effect" label="规则效果" rules={[{ required: true }]}><Select options={[{ value: 'ALLOW', label: '允许（补充授权）' }, { value: 'DENY', label: '拒绝（单独限制）' }]} /></Form.Item>
-        <Typography.Text strong>适用时间</Typography.Text>
+        <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => getFieldValue('action') === 'REPORT_OUTPUT_SETTINGS_MANAGE'
+          ? <Typography.Paragraph type="secondary">适用范围：全部学年、学期、周次与检查类型。</Typography.Paragraph>
+          : <><Typography.Text strong>适用时间</Typography.Text>
         <Space wrap align="start" style={{ display: 'flex', marginTop: 8 }}>
           <Form.Item name={['scope', 'academicYearId']} label="学年"><Select allowClear placeholder="全部学年" style={{ width: 190 }} options={(calendar.data?.academicYears ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['scope', 'semesterId']} label="学期"><Select allowClear placeholder="全部学期" style={{ width: 190 }} options={(calendar.data?.semesters ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['scope', 'weekId']} label="周次"><Select allowClear placeholder="全部周次" style={{ width: 190 }} options={(calendar.data?.weeks ?? []).map(item => ({ value: item.id, label: `第 ${item.weekNo} 周` }))} /></Form.Item>
         </Space>
         <Form.Item name={['scope', 'inspectionTypeId']} label="检查类型"><Select allowClear options={(catalogs.data?.inspectionTypes ?? []).map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item noStyle shouldUpdate>{({ getFieldValue }) => <Typography.Paragraph type="secondary">本规则范围：{scopeText(getFieldValue('scope') ?? {})}。未选择的维度表示全部。</Typography.Paragraph>}</Form.Item>
+        <Form.Item noStyle shouldUpdate>{({ getFieldValue }) => <Typography.Paragraph type="secondary">本规则范围：{scopeText(getFieldValue('scope') ?? {})}。未选择的维度表示全部。</Typography.Paragraph>}</Form.Item></>}
+        </Form.Item>
         <Form.Item name="note" label="授权说明" rules={[{ required: true, message: '请说明设置原因' }]}><Input.TextArea rows={3} maxLength={255} showCount /></Form.Item>
       </Form>
     </Modal>

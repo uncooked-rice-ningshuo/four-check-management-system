@@ -34,6 +34,9 @@ func TestReadyRequiresCurrentSchema(t *testing.T) {
 		t.Fatalf("read migrations: %v (files=%d)", err, len(files))
 	}
 	for _, f := range files {
+		if filepath.Base(f) == "046_report_output_format_defaults.sql" && db.Ready(ctx) == nil {
+			t.Fatal("schema missing separate Word and Excel defaults reports ready")
+		}
 		if filepath.Base(f) == "037_daily_inspection_adjustments.sql" {
 			if db.Ready(ctx) == nil {
 				t.Fatal("schema missing daily inspection adjustments reports ready")

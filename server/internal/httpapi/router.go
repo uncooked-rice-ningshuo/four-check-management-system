@@ -25,6 +25,7 @@ import (
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/reporting"
+	"four-check-management-system/server/internal/reportoutput"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,7 @@ type AdminServices struct {
 	Dashboard                dashboardHTTPService
 	Workflow                 workflowHTTPService
 	Reporting                reportingHTTPService
+	ReportOutput             *reportoutput.Service
 	ImportFiles              importFileHTTPService
 	ImportMaxUploadBytes     int64
 }
@@ -155,6 +157,7 @@ type handler struct {
 	dashboard                  dashboardHTTPService
 	workflow                   workflowHTTPService
 	reporting                  reportingHTTPService
+	reportOutput               *reportoutput.Service
 	reportingObligationService reportingObligationHTTPService
 	importFiles                importFileHTTPService
 	importMaxUploadBytes       int64
@@ -180,6 +183,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.dashboard = dependencies[0].Dashboard
 		h.workflow = dependencies[0].Workflow
 		h.reporting = dependencies[0].Reporting
+		h.reportOutput = dependencies[0].ReportOutput
 		h.reportingObligationService, _ = dependencies[0].Reporting.(reportingObligationHTTPService)
 		h.manualAttendance = dependencies[0].ManualAttendance
 		h.inspections = dependencies[0].Inspections
@@ -229,7 +233,9 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.POST("/academic/semesters", h.createSemester)
 	admin.PUT("/academic/semesters/:id", h.updateSemester)
 	admin.GET("/academic/semesters/:id/report-grades", h.getReportGrades)
+	admin.GET("/academic/semesters/:id/report-grades/preview", h.previewReportGrades)
 	admin.PUT("/academic/semesters/:id/report-grades", h.replaceReportGrades)
+	admin.PUT("/report-output/settings", h.updateReportOutputSettings)
 	admin.POST("/academic/weeks", h.createWeek)
 	admin.PUT("/academic/weeks/:id", h.updateWeek)
 	admin.GET("/academic/weeks/import-spec", h.getAcademicWeekImportSpec)
@@ -280,6 +286,14 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.GET("/reports/periods", h.reportPeriods)
 	v1.GET("/reports/summary", h.reportSummary)
 	v1.GET("/reports/workflow", h.reportWorkflow)
+	v1.GET("/reports/output-settings", h.requireAnyAction(permission.ActionReportGenerate), h.getReportOutputSettings)
+	v1.GET("/reports/output-settings/editor", h.requireAction(permission.ActionReportOutputSettingsManage), h.getReportOutputEditorSettings)
+	v1.PUT("/reports/output-settings", h.requireAction(permission.ActionReportOutputSettingsManage), h.updateReportOutputSettings)
+	v1.POST("/reports/output-settings/preview", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputWord)
+	v1.POST("/reports/output-settings/preview-excel", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputExcel)
+	v1.POST("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs", h.generateReportOutput)
+	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs", h.listReportOutputs)
+	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs/:outputId/download", h.downloadReportOutput)
 	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/records", h.reportVersionRecords)
 	v1.GET("/reports/archive", h.reportArchive)
 	v1.GET("/reports/archive/:semesterId/:weekId", h.reportArchiveWorkflow)
@@ -1571,6 +1585,29 @@ func (h *handler) requireAction(action string) gin.HandlerFunc {
 		}
 		effective, err := h.permission.Effective(c, a.ID)
 		if err != nil || !effective.Allowed(action, permission.Scope{}) {
+			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
+			c.Abort()
+			return
+		}
+		c.Set("account", a)
+		c.Next()
+	}
+}
+
+func (h *handler) requireAnyAction(action string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		a, ok := h.currentAccount(c)
+		if !ok {
+			c.Abort()
+			return
+		}
+		if a.MustChangePassword || h.permission == nil {
+			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
+			c.Abort()
+			return
+		}
+		effective, err := h.permission.Effective(c, a.ID)
+		if err != nil || !effective.HasAnyAllowed(action) {
 			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
 			c.Abort()
 			return

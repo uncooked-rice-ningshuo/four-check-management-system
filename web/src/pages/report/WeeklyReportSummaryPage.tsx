@@ -1,6 +1,8 @@
 import { absenceSummary } from './recordSummary'
 import { useCallback, useMemo, useState } from 'react'
-import { InfoCircleOutlined, SyncOutlined, TeamOutlined } from '@ant-design/icons'
+import { InfoCircleOutlined, TeamOutlined } from '@ant-design/icons'
+import { Icon } from '@iconify/react'
+import refreshCw from '@iconify-icons/lucide/refresh-cw'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, Descriptions, Drawer, Empty, Popconfirm, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -393,7 +395,7 @@ export function WeeklyReportSummaryPage() {
             </div>
             <Space wrap>
               <Typography.Text type="secondary">{typeRows.length} 类检查</Typography.Text>
-              {selectedPeriod && <Button size="small" icon={<SyncOutlined aria-hidden="true" />} onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching}>刷新汇总</Button>}
+              {selectedPeriod && <Tooltip title="刷新汇总"><Button className="weekly-report-summary-refresh" type="text" size="small" aria-label="刷新汇总" icon={<Icon icon={refreshCw} aria-hidden="true" />} onClick={() => void summaryQuery.refetch()} loading={summaryQuery.isFetching} /></Tooltip>}
             </Space>
           </div>
           {typeRows.length === 0 ? <Empty description="当前周期暂无可查看的汇总单元" /> : (

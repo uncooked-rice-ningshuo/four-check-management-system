@@ -79,6 +79,8 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submission_revisions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='inspection_records' AND column_name='attribution_mode')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='import_batches' AND column_name='attribution_mode')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='report_output_settings' AND column_name='word_type_codes')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='report_output_settings' AND column_name='excel_type_codes')
 		AND EXISTS (SELECT 1 FROM system_settings WHERE key='work_week_override')
  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='files' AND column_name='object_removed_at')`).Scan(&ready)
 	if err != nil {

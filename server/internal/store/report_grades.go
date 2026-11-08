@@ -107,3 +107,34 @@ ON CONFLICT (semester_id) DO UPDATE SET version=$2,updated_by=NULLIF($3,'')::uui
 	}
 	return scope, nil
 }
+
+func (p *Postgres) PreviewReportGrades(ctx context.Context, gradeIDs []string) (academic.ReportGradePreview, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT grade.id::text,grade.name,
+  (SELECT count(*) FROM classes class WHERE class.grade_id=grade.id AND class.enabled),
+  (SELECT count(*) FROM students student WHERE student.grade_id=grade.id AND student.enabled AND student.enrollment_status='ENROLLED'),
+  (SELECT count(*) FROM students student LEFT JOIN classes class ON class.id=student.class_id AND class.grade_id=grade.id AND class.enabled
+   WHERE student.grade_id=grade.id AND student.enabled AND student.enrollment_status='ENROLLED' AND class.id IS NULL)
+FROM grades grade WHERE grade.id=ANY($1::uuid[]) AND grade.enabled ORDER BY grade.name,grade.id`, gradeIDs)
+	if err != nil {
+		return academic.ReportGradePreview{}, err
+	}
+	defer rows.Close()
+	result := academic.ReportGradePreview{Grades: make([]academic.ReportGradePreviewRow, 0, len(gradeIDs))}
+	for rows.Next() {
+		var item academic.ReportGradePreviewRow
+		if err := rows.Scan(&item.GradeID, &item.GradeName, &item.ClassCount, &item.StudentCount, &item.UnassignedCount); err != nil {
+			return academic.ReportGradePreview{}, err
+		}
+		result.Grades = append(result.Grades, item)
+		result.ClassCount += item.ClassCount
+		result.StudentCount += item.StudentCount
+		result.UnassignedCount += item.UnassignedCount
+	}
+	if err := rows.Err(); err != nil {
+		return academic.ReportGradePreview{}, err
+	}
+	if len(result.Grades) != len(gradeIDs) {
+		return academic.ReportGradePreview{}, academic.ErrReportGradeUnavailable
+	}
+	return result, nil
+}

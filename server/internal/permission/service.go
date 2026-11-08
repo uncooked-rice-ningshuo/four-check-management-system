@@ -22,28 +22,29 @@ const (
 	SourceDepartmentMap    = "DEPARTMENT_MAPPING"
 	SourceUserRule         = "USER_RULE"
 
-	ActionUserManage             = "USER_MANAGE"
-	ActionPermissionManage       = "PERMISSION_MANAGE"
-	ActionMasterDataManage       = "MASTER_DATA_MANAGE"
-	ActionDictionaryManage       = "DICTIONARY_MANAGE"
-	ActionConfigurationView      = "CONFIGURATION_VIEW"
-	ActionInspectionManage       = "INSPECTION_MANAGE"
-	ActionInspectionEnter        = "INSPECTION_ENTER"
-	ActionInspectionView         = "INSPECTION_VIEW"
-	ActionInspectionReview       = "INSPECTION_REVIEW"
-	ActionInspectionExport       = "INSPECTION_EXPORT"
-	ActionInspectionSummary      = "INSPECTION_SUMMARIZE"
-	ActionMorningScheduleManage  = "MORNING_SCHEDULE_MANAGE"
-	ActionReportView             = "REPORT_VIEW"
-	ActionReportGenerate         = "REPORT_GENERATE"
-	ActionReportCorrect          = "REPORT_CORRECT"
-	ActionReportForceGenerate    = "REPORT_FORCE_GENERATE"
-	ActionReportObligationManage = "REPORT_OBLIGATION_MANAGE"
-	ActionReportReview           = "REPORT_REVIEW"
-	ActionReportReturn           = "REPORT_RETURN"
-	ActionReportFinalize         = "REPORT_FINALIZE"
-	ActionReportPublish          = "REPORT_PUBLISH"
-	ActionArchiveView            = "ARCHIVE_VIEW"
+	ActionUserManage                 = "USER_MANAGE"
+	ActionPermissionManage           = "PERMISSION_MANAGE"
+	ActionMasterDataManage           = "MASTER_DATA_MANAGE"
+	ActionDictionaryManage           = "DICTIONARY_MANAGE"
+	ActionConfigurationView          = "CONFIGURATION_VIEW"
+	ActionInspectionManage           = "INSPECTION_MANAGE"
+	ActionInspectionEnter            = "INSPECTION_ENTER"
+	ActionInspectionView             = "INSPECTION_VIEW"
+	ActionInspectionReview           = "INSPECTION_REVIEW"
+	ActionInspectionExport           = "INSPECTION_EXPORT"
+	ActionInspectionSummary          = "INSPECTION_SUMMARIZE"
+	ActionMorningScheduleManage      = "MORNING_SCHEDULE_MANAGE"
+	ActionReportView                 = "REPORT_VIEW"
+	ActionReportGenerate             = "REPORT_GENERATE"
+	ActionReportCorrect              = "REPORT_CORRECT"
+	ActionReportForceGenerate        = "REPORT_FORCE_GENERATE"
+	ActionReportObligationManage     = "REPORT_OBLIGATION_MANAGE"
+	ActionReportOutputSettingsManage = "REPORT_OUTPUT_SETTINGS_MANAGE"
+	ActionReportReview               = "REPORT_REVIEW"
+	ActionReportReturn               = "REPORT_RETURN"
+	ActionReportFinalize             = "REPORT_FINALIZE"
+	ActionReportPublish              = "REPORT_PUBLISH"
+	ActionArchiveView                = "ARCHIVE_VIEW"
 )
 
 var ErrInvalidRule = errors.New("invalid permission rule")
@@ -53,7 +54,7 @@ var ErrReportObligationRoleRequired = errors.New("weekly obligation permission r
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
 	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary, ActionMorningScheduleManage,
-	ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
+	ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
 type Scope struct {
@@ -131,6 +132,28 @@ func (r EffectiveResult) Allowed(action string, requested Scope) bool {
 		}
 	}
 	return allowed
+}
+
+// HasAnyAllowed reports whether at least one part of an action's scope remains
+// available after a covering denial. It is for reading global defaults only;
+// resource operations must continue to check their concrete scope.
+func (r EffectiveResult) HasAnyAllowed(action string) bool {
+	for _, allowed := range r.Permissions {
+		if allowed.Action != action || allowed.Effect != EffectAllow {
+			continue
+		}
+		covered := false
+		for _, denied := range r.Permissions {
+			if denied.Action == action && denied.Effect == EffectDeny && scopeMatches(denied.Scope, allowed.Scope) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return true
+		}
+	}
+	return false
 }
 
 // AllowsWholeScope reports whether an action covers an entire resource scope.
@@ -238,7 +261,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 	}
 	if profile.DepartmentCode == "OFFICE" && leadership {
-		for _, action := range []string{ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
+		for _, action := range []string{ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceOrganizationRole, Label: "学生会办公室部长/副部长"}))
 		}
 	}
@@ -252,6 +275,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		if rule.Effect == EffectDeny && hasRemovedScopeDimensions(rule.Scope) {
 			// A legacy scoped denial cannot safely become a global denial. The
 			// migration audits and disables it; ignore it during rollout too.
+			continue
+		}
+		if rule.Action == ActionReportOutputSettingsManage && !isGlobalScope(rule.Scope) {
 			continue
 		}
 		rule.Scope.DepartmentID = ""
@@ -412,12 +438,19 @@ func validRule(rule Rule) bool {
 	if hasRemovedScopeDimensions(rule.Scope) {
 		return false
 	}
+	if rule.Action == ActionReportOutputSettingsManage && !isGlobalScope(rule.Scope) {
+		return false
+	}
 	for _, action := range allActions {
 		if action == strings.TrimSpace(rule.Action) {
 			return true
 		}
 	}
 	return false
+}
+
+func isGlobalScope(scope Scope) bool {
+	return scope.AcademicYearID == "" && scope.SemesterID == "" && scope.WeekID == "" && scope.InspectionTypeID == "" && !hasRemovedScopeDimensions(scope)
 }
 
 func hasRemovedScopeDimensions(scope Scope) bool {

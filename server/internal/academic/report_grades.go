@@ -21,9 +21,26 @@ type ReportGradeScope struct {
 	Version    int      `json:"version"`
 }
 
+// ReportGradePreview describes the current roster that a newly generated report would snapshot.
+type ReportGradePreview struct {
+	Grades          []ReportGradePreviewRow `json:"grades"`
+	ClassCount      int                     `json:"classCount"`
+	StudentCount    int                     `json:"studentCount"`
+	UnassignedCount int                     `json:"unassignedCount"`
+}
+
+type ReportGradePreviewRow struct {
+	GradeID         string `json:"gradeId"`
+	GradeName       string `json:"gradeName"`
+	ClassCount      int    `json:"classCount"`
+	StudentCount    int    `json:"studentCount"`
+	UnassignedCount int    `json:"unassignedCount"`
+}
+
 type ReportGradeRepository interface {
 	GetReportGrades(context.Context, string) (ReportGradeScope, error)
 	ReplaceReportGrades(context.Context, ReportGradeScope, audit.Metadata) (ReportGradeScope, error)
+	PreviewReportGrades(context.Context, []string) (ReportGradePreview, error)
 }
 
 type ReportGradeService struct{ repository ReportGradeRepository }
@@ -57,4 +74,18 @@ func (s *ReportGradeService) Replace(ctx context.Context, scope ReportGradeScope
 		seen[id] = struct{}{}
 	}
 	return s.repository.ReplaceReportGrades(ctx, scope, metadata)
+}
+
+func (s *ReportGradeService) Preview(ctx context.Context, gradeIDs []string) (ReportGradePreview, error) {
+	if len(gradeIDs) == 0 || len(gradeIDs) > 100 {
+		return ReportGradePreview{}, ErrInvalidInput
+	}
+	seen := make(map[string]bool, len(gradeIDs))
+	for _, id := range gradeIDs {
+		if _, err := uuid.Parse(id); err != nil || seen[id] {
+			return ReportGradePreview{}, ErrInvalidInput
+		}
+		seen[id] = true
+	}
+	return s.repository.PreviewReportGrades(ctx, gradeIDs)
 }

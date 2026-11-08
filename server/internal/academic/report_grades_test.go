@@ -17,6 +17,10 @@ func (s *reportGradesStub) ReplaceReportGrades(_ context.Context, scope ReportGr
 	s.calls++
 	return scope, nil
 }
+func (s *reportGradesStub) PreviewReportGrades(_ context.Context, ids []string) (ReportGradePreview, error) {
+	s.calls++
+	return ReportGradePreview{Grades: []ReportGradePreviewRow{{GradeID: ids[0]}}}, nil
+}
 
 func TestReportGradeScopeRejectsInvalidSelection(t *testing.T) {
 	repository := &reportGradesStub{}
@@ -37,5 +41,23 @@ func TestReportGradeScopeRejectsInvalidSelection(t *testing.T) {
 	}
 	if repository.calls != 1 {
 		t.Fatal("valid selection was not saved")
+	}
+}
+
+func TestReportGradePreviewRejectsInvalidSelection(t *testing.T) {
+	repository := &reportGradesStub{}
+	service := NewReportGradeService(repository)
+	grade := "10000000-0000-0000-0000-000000000002"
+	for _, ids := range [][]string{nil, {grade, grade}, {"invalid"}} {
+		if _, err := service.Preview(context.Background(), ids); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("ids=%v: got %v", ids, err)
+		}
+	}
+	if repository.calls != 0 {
+		t.Fatal("invalid preview reached repository")
+	}
+	result, err := service.Preview(context.Background(), []string{grade})
+	if err != nil || len(result.Grades) != 1 || repository.calls != 1 {
+		t.Fatalf("result=%+v err=%v calls=%d", result, err, repository.calls)
 	}
 }

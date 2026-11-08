@@ -15,6 +15,7 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/reporting"
+	"four-check-management-system/server/internal/reportoutput"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -61,6 +62,10 @@ func TestWeeklyReportVersionWorkflowPostgres(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, string(seed)); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO staff(id,employee_no,name) VALUES('a0000000-0000-0000-0000-000000000028','FIXTURE-TEACHER','Fixture teacher');
+UPDATE classes SET head_teacher_id='a0000000-0000-0000-0000-000000000028' WHERE id='a0000000-0000-0000-0000-000000000006'`); err != nil {
+		t.Fatal("prepare class teacher fixture:", err)
 	}
 	const (
 		actorID             = "a0000000-0000-0000-0000-000000000001"
@@ -174,6 +179,10 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	if _, err := database.ReplaceReportGrades(ctx, gradeScope, audit.Metadata{ActorID: actorID}); !errors.Is(err, academic.ErrReportGradesConflict) {
 		t.Fatalf("stale grade scope write = %v, want version conflict", err)
 	}
+	preview, err := database.PreviewReportGrades(ctx, gradeScope.GradeIDs)
+	if err != nil || len(preview.Grades) != 1 || preview.ClassCount != 2 || preview.StudentCount != 2 || preview.UnassignedCount != 1 {
+		t.Fatalf("current roster preview = %+v, err=%v", preview, err)
+	}
 	service := reporting.NewService(database, reportWorkflowPermissionStub{permissions: permissions})
 	draft, err := service.GenerateDraft(ctx, actorID, reporting.GenerateDraftInput{SemesterID: semesterID, WeekID: weekID}, audit.Metadata{})
 	if err != nil {
@@ -194,6 +203,18 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	if classRosterSizes["Fixture class"] != 1 || classRosterSizes["Other fixture class"] != 0 {
 		t.Fatalf("class roster snapshot = %+v, want 1 and 0 active students", classRosterSizes)
 	}
+	var frozenTeacher string
+	for _, class := range draft.Content.Indicators.Inputs.Classes {
+		if class.ClassName == "Fixture class" {
+			frozenTeacher = class.HeadTeacherName
+		}
+	}
+	if frozenTeacher != "Fixture teacher" {
+		t.Fatalf("draft teacher snapshot = %q", frozenTeacher)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE staff SET name='Renamed fixture teacher' WHERE employee_no='FIXTURE-TEACHER'`); err != nil {
+		t.Fatal("rename live teacher fixture:", err)
+	}
 	var foundAttendance, foundEvening bool
 	for _, row := range draft.Content.Rows {
 		if row.InspectionTypeID == attendanceID {
@@ -212,6 +233,40 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 		history.Report.RowVersion != draft.RowVersion || len(history.Versions) != 1 || history.Versions[0].VersionNo != 1 ||
 		history.Versions[0].Content.ConfirmedRecordCount != 2 {
 		t.Fatalf("authorized report workflow history = %+v, %v", history, err)
+	}
+	for _, class := range history.Versions[0].Content.Indicators.Inputs.Classes {
+		if class.ClassName == "Fixture class" && class.HeadTeacherName != "Fixture teacher" {
+			t.Fatalf("historical teacher changed with live master data: %q", class.HeadTeacherName)
+		}
+	}
+	settings, err := database.GetOutputSettings(ctx)
+	if err != nil || settings.Version != 1 {
+		t.Fatalf("output settings = %+v, err=%v", settings, err)
+	}
+	settings.Introduction, settings.WordTypeCodes, settings.ExcelTypeCodes = "Fixture introduction", []string{"ATTENDANCE_RATE", "EVENING_SELF_STUDY"}, []string{"ATTENDANCE_RATE", "EVENING_SELF_STUDY"}
+	settings.IntroductionDocument = json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left"},"content":[{"type":"text","text":"Fixture introduction"}]}]}`)
+	updatedSettings, err := database.ReplaceOutputSettings(ctx, settings, audit.Metadata{ActorID: actorID})
+	if err != nil || updatedSettings.Version != 2 {
+		t.Fatalf("replace output settings = %+v, err=%v", updatedSettings, err)
+	}
+	if _, err := database.ReplaceOutputSettings(ctx, settings, audit.Metadata{ActorID: actorID}); !errors.Is(err, reportoutput.ErrConfigConflict) {
+		t.Fatalf("stale output settings write = %v", err)
+	}
+	versionID := history.Versions[0].ID
+	outputRecords, err := database.LoadReportOutputRecords(ctx, versionID)
+	if err != nil || len(outputRecords) != 2 {
+		t.Fatalf("frozen output records = %+v, err=%v", outputRecords, err)
+	}
+	output := reportoutput.File{ID: "d0000000-0000-0000-0000-000000000001", ReportVersionID: versionID, Format: "EXCEL", TypeCodes: []string{"ATTENDANCE_RATE"}, Status: "PENDING", SettingsVersion: updatedSettings.Version}
+	if err := database.StartReportOutput(ctx, output, actorID, audit.Metadata{ActorID: actorID}); err != nil {
+		t.Fatal("start output attempt:", err)
+	}
+	if err := database.FailReportOutput(ctx, output.ID, "GENERATION_FAILED", audit.Metadata{ActorID: actorID}); err != nil {
+		t.Fatal("mark failed output:", err)
+	}
+	storedOutputs, err := database.ListReportOutputs(ctx, versionID)
+	if err != nil || len(storedOutputs) != 1 || storedOutputs[0].Status != "FAILED" || storedOutputs[0].FileID != "" {
+		t.Fatalf("failed output became downloadable: %+v, err=%v", storedOutputs, err)
 	}
 	limitedWorkflowService := reporting.NewService(database, reportWorkflowPermissionStub{permissions: []permission.EffectivePermission{
 		{Action: permission.ActionReportView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: attendanceID}},

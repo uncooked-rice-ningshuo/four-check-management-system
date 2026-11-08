@@ -1,6 +1,6 @@
 # 学期适用年级与全量班级指标改造方案
 
-> 2026-11-08 实施中。学期配置、名册范围、V2 快照和基础越界校验已在本地工作区实现；逐类型来源状态、页面浏览器验收与目标环境仍待完成。迁移仅在一次性 PostgreSQL 验证，未应用到目标环境。
+> 2026-11-08 本地实现。学期配置、名册范围与预览、V2 快照、来源状态及越界校验已实现；042/043 迁移与工作流在一次性 PostgreSQL 验证。隔离 PostgreSQL/MinIO、真实 API/Vite、Chrome 的[39 项浏览器回归](../../output/playwright/86ee091938/summary.json)已通过，包含年级范围真实预览、保存及重开回显。本机数据库已实际应用 042/043，目标环境未部署，实际业务数据范围核查与真实账号角色验收仍待完成。
 
 ## 1. 目标与已核对的现状
 
@@ -52,6 +52,8 @@
 | 前端配置 | `AcademicCalendarPage` 增加学期年级设置与人数预览；API client、Query hook、实体类型同步；保存失败保留已选项，冲突后提示刷新。 |
 | 前端通报 | `ReportVersionIndicators` 的八类标签页统一展示全量班级、零值和待确认状态，显示“共 N 个班级”、年级/班级筛选、分页及表内横向滚动；工作台与归档读取同一版本快照。筛选选项只取该版本班级，不从当前全库基础数据补齐。 |
 | 文档 | 更新指标口径说明、PRD/页面功能说明、项目状态和 API 契约；把 V1 历史版本与 V2 新版本的展示边界写清。 |
+
+本地接口：`GET/PUT /api/v1/admin/academic/semesters/:id/report-grades` 读取和以 `version` 乐观锁替换年级集合；`GET /api/v1/admin/academic/semesters/:id/report-grades/preview?gradeId=<UUID>` 可重复传入年级 ID，返回当前启用班级、在籍学生及未分入启用班级人数。预览不保存名册，新版本生成时重新读取并冻结。配置缺失返回 `REPORT_GRADES_UNCONFIGURED`，旧版本继续只读其原快照。
 
 ## 5. 实施顺序与验收
 

@@ -1,5 +1,6 @@
 async (page) => {
   const fixture = __FIXTURE__
+  const output = __OUTPUT__
   const base = page.url().split('/').slice(0, 3).join('/')
   const cases = []
   const browserErrors = []
@@ -95,7 +96,7 @@ async (page) => {
   const attendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await attendanceRow.waitFor()
   const cells = await attendanceRow.getByRole('cell').allInnerTexts()
-  check(cells[1] === '2' && cells[5] === '2' && cells[6] === '4', `Type summary did not combine current confirmed revisions: ${cells.join('|')}`)
+  check(cells[1]?.includes('已提交 2 批') && cells[2]?.includes('4 条记录'), `Type summary did not combine current confirmed revisions: ${cells.join('|')}`)
   check(await page.getByRole('cell', { name: '教室卫生', exact: true }).count() === 0, 'Paused inspection type appeared in reporting summary')
   check(await attendanceRow.count() === 1, 'One type should occupy only one summary row')
   cases.push('自动选中当前工作周并按检查类型合并部门与管理员来源，保留已确认记录口径和暂停类型排除')
@@ -110,24 +111,15 @@ async (page) => {
   check(recordPage.total === 4 && recordPage.items.some(item => item.studentName === 'E2E student A') &&
     recordPage.items.some(item => item.studentName === 'E2E student B'),
   `Records endpoint did not return cross-source confirmed records: ${JSON.stringify(recordPage)}`)
-  await page.getByText('以下为当前确认修订中的实际提交记录', { exact: true }).waitFor()
-  const sourceDrawer = page.getByRole('dialog', { name: '到课率' })
+  await page.getByText('按单位核对状态', { exact: true }).waitFor()
+  const sourceDrawer = page.getByRole('dialog', { name: '来源明细 · 到课率' })
   await sourceDrawer.getByRole('row').filter({ hasText: 'E2E student A' }).first().waitFor()
   const collegeRow = sourceDrawer.locator('tr[data-row-key="college:30000000-0000-0000-0000-000000000001"]')
   await collegeRow.waitFor()
 
-  const collegeRecordsResponsePromise = page.waitForResponse(response =>
-    response.url().includes('/api/v1/reports/records?') && response.url().includes('collegeLevel=true') &&
-    response.url().includes('weekId=b0000000-0000-0000-0000-000000000003'))
-  await collegeRow.getByRole('button', { name: '查看记录' }).click()
-  const collegeRecordsResponse = await collegeRecordsResponsePromise
-  check(collegeRecordsResponse.status() === 200,
-    `College-level records endpoint returned ${collegeRecordsResponse.status()}: ${JSON.stringify(await collegeRecordsResponse.json().catch(() => ({})))}`)
-  const collegeRecordPage = await collegeRecordsResponse.json()
-  check(collegeRecordPage.total === 2 && collegeRecordPage.items.some(item => item.studentName === 'E2E student A') &&
-    collegeRecordPage.items.some(item => item.studentName === 'E2E student B'),
-  `College-level records endpoint returned unexpected records: ${JSON.stringify(collegeRecordPage)}`)
-  await sourceDrawer.getByText('管理员 · 已确认记录').waitFor()
+  await collegeRow.getByRole('button', { name: '查看管理员记录' }).click()
+  await sourceDrawer.getByText('管理员 · 结果仅含已确认记录，筛选项来自当前在籍名册').waitFor()
+  await sourceDrawer.getByText('全部记录 · 共 2 条').waitFor()
   await sourceDrawer.getByRole('row').filter({ hasText: 'E2E student B' }).waitFor()
   await sourceDrawer.getByRole('button', { name: 'Close', exact: true }).click()
   cases.push('类型汇总抽屉展示跨来源记录，并可按提交归属查看管理员记录')
@@ -249,7 +241,7 @@ async (page) => {
   const secondWeekAttendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await secondWeekAttendanceRow.waitFor()
   let secondWeekCells = await secondWeekAttendanceRow.getByRole('cell').allInnerTexts()
-  check(secondWeekCells[1] === '0' && secondWeekCells[2] === '0' && secondWeekCells[3] === '0',
+  check(secondWeekCells[1] === '暂无提交' && secondWeekCells[2] === '尚无确认数据',
     `The second week's own summary was not shown: ${secondWeekCells.join('|')}`)
 
   const delayedFirstWeekResponseReceived = page.waitForResponse(response => {
@@ -260,7 +252,7 @@ async (page) => {
   await delayedFirstWeekResponseReceived
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   secondWeekCells = await secondWeekAttendanceRow.getByRole('cell').allInnerTexts()
-  check(secondWeekCells[1] === '0' && secondWeekCells[2] === '0' && secondWeekCells[3] === '0',
+  check(secondWeekCells[1] === '暂无提交' && secondWeekCells[2] === '尚无确认数据',
     `Late first-week response replaced the second week's summary: ${secondWeekCells.join('|')}`)
   await page.unroute('**/api/v1/reports/summary*', delayedFirstWeekRoute)
   cases.push('第一周汇总响应延迟时切换到第二周；旧响应晚到不覆盖当前周汇总')
@@ -308,7 +300,7 @@ async (page) => {
   const updatedAttendanceRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await updatedAttendanceRow.waitFor()
   const updatedCells = await updatedAttendanceRow.getByRole('cell').allInnerTexts()
-  check(updatedCells[1] === '3' && updatedCells[5] === '3' && updatedCells[6] === '5',
+  check(updatedCells[1]?.includes('已提交 3 批') && updatedCells[2]?.includes('5 条记录'),
     `The summary page did not include the newly submitted and confirmed record: ${updatedCells.join('|')}`)
   await page.getByRole('button', { name: '确认数据并生成草稿', exact: true }).waitFor()
   cases.push('真实提交并确认一个部门批次后重载汇总页；页面显示新增确认批次和当前修订记录数')
@@ -336,18 +328,44 @@ async (page) => {
   await page.getByText('草稿 · V1', { exact: true }).waitFor()
   await page.getByRole('button', { name: '草稿无误，进入定稿确认', exact: true }).waitFor()
   check(await page.getByText('草稿 · V1', { exact: true }).count() === 1, 'Current draft version appeared more than once')
-  check(!(await page.locator('.weekly-report-history').evaluate(element => element.open)), 'Version history should start collapsed')
-  await page.getByText('版本与操作记录', { exact: true }).click()
-  check(await page.locator('.weekly-report-history').evaluate(element => element.open), 'Version history did not open')
-  await page.locator('.weekly-report-history').getByText('V1', { exact: true }).waitFor()
-  await page.getByText('版本与操作记录', { exact: true }).click()
+  await page.getByRole('group', { name: '版本记录' }).getByText('版本记录 · 1 个版本').waitFor()
   await page.getByRole('button', { name: /确认来源数据/ }).click()
   await page.getByRole('region', { name: '当前阶段操作' }).getByRole('button', { name: '继续编制草稿', exact: true }).waitFor()
   check(await page.getByRole('button', { name: '继续编制草稿', exact: true }).count() === 1, 'Expected exactly one continue draft action')
   await page.getByRole('region', { name: '当前阶段操作' }).getByRole('button', { name: '继续编制草稿', exact: true }).click()
   await page.getByText('草稿 · V1', { exact: true }).waitFor()
-  check(await page.getByRole('button', { name: '生成草稿 Word', exact: true }).isDisabled(), 'Draft Word output placeholder was enabled before implementation')
-  check(await page.getByRole('button', { name: '生成草稿 Excel', exact: true }).isDisabled(), 'Draft Excel output placeholder was enabled before implementation')
+  const draftActions = page.getByRole('region', { name: '当前阶段操作' })
+  check(await draftActions.getByRole('button', { name: '生成 Word' }).isEnabled() &&
+    await draftActions.getByRole('button', { name: '生成 Excel' }).isEnabled(), 'Separate draft output entries were unavailable')
+  check(await page.locator('#report-output-panel').count() === 0, 'Persistent output card remained in the workbench')
+  await draftActions.getByRole('button', { name: '生成 Word' }).click()
+  const wordDialog = page.getByRole('dialog', { name: 'V1 · Word 文件' })
+  await wordDialog.getByRole('radio', { name: '单项文件' }).click()
+  check(await wordDialog.getByText('到课率', { exact: true }).count() > 0, 'Single output did not select the confirmed attendance type')
+  await wordDialog.screenshot({ path: output + '/report-output-word-dialog.png' })
+  const wordResponse = page.waitForResponse(response => response.url().endsWith('/versions/1/outputs') && response.request().method() === 'POST')
+  await wordDialog.getByRole('button', { name: '生成 Word' }).click()
+  const generatedWord = await wordResponse
+  const wordFile = await generatedWord.json()
+  check(generatedWord.status() === 201 && wordFile.status === 'AVAILABLE', 'Word output was not generated from the draft version')
+  await wordDialog.getByRole('button', { name: '下载 Word 文件' }).waitFor()
+  const wordDownload = await page.request.get(`${base}/api/v1/reports/workflow/b0000000-0000-0000-0000-000000000002/b0000000-0000-0000-0000-000000000003/versions/1/outputs/${wordFile.id}/download`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const wordBytes = await wordDownload.body()
+  check(wordDownload.status() === 200 && wordDownload.headers()['content-type']?.includes('wordprocessingml') && wordBytes[0] === 80 && wordBytes[1] === 75, 'Word output download was not a verified DOCX')
+  await wordDialog.getByRole('button', { name: /关\s*闭/ }).click()
+  await draftActions.getByRole('button', { name: '生成 Excel' }).click()
+  const excelDialog = page.getByRole('dialog', { name: 'V1 · Excel 文件' })
+  await excelDialog.getByRole('radio', { name: '单项文件' }).click()
+  const excelResponse = page.waitForResponse(response => response.url().endsWith('/versions/1/outputs') && response.request().method() === 'POST')
+  await excelDialog.getByRole('button', { name: '生成 Excel' }).click()
+  const generatedExcel = await excelResponse
+  const excelFile = await generatedExcel.json()
+  check(generatedExcel.status() === 201 && excelFile.status === 'AVAILABLE', 'Excel output was not generated from the draft version')
+  const excelDownload = await page.request.get(`${base}/api/v1/reports/workflow/b0000000-0000-0000-0000-000000000002/b0000000-0000-0000-0000-000000000003/versions/1/outputs/${excelFile.id}/download`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const excelBytes = await excelDownload.body()
+  check(excelDownload.status() === 200 && excelDownload.headers()['content-type']?.includes('spreadsheetml') && excelBytes[0] === 80 && excelBytes[1] === 75, 'Excel output download was not a verified XLSX')
+  await excelDialog.getByRole('button', { name: /关\s*闭/ }).click()
+  cases.push('草稿版本生成单项 Word/Excel，并经真实鉴权下载已校验的 DOCX/XLSX')
   const draftDetailResponsePromise = page.waitForResponse(response => response.url().includes('/api/v1/reports/workflow/') &&
     response.url().includes('/versions/1/records?'))
   await page.getByRole('button', { name: '查看明细', exact: true }).first().click()
@@ -358,7 +376,7 @@ async (page) => {
   check((await page.locator('.weekly-report-stage-actions').evaluate(element => getComputedStyle(element).position)) === 'fixed',
     'Draft stage actions are not fixed to the viewport')
   await page.keyboard.press('Escape')
-  cases.push('草稿按检查类型打开本版冻结明细，阶段操作栏固定在视口底部，生成 Word/Excel 控件保留为禁用占位')
+  cases.push('草稿按检查类型打开本版冻结明细，阶段操作栏固定在视口底部，文件输出入口可用')
 
   const draftArchiveResponsePromise = page.waitForResponse(response => response.url().includes('/api/v1/reports/archive?'))
   await page.getByRole('link', { name: '通报归档', exact: true }).click()
@@ -404,8 +422,6 @@ async (page) => {
   await approvalResponse
   await page.getByText('审核通过，待定稿确认 · V1', { exact: true }).waitFor()
   await page.getByRole('button', { name: '确认定稿数据', exact: true }).waitFor()
-  check(await page.getByText('提交审核 · V1').count() > 0 && await page.getByText('退回修改 · V1').count() > 0,
-    'Submission/return review events were absent from the history timeline')
   const finalizeResponse = page.waitForResponse(response => response.status() === 200 &&
     response.url().endsWith(`/api/v1/reports/${draftState.id}/finalize`))
   await page.getByRole('button', { name: '确认定稿数据', exact: true }).click()
@@ -413,8 +429,8 @@ async (page) => {
   await page.getByText('已定稿 · V1', { exact: true }).waitFor()
   check(await page.getByRole('region', { name: '当前阶段操作' }).getByText('已定稿 · 只读', { exact: true }).count() === 0,
     '定稿状态不在底栏重复显示')
-  check(await page.getByRole('button', { name: '生成定稿 Word', exact: true }).isDisabled(), 'Final Word output placeholder was enabled before implementation')
-  check(await page.getByRole('button', { name: '生成定稿 Excel', exact: true }).isDisabled(), 'Final Excel output placeholder was enabled before implementation')
+  check(await page.getByRole('region', { name: '当前阶段操作' }).getByRole('button', { name: '生成 Word' }).isEnabled() &&
+    await page.getByRole('region', { name: '当前阶段操作' }).getByRole('button', { name: '生成 Excel' }).isEnabled(), 'Final output entries were unavailable')
   const finalDetailResponsePromise = page.waitForResponse(response => response.url().includes('/api/v1/reports/workflow/') &&
     response.url().includes('/versions/1/records?'))
   await page.getByRole('button', { name: '查看明细', exact: true }).first().click()
@@ -433,14 +449,26 @@ async (page) => {
   const finalizedArchive = await archiveResponse.json()
   check(archiveResponse.status() === 200 && finalizedArchive.items[0]?.status === 'FINALIZED',
     `Finalized report did not appear in the archive: ${JSON.stringify(finalizedArchive)}`)
+  const archiveViewport = page.viewportSize()
+  await page.setViewportSize({ width: 1009, height: 954 })
+  const periodWidth = await page.getByRole('columnheader', { name: '学年 / 学期 / 周次' }).evaluate(element => element.getBoundingClientRect().width)
+  check(periodWidth >= 300, `Archive period column is still too narrow: ${periodWidth}px`)
+  await page.screenshot({ path: output + '/report-archive-1009px.png', fullPage: true })
+  if (archiveViewport) await page.setViewportSize(archiveViewport)
+  cases.push('1009px 视口中归档周期列保留可读宽度，横向滚动限制在表格内')
   await page.getByRole('button', { name: '查看版本', exact: true }).click()
   await page.getByText('归档快照为只读记录').waitFor()
-  check(await page.getByRole('button', { name: '生成定稿 Word', exact: true }).isDisabled(), 'Archive final Word output placeholder was enabled')
-  check(await page.getByRole('button', { name: '生成定稿 Excel', exact: true }).isDisabled(), 'Archive final Excel output placeholder was enabled')
+  check(await page.getByText('提交审核', { exact: true }).count() > 0 && await page.getByText('退回修改', { exact: true }).count() > 0,
+    'Submission and return events were absent from the archive audit timeline')
+  await page.getByRole('button', { name: '查看明细', exact: true }).click()
+  const archiveVersion = page.locator('.weekly-report-version-detail-drawer')
+  check(await archiveVersion.getByRole('button', { name: '生成 Word' }).count() === 1 &&
+    await archiveVersion.getByRole('button', { name: '生成 Excel' }).count() === 1, 'Archive output entries were unavailable')
+  await archiveVersion.getByRole('button', { name: 'Close', exact: true }).click()
   check(await page.getByRole('button', { name: '基于定稿修正', exact: true }).count() === 1, 'Archive did not provide a path back to workbench correction')
   cases.push('通报归档保留已生成周次，提供定稿输出入口并可跳转工作台发起更正')
 
-  await page.screenshot({ path: '__OUTPUT__/weekly-report-summary.png', fullPage: true })
+  await page.screenshot({ path: output + '/weekly-report-summary.png', fullPage: true })
   check(browserErrors.length === 0, `Uncaught browser errors: ${browserErrors.join('; ')}`)
   return { cases, browserErrors }
 }

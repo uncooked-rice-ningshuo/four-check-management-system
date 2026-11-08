@@ -88,7 +88,10 @@ describe('AppLayout', () => {
       expect(document.querySelectorAll('#admin-navigation .ant-menu-submenu-open')).toHaveLength(1)
     }
     const inspectionNames = ['到课率检查', '无机课堂检查', '早锻炼/早签', '宿舍卫生', '公共宿舍卫生', '晚归', '教室卫生']
-    const icons = inspectionNames.map(name => screen.getByRole('link', { name }).closest('.ant-menu-item')?.querySelector('svg[data-icon]')?.getAttribute('data-icon'))
+    const icons = inspectionNames.map(name => {
+      const item = screen.getByRole('link', { name }).closest('.ant-menu-item')
+      return item?.querySelector('svg[data-icon]')?.getAttribute('data-icon') ?? item?.querySelector('svg.ant-menu-item-icon')?.innerHTML
+    })
     expect(icons.every(Boolean)).toBe(true)
     expect(new Set(icons).size).toBe(inspectionNames.length)
   })

@@ -93,6 +93,22 @@ class_name_snapshot='Fixture class',grade_snapshot='2026' WHERE id='a0000000-000
 	}
 
 	repository := &Postgres{Pool: pool}
+	// All eight configured dimensions must remain visible even before their departments submit.
+	allTypeSummary, err := repository.ReportSummary(ctx, semesterID, weekID, []permission.EffectivePermission{{Action: permission.ActionReportView, Effect: permission.EffectAllow}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeCodes := make(map[string]bool)
+	publicHygieneWithoutSubmission := false
+	for _, row := range allTypeSummary.Rows {
+		typeCodes[row.InspectionTypeCode] = true
+		if row.InspectionTypeCode == "PUBLIC_DORMITORY_HYGIENE" && row.SubmissionCount == 0 {
+			publicHygieneWithoutSubmission = true
+		}
+	}
+	if len(typeCodes) != 8 || !publicHygieneWithoutSubmission {
+		t.Fatalf("configured report dimensions=%v, public hygiene without submission=%v", typeCodes, publicHygieneWithoutSubmission)
+	}
 	profile, err := repository.LoadAccessProfile(ctx, "a0000000-0000-0000-0000-000000000001")
 	if err != nil {
 		t.Fatalf("load access profile without a primary department: %v", err)
@@ -185,11 +201,8 @@ VALUES ('c0000000-0000-0000-0000-000000000006','b0000000-0000-0000-0000-00000000
 				ConfirmedRecordCount: candidate.ConfirmedRecordCount,
 			}
 		}
-		if candidate.CollegeLevel && candidate.InspectionTypeID != attendance {
+		if candidate.CollegeLevel && candidate.InspectionTypeID != attendance && candidate.DepartmentName != "未分配部门" {
 			t.Fatalf("summary invented a college-level cell without a college submission: %+v", candidate)
-		}
-		if candidate.InspectionTypeID == "30000000-0000-0000-0000-000000000003" {
-			t.Fatalf("paused inspection type appeared in summary: %+v", candidate)
 		}
 	}
 	if collegeRow == nil || collegeRow.SubmissionCount != 1 || collegeRow.ConfirmedBatchCount != 1 || collegeRow.ConfirmedRecordCount != 1 {

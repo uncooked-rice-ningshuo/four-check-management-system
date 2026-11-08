@@ -124,10 +124,20 @@ func (p *Postgres) ReportSummary(ctx context.Context, semesterID, weekID string,
  JOIN inspection_types it ON it.id=candidate.inspection_type_id AND it.enabled AND it.participates_in_report
  WHERE ` + collegeAccess + `
  GROUP BY it.id,it.name,it.sort_order
+), unassigned_cells AS (
+ SELECT NULL::uuid AS department_id,'未分配部门'::text AS department_name,TRUE AS college_level,
+        it.id AS inspection_type_id,it.code AS inspection_type_code,it.name AS inspection_type_name,it.sort_order AS inspection_type_order
+ FROM period
+ JOIN inspection_types it ON it.enabled AND it.participates_in_report
+ WHERE ` + collegeAccess + `
+   AND NOT EXISTS (SELECT 1 FROM department_scope_candidates candidate WHERE candidate.inspection_type_id=it.id)
+   AND NOT EXISTS (SELECT 1 FROM college_scope_candidates candidate WHERE candidate.inspection_type_id=it.id)
 ), cells AS (
  SELECT * FROM department_cells
  UNION ALL
  SELECT * FROM college_cells
+ UNION ALL
+ SELECT * FROM unassigned_cells
 )
 SELECT period.academic_year_id,period.academic_year_name,period.semester_id,period.semester_name,
        period.week_id,period.week_no,period.start_date,period.end_date,
@@ -248,9 +258,10 @@ WHERE scope.semester_id=$1::uuid`, semesterID).Scan(&configuredGradeCount, &enab
 	if lockRows {
 		classLock = " FOR SHARE OF class,grade"
 	}
-	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name
+	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name,COALESCE(teacher.name,'')
 FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
 JOIN classes class ON class.grade_id=grade.id
+LEFT JOIN staff teacher ON teacher.id=class.head_teacher_id
 WHERE scope.semester_id=$1::uuid AND class.enabled AND grade.enabled
 ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 	if err != nil {
@@ -261,7 +272,7 @@ ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 	for rows.Next() {
 		var classID string
 		var class reporting.ReportClassSizeSnapshot
-		if err := rows.Scan(&classID, &class.GradeID, &class.Grade, &class.ClassName); err != nil {
+		if err := rows.Scan(&classID, &class.GradeID, &class.Grade, &class.ClassName, &class.HeadTeacherName); err != nil {
 			rows.Close()
 			return reporting.ReportMetricInputs{}, err
 		}

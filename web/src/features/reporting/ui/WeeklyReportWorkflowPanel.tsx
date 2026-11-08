@@ -10,7 +10,9 @@ import { reportRecordColumns, reportRecordTableWidth, reportRecordTypeCodeForNam
 import { ReportRecordSnapshotCard } from './ReportRecordSnapshotCard'
 import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from './ReportVersionRecordFilters'
 import { ReportVersionIndicators } from './ReportVersionIndicators'
+import { ReportOutputPanel } from './ReportOutputPanel'
 import { groupVersionRows } from '../model/groupReportRows'
+import { permissionCoversReportTypes } from '../model/reportPermissions'
 
 const correctionFields = [
   { value: 'studentNumber', label: '学号', numeric: false, types: ['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'EVENING_SELF_STUDY', 'MORNING_ATTENDANCE', 'LATE_RETURN'] },
@@ -79,25 +81,6 @@ function recordPeople(record: ReportingRecord) {
   return [record.studentName, ...(record.responsibleStudents ?? []).map(item => item.label),
     ...(record.responsibleClasses ?? []).map(item => item.label), ...(record.responsibleDormitories ?? []).map(item => item.label)]
     .filter(Boolean).join('、') || '—'
-}
-
-const scopeFields = ['academicYearId', 'semesterId', 'weekId', 'inspectionTypeId'] as const
-
-function permissionCoversRows(permissions: EffectivePermission[], action: string, period: ReportingPeriod, rows: ReportingSummaryRow[]) {
-  if (rows.length === 0) return false
-  return rows.every(row => {
-    const requested = {
-      academicYearId: period.academicYearId,
-      semesterId: period.semesterId,
-      weekId: period.weekId,
-      inspectionTypeId: row.inspectionTypeId,
-    }
-    const rules = permissions.filter(item => item.action === action)
-    const matches = (scope: EffectivePermission['scope']) => scopeFields.every(key => !scope[key] || scope[key] === requested[key])
-    const allowed = rules.some(item => item.effect === 'ALLOW' && matches(item.scope))
-    const denied = rules.some(item => item.effect === 'DENY' && matches(item.scope))
-    return allowed && !denied
-  })
 }
 
 function errorMessage(error: unknown) {
@@ -176,11 +159,11 @@ export function WeeklyReportWorkflowPanel({
     zeroRecordConfirmedBatchCount: row.confirmedZeroReceiptCount,
   })) ?? []
   const displayRows = groupVersionRows(currentVersion?.content.rows ?? [])
-  const canGenerate = permissionCoversRows(permissions, 'REPORT_GENERATE', period, summaryRows)
-  const canSubmit = permissionCoversRows(permissions, 'REPORT_GENERATE', period, reportRows)
-  const canReview = permissionCoversRows(permissions, 'REPORT_REVIEW', period, reportRows)
-  const canReturn = permissionCoversRows(permissions, 'REPORT_RETURN', period, reportRows)
-  const canCorrect = permissionCoversRows(permissions, 'REPORT_CORRECT', period, reportRows)
+  const canGenerate = permissionCoversReportTypes(permissions, 'REPORT_GENERATE', period, summaryRows)
+  const canSubmit = permissionCoversReportTypes(permissions, 'REPORT_GENERATE', period, reportRows)
+  const canReview = permissionCoversReportTypes(permissions, 'REPORT_REVIEW', period, reportRows)
+  const canReturn = permissionCoversReportTypes(permissions, 'REPORT_RETURN', period, reportRows)
+  const canCorrect = permissionCoversReportTypes(permissions, 'REPORT_CORRECT', period, reportRows)
   const recordCellKey = selectedReportCell
     ? [period.weekId, currentVersion?.versionNo ?? 0, selectedReportCell.inspectionTypeId].join(':')
     : ''
@@ -293,10 +276,7 @@ export function WeeklyReportWorkflowPanel({
 
   const finalized = report !== null && ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report.status)
   const correctionValidation = correctionRecord ? correctionChangesFor(correctionRecord, correctionValues) : { changes: [], invalidFields: [] }
-  const outputControls = (kind: 'draft' | 'final') => <Space wrap>
-    <Tooltip title="后续开放；生成结果将关联当前版本。"><span><Button disabled>{kind === 'final' ? '生成定稿 Word' : '生成草稿 Word'}</Button></span></Tooltip>
-    <Tooltip title="后续开放；生成结果将关联当前版本。"><span><Button disabled>{kind === 'final' ? '生成定稿 Excel' : '生成草稿 Excel'}</Button></span></Tooltip>
-  </Space>
+  const outputControls = () => currentVersion && <ReportOutputPanel key={currentVersion.id} version={currentVersion} semesterId={period.semesterId} weekId={period.weekId} canGenerate={canGenerate} />
 
   return <section className="weekly-report-workflow-panel" aria-label={stage === 'source' ? '来源核对操作' : undefined} aria-labelledby={stage === 'source' ? undefined : 'weekly-report-workflow-title'}>
     {stage !== 'source' && <div className="weekly-report-workflow-heading">
@@ -401,14 +381,14 @@ export function WeeklyReportWorkflowPanel({
             <Button loading={generate.isPending}>读取最新数据</Button>
           </Popconfirm>}
           {(report.status === 'DRAFT' || report.status === 'RETURNED') && canSubmit && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('submit')}>草稿无误，进入定稿确认</Button>}
-          {outputControls('draft')}
+          {outputControls()}
         </Space>}
         {stage === 'final' && report && <Space wrap>
           {report.status === 'DRAFT' || report.status === 'RETURNED' ? <Button onClick={() => onStageChange?.(1)}>返回草稿修订</Button> : null}
           {report.status === 'PENDING_REVIEW' && canReview && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('approve')}>审核通过</Button>}
           {report.status === 'PENDING_REVIEW' && canReturn && <Button danger loading={transition.isPending} onClick={() => { setReturnComment(''); setReturnOpen(true) }}>退回草稿</Button>}
-          {report.status === 'FINALIZING' && permissionCoversRows(permissions, 'REPORT_FINALIZE', period, reportRows) && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('finalize')}>确认定稿数据</Button>}
-          {finalized && outputControls('final')}
+          {report.status === 'FINALIZING' && permissionCoversReportTypes(permissions, 'REPORT_FINALIZE', period, reportRows) && <Button type="primary" loading={transition.isPending} onClick={() => runTransition('finalize')}>确认定稿数据</Button>}
+          {finalized && outputControls()}
         </Space>}
       </div>
     </div>

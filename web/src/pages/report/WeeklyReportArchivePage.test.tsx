@@ -11,6 +11,9 @@ vi.mock('../../features/reporting/model/queries', () => ({
   useReportArchiveWorkflow: mocks.useReportArchiveWorkflow,
   useReportVersionRecords: mocks.records,
 }))
+vi.mock('../../features/attendance/hooks/useAttendancePermissions', () => ({
+  useAttendancePermissions: () => ({ data: { permissions: [] } }),
+}))
 
 const period: ReportingPeriod = {
   academicYearId: 'year-1', academicYearName: '2025-2026学年', semesterId: 'semester-1', semesterName: '第二学期',
@@ -50,12 +53,31 @@ describe('WeeklyReportArchivePage', () => {
     expect(screen.getByRole('heading', { name: '通报归档' })).toBeVisible()
     expect(screen.getByRole('heading', { name: '通报归档' }).closest('.attendance-page-heading')).toBeInTheDocument()
     expect(screen.getByText('2025-2026学年 · 第二学期 · 第 2 周')).toBeVisible()
+    expect(screen.getByText('2025-2026学年 · 第二学期 · 第 2 周').closest('.report-archive-period')).toBeInTheDocument()
     expect(screen.getByText('已定稿')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '查看版本' }))
 
     await waitFor(() => expect(screen.getByText(/历史版本/)).toBeVisible())
     expect(await screen.findByText('归档快照为只读记录')).toBeVisible()
+    const versionRow = screen.getByRole('row', { name: /V1 当前.*查看明细/ })
+    expect(within(versionRow).getByRole('button', { name: '查看 Word 文件' })).toBeVisible()
+    expect(within(versionRow).getByRole('button', { name: '查看 Excel 文件' })).toBeVisible()
+    expect(screen.queryByRole('columnheader', { name: '文件输出' })).not.toBeInTheDocument()
     await waitFor(() => expect(mocks.useReportArchiveWorkflow).toHaveBeenCalledWith(period.semesterId, period.weekId, true, expect.any(Function)))
+  })
+
+  it('归档周期中学期名称已含学年时只展示一次学年', async () => {
+    const namedPeriod = { ...period, academicYearName: '2026-2027 学年', semesterName: '2026-2027 学年上学期', weekNo: 9 }
+    mocks.useReportArchive.mockReturnValue({
+      data: { ...archivePage, items: [{ ...archivePage.items[0], period: namedPeriod }] },
+      isPending: false, isFetching: false, isError: false, refetch: vi.fn(),
+    })
+    renderPage()
+
+    expect(screen.getByText('2026-2027 学年 · 上学期 · 第 9 周')).toBeVisible()
+    expect(screen.queryByText(/2026-2027 学年 · 2026-2027 学年上学期/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看版本' }))
+    expect(await screen.findByText('2026-2027 学年 · 上学期 · 第 9 周 · 历史版本')).toBeVisible()
   })
 
   it('把归档状态筛选放在 ProTable 表单中并将周通报列表置于其下方', () => {
@@ -116,7 +138,13 @@ describe('WeeklyReportArchivePage', () => {
     const versionContext = await screen.findByRole('group', { name: '归档版本上下文' })
     expect(within(versionContext).getByRole('heading', { name: 'V1 · 数据明细' })).toBeVisible()
     expect(within(versionContext).getByText('2025-2026学年 · 第二学期 · 第 2 周')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: '返回历史版本' }))
+    expect(within(versionContext).queryByRole('button', { name: '生成 Word' })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '生成文件' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '返回历史版本' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/此处展示版本生成时保存的只读内容/)).not.toBeInTheDocument()
+    const closeVersion = screen.getAllByRole('button', { name: 'Close' }).at(-1)
+    if (!closeVersion) throw new Error('归档版本明细缺少关闭按钮')
+    fireEvent.click(closeVersion)
     await waitFor(() => expect(screen.queryByRole('group', { name: '归档版本上下文' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: '查看 V1 数据明细' })).toBeVisible()
 

@@ -224,6 +224,8 @@ INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES(
         fixture_sql = f"""
 INSERT INTO faculties(id,name) VALUES('{ids['faculty']}','E2E faculty');
 INSERT INTO grades(id,name) VALUES('{ids['grade']}','2026级');
+INSERT INTO semester_report_grade_scopes(semester_id,version) VALUES('b0000000-0000-0000-0000-000000000002',1);
+INSERT INTO semester_report_grades(semester_id,grade_id) VALUES('b0000000-0000-0000-0000-000000000002','{ids['grade']}');
 INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}',2);
 INSERT INTO teaching_buildings(id,name) VALUES('{ids['building']}','E2E building');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['room']}','{ids['building']}','101');
@@ -425,7 +427,7 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         report['knownWarnings'] = payload['knownWarnings']
         report['unexpectedConsoleErrors'] = payload['unexpectedConsoleErrors']
         report['status'] = 'passed'
-        report['cases'] += ['学年/学期/周次新建关闭后首次编辑与重新打开', '周次 A/B 切换不串值', '真实 409 冲突保留输入并修正重试', '保存立即更新当前工作周及临时周选项', '注入 500/异常响应的安全提示与保留输入', '重载后真实数据库持久化结果']
+        report['cases'] += ['学期通报适用年级真实名册预览、乐观版本保存及重开回显', '学年/学期/周次新建关闭后首次编辑与重新打开', '周次 A/B 切换不串值', '真实 409 冲突保留输入并修正重试', '保存立即更新当前工作周及临时周选项', '注入 500/异常响应的安全提示与保留输入', '重载后真实数据库持久化结果']
         (OUTPUT / 'final-snapshot.txt').write_text(cli('snapshot'))
         print('PASS: calendar browser regression', flush=True)
         def browser_suite(name):

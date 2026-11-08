@@ -28,30 +28,32 @@ async (page) => {
     await category.click()
     await versionSnapshot.getByRole('row').filter({ hasText: studentName })
       .filter({ hasText: `${expectedDate} 08:00` }).waitFor()
-    const filters = versionSnapshot.getByRole('form', { name: '筛选本版记录' })
-    await selectSnapshotFilter(filters, '学号', '0000', '000001')
-    await selectSnapshotFilter(filters, '姓名', studentName.slice(0, 8), studentName)
-    await selectSnapshotFilter(filters, '班级', 'E2E', 'E2E class')
-    await selectSnapshotFilter(filters, '年级', '2026', '2026级')
-    const selectedFilters = await filters.locator('.ant-select').allTextContents()
-    check(['000001', studentName, 'E2E class', '2026级'].every(value => selectedFilters.some(item => item.includes(value))),
-      `Searchable select values were not retained before submit: ${selectedFilters.join(' | ')}`)
-    const recordsResponsePromise = page.waitForResponse(response => response.request().method() === 'GET' &&
-      response.url().includes(`/versions/${versionNo}/records?`))
-    await filters.locator('.report-version-record-filter-actions .ant-btn-primary').click()
-    let recordsResponse
-    try {
-      recordsResponse = await recordsResponsePromise
-    } catch (error) {
-      const requests = await page.evaluate(() => performance.getEntriesByType('resource')
-        .map(entry => entry.name).filter(url => url.includes('/versions/') && url.includes('/records?')))
-      throw new Error(`No version-record response after applying filters; observed requests: ${requests.join(' | ')}; ${error}`)
+    if (versionNo === 1) {
+      const filters = versionSnapshot.getByRole('form', { name: '筛选本版记录' })
+      await selectSnapshotFilter(filters, '学号', '0000', '000001')
+      await selectSnapshotFilter(filters, '姓名', studentName.slice(0, 8), studentName)
+      await selectSnapshotFilter(filters, '班级', 'E2E', 'E2E class')
+      await selectSnapshotFilter(filters, '年级', '2026', '2026级')
+      const selectedFilters = await filters.locator('.ant-select').allTextContents()
+      check(['000001', studentName, 'E2E class', '2026级'].every(value => selectedFilters.some(item => item.includes(value))),
+        `Searchable select values were not retained before submit: ${selectedFilters.join(' | ')}`)
+      const recordsResponsePromise = page.waitForResponse(response => response.request().method() === 'GET' &&
+        response.url().includes(`/versions/${versionNo}/records?`))
+      await filters.locator('.report-version-record-filter-actions .ant-btn-primary').click()
+      let recordsResponse
+      try {
+        recordsResponse = await recordsResponsePromise
+      } catch (error) {
+        const requests = await page.evaluate(() => performance.getEntriesByType('resource')
+          .map(entry => entry.name).filter(url => url.includes('/versions/') && url.includes('/records?')))
+        throw new Error(`No version-record response after applying filters; observed requests: ${requests.join(' | ')}; ${error}`)
+      }
+      const filterParams = await page.evaluate(url => Object.fromEntries(new URL(url).searchParams.entries()), recordsResponse.url())
+      check(recordsResponse.status() === 200 && filterParams.studentNumber === '000001' &&
+        filterParams.studentName === studentName && filterParams.className === 'E2E class' &&
+        filterParams.grade === '2026级',
+      `Snapshot filter request did not carry all selected values: ${recordsResponse.status()} ${recordsResponse.url()}`)
     }
-    const filterParams = await page.evaluate(url => Object.fromEntries(new URL(url).searchParams.entries()), recordsResponse.url())
-    check(recordsResponse.status() === 200 && filterParams.studentNumber === '000001' &&
-      filterParams.studentName === studentName && filterParams.className === 'E2E class' &&
-      filterParams.grade === '2026级',
-    `Snapshot filter request did not carry all selected values: ${recordsResponse.status()} ${recordsResponse.url()}`)
     const recordRow = versionSnapshot.getByRole('row').filter({ hasText: studentName })
       .filter({ hasText: `${expectedDate} 08:00` })
     await recordRow.waitFor()
@@ -110,12 +112,12 @@ async (page) => {
   cases.push('通报归档与工作台复用相同页面标题容器和顶部节奏')
 
   const versionHistory = page.locator('.weekly-report-history')
-  await versionHistory.locator('summary').click()
   const v1HistoryRow = versionHistory.getByRole('row').filter({ hasText: 'V1' }).last()
-  await v1HistoryRow.getByRole('button', { name: '查看明细', exact: true }).click()
-  await inspectVersionSnapshot(versionHistory, 1, 'E2E student A', fixture.date)
-  await versionHistory.getByRole('button', { name: '收起明细', exact: true }).click()
-  cases.push('阶段二版本记录支持个人信息筛选，并按表格列组合展示保存时的信息')
+  await v1HistoryRow.waitFor()
+  check((await v1HistoryRow.innerText()).includes('全周可见数据') &&
+    await versionHistory.getByRole('link', { name: '打开通报归档' }).count() === 1,
+  'Readonly version history did not show the saved version and archive entry')
+  cases.push('工作台展示只读版本记录，并通过归档查看冻结明细')
 
   const recordsResponsePromise = page.waitForResponse(response =>
     response.status() === 200 && response.url().includes('/api/v1/reports/workflow/') &&

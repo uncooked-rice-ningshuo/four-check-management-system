@@ -88,6 +88,7 @@ export type ReportClassSizeSnapshot = {
 export type ReportIndicators = {
   inputs: ReportMetricInputs
   includedTypeCodes: string[]
+  sourceStates?: Record<string, string>
   classes: ReportClassIndicators[]
   totals: ReportIndicatorValues
 }
@@ -96,6 +97,7 @@ export type ReportClassIndicators = {
   classId?: string
   grade: string
   className: string
+  sourceStates?: Record<string, string>
 } & ReportIndicatorValues
 
 export type ReportIndicatorValues = {

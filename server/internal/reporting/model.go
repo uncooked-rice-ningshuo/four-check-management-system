@@ -287,6 +287,7 @@ type ReportClassSizeSnapshot struct {
 	GradeID              string `json:"gradeId,omitempty"`
 	Grade                string `json:"grade"`
 	ClassName            string `json:"className"`
+	HeadTeacherName      string `json:"headTeacherName,omitempty"`
 	ExpectedStudentCount int    `json:"expectedStudentCount"`
 }
 
@@ -294,14 +295,16 @@ type ReportClassSizeSnapshot struct {
 type ReportIndicators struct {
 	Inputs            ReportMetricInputs      `json:"inputs"`
 	IncludedTypeCodes []string                `json:"includedTypeCodes"`
+	SourceStates      map[string]string       `json:"sourceStates,omitempty"`
 	Classes           []ReportClassIndicators `json:"classes"`
 	Totals            ReportIndicatorValues   `json:"totals"`
 }
 
 type ReportClassIndicators struct {
-	ClassID   string `json:"classId,omitempty"`
-	Grade     string `json:"grade"`
-	ClassName string `json:"className"`
+	ClassID      string            `json:"classId,omitempty"`
+	Grade        string            `json:"grade"`
+	ClassName    string            `json:"className"`
+	SourceStates map[string]string `json:"sourceStates,omitempty"`
 	ReportIndicatorValues
 }
 

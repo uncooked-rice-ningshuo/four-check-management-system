@@ -211,6 +211,13 @@ const catalog: InspectionDefinition[] = [
         "required": true
       },
       {
+        "key": "period",
+        "label": "课程节次",
+        "kind": "string",
+        "required": true,
+        "maxLength": 64
+      },
+      {
         "key": "classroomId",
         "label": "教室",
         "kind": "uuid",
@@ -221,13 +228,6 @@ const catalog: InspectionDefinition[] = [
         "label": "检查日期",
         "kind": "date",
         "required": true
-      },
-      {
-        "key": "period",
-        "label": "课程节次",
-        "kind": "string",
-        "required": true,
-        "maxLength": 64
       },
       {
         "key": "remark",
@@ -261,7 +261,7 @@ const catalog: InspectionDefinition[] = [
       "IMPORT"
     ],
     "rules": [
-      "One violation per student and normalized course section within the week; class, course, and date do not split this identity."
+      "Duplicate identity is student plus normalized course section within the semester, week and inspection type; course, class and date do not split the event."
     ]
   },
   {

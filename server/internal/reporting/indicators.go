@@ -232,7 +232,80 @@ func RecalculateReportIndicators(content *ReportVersionContent, records []Record
 		return err
 	}
 	content.Indicators = indicators
+	ApplyReportSourceStates(content)
 	return nil
+}
+
+// ApplyReportSourceStates describes source completeness at submission-cell granularity.
+// A class with zero records shares its type's confirmed source, but this is not
+// evidence that the class was individually inspected.
+func ApplyReportSourceStates(content *ReportVersionContent) {
+	if content.Indicators == nil || content.StatisticsRuleVersion != "WEEKLY_INDICATORS_V2" {
+		return
+	}
+	states := make(map[string]string, len(content.Indicators.IncludedTypeCodes))
+	for _, code := range content.Indicators.IncludedTypeCodes {
+		states[code] = "CONFIRMED_ZERO"
+	}
+	for _, row := range content.Rows {
+		code := row.InspectionTypeCode
+		if code == "" {
+			code = reportTypeCodeForName(row.InspectionType)
+		}
+		if code == "" {
+			continue
+		}
+		switch {
+		case row.DataStatus == "NO_CONFIRMED_DATA":
+			states[code] = "SOURCE_INCOMPLETE"
+		case row.RecordCount > 0 && states[code] != "SOURCE_INCOMPLETE":
+			states[code] = "CONFIRMED_WITH_RECORDS"
+		}
+	}
+	for _, cell := range content.IncompleteCells {
+		for _, row := range content.Rows {
+			if row.InspectionTypeID == cell.InspectionTypeID {
+				states[row.InspectionTypeCode] = "SOURCE_INCOMPLETE"
+			}
+		}
+	}
+	content.Indicators.SourceStates = states
+	for i := range content.Indicators.Classes {
+		class := &content.Indicators.Classes[i]
+		class.SourceStates = make(map[string]string, len(states))
+		for code, state := range states {
+			if state == "SOURCE_INCOMPLETE" {
+				class.SourceStates[code] = state
+			} else if classHasReportRecords(*class, code) {
+				class.SourceStates[code] = "CONFIRMED_WITH_RECORDS"
+			} else {
+				class.SourceStates[code] = "CONFIRMED_ZERO"
+			}
+		}
+	}
+}
+
+func classHasReportRecords(class ReportClassIndicators, code string) bool {
+	switch code {
+	case inspection.InspectionTypeAttendance:
+		return class.AttendanceRate != nil && class.AttendanceRate.ViolationStudentCount > 0
+	case inspection.InspectionTypeUnattended:
+		return class.UnattendedClassroom != nil && class.UnattendedClassroom.RawRecordCount > 0
+	case inspection.InspectionTypeMorning:
+		return class.MorningAttendance != nil && class.MorningAttendance.AbsencePersonTimes > 0
+	case inspection.InspectionTypeEveningSelfStudy:
+		return class.EveningSelfStudy != nil && class.EveningSelfStudy.RawRecordCount > 0
+	case inspection.InspectionTypeClassroomHygiene:
+		return class.ClassroomHygiene != nil && class.ClassroomHygiene.RawRecordCount > 0
+	case inspection.InspectionTypeDormitoryHygiene:
+		return class.DormitoryPersonalHygiene != nil && class.DormitoryPersonalHygiene.RawRecordCount > 0
+	case inspection.InspectionTypePublicDormitoryHygiene:
+		return class.DormitoryPublicHygiene != nil && class.DormitoryPublicHygiene.RawRecordCount > 0
+	case inspection.InspectionTypeLateReturn:
+		return class.LateReturn != nil && class.LateReturn.RawRecordCount > 0
+	default:
+		return false
+	}
 }
 
 type reportClassReference struct {

@@ -13,6 +13,7 @@ vi.mock('../model/queries', () => ({
   useAddReportAdjustment: () => ({ mutate: vi.fn(), isPending: false }),
   useAddReportCorrection: () => ({ mutate: mocks.correct, isPending: false }),
 }))
+vi.mock('./ReportOutputPanel', () => ({ ReportOutputPanel: () => <><button>Word 文件</button><button>Excel 文件</button></> }))
 
 const period: ReportingPeriod = { academicYearId: 'year-1', academicYearName: '学年', semesterId: 'semester-1', semesterName: '学期', weekId: 'week-1', weekNo: 1, startDate: '2026-03-01', endDate: '2026-03-07' }
 const summaryRow: ReportingSummaryRow = { departmentId: 'department-1', departmentName: '宿管部', collegeLevel: false, inspectionTypeId: 'type-1', inspectionTypeName: '宿舍卫生', isRequired: false, submissionCount: 1, draftBatchCount: 0, pendingReviewBatchCount: 0, returnedBatchCount: 0, confirmedBatchCount: 1, confirmedRecordCount: 1, pendingReviewOrReturnedRecordCount: 0, zeroRecordPendingReviewBatchCount: 0, zeroRecordReturnedBatchCount: 0, zeroRecordConfirmedBatchCount: 0 }
@@ -308,8 +309,9 @@ describe('通报记录修正', () => {
     expect(screen.getByText('已定稿 · V1')).toBeVisible()
     const actions = screen.getByRole('region', { name: '当前阶段操作' })
     expect(within(actions).queryByText('已定稿 · 只读')).not.toBeInTheDocument()
-    expect(within(actions).getByRole('button', { name: /Word/ })).toBeDisabled()
-    expect(within(actions).getByRole('button', { name: /Excel/ })).toBeDisabled()
+    expect(within(actions).getByRole('button', { name: 'Word 文件' })).toBeEnabled()
+    expect(within(actions).getByRole('button', { name: 'Excel 文件' })).toBeEnabled()
+    expect(screen.queryByText('V1 · Word/Excel 文件')).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: '按检查类型分类' })).toBeVisible()
   })
 

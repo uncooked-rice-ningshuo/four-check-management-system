@@ -193,6 +193,7 @@ FROM weekly_reports wr LEFT JOIN weekly_report_versions version ON version.repor
 		if err != nil {
 			return reporting.ReportDraft{}, err
 		}
+		reporting.ApplyReportSourceStates(&command.Content)
 	}
 	contentJSON, err := json.Marshal(command.Content)
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"four-check-management-system/server/internal/organization"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/reporting"
+	"four-check-management-system/server/internal/reportoutput"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/store"
 	"four-check-management-system/server/internal/workflow"
@@ -75,6 +76,7 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 	organizationService := organization.NewService(db)
 	academicService := academic.NewService(db)
 	permissionService := permission.NewService(db)
+	reportService := reporting.NewService(db, permissionService)
 	manualAttendance := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academicService, organizationService, permissionService)
 	return httpapi.AdminServices{
 		Organization: organizationService, Academic: academicService, ReportGrades: academic.NewReportGradeService(db), Permission: permissionService,
@@ -93,7 +95,8 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 		AttendanceMutations:      inspection.NewMutationService(db, manualAttendance, permissionService),
 		Dashboard:                dashboard.NewService(db, academicService, organizationService, permissionService),
 		Workflow:                 workflow.NewService(db, permissionService),
-		Reporting:                reporting.NewService(db, permissionService),
+		Reporting:                reportService,
+		ReportOutput:             reportoutput.NewService(db, storageService, permissionService, reportService),
 	}
 }
 

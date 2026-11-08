@@ -157,7 +157,7 @@ async (page) => {
     const typeRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
     await typeRow.waitFor()
     const typeCells = await typeRow.getByRole('cell').allInnerTexts()
-    check(typeCells[1] === '3' && typeCells[5] === '3' && typeCells[6] === '5', `${loginName} saw an unexpected type summary: ${typeCells.join('|')}`)
+    check(typeCells[1]?.includes('已提交 3 批') && typeCells[2]?.includes('5 条记录'), `${loginName} saw an unexpected type summary: ${typeCells.join('|')}`)
     await logout()
   }
   cases.push('办公室部长和副部长均能从页面入口查看跨来源的检查类型周汇总')
@@ -176,7 +176,7 @@ async (page) => {
   const scopedRow = page.locator('tr[data-row-key="30000000-0000-0000-0000-000000000001"]')
   await scopedRow.waitFor()
   const scopedCells = await scopedRow.getByRole('cell').allInnerTexts()
-  check(scopedCells[1] === '3' && scopedCells[5] === '3' && scopedCells[6] === '5',
+  check(scopedCells[1]?.includes('已提交 3 批') && scopedCells[2]?.includes('5 条记录'),
     `Inspection-type permission should cover authorized department and college records: ${scopedCells.join('|')}`)
   check(await page.getByRole('link', { name: '通报归档', exact: true }).count() === 0,
     'REPORT_VIEW alone must not expose the ARCHIVE_VIEW navigation item')

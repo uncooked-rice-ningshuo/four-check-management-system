@@ -24,6 +24,7 @@ import { InspectionTypeRoute } from './router/InspectionTypeRoute'
 import { AttendancePage } from '../pages/inspection/AttendancePage'
 import { WeeklyReportSummaryPage } from '../pages/report/WeeklyReportSummaryPage'
 import { WeeklyReportArchivePage } from '../pages/report/WeeklyReportArchivePage'
+import { ReportOutputSettingsPage } from '../pages/report/ReportOutputSettingsPage'
 import { AppLayout } from './layouts/AppLayout'
 import { ProtectedRoute } from './router/ProtectedRoute'
 import { SuperAdminOnly, SuperAdminRoute } from './router/SuperAdminRoute'
@@ -57,6 +58,7 @@ export default function App() {
 			<Route path="reports/weekly-summary" element={<Navigate to="/reports/workbench" replace />} />
 			<Route path="reports/weekly-draft" element={<Navigate to="/reports/workbench" replace />} />
 			<Route path="reports/archive" element={<EffectivePermissionRoute action="ARCHIVE_VIEW"><WeeklyReportArchivePage /></EffectivePermissionRoute>} />
+					<Route path="reports/output-settings" element={<EffectivePermissionRoute action="REPORT_OUTPUT_SETTINGS_MANAGE"><ReportOutputSettingsPage /></EffectivePermissionRoute>} />
 			<Route path="inspections/late-return" element={<InspectionTypeRoute typeCode="LATE_RETURN"><LateReturnPage /></InspectionTypeRoute>} />
 			<Route path="inspections/evening-self-study" element={<InspectionTypeRoute typeCode="EVENING_SELF_STUDY"><EveningSelfStudyPage /></InspectionTypeRoute>} />
 			<Route path="inspections/morning-attendance" element={<InspectionTypeRoute typeCode="MORNING_ATTENDANCE"><MorningAttendancePage /></InspectionTypeRoute>} />

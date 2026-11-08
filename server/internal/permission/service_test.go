@@ -88,6 +88,48 @@ func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
 	}
 }
 
+func TestReportOutputSettingsPermissionIsGlobalAndIndependent(t *testing.T) {
+	for _, test := range []struct {
+		name, role, department, organizationRole string
+		want                                     bool
+	}{
+		{"office minister", SystemRoleMember, "OFFICE", "MINISTER", true},
+		{"office deputy", SystemRoleMember, "OFFICE", "VICE_MINISTER", true},
+		{"office member", SystemRoleMember, "OFFICE", "MEMBER", false},
+		{"other minister", SystemRoleMember, "STUDY", "MINISTER", false},
+		{"system admin", SystemRoleAdmin, "", "", false},
+		{"super admin", SystemRoleSuperAdmin, "", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := NewService(&memoryRepository{profile: AccessProfile{AccountID: "user", SystemRole: test.role, DepartmentCode: test.department, OrganizationRoleCode: test.organizationRole}}).Effective(context.Background(), "user")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := result.Allowed(ActionReportOutputSettingsManage, Scope{}); got != test.want {
+				t.Fatalf("allowed = %v, want %v", got, test.want)
+			}
+		})
+	}
+	repository := &memoryRepository{profile: AccessProfile{AccountID: "member", SystemRole: SystemRoleMember}}
+	service := NewService(repository)
+	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Effective(context.Background(), "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed(ActionReportOutputSettingsManage, Scope{}) || result.Allowed(ActionReportView, Scope{}) {
+		t.Fatalf("unexpected permission: %+v", result.Permissions)
+	}
+	for _, scope := range []Scope{{AcademicYearID: "year"}, {SemesterID: "semester"}, {WeekID: "week"}, {InspectionTypeID: "type"}} {
+		_, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow, Scope: scope})
+		if !errors.Is(err, ErrInvalidRule) {
+			t.Fatalf("scope %+v: %v", scope, err)
+		}
+	}
+}
+
 func TestOnlySportsLeadershipReceivesMorningScheduleManagement(t *testing.T) {
 	for _, testCase := range []struct {
 		name             string
@@ -312,5 +354,19 @@ func TestInspectionManageIsSeparateFromEntry(t *testing.T) {
 		if result.Allowed("INSPECTION_MANAGE", Scope{DepartmentID: "study", InspectionTypeID: "attendance"}) != (role != "MEMBER") {
 			t.Fatalf("management permission for %s", role)
 		}
+	}
+}
+
+func TestHasAnyAllowedForScopedReportDefaults(t *testing.T) {
+	result := EffectiveResult{Permissions: []EffectivePermission{
+		{Action: ActionReportGenerate, Effect: EffectAllow, Scope: Scope{WeekID: "week-a"}},
+		{Action: ActionReportGenerate, Effect: EffectDeny, Scope: Scope{WeekID: "week-b"}},
+	}}
+	if result.Allowed(ActionReportGenerate, Scope{}) || !result.HasAnyAllowed(ActionReportGenerate) {
+		t.Fatal("scoped generator must be able to read defaults without gaining global generation")
+	}
+	result.Permissions = append(result.Permissions, EffectivePermission{Action: ActionReportGenerate, Effect: EffectDeny, Scope: Scope{}})
+	if result.HasAnyAllowed(ActionReportGenerate) {
+		t.Fatal("global denial must block reading generation defaults")
 	}
 }

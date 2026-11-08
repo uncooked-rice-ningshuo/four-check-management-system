@@ -77,3 +77,25 @@ func TestCalculateReportIndicatorsV2KeepsEmptyClassesAndRejectsOutsideScope(t *t
 		t.Fatal("out-of-scope record was accepted")
 	}
 }
+
+func TestApplyReportSourceStatesDistinguishesZeroAndMissing(t *testing.T) {
+	content := &ReportVersionContent{
+		StatisticsRuleVersion: "WEEKLY_INDICATORS_V2",
+		Rows: []ReportCountRow{
+			{InspectionTypeID: "attendance", InspectionTypeCode: inspection.InspectionTypeAttendance, RecordCount: 1, DataStatus: "CONFIRMED_RECORDS"},
+			{InspectionTypeID: "morning", InspectionTypeCode: inspection.InspectionTypeMorning, ZeroReceiptCount: 1, DataStatus: "CONFIRMED_ZERO_RECORD_RECEIPT"},
+			{InspectionTypeID: "late", InspectionTypeCode: inspection.InspectionTypeLateReturn, DataStatus: "NO_CONFIRMED_DATA"},
+		},
+		Indicators: &ReportIndicators{
+			IncludedTypeCodes: []string{inspection.InspectionTypeAttendance, inspection.InspectionTypeMorning, inspection.InspectionTypeLateReturn},
+			Classes: []ReportClassIndicators{{ClassID: "class-a", ReportIndicatorValues: ReportIndicatorValues{
+				AttendanceRate: &ReportAttendanceRateMetric{ViolationStudentCount: 1},
+			}}},
+		},
+	}
+	ApplyReportSourceStates(content)
+	got := content.Indicators.Classes[0].SourceStates
+	if got[inspection.InspectionTypeAttendance] != "CONFIRMED_WITH_RECORDS" || got[inspection.InspectionTypeMorning] != "CONFIRMED_ZERO" || got[inspection.InspectionTypeLateReturn] != "SOURCE_INCOMPLETE" {
+		t.Fatalf("class source states = %+v", got)
+	}
+}

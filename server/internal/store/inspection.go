@@ -269,17 +269,24 @@ const inspectionFrom = ` FROM inspection_records ir
 	LEFT JOIN department_submissions ds ON ds.id=ir.submission_id
 	LEFT JOIN accounts actual_submitter ON actual_submitter.id=ds.submitted_by `
 const inspectionCreatedByName = `COALESCE(importer.name,creator.name,'账号不可用')`
-const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,` + inspectionCreatedByName + `,` + inspectionCreatedByName + `,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,COALESCE(ir.class_id::text,''),ir.grade_snapshot`
+const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,` + inspectionCreatedByName + `,` + inspectionCreatedByName + `,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,ir.class_name_snapshot,COALESCE(ir.class_id::text,''),ir.grade_snapshot`
 const inspectionEditableSQL = `ir.locked_by_report_id IS NULL AND (
  (ir.status='DRAFT' AND ir.submission_id IS NULL)
  OR (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS(
   SELECT 1 FROM department_submissions ds WHERE ds.id=ir.submission_id AND ds.status='RETURNED')))`
+const confirmedInspectionSQL = `ir.status='CONFIRMED' AND EXISTS(
+ SELECT 1 FROM department_submissions ds
+ JOIN department_submission_revisions rev ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
+ WHERE ds.id=ir.submission_id AND ds.status='CONFIRMED' AND ir.id=ANY(rev.record_ids))`
 const inspectionDeletableSQL = `ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL`
 
 func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.MutationAccess, mode string, lock bool) (inspection.InspectionRecord, error) {
 	args := []any{id}
 	editable := inspectionAccessSQL(a, "mutate", &args)
 	sql := inspectionColumns + `,(` + inspectionEditableSQL + ` AND ` + editable + `),(` + inspectionDeletableSQL + ` AND ` + editable + `),COALESCE(actual_submitter.name,''),ds.submitted_at` + inspectionFrom + ` WHERE ir.id=$1 AND ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, mode, &args)
+	if a.ConfirmedOnly {
+		sql += " AND " + confirmedInspectionSQL
+	}
 	if lock {
 		sql += " FOR UPDATE OF ir"
 	}
@@ -321,11 +328,24 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 	result := inspection.InspectionPage{Items: []inspection.InspectionRecord{}, Page: f.Page, PageSize: f.PageSize}
 	args := []any{}
 	where := ` WHERE ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, "read", &args)
-	for _, filter := range []struct{ column, value string }{{"ir.semester_id", f.SemesterID}, {"ir.week_id", f.WeekID}, {"ir.inspection_type_id", f.InspectionTypeID}, {"ir.department_id", f.DepartmentID}, {"ir.status", f.Status}, {"ir.source", f.Source}} {
+	for _, filter := range []struct{ column, value string }{{"ir.semester_id", f.SemesterID}, {"ir.week_id", f.WeekID}, {"ir.inspection_type_id", f.InspectionTypeID}, {"ir.status", f.Status}, {"ir.source", f.Source}} {
 		if filter.value != "" {
 			args = append(args, filter.value)
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
+	}
+	departmentColumn := "NULLIF(ir.submission_department_key,'00000000-0000-0000-0000-000000000000'::uuid)"
+	if f.ConfirmedSubmissionOnly {
+		departmentColumn = "ds.department_id"
+	}
+	if f.DepartmentID != "" || f.CollegeOnly {
+		args = append(args, f.DepartmentID)
+		target := fmt.Sprintf("%s IS NOT DISTINCT FROM NULLIF($%d,'')::uuid", departmentColumn, len(args))
+		if f.SubmissionCandidatesOnly && (a.CanRouteOwn || a.Unrestricted) {
+			args = append(args, a.ActorID)
+			target = fmt.Sprintf("((%s AND ir.attribution_mode<>'ADMINISTRATOR') OR (ir.created_by=$%d::uuid))", target, len(args))
+		}
+		where += " AND " + target
 	}
 	if f.ImportBatchID != "" {
 		args = append(args, f.ImportBatchID)
@@ -348,18 +368,20 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 		where += fmt.Sprintf(" AND (ir.class_name_snapshot ILIKE $%d OR EXISTS(SELECT 1 FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id AND rc.class_name_snapshot ILIKE $%d))", len(args), len(args))
 	}
 	if f.SubmissionCandidatesOnly {
-		where += " AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL AND ir.attribution_mode<>'ADMINISTRATOR'"
+		if f.DepartmentID != "" {
+			args = append(args, f.DepartmentID)
+			where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM department_inspection_scopes mapping JOIN departments d ON d.id=mapping.department_id WHERE d.id=$%d::uuid AND d.enabled AND mapping.inspection_type_id=ir.inspection_type_id AND mapping.enabled AND mapping.can_enter)", len(args))
+		}
+		where += " AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL"
+		if !(a.CanRouteOwn || a.Unrestricted) {
+			where += " AND ir.attribution_mode<>'ADMINISTRATOR'"
+		}
 		where += " AND " + inspectionAccessSQL(a, "mutate", &args)
 	}
-	if f.ConfirmedSubmissionOnly {
-		where += ` AND ir.status='CONFIRMED' AND EXISTS(
- SELECT 1 FROM department_submissions ds
- JOIN department_submission_revisions rev ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
- WHERE ds.id=ir.submission_id AND ds.status='CONFIRMED' AND ir.id=ANY(rev.record_ids))`
+	if f.ConfirmedSubmissionOnly || a.ConfirmedOnly {
+		where += " AND " + confirmedInspectionSQL
 	}
-	if f.CollegeOnly {
-		where += " AND ir.department_id IS NULL AND ir.attribution_mode='COLLEGE'"
-	}
+
 	if f.AttributionMode != "" {
 		args = append(args, f.AttributionMode)
 		where += fmt.Sprintf(" AND ir.attribution_mode=$%d", len(args))

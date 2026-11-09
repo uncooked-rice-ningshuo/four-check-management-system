@@ -38,6 +38,7 @@ type ManualAttendanceInput struct {
 
 // ManualActor is supplied by authentication, never decoded from the request body.
 type ManualActor struct {
+	IsAdmin             bool
 	ID                  string
 	IsSuperAdmin        bool
 	IsMember            bool

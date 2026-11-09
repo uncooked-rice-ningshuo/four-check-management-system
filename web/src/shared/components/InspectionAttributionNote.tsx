@@ -8,9 +8,9 @@ type Props = {
 /** Explains administrator-owned inspection records and preserved department attribution. */
 export function InspectionAttributionNote({ editing, administratorOwned }: Props) {
   const note = !editing
-    ? { title: '管理员独立记录', description: '无需选择目标部门；记录不进入部门提交、审核和通报流程。' }
+    ? { title: '管理员独立记录', description: '确认提交时选择负责部门或管理员通道。' }
     : administratorOwned
-      ? { title: '管理员独立记录', description: '此记录不归属部门，也不进入部门提交、审核和通报流程。' }
+      ? { title: '管理员独立记录', description: '可在提交批次中查看本次提交的去向。' }
       : { title: '保留原部门归属', description: '此次修改不会改变记录原有的部门归属。' }
 
   return (

@@ -113,7 +113,7 @@ const dashboardAggregateSQL = `WITH authorized(department_id, inspection_type_id
 	COUNT(ir.id) FILTER (WHERE ir.status = 'CONFIRMED')::int AS confirmed,
 	COUNT(ir.id) FILTER (WHERE ir.status = 'LOCKED')::int AS locked
 	FROM authorized a LEFT JOIN inspection_records ir
-	ON COALESCE(ir.department_id::text,'') = a.department_id AND ir.inspection_type_id::text = a.inspection_type_id
+	ON COALESCE(NULLIF(ir.submission_department_key,'00000000-0000-0000-0000-000000000000'::uuid)::text,'') = a.department_id AND ir.inspection_type_id::text = a.inspection_type_id
 	AND ir.semester_id = $1::uuid AND ir.week_id = $2::uuid AND ir.deleted_at IS NULL
 	GROUP BY a.department_id, a.inspection_type_id
 ), batch_counts AS (

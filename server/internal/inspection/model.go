@@ -255,6 +255,7 @@ type AttendanceListFilter struct {
 // AttendanceScope is the already-compiled effective data scope for one list request.
 // Empty values mean the corresponding dimension is unrestricted.
 type AttendanceScope struct {
+	ConfirmedOnly    bool
 	SemesterID       string
 	WeekID           string
 	InspectionTypeID string
@@ -265,6 +266,7 @@ type AttendanceScope struct {
 }
 
 type AttendanceListQuery struct {
+	ConfirmedOnly    bool
 	SemesterID       string
 	WeekID           string
 	InspectionTypeID string

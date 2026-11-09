@@ -293,7 +293,7 @@ func TestBuildAttendanceListQueriesPushesEveryScopeDimensionIntoSQL(t *testing.T
 		"ir.semester_id = $1::uuid",
 		"ir.week_id = $2::uuid",
 		"ir.inspection_type_id = $3::uuid",
-		"cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[])",
+		"cardinality($10::text[]) = 0 OR ir.submission_department_key::text = ANY($10::text[])",
 		"($5::text = '' OR ir.class_id = $5::uuid)",
 		"($6::text = '' OR ir.grade_snapshot = $6)",
 		"($8::text = '' OR ir.status = $8)",

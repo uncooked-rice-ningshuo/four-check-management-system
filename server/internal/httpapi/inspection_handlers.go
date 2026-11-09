@@ -84,7 +84,7 @@ func (h *handler) inspectionActor(c *gin.Context) (inspection.ManualActor, bool)
 		writeError(c, 503, "SERVICE_UNAVAILABLE", "检查记录服务尚未就绪")
 		return inspection.ManualActor{}, false
 	}
-	return inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}, true
+	return inspection.ManualActor{IsAdmin: a.SystemRole == auth.SystemRoleAdmin, ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}, true
 }
 func bindInspection(c *gin.Context, v any) bool {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
@@ -162,14 +162,15 @@ func (h *handler) listSubmissionCandidates(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或管理员范围")
 		return
 	}
-	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
+	actor := inspection.ManualActor{IsAdmin: account.SystemRole == auth.SystemRoleAdmin, ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
 	var filter inspection.InspectionFilter
 	if c.ShouldBindQuery(&filter) != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "分页或筛选格式无效")
 		return
 	}
-	if account.SystemRole == auth.SystemRoleMember {
-		filter.DepartmentID = account.PrimaryDepartmentID
+	if !validSubmissionDestination(account, filter.DepartmentID) {
+		writeInspectionError(c, inspection.ErrScopeMismatch)
+		return
 	}
 	filter.SubmissionCandidatesOnly = true
 	filter.Status = inspection.RecordStatusDraft

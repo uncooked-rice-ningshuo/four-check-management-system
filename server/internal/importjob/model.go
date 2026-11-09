@@ -74,6 +74,7 @@ type Batch struct {
 }
 
 type SubmissionBatchQuery struct {
+	CanRouteOwn, CanManage                             bool
 	SemesterID, WeekID, InspectionTypeID, DepartmentID string
 	Page, PageSize                                     int
 }

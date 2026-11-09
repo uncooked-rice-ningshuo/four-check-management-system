@@ -95,7 +95,7 @@ it('never assigns a department to an administrator-owned record', async () => {
 
   expect(screen.queryByRole('combobox', { name: '业务归属部门' })).not.toBeInTheDocument()
   expect(screen.getByText('管理员独立记录')).toBeInTheDocument()
-  expect(screen.getByText('无需选择目标部门；记录不进入部门提交、审核和通报流程。')).toBeInTheDocument()
+  expect(screen.getByText('确认提交时选择负责部门或管理员通道。')).toBeInTheDocument()
   await waitFor(() => expect(entryOptions).toHaveBeenCalled())
   expect(entryOptions.mock.calls.every(call => !call[0].departmentId)).toBe(true)
 })

@@ -27,16 +27,30 @@ func (h *handler) listSubmissionImportBatches(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或管理员范围")
 		return
 	}
-	if account.SystemRole == auth.SystemRoleMember {
-		scope.DepartmentID = account.PrimaryDepartmentID
+	if !validSubmissionDestination(account, scope.DepartmentID) {
+		writeInspectionError(c, inspection.ErrScopeMismatch)
+		return
 	}
 	page, pageSize, ok := pagination(c)
 	if !ok {
 		return
 	}
+	canManage := account.IsSuperAdmin
+	if !canManage {
+		enriched, ok := h.inspectionScopeWithAcademicYear(c, scope, false)
+		if !ok {
+			return
+		}
+		access, err := h.permission.Effective(c, account.ID)
+		if err != nil {
+			writeInspectionError(c, err)
+			return
+		}
+		canManage = access.Allowed(permission.ActionInspectionManage, enriched)
+	}
 	result, err := h.importJobs.ListSubmissionBatches(c, account.ID, importjob.SubmissionBatchQuery{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
-		DepartmentID: scope.DepartmentID, Page: page, PageSize: pageSize,
+		CanManage: canManage, CanRouteOwn: account.IsSuperAdmin || account.SystemRole == auth.SystemRoleAdmin, DepartmentID: scope.DepartmentID, Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		writeImportError(c, err)
@@ -67,7 +81,11 @@ func (h *handler) listSubmissionBatchRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if batch.AttributionMode == inspection.AttributionModeAdministrator {
+	if !validSubmissionDestination(account, batch.DepartmentID) {
+		writeInspectionError(c, inspection.ErrScopeMismatch)
+		return
+	}
+	if batch.AttributionMode == inspection.AttributionModeAdministrator && (batch.CreatedBy != account.ID || account.SystemRole == auth.SystemRoleMember) {
 		writeImportError(c, importjob.ErrBatchNotFound)
 		return
 	}
@@ -83,7 +101,7 @@ func (h *handler) listSubmissionBatchRecords(c *gin.Context) {
 	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
 	result, err := h.inspections.List(c, actor, inspection.InspectionFilter{
 		SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID,
-		DepartmentID: batch.DepartmentID, ImportBatchID: batch.ID, Page: page, PageSize: pageSize,
+		ImportBatchID: batch.ID, Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		writeInspectionError(c, err)

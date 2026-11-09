@@ -360,20 +360,21 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             report['status'] = 'passed'
             print('PASS: academic-week-import', flush=True)
             raise SystemExit(0)
-        if ENV.get('BROWSER_SUITE') == 'department-submission':
+        if ENV.get('BROWSER_SUITE') in ('department-submission', 'submission-routing'):
+            suite_name = ENV['BROWSER_SUITE']
             fixture.update(authPassword=changed_password, matrixPassword=secrets.token_hex(20))
             PRIVATE_VALUES.append(fixture['matrixPassword'])
-            suite = temp / 'department-submission.js'
-            suite.write_text((ROOT / 'web/e2e/department-submission.js').read_text().replace('__FIXTURE__', json.dumps(fixture, ensure_ascii=False)).replace('__OUTPUT__', json.dumps(str(OUTPUT))))
+            suite = temp / (suite_name + '.js')
+            suite.write_text((ROOT / 'web/e2e' / (suite_name + '.js')).read_text().replace('__FIXTURE__', json.dumps(fixture, ensure_ascii=False)).replace('__OUTPUT__', json.dumps(str(OUTPUT))))
             payload = json.loads(cli('--raw', 'run-code', '--filename', str(suite)))
-            (OUTPUT / 'department-submission.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-            report['suites'] = {'department-submission': payload}
+            (OUTPUT / (suite_name + '.json')).write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            report['suites'] = {suite_name: payload}
             report['cases'] += payload['cases']
             report['browserVersion'] = payload['browserVersion']
             report['browserErrors'] = payload['browserErrors']
             report['faultInjection'] = payload.get('faultInjection', [])
             report['status'] = 'passed'
-            print('PASS: department-submission', flush=True)
+            print('PASS:', suite_name, flush=True)
             raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'master-data-import':
             fixture['invalidMasterDataImportFile'] = str(temp / 'master-data-malformed.xlsx')

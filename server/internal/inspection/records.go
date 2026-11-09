@@ -181,6 +181,8 @@ func (s *RecordService) access(ctx context.Context, a ManualActor) (MutationAcce
 		return result, nil
 	}
 	p, err := s.permissions.Effective(ctx, a.ID)
+	result.ConfirmedOnly = p.ConfirmedInspectionsOnly
+	result.CanRouteOwn = p.SystemRole == permission.SystemRoleAdmin
 	result.Permissions = p.Permissions
 	return result, err
 }
@@ -215,7 +217,8 @@ func normalizeInspectionInput(i *InspectionInput) error {
 }
 
 func resolveInspectionAttribution(actor ManualActor, input *InspectionInput) error {
-	if actor.IsSuperAdmin && strings.TrimSpace(input.DepartmentID) != "" {
+	administrator := actor.IsSuperAdmin || actor.IsAdmin
+	if administrator && (strings.TrimSpace(input.DepartmentID) != "" || (input.AttributionMode != "" && input.AttributionMode != AttributionModeAdministrator)) {
 		return ErrScopeMismatch
 	}
 	departmentID, err := ResolveEntryDepartment(actor, input.DepartmentID)
@@ -225,7 +228,7 @@ func resolveInspectionAttribution(actor ManualActor, input *InspectionInput) err
 	input.DepartmentID = departmentID
 	mode := strings.TrimSpace(input.AttributionMode)
 	if mode == "" {
-		if actor.IsSuperAdmin && departmentID == "" {
+		if administrator && departmentID == "" {
 			mode = AttributionModeAdministrator
 		} else if departmentID == "" {
 			mode = AttributionModeCollege
@@ -233,7 +236,7 @@ func resolveInspectionAttribution(actor ManualActor, input *InspectionInput) err
 			mode = AttributionModeDepartment
 		}
 	}
-	if mode == AttributionModeAdministrator && (!actor.IsSuperAdmin || departmentID != "") {
+	if mode == AttributionModeAdministrator && (!administrator || departmentID != "") {
 		return ErrScopeMismatch
 	}
 	input.AttributionMode = mode

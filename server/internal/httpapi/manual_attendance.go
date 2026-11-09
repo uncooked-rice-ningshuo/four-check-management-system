@@ -35,7 +35,7 @@ func (h *handler) createManualAttendance(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
-	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
+	actor := inspection.ManualActor{IsAdmin: account.SystemRole == auth.SystemRoleAdmin, ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
 	departmentID, err := inspection.ResolveEntryDepartment(actor, input.DepartmentID)
 	if err != nil {
 		writeError(c, 403, "FORBIDDEN_SCOPE", "当前账号无有效录入部门或不能选择其他部门")

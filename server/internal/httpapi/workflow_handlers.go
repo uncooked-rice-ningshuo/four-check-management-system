@@ -5,9 +5,15 @@ import (
 	"log"
 	"net/http"
 
+	"four-check-management-system/server/internal/auth"
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/gin-gonic/gin"
 )
+
+func validSubmissionDestination(account auth.Account, department string) bool {
+	return account.SystemRole != auth.SystemRoleMember || (account.PrimaryDepartmentID != "" && department == account.PrimaryDepartmentID && department != inspection.CollegeDepartmentOptionID)
+}
 
 func (h *handler) submitDepartmentBatch(c *gin.Context) {
 	account, ok := h.currentAccount(c)
@@ -24,6 +30,10 @@ func (h *handler) submitDepartmentBatch(c *gin.Context) {
 	}
 	var input workflow.SubmitInput
 	if !bindInspection(c, &input) {
+		return
+	}
+	if !validSubmissionDestination(account, input.Scope.DepartmentID) {
+		writeInspectionError(c, inspection.ErrScopeMismatch)
 		return
 	}
 	result, err := h.workflow.Submit(c, workflow.Actor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin}, input, requestMetadata(c, input.Explanation))

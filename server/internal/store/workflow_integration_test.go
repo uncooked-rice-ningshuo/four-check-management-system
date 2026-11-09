@@ -12,6 +12,7 @@ import (
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/dashboard"
+	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/workflow"
@@ -19,11 +20,12 @@ import (
 )
 
 type workflowPermissions struct {
+	role  string
 	rules []permission.EffectivePermission
 }
 
 func (p *workflowPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
-	return permission.EffectiveResult{Permissions: p.rules}, nil
+	return permission.EffectiveResult{SystemRole: p.role, Permissions: p.rules}, nil
 }
 
 func TestSubmitDepartmentBatchPostgres(t *testing.T) {
@@ -281,7 +283,7 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 	details, _ := json.Marshal(map[string]any{"studentId": "a0000000-0000-0000-0000-000000000007",
 		"classId": class, "courseId": "a0000000-0000-0000-0000-000000000013",
 		"classroomId": "a0000000-0000-0000-0000-000000000009", "date": "2026-09-02",
-		"time": "08:00", "period": "1-2", "absenceHours": 2, "remark": "corrected"})
+		"period": "1-2", "absenceHours": 2, "remark": "corrected"})
 	inspectionService := inspection.NewRecordService(&Postgres{Pool: pool}, permissions)
 	if _, err := pool.Exec(ctx, `UPDATE attendance_details SET penalty_multiplier=NULL WHERE record_id=$1`, first); err != nil {
 		t.Fatal(err)
@@ -571,7 +573,7 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 		}
 		schoolSubmit := workflow.NewService(&Postgres{Pool: pool}, &workflowPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID, ClassID: class}}}})
 		batch, err := schoolSubmit.Submit(ctx, actor, schoolInput, audit.Metadata{})
-		if err != nil || batch.Scope.DepartmentID != "" || batch.DepartmentName != "管理员" || batch.Status != workflow.PendingReview {
+		if err != nil || batch.Scope.DepartmentID != "" || batch.DepartmentName != "历史校级" || batch.Status != workflow.PendingReview {
 			t.Fatalf("college submit: %+v %v", batch, err)
 		}
 		if _, err := departmentOnly.Detail(ctx, actor, batch.ID); !errors.Is(err, workflow.ErrSubmissionMissing) {
@@ -589,6 +591,85 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 			t.Fatalf("college weekly aggregation: %+v %v", counts, err)
 		}
 	})
+	t.Run("administrator chooses either destination and reviews own batch", func(t *testing.T) {
+		administrator := workflow.Actor{ID: account}
+		adminRules := &workflowPermissions{role: permission.SystemRoleAdmin}
+		for _, action := range []string{permission.ActionInspectionEnter, permission.ActionInspectionView, permission.ActionInspectionReview} {
+			adminRules.rules = append(adminRules.rules, permission.EffectivePermission{Action: action, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID}})
+		}
+		service := workflow.NewService(&Postgres{Pool: pool}, adminRules)
+		db := &Postgres{Pool: pool}
+		for index, destination := range []string{department, ""} {
+			var recordID string
+			err := pool.QueryRow(ctx, `INSERT INTO inspection_records(id,inspection_type_id,semester_id,week_id,attribution_mode,student_id,student_no_snapshot,student_name_snapshot,class_id,class_name_snapshot,grade_snapshot,occurred_at,violation_count,source,dedup_key,created_by)
+   SELECT gen_random_uuid(),inspection_type_id,semester_id,week_id,'ADMINISTRATOR',student_id,student_no_snapshot,student_name_snapshot,class_id,class_name_snapshot,grade_snapshot,occurred_at+interval '8 days',violation_count,source,md5(random()::text)||md5(random()::text),created_by FROM inspection_records WHERE id=$1 RETURNING id`, first).Scan(&recordID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = pool.Exec(ctx, `INSERT INTO attendance_details(record_id,course_id,absence_hours,period_text,classroom_id,penalty_multiplier) SELECT $1,course_id,absence_hours,period_text,classroom_id,1 FROM attendance_details WHERE record_id=$2`, recordID, first); err != nil {
+				t.Fatal(err)
+			}
+			if index == 1 {
+				// Exercise the imported-record path with a confirmed source batch.
+				var importID string
+				err := pool.QueryRow(ctx, `WITH f AS (
+                  INSERT INTO files(id,bucket,object_key,original_name,size_bytes,sha256,status,retention_type,created_by)
+                  VALUES(gen_random_uuid(),'isolated','routing.xlsx','routing.xlsx',1,repeat('a',64),'AVAILABLE','IMPORT_SOURCE',$1) RETURNING id),
+                  template AS (INSERT INTO import_templates(id,code,name,inspection_type_id,version_no,file_id,status,created_by)
+                  SELECT gen_random_uuid(),'ROUTE','routing',$2,1,id,'DRAFT',$1 FROM f RETURNING id)
+                  INSERT INTO import_batches(id,inspection_type_id,semester_id,week_id,attribution_mode,original_file_id,template_id,template_version,status,total_rows,valid_rows,imported_rows,created_by)
+                  SELECT gen_random_uuid(),$2,$3,$4,'ADMINISTRATOR',f.id,template.id,1,'CONFIRMED',1,1,1,$1 FROM f,template RETURNING id`, account, typeID, scope.SemesterID, scope.WeekID).Scan(&importID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = pool.Exec(ctx, "UPDATE inspection_records SET source='EXCEL',import_batch_id=$1 WHERE id=$2", importID, recordID); err != nil {
+					t.Fatal(err)
+				}
+				for _, target := range []string{department, ""} {
+					imports, err := db.ListSubmissionBatches(ctx, account, importjob.SubmissionBatchQuery{CanRouteOwn: true, SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: typeID, DepartmentID: target, Page: 1, PageSize: 10})
+					if err != nil || len(imports.Items) != 1 || imports.Items[0].SelectableRecords != 1 {
+						t.Fatalf("import candidates %q: %+v %v", target, imports, err)
+					}
+				}
+			}
+			for _, target := range []string{department, ""} {
+				page, err := db.ListInspections(ctx, inspection.InspectionFilter{WeekID: scope.WeekID, DepartmentID: target, CollegeOnly: target == "", SubmissionCandidatesOnly: true, Page: 1, PageSize: 100}, inspection.MutationAccess{ActorID: account, CanRouteOwn: true, Permissions: adminRules.rules})
+				found := false
+				for _, record := range page.Items {
+					if record.ID == recordID {
+						found = record.ClassID == class && record.ClassName != ""
+					}
+				}
+				if err != nil || !found {
+					t.Fatalf("missing administrator candidate for %q: %v", target, err)
+				}
+			}
+			target := scope
+			target.DepartmentID = destination
+			batch, err := service.Submit(ctx, administrator, workflow.SubmitInput{Scope: target, Records: []workflow.VersionedRecord{{ID: recordID, Version: 1}}, IdempotencyKey: fmt.Sprintf("admin-route-%d", index)}, audit.Metadata{})
+			if err != nil || batch.Scope.DepartmentID != destination {
+				t.Fatalf("submit: %v", err)
+			}
+			confirmed, err := service.Decide(ctx, administrator, batch.ID, workflow.Confirm, workflow.DecisionInput{Version: batch.RowVersion}, audit.Metadata{})
+			if err != nil || confirmed.Status != workflow.Confirmed {
+				t.Fatalf("self review: %v", err)
+			}
+			report, err := db.ListInspections(ctx, inspection.InspectionFilter{SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: typeID, ConfirmedSubmissionOnly: true, DepartmentID: destination, CollegeOnly: destination == "", Page: 1, PageSize: 100}, inspection.MutationAccess{ActorID: account, Permissions: adminRules.rules})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := 0
+			for _, r := range report.Items {
+				if r.ID == recordID {
+					seen++
+				}
+			}
+			if seen != 1 {
+				t.Fatalf("confirmed record appeared %d times for destination %q", seen, destination)
+			}
+		}
+	})
+
 }
 
 func assertWorkflowState(t *testing.T, pool *pgxpool.Pool, recordID, status string, submitted bool, version int) {

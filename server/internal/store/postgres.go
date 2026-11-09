@@ -77,7 +77,7 @@ func (p *Postgres) Ready(ctx context.Context) error {
 			AND tgname='weekly_report_version_adjustments_append_only' AND NOT tgisinternal)
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submissions' AND column_name='submission_kind')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='department_submission_revisions' AND column_name='submission_kind')
-		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='inspection_records' AND column_name='attribution_mode')
+		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='inspection_records' AND column_name='submission_department_key')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='import_batches' AND column_name='attribution_mode')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='report_output_settings' AND column_name='word_type_codes')
 		AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='report_output_settings' AND column_name='excel_type_codes')
@@ -1493,17 +1493,18 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		WHERE ir.semester_id = $1::uuid
 		  AND ir.week_id = $2::uuid
 		  AND ir.inspection_type_id = $3::uuid
-		  AND (($4::text = '00000000-0000-0000-0000-000000000000' AND ir.department_id IS NULL)
-		       OR ($4::text <> '' AND $4::text <> '00000000-0000-0000-0000-000000000000' AND ir.department_id = $4::uuid)
-		       OR ($4::text = '' AND (cardinality($10::text[]) = 0 OR ir.department_id::text = ANY($10::text[])
-		         OR (ir.department_id IS NULL AND '00000000-0000-0000-0000-000000000000'=ANY($10::text[])))))
-		  AND ($5::text = '' OR ir.class_id = $5::uuid)
+		  AND (($4::text <> '' AND ir.submission_department_key = NULLIF($4,'')::uuid)
+               OR ($4::text = '' AND (cardinality($10::text[]) = 0 OR ir.submission_department_key::text = ANY($10::text[]))))
+          AND ($5::text = '' OR ir.class_id = $5::uuid)
 		  AND ($6::text = '' OR ir.grade_snapshot = $6)
 		  AND ($7::text = '' OR ir.student_no_snapshot ILIKE '%' || $7 || '%'
 		       OR ir.student_name_snapshot ILIKE '%' || $7 || '%')
 		  AND ($8::text = '' OR ir.status = $8)
 		  AND ($9::text = '' OR ir.source = $9)
 		  AND ir.deleted_at IS NULL`
+	if query.ConfirmedOnly {
+		where += " AND " + confirmedInspectionSQL
+	}
 	countSQL := `SELECT count(*)` + where
 	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
 		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
@@ -1669,8 +1670,9 @@ func (p *Postgres) FindImportBatch(ctx context.Context, id string) (importjob.Ba
 func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q importjob.SubmissionBatchQuery) (importjob.SubmissionBatchPage, error) {
 	page := importjob.SubmissionBatchPage{Items: []importjob.SubmissionBatchSummary{}, Page: q.Page, PageSize: q.PageSize}
 	from := ` FROM import_batches b JOIN files f ON f.id=b.original_file_id LEFT JOIN accounts batch_creator ON batch_creator.id=b.created_by LEFT JOIN inspection_records ir ON ir.import_batch_id=b.id AND ir.deleted_at IS NULL`
-	where := ` WHERE b.status='CONFIRMED' AND b.attribution_mode<>'ADMINISTRATOR' AND b.semester_id=$1 AND b.week_id=$2 AND b.inspection_type_id=$3 AND COALESCE(b.department_id::text,'')=$4`
-	args := []any{q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID}
+	where := ` WHERE b.status='CONFIRMED' AND b.semester_id=$1 AND b.week_id=$2 AND b.inspection_type_id=$3 AND ((b.attribution_mode<>'ADMINISTRATOR' AND COALESCE(b.department_id::text,'')=$4) OR (b.created_by=$5 AND $6::boolean))`
+	where += ` AND ($7::boolean OR b.created_by=$5) AND ($4='' OR EXISTS(SELECT 1 FROM department_inspection_scopes mapping JOIN departments d ON d.id=mapping.department_id WHERE d.id=NULLIF($4,'')::uuid AND d.enabled AND mapping.inspection_type_id=b.inspection_type_id AND mapping.enabled AND mapping.can_enter))`
+	args := []any{q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID, actorID, q.CanRouteOwn, q.CanManage}
 	if err := p.Pool.QueryRow(ctx, `SELECT count(DISTINCT b.id)`+from+where, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
@@ -1680,7 +1682,7 @@ func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q 
 		count(ir.id) FILTER (WHERE ir.submission_id IS NOT NULL),
 		count(ir.id) FILTER (WHERE ir.submission_id IS NULL AND (ir.status<>'DRAFT' OR ir.locked_by_report_id IS NOT NULL))
 		`+from+where+`
-			GROUP BY b.id,f.original_name,batch_creator.name ORDER BY b.confirmed_at DESC,b.id LIMIT $5 OFFSET $6`, args...)
+			GROUP BY b.id,f.original_name,batch_creator.name ORDER BY b.confirmed_at DESC,b.id LIMIT $8 OFFSET $9`, args...)
 	if err != nil {
 		return page, err
 	}

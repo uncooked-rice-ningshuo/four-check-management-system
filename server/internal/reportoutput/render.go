@@ -543,12 +543,8 @@ func cell(value string, width int, merge string, header bool, hygiene bool) stri
 	}
 	return fmt.Sprintf(`<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/>%s</w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="FangSong" w:eastAsia="%s"/><w:sz w:val="%s"/>%s</w:rPr><w:t xml:space="preserve">`, width, property, font, size, bold) + xmlText(value) + `</w:t></w:r></w:p></w:tc>`
 }
-func row(values []string, widths []int, gradeMerge string, header bool, hygiene bool) string {
+func row(values []string, widths []int, gradeMerge string, header bool, hygiene bool, minimumHeight int) string {
 	var b strings.Builder
-	minimumHeight := 600
-	if header {
-		minimumHeight = 600
-	}
 	b.WriteString(fmt.Sprintf(`<w:tr><w:trPr><w:trHeight w:val="%d" w:hRule="atLeast"/>`, minimumHeight))
 	if header {
 		b.WriteString(`<w:tblHeader/>`)
@@ -625,8 +621,8 @@ func renderWordTablePages(document *strings.Builder, title, code string, columns
 			headings = append(headings, item.title)
 		}
 		hygiene := code == "DORMITORY_HYGIENE" || code == "PUBLIC_DORMITORY_HYGIENE" || code == "CLASSROOM_HYGIENE"
-		document.WriteString(row(headings, widths, "", true, hygiene))
-		for index, line := range page {
+		document.WriteString(row(headings, widths, "", true, hygiene, 600))
+		for index, line := range page.lines {
 			values := append([]string(nil), line...)
 			if len(values) > 0 && !strings.HasPrefix(values[0], "本周无") && !strings.HasPrefix(values[0], "来源未完成") {
 				for columnIndex, definition := range columns {
@@ -638,11 +634,11 @@ func renderWordTablePages(document *strings.Builder, title, code string, columns
 			gradeMerge := ""
 			if grouped && values[1] != "" {
 				gradeMerge = "restart"
-				if index > 0 && page[index-1][0] == line[0] {
+				if index > 0 && page.lines[index-1][0] == line[0] {
 					gradeMerge = "continue"
 				}
 			}
-			document.WriteString(row(values, widths, gradeMerge, false, hygiene))
+			document.WriteString(row(values, widths, gradeMerge, false, hygiene, page.rowHeights[index]))
 		}
 		document.WriteString(`</w:tbl>`)
 	}

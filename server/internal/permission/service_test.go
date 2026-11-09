@@ -370,3 +370,23 @@ func TestHasAnyAllowedForScopedReportDefaults(t *testing.T) {
 		t.Fatal("global denial must block reading generation defaults")
 	}
 }
+
+func TestOfficeInspectionActionsRemainReadOnly(t *testing.T) {
+	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER", "PRESIDIUM"} {
+		t.Run(role, func(t *testing.T) {
+			profile := AccessProfile{AccountID: "office", DepartmentID: "office", DepartmentCode: "OFFICE", SystemRole: SystemRoleMember, OrganizationRoleCode: role}
+			for _, action := range []string{ActionInspectionEnter, ActionInspectionReview, ActionInspectionManage, ActionInspectionView} {
+				profile.Rules = append(profile.Rules, Rule{Action: action, Enabled: true, Effect: EffectAllow})
+			}
+			result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "office")
+			if err != nil || !result.ConfirmedInspectionsOnly || !result.Allowed(ActionInspectionView, Scope{}) {
+				t.Fatalf("office view %v", err)
+			}
+			for _, action := range []string{ActionInspectionEnter, ActionInspectionReview, ActionInspectionManage} {
+				if result.Allowed(action, Scope{}) {
+					t.Errorf("unexpected %s", action)
+				}
+			}
+		})
+	}
+}

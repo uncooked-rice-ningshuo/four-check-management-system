@@ -316,31 +316,68 @@ func estimatedRowHeight(values []string, widths []int) int {
 	return 600 + (maxLines-1)*340
 }
 
-// Hard page boundaries keep grade merges from continuing into a new page.
-// This deliberately leaves room for each application's own line breaking.
-func paginateWordRows(lines [][]string, widths []int) [][][]string {
-	const pageBudget = 6500
-	const standaloneRowHeight = 3500
-	pages := make([][][]string, 0, 1)
-	page := make([][]string, 0)
-	used := 0
-	for _, line := range lines {
-		height := estimatedRowHeight(line, widths)
-		if len(page) > 0 && (used+height > pageBudget || height >= standaloneRowHeight) {
-			pages = append(pages, page)
-			page = make([][]string, 0)
-			used = 0
+type wordTablePage struct {
+	lines      [][]string
+	rowHeights []int
+}
+
+func equalizedWordRowHeights(natural []int, regularLimit int) []int {
+	regularHeight := 0
+	for _, height := range natural {
+		if height <= regularLimit && height > regularHeight {
+			regularHeight = height
 		}
-		page = append(page, line)
-		used += height
-		if height >= standaloneRowHeight {
-			pages = append(pages, page)
-			page = make([][]string, 0)
-			used = 0
+	}
+	result := make([]int, len(natural))
+	for index, height := range natural {
+		if height <= regularLimit {
+			result[index] = regularHeight
+		} else {
+			result[index] = height
+		}
+	}
+	return result
+}
+
+// A regular row shares its page's largest regular height; a taller row keeps
+// its own height and may share the remaining space with other rows.
+func paginateWordRowHeights(natural []int, pageBudget, regularLimit int) [][]int {
+	pages := make([][]int, 0, 1)
+	page := make([]int, 0)
+	for _, height := range natural {
+		candidate := append(append([]int(nil), page...), height)
+		used := 0
+		for _, displayed := range equalizedWordRowHeights(candidate, regularLimit) {
+			used += displayed
+		}
+		if len(page) > 0 && used > pageBudget {
+			pages = append(pages, equalizedWordRowHeights(page, regularLimit))
+			page = []int{height}
+		} else {
+			page = candidate
 		}
 	}
 	if len(page) > 0 {
-		pages = append(pages, page)
+		pages = append(pages, equalizedWordRowHeights(page, regularLimit))
+	}
+	return pages
+}
+
+// Hard page boundaries keep grade merges from continuing into a new page.
+func paginateWordRows(lines [][]string, widths []int) []wordTablePage {
+	const pageBudget = 6500
+	const regularRowLimit = 2000 // About 31% of the data-row budget, below half a page.
+	natural := make([]int, len(lines))
+	for index, line := range lines {
+		natural[index] = estimatedRowHeight(line, widths)
+	}
+	pageHeights := paginateWordRowHeights(natural, pageBudget, regularRowLimit)
+	pages := make([]wordTablePage, 0, len(pageHeights))
+	start := 0
+	for _, heights := range pageHeights {
+		end := start + len(heights)
+		pages = append(pages, wordTablePage{lines: lines[start:end], rowHeights: heights})
+		start = end
 	}
 	return pages
 }

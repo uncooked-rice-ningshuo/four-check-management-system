@@ -42,6 +42,9 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 		owner = original.CreatedBy
 	}
 	mode := "read"
+	if q.Purpose == "submit" {
+		mode = "mutate"
+	}
 	if q.Purpose == "entry" {
 		mode = "mutate"
 		rules := make([]permission.EffectivePermission, 0, len(a.Permissions))

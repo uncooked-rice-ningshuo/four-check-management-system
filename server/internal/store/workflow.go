@@ -63,12 +63,12 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		Kind: command.Kind, RevisionNo: 1, RowVersion: 1, CreatedBy: command.ActorID, SubmittedBy: command.ActorID}
 	err = tx.QueryRow(ctx, `INSERT INTO department_submissions(
  id,semester_id,week_id,department_id,inspection_type_id,submission_kind,status,revision_no,row_version,
- created_by,submitted_by,idempotency_key,request_fingerprint,submitted_at)
- VALUES($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,'PENDING_REVIEW',1,1,$7,$7,$8,$9,now())
+ created_by,submitted_by,idempotency_key,request_fingerprint,submitted_at,administrator_channel)
+ VALUES($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,'PENDING_REVIEW',1,1,$7,$7,$8,$9,now(),$10)
  ON CONFLICT (created_by,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
  RETURNING created_at,submitted_at`, id, command.Scope.SemesterID, command.Scope.WeekID,
 		command.Scope.DepartmentID, command.Scope.InspectionTypeID, command.Kind, command.ActorID,
-		command.IdempotencyKey, command.Fingerprint).Scan(&result.CreatedAt, &result.SubmittedAt)
+		command.IdempotencyKey, command.Fingerprint, command.CanRouteOwn && command.Scope.DepartmentID == "").Scan(&result.CreatedAt, &result.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var fingerprint string
 		err = tx.QueryRow(ctx, `SELECT id,semester_id,week_id,COALESCE(department_id::text,''),inspection_type_id,submission_kind,status,
@@ -94,12 +94,13 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		// A replay must still satisfy current per-record permissions. Otherwise a
 		// revoked member could use an old key to read a batch's current state.
 		for _, requested := range command.Records {
-			args := []any{requested.ID, result.ID}
+			args := []any{requested.ID, result.ID, command.CanRouteOwn, command.ActorID}
 			guard := inspectionAccessSQL(access, "mutate", &args)
 			var allowed bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inspection_records ir
  JOIN semesters sem ON sem.id=ir.semester_id WHERE ir.id=$1 AND ir.submission_id=$2
- AND ir.deleted_at IS NULL AND ir.attribution_mode<>'ADMINISTRATOR' AND `+guard+`)`, args...).Scan(&allowed); err != nil {
+ AND (ir.attribution_mode<>'ADMINISTRATOR' OR ($3::boolean AND ir.created_by=$4::uuid))
+ AND ir.deleted_at IS NULL AND `+guard+`)`, args...).Scan(&allowed); err != nil {
 				return workflow.Submission{}, err
 			}
 			if !allowed {
@@ -115,7 +116,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	recordIDs := make([]string, 0, len(command.Records))
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
-		args := []any{requested.ID, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.DepartmentID, command.Scope.InspectionTypeID}
+		args := []any{requested.ID, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.DepartmentID, command.Scope.InspectionTypeID, command.CanRouteOwn, command.ActorID}
 		guard := inspectionAccessSQL(access, "mutate", &args)
 		var version int
 		var snapshot json.RawMessage
@@ -135,9 +136,9 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
  LEFT JOIN dorm_hygiene_details dh ON dh.record_id=ir.id
 	 LEFT JOIN classroom_hygiene_details ch ON ch.record_id=ir.id
 	 LEFT JOIN public_dormitory_hygiene_details pdh ON pdh.record_id=ir.id
- WHERE ir.id=$1 AND ir.semester_id=$2 AND ir.week_id=$3 AND ir.department_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid AND ir.inspection_type_id=$5
+ WHERE ir.id=$1 AND ir.semester_id=$2 AND ir.week_id=$3 AND ((ir.attribution_mode<>'ADMINISTRATOR' AND ir.department_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid) OR ($6::boolean AND ir.created_by=$7::uuid)) AND ir.inspection_type_id=$5
    AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL
-   AND ir.deleted_at IS NULL AND ir.attribution_mode<>'ADMINISTRATOR' AND `+guard+` FOR UPDATE OF ir`, args...).Scan(&version, &snapshot)
+   AND ir.deleted_at IS NULL AND `+guard+` FOR UPDATE OF ir`, args...).Scan(&version, &snapshot)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return workflow.Submission{}, workflow.ErrRecordUnavailable
 		}
@@ -152,9 +153,9 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	}
 
 	for _, record := range command.Records {
-		tag, err := tx.Exec(ctx, `UPDATE inspection_records SET status='PENDING_REVIEW',submission_id=$1,
+		tag, err := tx.Exec(ctx, `UPDATE inspection_records SET status='PENDING_REVIEW',submission_id=$1, submission_routed=true, routed_department_id=NULLIF($4,'')::uuid,
  row_version=row_version+1,updated_at=now() WHERE id=$2 AND row_version=$3 AND status='DRAFT'
- AND submission_id IS NULL AND locked_by_report_id IS NULL AND deleted_at IS NULL AND attribution_mode<>'ADMINISTRATOR'`, id, record.ID, record.Version)
+ AND submission_id IS NULL AND locked_by_report_id IS NULL AND deleted_at IS NULL`, id, record.ID, record.Version, command.Scope.DepartmentID)
 		if err != nil {
 			return workflow.Submission{}, err
 		}
@@ -347,6 +348,9 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 	}
 	if err != nil {
 		return workflow.Submission{}, err
+	}
+	if command.MemberDepartmentID != nil && (*command.MemberDepartmentID == "" || *command.MemberDepartmentID != result.Scope.DepartmentID) {
+		return workflow.Submission{}, workflow.ErrSubmissionScope
 	}
 	if result.Kind != command.Kind {
 		return workflow.Submission{}, workflow.ErrInvalidSubmit

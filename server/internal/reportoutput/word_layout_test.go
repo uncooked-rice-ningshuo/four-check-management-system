@@ -3,8 +3,10 @@ package reportoutput
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,13 +99,43 @@ func TestWordAttachmentTitleAndTableFormattingMatchReference(t *testing.T) {
 	}
 }
 
-func TestOversizedWordRowGetsItsOwnPageAndFollowingRowsContinue(t *testing.T) {
+func TestTallWordRowSharesPageWhenFollowingRowsFit(t *testing.T) {
 	widths := []int{1000, 1000}
-	big := []string{"2026级", strings.Repeat("虚构学生", 70)}
+	big := []string{"2026级", strings.Repeat("甲", 30)}
 	lines := [][]string{{"2026级", "短"}, big, {"2026级", "短二"}, {"2026级", "短三"}}
 	pages := paginateWordRows(lines, widths)
-	if len(pages) != 3 || len(pages[0]) != 1 || len(pages[1]) != 1 || len(pages[2]) != 2 {
-		t.Fatalf("oversized row pagination=%v", pages)
+	if len(pages) != 1 || len(pages[0].lines) != 4 {
+		t.Fatalf("tall row unnecessarily created a new page: %v", pages)
+	}
+}
+
+func TestTallWordRowMovesOnlyWhenRemainingSpaceIsInsufficient(t *testing.T) {
+	widths := []int{1000, 1000}
+	lines := [][]string{{"年级", "一"}, {"年级", "二"}, {"年级", "三"}, {"年级", "四"}, {"年级", "五"}, {"年级", strings.Repeat("甲", 30)}, {"年级", "六"}}
+	pages := paginateWordRows(lines, widths)
+	if len(pages) != 2 || len(pages[0].lines) != 5 || len(pages[1].lines) != 2 {
+		t.Fatalf("tall row should move with its following short row: %v", pages)
+	}
+}
+
+func TestWordRowsOnSamePageShareHeightBelowCap(t *testing.T) {
+	pages := paginateWordRowHeights([]int{20, 30, 40, 30, 20, 25, 20}, 100, 30)
+	want := [][]int{{30, 30, 40}, {30, 30, 30}, {20}}
+	if !reflect.DeepEqual(pages, want) {
+		t.Fatalf("page row heights=%v, want %v", pages, want)
+	}
+}
+
+func TestWordTableWritesUniformRegularRowHeights(t *testing.T) {
+	columns := []column{{title: "年级"}, {title: "备注"}}
+	lines := [][]string{{"2026级", "短"}, {"2026级", strings.Repeat("甲", 40)}, {"2026级", strings.Repeat("乙", 80)}}
+	widths := wordColumnWidths(columns)
+	expectedHeight := estimatedRowHeight(lines[2], widths)
+	var document strings.Builder
+	renderWordTablePages(&document, "测试表格", "LATE_RETURN", columns, lines, false)
+	want := fmt.Sprintf(`<w:trHeight w:val="%d" w:hRule="atLeast"/>`, expectedHeight)
+	if strings.Count(document.String(), want) != len(lines) {
+		t.Fatalf("regular row heights are not uniform: %s", document.String())
 	}
 }
 

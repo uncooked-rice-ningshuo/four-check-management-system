@@ -56,6 +56,7 @@ func TestDepartmentSubmitHTTPContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	account := repo.values["workflow-member"]
+	account.PrimaryDepartmentID = uuid.NewString()
 	account.Status = auth.StatusActive
 	repo.values[account.LoginName] = account
 	tokens, err := service.Login(context.Background(), account.LoginName, "Password123")
@@ -65,11 +66,16 @@ func TestDepartmentSubmitHTTPContracts(t *testing.T) {
 	stub := &workflowHTTPStub{}
 	router := NewRouter(service, false, AdminServices{Workflow: stub})
 	id := uuid.NewString()
-	request := workflow.SubmitInput{Scope: workflow.Scope{SemesterID: id, WeekID: id, DepartmentID: id, InspectionTypeID: id},
+	request := workflow.SubmitInput{Scope: workflow.Scope{SemesterID: id, WeekID: id, DepartmentID: account.PrimaryDepartmentID, InspectionTypeID: id},
 		Records: []workflow.VersionedRecord{{ID: id, Version: 1}}, IdempotencyKey: "batch-1"}
 	path := "/api/v1/department-submissions"
 	if response := performJSON(router, "POST", path, request, ""); response.Code != 401 || stub.calls != 0 {
 		t.Fatalf("unauthenticated submit: %d calls=%d", response.Code, stub.calls)
+	}
+	wrong := request
+	wrong.Scope.DepartmentID = ""
+	if got := performJSON(router, "POST", path, wrong, tokens.AccessToken); got.Code != 403 || stub.calls != 0 {
+		t.Fatalf("member administrator route: %d", got.Code)
 	}
 	response := performJSON(router, "POST", path, request, tokens.AccessToken)
 	if response.Code != 201 || !strings.Contains(response.Body.String(), `"revisionNo":1`) || stub.actor.ID != account.ID || stub.input.IdempotencyKey != "batch-1" || stub.metadata.RequestID == "" {

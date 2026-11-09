@@ -1031,7 +1031,7 @@ func attendanceInspectionType(values []organization.InspectionType) (organizatio
 }
 
 func (h *handler) listAttendance(c *gin.Context) {
-	_, scope, allowedDepartments, ok := h.authorizeAttendanceList(c)
+	account, scope, allowedDepartments, ok := h.authorizeAttendanceList(c)
 	if !ok {
 		return
 	}
@@ -1045,7 +1045,16 @@ func (h *handler) listAttendance(c *gin.Context) {
 		Keyword: c.Query("keyword"), Status: c.Query("status"), Source: c.Query("source"),
 		Sort: c.DefaultQuery("sort", inspection.SortOccurredAtDescending), Page: page, PageSize: pageSize,
 	}
-	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{
+	confirmedOnly := false
+	if !account.IsSuperAdmin {
+		effective, err := h.permission.Effective(c, account.ID)
+		if err != nil {
+			writeInspectionError(c, err)
+			return
+		}
+		confirmedOnly = effective.ConfirmedInspectionsOnly
+	}
+	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{ConfirmedOnly: confirmedOnly,
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
 		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments,
 		ClassID: scope.ClassID, Grade: scope.Grade,
@@ -1199,14 +1208,15 @@ func (h *handler) uploadAttendanceImport(c *gin.Context) {
 	}
 	scope := inspectionScopeFromForm(c)
 	attributionMode := strings.TrimSpace(c.PostForm("attributionMode"))
-	if requester.IsSuperAdmin {
+	administrator := requester.IsSuperAdmin || requester.SystemRole == auth.SystemRoleAdmin
+	if administrator {
 		if scope.DepartmentID != "" || (attributionMode != "" && attributionMode != inspection.AttributionModeAdministrator) {
 			writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "管理员导入不选择部门归属")
 			return
 		}
 		attributionMode = inspection.AttributionModeAdministrator
 	}
-	if attributionMode == inspection.AttributionModeAdministrator && (!requester.IsSuperAdmin || scope.DepartmentID != "") {
+	if attributionMode == inspection.AttributionModeAdministrator && (!administrator || scope.DepartmentID != "") {
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "管理员独立记录仅可由系统超级管理员录入，且不能选择部门归属")
 		return
 	}
@@ -1441,7 +1451,7 @@ func (h *handler) authorizedBatch(c *gin.Context, action string) (auth.Account, 
 		return auth.Account{}, importjob.Batch{}, false
 	}
 	effective, err := h.permission.Effective(c, account.ID)
-	if err != nil || !effective.Allowed(action, scope) {
+	if err != nil || effective.ConfirmedInspectionsOnly || !effective.Allowed(action, scope) {
 		writeInspectionForbidden(c, true)
 		return auth.Account{}, importjob.Batch{}, false
 	}

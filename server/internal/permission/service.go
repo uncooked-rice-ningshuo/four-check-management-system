@@ -113,9 +113,11 @@ type EffectivePermission struct {
 }
 
 type EffectiveResult struct {
-	AccountID   string                `json:"accountId"`
-	SystemRole  string                `json:"systemRole"`
-	Permissions []EffectivePermission `json:"permissions"`
+	PrimaryDepartmentID      string                `json:"-"`
+	ConfirmedInspectionsOnly bool                  `json:"confirmedInspectionsOnly,omitempty"`
+	AccountID                string                `json:"accountId"`
+	SystemRole               string                `json:"systemRole"`
+	Permissions              []EffectivePermission `json:"permissions"`
 }
 
 func (r EffectiveResult) Allowed(action string, requested Scope) bool {
@@ -200,7 +202,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	if err != nil {
 		return EffectiveResult{}, err
 	}
-	result := EffectiveResult{AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
+	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
 	if profile.SystemRole == SystemRoleSuperAdmin {
 		for _, action := range allActions {
 			if action == ActionReportForceGenerate || action == ActionReportObligationManage {
@@ -290,6 +292,18 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 			continue
 		}
 		result.Permissions = append(result.Permissions, userRulePermission(rule))
+	}
+	if profile.DepartmentCode == "OFFICE" {
+		result.ConfirmedInspectionsOnly = true
+		allowed := result.Permissions[:0]
+		for _, p := range result.Permissions {
+			switch p.Action {
+			case ActionInspectionEnter, ActionInspectionManage, ActionInspectionReview:
+				continue
+			}
+			allowed = append(allowed, p)
+		}
+		result.Permissions = allowed
 	}
 	return result, nil
 }

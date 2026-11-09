@@ -24,6 +24,7 @@ export type EffectivePermission = {
 }
 
 export type EffectivePermissions = {
+  confirmedInspectionsOnly?: boolean
   accountId: string
   systemRole: 'SUPER_ADMIN' | 'ADMIN' | 'MEMBER'
   permissions: EffectivePermission[]

@@ -107,9 +107,10 @@ type Page struct {
 }
 
 type ViewAccess struct {
-	ActorID      string
-	Unrestricted bool
-	Permissions  []permission.EffectivePermission
+	ConfirmedOnly bool
+	ActorID       string
+	Unrestricted  bool
+	Permissions   []permission.EffectivePermission
 }
 
 type Actor struct {
@@ -120,6 +121,7 @@ type Actor struct {
 // SubmitCommand carries validated input and the actor's effective rules to the
 // repository, which applies them inside SQL before locking each record.
 type SubmitCommand struct {
+	CanRouteOwn    bool
 	ActorID        string
 	Unrestricted   bool
 	Permissions    []permission.EffectivePermission
@@ -148,15 +150,16 @@ type ResubmitInput struct {
 }
 
 type ResubmitCommand struct {
-	ActorID      string
-	Unrestricted bool
-	Permissions  []permission.EffectivePermission
-	SubmissionID string
-	Version      int
-	Kind         SubmissionKind
-	Records      []VersionedRecord
-	Explanation  string
-	Metadata     audit.Metadata
+	MemberDepartmentID *string
+	ActorID            string
+	Unrestricted       bool
+	Permissions        []permission.EffectivePermission
+	SubmissionID       string
+	Version            int
+	Kind               SubmissionKind
+	Records            []VersionedRecord
+	Explanation        string
+	Metadata           audit.Metadata
 }
 
 type DecisionInput struct {
@@ -238,6 +241,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 			return Submission{}, ErrInvalidSubmit
 		}
 	}
+	canRouteOwn := actor.IsSuperAdmin
 	permissions := []permission.EffectivePermission(nil)
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
@@ -247,6 +251,10 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 		if err != nil {
 			return Submission{}, err
 		}
+		if effective.SystemRole == permission.SystemRoleMember && (effective.PrimaryDepartmentID == "" || effective.PrimaryDepartmentID != input.Scope.DepartmentID) {
+			return Submission{}, ErrSubmissionScope
+		}
+		canRouteOwn = effective.SystemRole == permission.SystemRoleAdmin
 		permissions = effective.Permissions
 	}
 	hash := sha256.New()
@@ -257,7 +265,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 	}
 	metadata.ActorID = actor.ID
 	metadata.Reason = input.Explanation
-	return s.repository.SubmitDepartmentBatch(ctx, SubmitCommand{ActorID: actor.ID, Unrestricted: actor.IsSuperAdmin,
+	return s.repository.SubmitDepartmentBatch(ctx, SubmitCommand{CanRouteOwn: canRouteOwn, ActorID: actor.ID, Unrestricted: actor.IsSuperAdmin,
 		Permissions: permissions, Scope: input.Scope, Kind: input.Kind, Records: records, IdempotencyKey: input.IdempotencyKey,
 		Explanation: input.Explanation,
 		Fingerprint: hex.EncodeToString(hash.Sum(nil)), Metadata: metadata})
@@ -318,6 +326,7 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input Re
 			return Submission{}, ErrInvalidSubmit
 		}
 	}
+	var memberDepartmentID *string
 	permissions := []permission.EffectivePermission(nil)
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
@@ -327,10 +336,13 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input Re
 		if err != nil {
 			return Submission{}, err
 		}
+		if effective.SystemRole == permission.SystemRoleMember {
+			memberDepartmentID = &effective.PrimaryDepartmentID
+		}
 		permissions = effective.Permissions
 	}
 	metadata.ActorID, metadata.Reason = actorID.String(), input.Explanation
-	return s.repository.ResubmitDepartmentBatch(ctx, ResubmitCommand{ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
+	return s.repository.ResubmitDepartmentBatch(ctx, ResubmitCommand{MemberDepartmentID: memberDepartmentID, ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
 		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Kind: input.Kind,
 		Records: records, Explanation: input.Explanation, Metadata: metadata})
 }
@@ -349,6 +361,7 @@ func (s *Service) viewAccess(ctx context.Context, actor Actor) (ViewAccess, erro
 		if err != nil {
 			return ViewAccess{}, err
 		}
+		access.ConfirmedOnly = effective.ConfirmedInspectionsOnly
 		access.Permissions = effective.Permissions
 	}
 	return access, nil

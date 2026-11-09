@@ -46,7 +46,7 @@ func (s *ContextOptionService) ContextOptions(ctx context.Context, a ManualActor
 	if q.TypeCode != InspectionTypeAttendance && q.TypeCode != InspectionTypeUnattended && q.TypeCode != InspectionTypeLateReturn && q.TypeCode != InspectionTypeMorning && q.TypeCode != InspectionTypeDormitoryHygiene && q.TypeCode != InspectionTypeClassroomHygiene && q.TypeCode != InspectionTypePublicDormitoryHygiene && q.TypeCode != InspectionTypeEveningSelfStudy {
 		return ContextOptionPage{}, ErrInspectionRequest
 	}
-	if q.Purpose != "view" && q.Purpose != "entry" {
+	if q.Purpose != "view" && q.Purpose != "entry" && q.Purpose != "submit" {
 		return ContextOptionPage{}, ErrInspectionRequest
 	}
 	for _, id := range []*string{&q.SemesterID, &q.WeekID, &q.DepartmentID, &q.RecordID} {
@@ -59,13 +59,13 @@ func (s *ContextOptionService) ContextOptions(ctx context.Context, a ManualActor
 		}
 	}
 	if q.DepartmentID == CollegeDepartmentOptionID {
-		if a.IsMember && q.Purpose == "entry" {
+		if a.IsMember && q.Purpose != "view" {
 			return ContextOptionPage{}, ErrScopeMismatch
 		}
 		q.DepartmentID = ""
 		q.CollegeOnly = true
 	}
-	if a.IsMember && q.Purpose == "entry" {
+	if a.IsMember && q.Purpose != "view" {
 		primary, ok := canonicalDetailID(a.PrimaryDepartmentID)
 		if !ok || (q.DepartmentID != "" && q.DepartmentID != primary) {
 			return ContextOptionPage{}, ErrScopeMismatch

@@ -97,12 +97,12 @@ func decodeIntroduction(raw json.RawMessage) (IntroductionDocument, error) {
 	if document.FooterAlign != "" && document.FooterAlign != "left" && document.FooterAlign != "center" && document.FooterAlign != "right" {
 		return IntroductionDocument{}, ErrInvalidSelection
 	}
-	if document.FooterLayout == "custom" && (!utf8.ValidString(document.FooterText) || utf8.RuneCountInString(document.FooterText) > 240 || strings.Contains(document.FooterText, "\r") || strings.Count(document.FooterText, "\n") > 2 || strings.Count(document.FooterText, "{page}") > 1) {
+	if document.FooterLayout == "custom" && (!utf8.ValidString(document.FooterText) || utf8.RuneCountInString(document.FooterText) > 240 || strings.Contains(document.FooterText, "\r") || strings.Count(document.FooterText, "\n") > 2 || strings.Count(document.FooterText, "{page}")+strings.Count(document.FooterText, "{pageChinese}") > 1) {
 		return IntroductionDocument{}, ErrInvalidSelection
 	}
 	if document.FooterLayout == "custom" {
-		plain := strings.NewReplacer("{page}", "", "{totalPages}", "", "{semesterName}", "", "{weekNo}", "").Replace(document.FooterText)
-		if strings.ContainsAny(plain, "{}") || strings.Count(document.FooterText, "{totalPages}") > 1 {
+		plain := strings.NewReplacer("{page}", "", "{pageChinese}", "", "{totalPages}", "", "{totalPagesChinese}", "", "{semesterName}", "", "{weekNo}", "", "{weekNoChinese}", "").Replace(document.FooterText)
+		if strings.ContainsAny(plain, "{}") || strings.Count(document.FooterText, "{totalPages}")+strings.Count(document.FooterText, "{totalPagesChinese}") > 1 {
 			return IntroductionDocument{}, ErrInvalidSelection
 		}
 		for _, line := range strings.Split(document.FooterText, "\n") {
@@ -112,7 +112,7 @@ func decodeIntroduction(raw json.RawMessage) (IntroductionDocument, error) {
 		}
 	}
 	if document.TitleTemplate != "" {
-		check := strings.NewReplacer("{semesterName}", "", "{weekNo}", "", "{reportDate}", "").Replace(document.TitleTemplate)
+		check := strings.NewReplacer("{semesterName}", "", "{weekNo}", "", "{weekNoChinese}", "", "{reportDate}", "").Replace(document.TitleTemplate)
 		if !validPageText(document.TitleTemplate) || strings.ContainsAny(check, "{}") || document.TitleTemplate == " " {
 			return IntroductionDocument{}, ErrInvalidSelection
 		}

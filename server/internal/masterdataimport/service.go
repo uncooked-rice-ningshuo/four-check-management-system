@@ -524,7 +524,13 @@ func resolveRecordReferences(kind string, values map[string]string, record *mast
 		resolveFaculty("faculty_name", values["faculty_name"])
 		resolveMajor("major_name", values["major_name"])
 		if values["class_name"] != "" {
-			if class, ok := resolveName("class_name", masterdata.KindClass, values["class_name"]); ok {
+			matches := filterReference(lookups.byName[lookupKey(masterdata.KindClass, strings.TrimSpace(values["class_name"]))], func(class masterdata.Record) bool {
+				return class.GradeID == record.GradeID && (record.FacultyID == "" || class.FacultyID == record.FacultyID) && (record.MajorID == "" || class.MajorID == record.MajorID)
+			})
+			if len(matches) != 1 {
+				addError("class_name", referenceError(len(matches), "未找到唯一匹配年级、院系、专业的已启用班级"))
+			} else {
+				class := matches[0]
 				record.ClassID = class.ID
 				if record.GradeID != "" && class.GradeID != record.GradeID {
 					addError("class_name", "班级所属年级与本行入学年份不一致")
@@ -766,6 +772,11 @@ func naturalFields(kind string) []string {
 func naturalKey(kind string, values map[string]string, record masterdata.Record) string {
 	parts := []string{kind}
 	switch kind {
+	case masterdata.KindClass:
+		if record.GradeID == "" || record.Name == "" {
+			return ""
+		}
+		return strings.Join([]string{kind, record.GradeID, record.FacultyID, record.MajorID, record.Name}, "\x00")
 	case masterdata.KindMajor:
 		parts = append(parts, strings.TrimSpace(values["faculty_name"]), strings.TrimSpace(values["name"]))
 	case masterdata.KindDormitoryBuilding:
@@ -793,7 +804,9 @@ func naturalKey(kind string, values map[string]string, record masterdata.Record)
 
 func recordLookupKey(kind string, values map[string]string, record masterdata.Record) (LookupKey, bool) {
 	switch kind {
-	case masterdata.KindFaculty, masterdata.KindGrade, masterdata.KindClass, masterdata.KindDormitoryArea, masterdata.KindTeachingBuilding:
+	case masterdata.KindClass:
+		return LookupKey{Name: record.Name, GradeID: record.GradeID, FacultyID: record.FacultyID, MajorID: record.MajorID}, record.Name != "" && record.GradeID != ""
+	case masterdata.KindFaculty, masterdata.KindGrade, masterdata.KindDormitoryArea, masterdata.KindTeachingBuilding:
 		return LookupKey{Name: record.Name}, record.Name != ""
 	case masterdata.KindMajor:
 		return LookupKey{ParentID: record.FacultyID, Name: record.Name}, record.FacultyID != "" && record.Name != ""
@@ -828,6 +841,10 @@ func duplicateField(kind string) string {
 func matchesKey(kind string, records []masterdata.Record, key LookupKey) bool {
 	for _, record := range records {
 		switch kind {
+		case masterdata.KindClass:
+			if record.Name == key.Name && (key.GradeID == "" || record.GradeID == key.GradeID && record.FacultyID == key.FacultyID && record.MajorID == key.MajorID) {
+				return true
+			}
 		case masterdata.KindMajor:
 			if record.Name == key.Name && (key.ParentID == "" || record.FacultyID == key.ParentID) {
 				return true

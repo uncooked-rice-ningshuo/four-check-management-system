@@ -269,7 +269,7 @@ const inspectionFrom = ` FROM inspection_records ir
 	LEFT JOIN department_submissions ds ON ds.id=ir.submission_id
 	LEFT JOIN accounts actual_submitter ON actual_submitter.id=ds.submitted_by `
 const inspectionCreatedByName = `COALESCE(importer.name,creator.name,'账号不可用')`
-const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,` + inspectionCreatedByName + `,` + inspectionCreatedByName + `,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,ir.class_name_snapshot,ir.grade_snapshot`
+const inspectionColumns = `SELECT ir.id,ir.semester_id,ir.week_id,ir.inspection_type_id,it.code,COALESCE(ir.department_id::text,''),ir.attribution_mode,ir.status,ir.source,COALESCE(ir.import_batch_id::text,''),ir.row_version,ir.created_by,` + inspectionCreatedByName + `,` + inspectionCreatedByName + `,ir.created_at,ir.updated_at,ir.submission_id IS NOT NULL,ir.locked_by_report_id IS NOT NULL,ir.student_no_snapshot,ir.student_name_snapshot,COALESCE(ir.class_id::text,''),ir.grade_snapshot`
 const inspectionEditableSQL = `ir.locked_by_report_id IS NULL AND (
  (ir.status='DRAFT' AND ir.submission_id IS NULL)
  OR (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS(
@@ -284,7 +284,7 @@ func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.Mutatio
 		sql += " FOR UPDATE OF ir"
 	}
 	var r inspection.InspectionRecord
-	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.AttributionMode, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedByName, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.Grade, &r.CanEdit, &r.CanDelete, &r.SubmittedByName, &r.SubmittedAt)
+	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.AttributionMode, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedByName, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.ClassID, &r.Grade, &r.CanEdit, &r.CanDelete, &r.SubmittedByName, &r.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, inspection.ErrRecordNotFound
 	}

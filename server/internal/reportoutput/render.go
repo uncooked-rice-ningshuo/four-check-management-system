@@ -7,8 +7,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
+	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/reporting"
 	"github.com/xuri/excelize/v2"
 )
@@ -32,34 +34,40 @@ func recordColumns() []reportType {
 		{"UNATTENDED_CLASSROOM", "无机课堂检查情况", append(append([]column{}, common...), date, field("课程", func(r reporting.Record) string { return r.CurrentCourseName }), field("节次", func(r reporting.Record) string { return r.Details.Period }), field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), remark)},
 		{"MORNING_ATTENDANCE", "早锻炼早签检查情况", append(append([]column{}, common...), date, field("缺勤次数", func(r reporting.Record) string { return integer(r.Details.AbsenceCount) }), remark)},
 		{"EVENING_SELF_STUDY", "晚自习检查情况", append(append([]column{}, common...), date, field("节次", func(r reporting.Record) string { return r.Details.Period }), field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), remark)},
-		{"DORMITORY_HYGIENE", "宿舍卫生检查情况", []column{date, field("寝室", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return r.Details.Result }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), field("原因", func(r reporting.Record) string { return r.Details.Description }), remark}},
-		{"PUBLIC_DORMITORY_HYGIENE", "宿舍公共卫生检查情况", []column{date, field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return r.Details.Result }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), field("原因", func(r reporting.Record) string { return r.Details.Description }), remark}},
-		{"LATE_RETURN", "晚归检查情况", append(append([]column{}, common...), date, field("寝室", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("时间", func(r reporting.Record) string { return r.Details.Time }), remark)},
-		{"CLASSROOM_HYGIENE", "教室卫生检查情况", []column{date, field("年级", func(r reporting.Record) string { return r.Grade }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责学生", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("情况", func(r reporting.Record) string { return r.Details.Description }), remark}},
+		{"DORMITORY_HYGIENE", "宿舍卫生检查情况", []column{date, field("寝室", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), remark}},
+		{"PUBLIC_DORMITORY_HYGIENE", "宿舍公共卫生检查情况", []column{date, field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), remark}},
+		{"LATE_RETURN", "晚归检查情况", append(append([]column{}, common...), date, field("寝室", func(r reporting.Record) string { return r.CurrentDormitoryName }), remark)},
+		{"CLASSROOM_HYGIENE", "教室卫生检查情况", []column{date, field("年级", func(r reporting.Record) string { return r.Grade }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责学生", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), remark}},
 	}
 }
 
 // wordRecordColumns follows the historical attachment tables where the
 // immutable report snapshot has corresponding values. Legacy snapshots without
 // adviser names keep those cells empty rather than reading mutable live data.
-func wordRecordColumns(item reportType, teachers map[string]string, checkedDormitoryCount int) []column {
+func wordRecordColumns(item reportType, teachers map[string]string) []column {
 	field := func(title string, value func(reporting.Record) string) column { return column{title, value} }
-	teacher := field("班主任", func(r reporting.Record) string { return teachers[classKey(r.Grade, r.ClassName)] })
+	teacher := field("班主任", func(r reporting.Record) string { return teachers[classOutputKey(r.ClassID, r.Grade, r.ClassName)] })
 	switch item.code {
 	case "CLASSROOM_HYGIENE":
-		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责人员", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), teacher, field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("违纪情况", func(r reporting.Record) string { return r.Details.Description })}
+		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责人员", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), teacher, field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("检查情况", func(r reporting.Record) string { return hygieneSituation(r.Details) })}
 	case "DORMITORY_HYGIENE":
-		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return r.Details.Description }), field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("所在班级", func(r reporting.Record) string { return r.ClassName }), teacher}
+		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("所在班级", responsibleClassNames), teacher}
 	case "PUBLIC_DORMITORY_HYGIENE":
-		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), teacher, field("负责宿舍楼", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("楼层/单元", func(r reporting.Record) string { return r.CurrentAreaName })}
+		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	case "LATE_RETURN":
-		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("晚归人员", func(r reporting.Record) string { return r.StudentName }), teacher, field("共查寝间数", func(reporting.Record) string { return fmt.Sprint(checkedDormitoryCount) }), {title: "缺勤率"}, field("备注", func(r reporting.Record) string { return r.Details.Remark })}
+		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("晚归人员", func(r reporting.Record) string { return r.StudentName }), teacher, field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	default:
 		return item.columns
 	}
 }
 
 func classKey(grade, className string) string { return grade + "\x00" + className }
+func classOutputKey(classID, grade, className string) string {
+	if classID != "" {
+		return "id:" + classID
+	}
+	return "legacy:" + classKey(grade, className)
+}
 
 func headTeacherNames(content reporting.ReportVersionContent) map[string]string {
 	result := make(map[string]string)
@@ -67,24 +75,20 @@ func headTeacherNames(content reporting.ReportVersionContent) map[string]string 
 		return result
 	}
 	for _, class := range content.Indicators.Inputs.Classes {
-		result[classKey(class.Grade, class.ClassName)] = class.HeadTeacherName
+		result[classOutputKey(class.ClassID, class.Grade, class.ClassName)] = class.HeadTeacherName
 	}
 	return result
 }
 
-func checkedDormitoryCount(records []reporting.Record) int {
-	seen := make(map[string]struct{})
-	for _, record := range records {
-		if name := strings.TrimSpace(record.CurrentDormitoryName); name != "" {
-			seen[name] = struct{}{}
-		}
-		for _, dormitory := range record.ResponsibleDormitories {
-			if name := strings.TrimSpace(dormitory.Label); name != "" {
-				seen[name] = struct{}{}
-			}
-		}
+func hygieneSituation(details reporting.RecordDetails) string {
+	result := map[string]string{inspection.HygieneExcellent: "优秀", inspection.HygieneQualified: "合格", inspection.HygieneUnqualified: "不合格"}[details.Result]
+	if result == "" {
+		return details.Description
 	}
-	return len(seen)
+	if details.Description == "" {
+		return result
+	}
+	return result + "：" + details.Description
 }
 
 func number(value *float64) string {
@@ -112,11 +116,25 @@ func references(values []reporting.RecordReference) string {
 	return strings.Join(names, "、")
 }
 
-func classRecordValues(records []reporting.Record, code, grade, className string, value func(reporting.Record) string) string {
+func responsibleClassNames(record reporting.Record) string {
+	if names := references(record.ResponsibleClasses); names != "" {
+		return names
+	}
+	return record.ClassName
+}
+
+func recordInReportClass(record reporting.Record, class reporting.ReportClassIndicators) bool {
+	if class.ClassID != "" && record.ClassID != "" {
+		return class.ClassID == record.ClassID
+	}
+	return record.Grade == class.Grade && record.ClassName == class.ClassName
+}
+
+func classRecordValues(records []reporting.Record, code string, class reporting.ReportClassIndicators, value func(reporting.Record) string) string {
 	seen := make(map[string]bool)
 	var values []string
 	for _, record := range records {
-		if record.TypeCode != code || record.Grade != grade || record.ClassName != className {
+		if record.TypeCode != code || !recordInReportClass(record, class) {
 			continue
 		}
 		item := strings.TrimSpace(value(record))
@@ -128,20 +146,175 @@ func classRecordValues(records []reporting.Record, code, grade, className string
 	return strings.Join(values, "、")
 }
 
-func classRecordNames(records []reporting.Record, code, grade, className string) string {
-	return classRecordValues(records, code, grade, className, func(record reporting.Record) string { return record.StudentName })
-}
-
-func classRecordCourses(records []reporting.Record, code, grade, className string) string {
-	return classRecordValues(records, code, grade, className, func(record reporting.Record) string { return record.CurrentCourseName })
-}
-
-func classRecordAbsenceHours(records []reporting.Record, code, grade, className string) string {
-	var total float64
+func classRecordNames(records []reporting.Record, code string, class reporting.ReportClassIndicators) string {
+	seen := make(map[string]bool)
+	var names []string
 	for _, record := range records {
-		if record.TypeCode == code && record.Grade == grade && record.ClassName == className && record.Details.AbsenceHours != nil {
-			total += *record.Details.AbsenceHours
+		if record.TypeCode != code || !recordInReportClass(record, class) {
+			continue
 		}
+		name := strings.TrimSpace(record.StudentName)
+		if name == "" {
+			continue
+		}
+		// A student can have several absence records; names alone cannot identify
+		// distinct students when two classmates share the same name.
+		identity := strings.TrimSpace(record.StudentNumber)
+		if identity == "" {
+			identity = "name:" + name
+		} else {
+			identity = "number:" + identity
+		}
+		if !seen[identity] {
+			seen[identity] = true
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, "、")
+}
+
+func attendanceWordLines(content reporting.ReportVersionContent, records []reporting.Record, teachers map[string]string) [][]string {
+	classes := reportWordClasses(content, records, "ATTENDANCE_RATE")
+	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, "ATTENDANCE_RATE")
+	lines := make([][]string, 0, len(classes))
+	for _, class := range classes {
+		key := classOutputKey(class.ClassID, class.Grade, class.ClassName)
+		values := []string{class.Grade, wordClassLabel(class, classes), "", classRecordNames(records, "ATTENDANCE_RATE", class), classRecordCourses(records, "ATTENDANCE_RATE", class), teachers[key], classRecordAbsenceHours(records, "ATTENDANCE_RATE", class), ""}
+		if metricsAvailable && class.AttendanceRate != nil {
+			metric := class.AttendanceRate
+			values[2] = fmt.Sprintf("%d/%d", metric.ExpectedStudentCount, metric.AttendedStudentCount)
+			values[7] = rate(metric.Rate)
+		}
+		lines = append(lines, values)
+	}
+	return lines
+}
+
+func reportWordClasses(content reporting.ReportVersionContent, records []reporting.Record, code string) []reporting.ReportClassIndicators {
+	classes := make(map[string]reporting.ReportClassIndicators)
+	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, code)
+	if metricsAvailable {
+		for _, class := range content.Indicators.Classes {
+			classes[classOutputKey(class.ClassID, class.Grade, class.ClassName)] = class
+		}
+	}
+	for _, record := range records {
+		if record.TypeCode == code && record.Grade != "" && record.ClassName != "" {
+			key := classOutputKey(record.ClassID, record.Grade, record.ClassName)
+			if _, exists := classes[key]; !exists {
+				classes[key] = reporting.ReportClassIndicators{ClassID: record.ClassID, Grade: record.Grade, ClassName: record.ClassName}
+			}
+		}
+	}
+	keys := make([]string, 0, len(classes))
+	for key := range classes {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left, right := classes[keys[i]], classes[keys[j]]
+		if left.Grade != right.Grade {
+			return left.Grade < right.Grade
+		}
+		if left.ClassName != right.ClassName {
+			return left.ClassName < right.ClassName
+		}
+		return keys[i] < keys[j]
+	})
+	result := make([]reporting.ReportClassIndicators, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, classes[key])
+	}
+	return result
+}
+
+func wordClassLabel(class reporting.ReportClassIndicators, classes []reporting.ReportClassIndicators) string {
+	for _, other := range classes {
+		if other.ClassID != class.ClassID && other.Grade == class.Grade && other.ClassName == class.ClassName {
+			parts := []string{}
+			if class.FacultyName != "" {
+				parts = append(parts, class.FacultyName)
+			}
+			if class.MajorName != "" {
+				parts = append(parts, class.MajorName)
+			}
+			if len(parts) > 0 {
+				return class.ClassName + "（" + strings.Join(parts, "·") + "）"
+			}
+		}
+	}
+	return class.ClassName
+}
+
+func classRecordCount(records []reporting.Record, code string, class reporting.ReportClassIndicators) int {
+	count := 0
+	for _, record := range records {
+		if record.TypeCode == code && recordInReportClass(record, class) {
+			count++
+		}
+	}
+	return count
+}
+
+func morningWordLines(content reporting.ReportVersionContent, records []reporting.Record, teachers map[string]string) [][]string {
+	classes := reportWordClasses(content, records, "MORNING_ATTENDANCE")
+	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, "MORNING_ATTENDANCE")
+	lines := make([][]string, 0, len(classes))
+	for _, class := range classes {
+		values := []string{class.Grade, wordClassLabel(class, classes), "", classRecordNames(records, "MORNING_ATTENDANCE", class), teachers[classOutputKey(class.ClassID, class.Grade, class.ClassName)], "", ""}
+		if metricsAvailable && class.MorningAttendance != nil {
+			metric := class.MorningAttendance
+			values[2] = fmt.Sprintf("%d/%d", metric.ExpectedPersonTimes, metric.AttendedPersonTimes)
+			values[5] = fmt.Sprint(metric.AbsencePersonTimes)
+			values[6] = rate(metric.Rate)
+		}
+		lines = append(lines, values)
+	}
+	return lines
+}
+
+func unattendedWordLines(content reporting.ReportVersionContent, records []reporting.Record, teachers map[string]string) [][]string {
+	classes := reportWordClasses(content, records, "UNATTENDED_CLASSROOM")
+	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, "UNATTENDED_CLASSROOM")
+	lines := make([][]string, 0, len(classes))
+	for _, class := range classes {
+		count := classRecordCount(records, "UNATTENDED_CLASSROOM", class)
+		if metricsAvailable && class.UnattendedClassroom != nil {
+			count = class.UnattendedClassroom.RawRecordCount
+		}
+		lines = append(lines, []string{class.Grade, wordClassLabel(class, classes), classRecordNames(records, "UNATTENDED_CLASSROOM", class), classRecordCourses(records, "UNATTENDED_CLASSROOM", class), teachers[classOutputKey(class.ClassID, class.Grade, class.ClassName)], fmt.Sprint(count)})
+	}
+	return lines
+}
+
+func eveningWordLines(content reporting.ReportVersionContent, records []reporting.Record, teachers map[string]string) [][]string {
+	classes := reportWordClasses(content, records, "EVENING_SELF_STUDY")
+	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, "EVENING_SELF_STUDY")
+	lines := make([][]string, 0, len(classes))
+	for _, class := range classes {
+		count := classRecordCount(records, "EVENING_SELF_STUDY", class)
+		if metricsAvailable && class.EveningSelfStudy != nil {
+			count = class.EveningSelfStudy.RawRecordCount
+		}
+		lines = append(lines, []string{class.Grade, wordClassLabel(class, classes), classRecordNames(records, "EVENING_SELF_STUDY", class), teachers[classOutputKey(class.ClassID, class.Grade, class.ClassName)], fmt.Sprint(count)})
+	}
+	return lines
+}
+
+func classRecordCourses(records []reporting.Record, code string, class reporting.ReportClassIndicators) string {
+	return classRecordValues(records, code, class, func(record reporting.Record) string { return record.CurrentCourseName })
+}
+
+func classRecordAbsenceHours(records []reporting.Record, code string, class reporting.ReportClassIndicators) string {
+	var total float64
+	found := false
+	for _, record := range records {
+		if record.TypeCode == code && recordInReportClass(record, class) && record.Details.AbsenceHours != nil {
+			total += *record.Details.AbsenceHours
+			found = true
+		}
+	}
+	if !found {
+		return ""
 	}
 	return fmt.Sprintf("%g", total)
 }
@@ -174,8 +347,8 @@ func chosenTypes(codes []string) ([]reportType, error) {
 	return result, nil
 }
 
-// outputTypeLayout exposes the same fixed attachment title and columns used
-// by the DOCX renderer, so the settings page never invents a separate layout.
+// outputTypeLayout exposes the attachment title and primary columns used by
+// the DOCX renderer; dormitory subtable headings are in wordOutputSections.
 func outputTypeLayout(code string) (string, []string) {
 	for _, item := range recordColumns() {
 		if item.code != code {
@@ -187,13 +360,32 @@ func outputTypeLayout(code string) (string, []string) {
 		if code == "MORNING_ATTENDANCE" {
 			return item.title, []string{"年级", "班级", "应到/实到", "缺到人员", "班主任", "缺勤总次数", "出勤率"}
 		}
+		if code == "UNATTENDED_CLASSROOM" {
+			return item.title, []string{"年级", "班级", "违纪学生", "课程", "班主任", "违规次数"}
+		}
+		if code == "EVENING_SELF_STUDY" {
+			return item.title, []string{"年级", "班级", "缺勤学生", "班主任", "缺勤次数"}
+		}
 		headings := make([]string, 0, len(item.columns))
-		for _, column := range wordRecordColumns(item, nil, 0) {
+		for _, column := range wordRecordColumns(item, nil) {
 			headings = append(headings, column.title)
 		}
 		return item.title, headings
 	}
 	return "", nil
+}
+
+func wordOutputSections(code string, columns []string) []OutputSection {
+	if code != "DORMITORY_HYGIENE" {
+		return nil
+	}
+	excellent := []string{"寝室号", "所在班级", "责任人", "班主任"}
+	return []OutputSection{
+		{Title: "不合格寝室", Columns: columns},
+		{Title: "优秀寝室", Columns: append(append([]string{}, excellent...), excellent...)},
+		{Title: "合格寝室", Columns: excellent},
+		{Title: "其他宿舍检查记录", Columns: columns},
+	}
 }
 
 func excelTypeColumns(code string) []string {
@@ -337,9 +529,9 @@ func paragraph(value string) string {
 	return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="SimSun" w:eastAsia="宋体"/><w:sz w:val="28"/></w:rPr><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
 }
 func cell(value string, width int, merge string, header bool, hygiene bool) string {
-	property := ""
+	property := `<w:vAlign w:val="center"/>`
 	if merge != "" {
-		property = `<w:vMerge w:val="` + merge + `"/>`
+		property += `<w:vMerge w:val="` + merge + `"/>`
 	}
 	font := "仿宋"
 	if hygiene {
@@ -353,9 +545,9 @@ func cell(value string, width int, merge string, header bool, hygiene bool) stri
 }
 func row(values []string, widths []int, gradeMerge string, header bool, hygiene bool) string {
 	var b strings.Builder
-	minimumHeight := 420
+	minimumHeight := 600
 	if header {
-		minimumHeight = 520
+		minimumHeight = 600
 	}
 	b.WriteString(fmt.Sprintf(`<w:tr><w:trPr><w:trHeight w:val="%d" w:hRule="atLeast"/>`, minimumHeight))
 	if header {
@@ -377,6 +569,149 @@ func row(values []string, widths []int, gradeMerge string, header bool, hygiene 
 	}
 	b.WriteString(`</w:tr>`)
 	return b.String()
+}
+
+func sortedWordRecords(records []reporting.Record, code string) []reporting.Record {
+	selected := make([]reporting.Record, 0)
+	for _, record := range records {
+		if record.TypeCode == code {
+			selected = append(selected, record)
+		}
+	}
+	sort.SliceStable(selected, func(i, j int) bool {
+		left, right := selected[i], selected[j]
+		for index, value := range []string{left.Grade, left.ClassName, left.Details.Date, left.CurrentDormitoryName, left.StudentNumber, left.ID} {
+			other := []string{right.Grade, right.ClassName, right.Details.Date, right.CurrentDormitoryName, right.StudentNumber, right.ID}[index]
+			if value != other {
+				return value < other
+			}
+		}
+		return false
+	})
+	return selected
+}
+
+func wordRecordLines(records []reporting.Record, columns []column) [][]string {
+	lines := make([][]string, 0, len(records))
+	for _, record := range records {
+		values := make([]string, 0, len(columns))
+		for _, definition := range columns {
+			if definition.value == nil {
+				values = append(values, "")
+			} else {
+				values = append(values, definition.value(record))
+			}
+		}
+		lines = append(lines, values)
+	}
+	return lines
+}
+
+func renderWordTablePages(document *strings.Builder, title, code string, columns []column, lines [][]string, grouped bool) {
+	widths := wordColumnWidths(columns)
+	pages := paginateWordRows(lines, widths)
+	for pageIndex, page := range pages {
+		if pageIndex > 0 {
+			document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
+			document.WriteString(attachmentTitle(title+"（续）", code))
+		}
+		var grid strings.Builder
+		for _, width := range widths {
+			grid.WriteString(fmt.Sprintf(`<w:gridCol w:w="%d"/>`, width))
+		}
+		document.WriteString(fmt.Sprintf(`<w:tbl><w:tblPr><w:tblW w:w="15000" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single"/><w:left w:val="single"/><w:bottom w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr><w:tblGrid>%s</w:tblGrid>`, grid.String()))
+		headings := make([]string, 0, len(columns))
+		for _, item := range columns {
+			headings = append(headings, item.title)
+		}
+		hygiene := code == "DORMITORY_HYGIENE" || code == "PUBLIC_DORMITORY_HYGIENE" || code == "CLASSROOM_HYGIENE"
+		document.WriteString(row(headings, widths, "", true, hygiene))
+		for index, line := range page {
+			values := append([]string(nil), line...)
+			if len(values) > 0 && !strings.HasPrefix(values[0], "本周无") && !strings.HasPrefix(values[0], "来源未完成") {
+				for columnIndex, definition := range columns {
+					if values[columnIndex] == "" && (definition.title == "缺课同学" || definition.title == "课程" || definition.title == "缺到人员" || definition.title == "违纪学生" || definition.title == "缺勤学生") {
+						values[columnIndex] = "无"
+					}
+				}
+			}
+			gradeMerge := ""
+			if grouped && values[1] != "" {
+				gradeMerge = "restart"
+				if index > 0 && page[index-1][0] == line[0] {
+					gradeMerge = "continue"
+				}
+			}
+			document.WriteString(row(values, widths, gradeMerge, false, hygiene))
+		}
+		document.WriteString(`</w:tbl>`)
+	}
+}
+
+func dormitoryWordTables(document *strings.Builder, content reporting.ReportVersionContent, records []reporting.Record, item reportType, teachers map[string]string) {
+	field := func(title string, value func(reporting.Record) string) column { return column{title, value} }
+	excellentColumns := []column{
+		field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }),
+		field("所在班级", responsibleClassNames),
+		field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }),
+		field("班主任", func(r reporting.Record) string { return teachers[classOutputKey(r.ClassID, r.Grade, r.ClassName)] }),
+	}
+	pairedExcellentColumns := append(append([]column{}, excellentColumns...), excellentColumns...)
+	groups := []struct {
+		result, title string
+		columns       []column
+	}{
+		{inspection.HygieneUnqualified, "不合格寝室", wordRecordColumns(item, teachers)},
+		{inspection.HygieneExcellent, "优秀寝室", pairedExcellentColumns},
+		{inspection.HygieneQualified, "合格寝室", excellentColumns},
+	}
+	selected := sortedWordRecords(records, item.code)
+	written := false
+	for _, group := range groups {
+		var members []reporting.Record
+		for _, record := range selected {
+			if record.Details.Result == group.result {
+				members = append(members, record)
+			}
+		}
+		if len(members) == 0 {
+			continue
+		}
+		document.WriteString(attachmentTitle(group.title, item.code))
+		lines := wordRecordLines(members, group.columns)
+		if group.result == inspection.HygieneExcellent {
+			lines = nil
+			for index := 0; index < len(members); index += 2 {
+				line := make([]string, len(pairedExcellentColumns))
+				for offset := 0; offset < 2 && index+offset < len(members); offset++ {
+					for columnIndex, column := range excellentColumns {
+						line[offset*len(excellentColumns)+columnIndex] = column.value(members[index+offset])
+					}
+				}
+				lines = append(lines, line)
+			}
+		}
+		renderWordTablePages(document, group.title, item.code, group.columns, lines, false)
+		written = true
+	}
+	var other []reporting.Record
+	for _, record := range selected {
+		if record.Details.Result != inspection.HygieneUnqualified && record.Details.Result != inspection.HygieneExcellent && record.Details.Result != inspection.HygieneQualified {
+			other = append(other, record)
+		}
+	}
+	if len(other) > 0 {
+		columns := wordRecordColumns(item, teachers)
+		document.WriteString(attachmentTitle("其他宿舍检查记录", item.code))
+		renderWordTablePages(document, "其他宿舍检查记录", item.code, columns, wordRecordLines(other, columns), false)
+		written = true
+	}
+	if !written {
+		columns := wordRecordColumns(item, teachers)
+		empty := make([]string, len(columns))
+		empty[0] = emptyOutputText(content, item.code)
+		renderWordTablePages(document, item.title, item.code, columns, [][]string{empty}, false)
+	}
 }
 
 // RenderWord builds a standard DOCX with a portrait introduction and landscape inspection pages.
@@ -413,13 +748,13 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 			if title == "" {
 				title = "{semesterName} 第{weekNo}周日常管理通报"
 			}
-			title = strings.ReplaceAll(strings.ReplaceAll(title, "{semesterName}", content.Period.SemesterName), "{weekNo}", fmt.Sprint(content.Period.WeekNo))
+			title = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(title)
 			document.WriteString(coverTitle(title))
 		}
 		for index := range cover.Content {
 			for run := range cover.Content[index].Content {
 				value := cover.Content[index].Content[run].Text
-				cover.Content[index].Content[run].Text = strings.ReplaceAll(strings.ReplaceAll(value, "{semesterName}", content.Period.SemesterName), "{weekNo}", fmt.Sprint(content.Period.WeekNo))
+				cover.Content[index].Content[run].Text = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(value)
 			}
 		}
 		position := len(cover.Content)
@@ -431,90 +766,49 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 			document.WriteString(coverAttachmentList(types))
 		}
 		document.WriteString(renderIntroduction(IntroductionDocument{Content: cover.Content[position:]}))
-		document.WriteString(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1080" w:right="1080"/></w:sectPr></w:pPr></w:p>`)
+		document.WriteString(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1080" w:right="1080"/>` + wordPageNumberFormat(cover) + `</w:sectPr></w:pPr></w:p>`)
 	}
 	teachers := headTeacherNames(content)
-	dormitoryCount := checkedDormitoryCount(records)
 	for typeIndex, item := range types {
 		if typeIndex > 0 {
 			document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
 		}
-		document.WriteString(attachmentTitle(item.title, item.code))
-		columns := wordRecordColumns(item, teachers, dormitoryCount)
+		wordTitle := wordAttachmentTitle(item.code, content.Period.WeekNo)
+		document.WriteString(attachmentTitle(wordTitle, item.code))
+		if item.code == "DORMITORY_HYGIENE" {
+			dormitoryWordTables(&document, content, records, item, teachers)
+			continue
+		}
+		columns := wordRecordColumns(item, teachers)
 		var lines [][]string
-		if content.Indicators != nil && !outputSourceUnsubmitted(content, item.code) && (item.code == "ATTENDANCE_RATE" || item.code == "MORNING_ATTENDANCE") {
-			if item.code == "ATTENDANCE_RATE" {
-				columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺课同学"}, {title: "课程"}, {title: "班主任"}, {title: "缺课总课时"}, {title: "到课率"}}
-			} else {
-				columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺到人员"}, {title: "班主任"}, {title: "缺勤总次数"}, {title: "出勤率"}}
-			}
-			for _, class := range content.Indicators.Classes {
-				values := []string{class.Grade, class.ClassName}
-				if item.code == "ATTENDANCE_RATE" && class.AttendanceRate != nil {
-					m := class.AttendanceRate
-					values = append(values, fmt.Sprintf("%d/%d", m.ExpectedStudentCount, m.AttendedStudentCount), classRecordNames(records, item.code, class.Grade, class.ClassName), classRecordCourses(records, item.code, class.Grade, class.ClassName), teachers[classKey(class.Grade, class.ClassName)], classRecordAbsenceHours(records, item.code, class.Grade, class.ClassName), rate(m.Rate))
-				}
-				if item.code == "MORNING_ATTENDANCE" && class.MorningAttendance != nil {
-					m := class.MorningAttendance
-					values = append(values, fmt.Sprintf("%d/%d", m.ExpectedPersonTimes, m.AttendedPersonTimes), classRecordNames(records, item.code, class.Grade, class.ClassName), teachers[classKey(class.Grade, class.ClassName)], fmt.Sprint(m.AbsencePersonTimes), rate(m.Rate))
-				}
-				if len(values) == len(columns) {
-					lines = append(lines, values)
-				}
-			}
+		grouped := false
+		if item.code == "ATTENDANCE_RATE" {
+			columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺课同学"}, {title: "课程"}, {title: "班主任"}, {title: "缺课总课时"}, {title: "到课率"}}
+			lines = attendanceWordLines(content, records, teachers)
+			grouped = true
+		} else if item.code == "MORNING_ATTENDANCE" {
+			columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺到人员"}, {title: "班主任"}, {title: "缺勤总次数"}, {title: "出勤率"}}
+			lines = morningWordLines(content, records, teachers)
+			grouped = true
+		} else if item.code == "UNATTENDED_CLASSROOM" {
+			columns = []column{{title: "年级"}, {title: "班级"}, {title: "违纪学生"}, {title: "课程"}, {title: "班主任"}, {title: "违规次数"}}
+			lines = unattendedWordLines(content, records, teachers)
+			grouped = true
+		} else if item.code == "EVENING_SELF_STUDY" {
+			columns = []column{{title: "年级"}, {title: "班级"}, {title: "缺勤学生"}, {title: "班主任"}, {title: "缺勤次数"}}
+			lines = eveningWordLines(content, records, teachers)
+			grouped = true
 		} else {
-			for _, record := range records {
-				if record.TypeCode != item.code {
-					continue
-				}
-				values := make([]string, 0, len(columns))
-				for _, definition := range columns {
-					if definition.value == nil {
-						values = append(values, "")
-						continue
-					}
-					values = append(values, definition.value(record))
-				}
-				lines = append(lines, values)
-			}
+			lines = wordRecordLines(sortedWordRecords(records, item.code), columns)
 		}
 		if len(lines) == 0 {
 			empty := make([]string, len(columns))
 			empty[0] = emptyOutputText(content, item.code)
 			lines = append(lines, empty)
 		}
-		widths := wordColumnWidths(columns)
-		pages := paginateWordRows(lines, widths)
-		for pageIndex, page := range pages {
-			if pageIndex > 0 {
-				document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
-				document.WriteString(attachmentTitle(item.title+"（续）", item.code))
-			}
-			var grid strings.Builder
-			for _, width := range widths {
-				grid.WriteString(fmt.Sprintf(`<w:gridCol w:w="%d"/>`, width))
-			}
-			document.WriteString(fmt.Sprintf(`<w:tbl><w:tblPr><w:tblW w:w="15000" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single"/><w:left w:val="single"/><w:bottom w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr><w:tblGrid>%s</w:tblGrid>`, grid.String()))
-			headings := make([]string, 0, len(columns))
-			for _, c := range columns {
-				headings = append(headings, c.title)
-			}
-			hygiene := item.code == "DORMITORY_HYGIENE" || item.code == "PUBLIC_DORMITORY_HYGIENE" || item.code == "CLASSROOM_HYGIENE"
-			document.WriteString(row(headings, widths, "", true, hygiene))
-			for index, line := range page {
-				gradeMerge := ""
-				if content.Indicators != nil && !outputSourceUnsubmitted(content, item.code) && (item.code == "ATTENDANCE_RATE" || item.code == "MORNING_ATTENDANCE") && line[0] != "本周无已确认违纪记录" {
-					gradeMerge = "restart"
-					if index > 0 && page[index-1][0] == line[0] {
-						gradeMerge = "continue"
-					}
-				}
-				document.WriteString(row(line, widths, gradeMerge, false, hygiene))
-			}
-			document.WriteString(`</w:tbl>`)
-		}
+		renderWordTablePages(&document, wordTitle, item.code, columns, lines, grouped)
 	}
-	document.WriteString(`<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="900" w:bottom="900" w:left="900" w:right="900"/></w:sectPr></w:body></w:document>`)
+	document.WriteString(`<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="900" w:bottom="900" w:left="900" w:right="900"/>` + wordPageNumberFormat(cover) + `</w:sectPr></w:body></w:document>`)
 	var buffer bytes.Buffer
 	archive := zip.NewWriter(&buffer)
 	files := []struct{ name, value string }{

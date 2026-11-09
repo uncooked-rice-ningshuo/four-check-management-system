@@ -36,6 +36,56 @@ func attachmentTitle(value, code string) string {
 	return `<w:p><w:pPr><w:pStyle w:val="` + style + `"/></w:pPr><w:r><w:t xml:space="preserve">` + xmlText(value) + `</w:t></w:r></w:p>`
 }
 
+func chineseNumber(value int) string {
+	if value < 0 || value >= 10000 {
+		return fmt.Sprint(value)
+	}
+	if value == 0 {
+		return "零"
+	}
+	digits := []string{"零", "一", "二", "三", "四", "五", "六", "七", "八", "九"}
+	units := []string{"", "十", "百", "千"}
+	result := ""
+	zero := false
+	for position := 3; position >= 0; position-- {
+		base := 1
+		for count := 0; count < position; count++ {
+			base *= 10
+		}
+		digit := value / base % 10
+		if digit == 0 {
+			zero = result != ""
+			continue
+		}
+		if zero {
+			result += "零"
+		}
+		if !(position == 1 && digit == 1 && result == "") {
+			result += digits[digit]
+		}
+		result += units[position]
+		zero = false
+	}
+	return result
+}
+
+func wordAttachmentTitle(code string, weekNo int) string {
+	titles := map[string]string{
+		"ATTENDANCE_RATE":          "到课率检查通报",
+		"UNATTENDED_CLASSROOM":     "无机课堂检查通报",
+		"MORNING_ATTENDANCE":       "早签通报",
+		"EVENING_SELF_STUDY":       "晚自习检查通报",
+		"DORMITORY_HYGIENE":        "宿舍卫生检查通报",
+		"PUBLIC_DORMITORY_HYGIENE": "公共宿舍卫生检查通报",
+		"LATE_RETURN":              "晚归检查通报",
+		"CLASSROOM_HYGIENE":        "教室卫生检查通报",
+	}
+	if weekNo <= 0 {
+		return titles[code]
+	}
+	return "第" + chineseNumber(weekNo) + "周" + titles[code]
+}
+
 func coverAttachmentList(types []reportType) string {
 	var output strings.Builder
 	for index, item := range types {
@@ -83,8 +133,9 @@ func wordFooterDocumentXML(document IntroductionDocument, semesterName string, w
 		return wordFooterLayoutXML(document.FooterText, document.FooterLayout)
 	}
 	const open = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">`
+	chinesePages := wordPageNumberFormat(document) != ""
 	runs := func(value string) string {
-		value = strings.NewReplacer("{semesterName}", semesterName, "{weekNo}", fmt.Sprint(weekNo)).Replace(value)
+		value = strings.NewReplacer("{semesterName}", semesterName, "{weekNoChinese}", chineseNumber(weekNo), "{weekNo}", fmt.Sprint(weekNo)).Replace(value)
 		parts := strings.SplitAfter(value, "}")
 		var output strings.Builder
 		for _, part := range parts {
@@ -104,9 +155,21 @@ func wordFooterDocumentXML(document IntroductionDocument, semesterName string, w
 				}
 				switch field + "}" {
 				case "{page}":
-					output.WriteString(`<w:fldSimple w:instr="PAGE"/>`)
+					if chinesePages {
+						output.WriteString(`<w:fldSimple w:instr="PAGE \* Arabic"/>`)
+					} else {
+						output.WriteString(`<w:fldSimple w:instr="PAGE"/>`)
+					}
+				case "{pageChinese}":
+					output.WriteString(`<w:fldSimple w:instr="PAGE \* CHINESENUM1"/>`)
 				case "{totalPages}":
-					output.WriteString(`<w:fldSimple w:instr="NUMPAGES"/>`)
+					if chinesePages {
+						output.WriteString(`<w:fldSimple w:instr="NUMPAGES \* Arabic"/>`)
+					} else {
+						output.WriteString(`<w:fldSimple w:instr="NUMPAGES"/>`)
+					}
+				case "{totalPagesChinese}":
+					output.WriteString(`<w:fldSimple w:instr="NUMPAGES \* CHINESENUM1"/>`)
 				default:
 					output.WriteString(`<w:r><w:t xml:space="preserve">` + xmlText(field+"}") + `</w:t></w:r>`)
 				}
@@ -140,6 +203,13 @@ func wordFooterDocumentXML(document IntroductionDocument, semesterName string, w
 	}
 	output.WriteString(`</w:ftr>`)
 	return output.String()
+}
+
+func wordPageNumberFormat(document IntroductionDocument) string {
+	if strings.Contains(document.FooterText, "{pageChinese}") || strings.Contains(document.FooterText, "{totalPagesChinese}") {
+		return `<w:pgNumType w:fmt="chineseCounting"/>`
+	}
+	return ""
 }
 
 func renderIntroduction(document IntroductionDocument) string {
@@ -243,25 +313,31 @@ func estimatedRowHeight(values []string, widths []int) int {
 			maxLines = lines
 		}
 	}
-	return 420 + (maxLines-1)*340
+	return 600 + (maxLines-1)*340
 }
 
 // Hard page boundaries keep grade merges from continuing into a new page.
 // This deliberately leaves room for each application's own line breaking.
 func paginateWordRows(lines [][]string, widths []int) [][][]string {
 	const pageBudget = 6500
+	const standaloneRowHeight = 3500
 	pages := make([][][]string, 0, 1)
 	page := make([][]string, 0)
 	used := 0
 	for _, line := range lines {
 		height := estimatedRowHeight(line, widths)
-		if len(page) > 0 && used+height > pageBudget {
+		if len(page) > 0 && (used+height > pageBudget || height >= standaloneRowHeight) {
 			pages = append(pages, page)
 			page = make([][]string, 0)
 			used = 0
 		}
 		page = append(page, line)
 		used += height
+		if height >= standaloneRowHeight {
+			pages = append(pages, page)
+			page = make([][]string, 0)
+			used = 0
+		}
 	}
 	if len(page) > 0 {
 		pages = append(pages, page)

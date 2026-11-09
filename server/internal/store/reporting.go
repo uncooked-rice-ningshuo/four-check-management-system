@@ -258,9 +258,11 @@ WHERE scope.semester_id=$1::uuid`, semesterID).Scan(&configuredGradeCount, &enab
 	if lockRows {
 		classLock = " FOR SHARE OF class,grade"
 	}
-	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name,COALESCE(teacher.name,'')
+	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name,COALESCE(faculty.name,''),COALESCE(major.name,''),COALESCE(teacher.name,'')
 FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
 JOIN classes class ON class.grade_id=grade.id
+LEFT JOIN faculties faculty ON faculty.id=class.faculty_id
+LEFT JOIN majors major ON major.id=class.major_id
 LEFT JOIN staff teacher ON teacher.id=class.head_teacher_id
 WHERE scope.semester_id=$1::uuid AND class.enabled AND grade.enabled
 ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
@@ -272,7 +274,7 @@ ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 	for rows.Next() {
 		var classID string
 		var class reporting.ReportClassSizeSnapshot
-		if err := rows.Scan(&classID, &class.GradeID, &class.Grade, &class.ClassName, &class.HeadTeacherName); err != nil {
+		if err := rows.Scan(&classID, &class.GradeID, &class.Grade, &class.ClassName, &class.FacultyName, &class.MajorName, &class.HeadTeacherName); err != nil {
 			rows.Close()
 			return reporting.ReportMetricInputs{}, err
 		}

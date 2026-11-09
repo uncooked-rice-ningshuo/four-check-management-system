@@ -86,11 +86,11 @@ const TemplateVariable = Node.create({
   name: 'templateVariable', group: 'inline', inline: true, atom: true,
   addAttributes() { return { key: { default: 'semesterName', parseHTML: element => element.getAttribute('data-template-variable'), renderHTML: attributes => ({ 'data-template-variable': attributes.key }) } } },
   parseHTML() { return [{ tag: 'span[data-template-variable]' }] },
-  renderHTML({ node }) { return ['span', { class: 'report-template-variable', 'data-template-variable': node.attrs.key, title: node.attrs.key === 'reportDate' ? '通报文件设置中的每周文件日期' : node.attrs.key === 'weekNo' ? '周次变量' : '学期变量' }, node.attrs.key === 'reportDate' ? '文件日期' : node.attrs.key === 'weekNo' ? '9' : '示例学期'] },
+  renderHTML({ node }) { return ['span', { class: 'report-template-variable', 'data-template-variable': node.attrs.key, title: node.attrs.key === 'reportDate' ? '通报文件设置中的每周文件日期' : node.attrs.key === 'weekNo' || node.attrs.key === 'weekNoChinese' ? '周次变量' : '学期变量' }, node.attrs.key === 'reportDate' ? '文件日期' : node.attrs.key === 'weekNoChinese' ? '九' : node.attrs.key === 'weekNo' ? '9' : '示例学期'] },
 })
 
 function editorContent(document: IntroductionDocument): JSONContent {
-  return { type: 'doc', content: document.content.map(paragraph => ({ ...paragraph, content: paragraph.content?.flatMap(run => run.text.split(/(\{semesterName\}|\{weekNo\}|\{reportDate\})/g).filter(Boolean).map(part => ['{semesterName}', '{weekNo}', '{reportDate}'].includes(part) ? { type: 'templateVariable', attrs: { key: part.slice(1, -1) } } : { ...run, text: part })) })) }
+  return { type: 'doc', content: document.content.map(paragraph => ({ ...paragraph, content: paragraph.content?.flatMap(run => run.text.split(/(\{semesterName\}|\{weekNo\}|\{weekNoChinese\}|\{reportDate\})/g).filter(Boolean).map(part => ['{semesterName}', '{weekNo}', '{weekNoChinese}', '{reportDate}'].includes(part) ? { type: 'templateVariable', attrs: { key: part.slice(1, -1) } } : { ...run, text: part })) })) }
 }
 
 const RestrictedFontFamily = FontFamily.extend({
@@ -135,7 +135,7 @@ function introductionFromEditor(document: JSONContent): IntroductionDocument {
       const runs: NonNullable<IntroductionDocument['content'][number]['content']> = (paragraph.content ?? [])
         .filter(run => (run.type === 'text' && typeof run.text === 'string' && run.text.length > 0) || run.type === 'templateVariable')
         .map(run => {
-          if (run.type === 'templateVariable') return { type: 'text' as const, text: run.attrs?.key === 'reportDate' ? '{reportDate}' : run.attrs?.key === 'weekNo' ? '{weekNo}' : '{semesterName}' }
+          if (run.type === 'templateVariable') return { type: 'text' as const, text: run.attrs?.key === 'reportDate' ? '{reportDate}' : run.attrs?.key === 'weekNoChinese' ? '{weekNoChinese}' : run.attrs?.key === 'weekNo' ? '{weekNo}' : '{semesterName}' }
           const marks: NonNullable<NonNullable<IntroductionDocument['content'][number]['content']>[number]['marks']> = []
           for (const mark of run.marks ?? []) {
             if (mark.type === 'bold' || mark.type === 'italic' || mark.type === 'strike' || mark.type === 'underline') marks.push({ type: mark.type })
@@ -214,6 +214,8 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
   const history = useRef<{ past: IntroductionDocument[]; future: IntroductionDocument[] }>({ past: [], future: [] })
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false })
   const [zoom, setZoom] = useState(100)
+  const [pageCount, setPageCount] = useState(1)
+  const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => { onChangeRef.current = onChange; documentRef.current = value }, [onChange, value])
   const updateDocument = (next: IntroductionDocument) => {
     if (JSON.stringify(next) === JSON.stringify(documentRef.current)) return
@@ -235,6 +237,40 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       updateDocument({ ...documentRef.current, content })
     },
   })
+  useEffect(() => {
+    if (!editor) return
+    let frame = 0
+    const measure = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const content = contentRef.current?.querySelector<HTMLElement>('.tiptap')
+        if (!content) return
+        const paragraphs = Array.from(content.children).filter((node): node is HTMLElement => node instanceof HTMLElement)
+        // Keep pagination visual only; page spacing never enters the saved document.
+        for (const paragraph of paragraphs) paragraph.style.marginTop = `${Number(paragraph.dataset.spaceBefore) || 0}pt`
+        let page = 1
+        let used = 0
+        for (const paragraph of paragraphs) {
+          const before = (Number(paragraph.dataset.spaceBefore) || 0) * 4 / 3
+          const after = (Number(paragraph.dataset.spaceAfter) || 0) * 4 / 3
+          const height = paragraph.getBoundingClientRect().height
+          if (used > 0 && used + before + height + after > 887) {
+            paragraph.style.marginTop = `calc(${before}px + ${887 - used + 260}px)`
+            used = before + height + after
+            page += 1
+          } else {
+            used += before + height + after
+          }
+        }
+        setPageCount(page)
+      })
+    }
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(editor.view.dom)
+    editor.on('transaction', measure)
+    measure()
+    return () => { observer?.disconnect(); editor.off('transaction', measure); cancelAnimationFrame(frame) }
+  }, [editor])
   const state = useEditorState({
     editor,
     selector: ({ editor: currentEditor }) => currentEditor ? selectionFormatting(currentEditor) : null,
@@ -276,6 +312,7 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
         <span aria-live="polite">{zoom}%</span>
         <ToolButton label="放大" icon={<Icon icon={plus} />} disabled={zoom >= 125} onClick={() => setZoom(current => Math.min(125, current + 25))} />
       </div>
+      <span className="report-intro-page-count" role="status">共 {pageCount} 页{pageCount > 1 ? '，正文已续到下一页' : ''}</span>
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
       <Select aria-label="段落样式" variant="borderless" className="report-intro-select report-intro-style-select" value={active?.paragraphStyle || 'body'} options={paragraphStyles} disabled={!editor} onChange={style => editor?.chain().focus().updateAttributes('paragraph', { style }).setTextAlign(style === 'signature' || style === 'date' ? 'right' : style === 'title' || style === 'subtitle' ? 'center' : 'left').run()} />
       <Select aria-label="字体" variant="borderless" className="report-intro-select report-intro-font-select" value={active?.fontFamily || defaultFont(active?.paragraphStyle)} options={fonts.map(font => ({ value: font, label: font }))} disabled={!editor} onChange={font => editor?.chain().focus().setFontFamily(font).run()} />
@@ -301,7 +338,7 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       <ToolButton label="重做" icon={<Icon icon={redoIcon} />} disabled={!historyState.canRedo} onClick={() => restore('redo')} />
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
       {!footerActive && <div className="report-intro-inserts"><ToolButton label="插入附件文本" icon={<Icon icon={listTree} />} disabled={!editor || attachmentNames.length === 0} onClick={insertDirectory} />
-        <Dropdown menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }, { key: 'date', label: '每周文件日期' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : key === 'week' ? '{weekNo}' : '{reportDate}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
+        <Dropdown menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }, { key: 'weekChinese', label: '周次汉字' }, { key: 'date', label: '每周文件日期' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : key === 'week' ? '{weekNo}' : key === 'weekChinese' ? '{weekNoChinese}' : '{reportDate}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
       }
       {footerActive && <div className="report-intro-footer-tools" role="toolbar" aria-label="页脚工具">
         <span>页脚</span>
@@ -311,8 +348,9 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
         <Button type="text" size="small" onClick={() => footerRef.current?.insertTab()}>插入分区</Button>
         <Dropdown menu={{ items: [
           { key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' },
-          { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' },
-        ], onClick: ({ key }) => footerRef.current?.insertField(key as 'page' | 'totalPages' | 'semesterName' | 'weekNo') }} trigger={['click']}>
+          { key: 'pageChinese', label: '当前页码（汉字）' }, { key: 'totalPagesChinese', label: '总页数（汉字）' },
+          { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }, { key: 'weekNoChinese', label: '周次汉字' },
+        ], onClick: ({ key }) => footerRef.current?.insertField(key as 'page' | 'totalPages' | 'pageChinese' | 'totalPagesChinese' | 'semesterName' | 'weekNo' | 'weekNoChinese') }} trigger={['click']}>
           <Button type="text" size="small">插入字段</Button>
         </Dropdown>
         <Button type="text" size="small" onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'left', footerText: '{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t' })}>参考页脚版式</Button>
@@ -320,11 +358,18 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       {toolbarAction && <div className="report-intro-toolbar-action">{toolbarAction}</div>}
     </div>
     <div className="report-intro-stage" aria-label="通报正文纸张工作区">
-      <div className="report-intro-page" style={{ zoom: `${zoom}%` }} aria-label="A4 页面排版参考">
-        <div className="report-intro-page-corners" aria-hidden="true"><i /><i /><i /><i /></div>
-        <input className="report-intro-page-header" aria-label="编辑页首" maxLength={120} placeholder="点击编辑页首" value={value.headerText ?? ''} onFocus={() => setFooterActive(false)} onChange={event => updateDocument({ ...documentRef.current, headerText: event.target.value })} />
-        <ReportFooterEditor ref={footerRef} value={value} onChange={updateDocument} onFocus={() => setFooterActive(true)} />
-        <div onFocusCapture={() => setFooterActive(false)}><EditorContent editor={editor} className="report-intro-content" aria-label="通报正文编辑区" /></div>
+      <div className="report-intro-pages" style={{ zoom: `${zoom}%`, height: 1123 * pageCount + 24 * (pageCount - 1) }} aria-label="A4 分页排版参考">
+        {Array.from({ length: pageCount }, (_, index) => <div key={index} className="report-intro-page" style={{ top: index * 1147 }} aria-label={`第 ${index + 1} 页`}>
+          <div className="report-intro-page-corners" aria-hidden="true"><i /><i /><i /><i /></div>
+          {index === 0 ? <>
+            <input className="report-intro-page-header" aria-label="编辑页首" maxLength={120} placeholder="点击编辑页首" value={value.headerText ?? ''} onFocus={() => setFooterActive(false)} onChange={event => updateDocument({ ...documentRef.current, headerText: event.target.value })} />
+            <ReportFooterEditor ref={footerRef} value={value} onChange={updateDocument} onFocus={() => setFooterActive(true)} />
+          </> : <>
+            <div className="report-intro-page-header" aria-hidden="true">{value.headerText}</div>
+            <div className="report-intro-page-footer" aria-hidden="true">第 {index + 1} 页 / 共 {pageCount} 页</div>
+          </>}
+        </div>)}
+        <div ref={contentRef} onFocusCapture={() => setFooterActive(false)}><EditorContent editor={editor} className="report-intro-content" aria-label="通报正文编辑区" /></div>
       </div>
     </div>
   </div>

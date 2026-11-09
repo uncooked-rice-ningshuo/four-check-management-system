@@ -1,6 +1,8 @@
 package reportoutput
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,12 +17,13 @@ import (
 )
 
 type outputRepositoryStub struct {
-	settings Settings
-	weekDate WeekDate
-	output   File
-	starts   int
-	previews int
-	records  []reporting.Record
+	settings         Settings
+	weekDate         WeekDate
+	output           File
+	starts           int
+	previews         int
+	transientOutputs int
+	records          []reporting.Record
 }
 
 func (r *outputRepositoryStub) ListWeekDates(context.Context) ([]WeekDate, error) {
@@ -111,16 +114,123 @@ func (r *outputRepositoryStub) RecordOutputPreview(context.Context, []string, au
 	r.previews++
 	return nil
 }
+func (r *outputRepositoryStub) RecordTransientOutput(context.Context, File, int, audit.Metadata) error {
+	r.transientOutputs++
+	return nil
+}
+
+func TestGenerateDownloadDoesNotStoreFiles(t *testing.T) {
+	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", SemesterName: "示例学期", WeekNo: 8}
+	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "NO_CONFIRMED_DATA"}}}}
+	repo := &outputRepositoryStub{settings: Settings{Version: 1}, weekDate: WeekDate{IssueDate: "2025-06-01"}}
+	files := &outputFilesStub{}
+	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
+	workflow := outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}}
+	service := NewService(repo, files, outputPermissionsStub{}, workflow)
+	if _, _, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) || repo.transientOutputs != 0 {
+		t.Fatalf("unauthorized output: %v", err)
+	}
+	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, workflow)
+	output, data, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{})
+	if err != nil || output.Status != "AVAILABLE" || ValidateGeneratedFile("WORD", data) != nil || repo.starts != 0 || len(files.content) != 0 || repo.transientOutputs != 1 {
+		t.Fatalf("transient output=%+v bytes=%d starts=%d stores=%d audits=%d err=%v", output, len(data), repo.starts, len(files.content), repo.transientOutputs, err)
+	}
+	input.Format = "EXCEL"
+	output, data, err = service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{})
+	if err != nil || output.Format != "EXCEL" || ValidateGeneratedFile("EXCEL", data) != nil || repo.starts != 0 || len(files.content) != 0 || repo.transientOutputs != 2 {
+		t.Fatalf("transient Excel output=%+v bytes=%d starts=%d stores=%d audits=%d err=%v", output, len(data), repo.starts, len(files.content), repo.transientOutputs, err)
+	}
+	version.Content.Rows[0].RecordCount = 1
+	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	if _, _, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, ErrInvalidGeneratedFile) || repo.transientOutputs != 2 || repo.starts != 0 {
+		t.Fatalf("inconsistent source generated or audited output: err=%v audits=%d starts=%d", err, repo.transientOutputs, repo.starts)
+	}
+}
+
+func TestGenerateDownloadResolvesConfiguredWeekDateInCover(t *testing.T) {
+	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", SemesterName: "示例学期", WeekNo: 8}
+	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "NO_CONFIRMED_DATA"}}}}
+	repo := &outputRepositoryStub{settings: Settings{Version: 1, IntroductionDocument: json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)}, weekDate: WeekDate{IssueDate: "2026-11-14", Version: 1}}
+	service := NewService(repo, &outputFilesStub{}, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	_, data, err := service.GenerateDownload(context.Background(), "actor", GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, audit.Metadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "2026年11月14日") || strings.Contains(string(body), "{reportDate}") {
+			t.Fatalf("configured date missing from generated Word: %s", body)
+		}
+		return
+	}
+	t.Fatal("document.xml missing")
+}
 
 func TestPreviewAuditsOnlyValidatedOutput(t *testing.T) {
 	repository := &outputRepositoryStub{}
 	service := NewService(repository, nil, nil, nil)
-	if _, err := service.PreviewWord(context.Background(), legacyIntroduction("虚构说明"), []string{"INVALID"}, audit.Metadata{}); err == nil || repository.previews != 0 {
+	if _, err := service.PreviewWord(context.Background(), legacyIntroduction("虚构说明"), []string{"INVALID"}, "", "", audit.Metadata{}); err == nil || repository.previews != 0 {
 		t.Fatal("invalid preview must not be audited as a generated file")
 	}
-	if _, err := service.PreviewWord(context.Background(), legacyIntroduction("虚构说明"), []string{"LATE_RETURN"}, audit.Metadata{}); err != nil || repository.previews != 1 {
+	if _, err := service.PreviewWord(context.Background(), legacyIntroduction("虚构说明"), []string{"LATE_RETURN"}, "", "", audit.Metadata{}); err != nil || repository.previews != 1 {
 		t.Fatalf("valid preview audit count=%d err=%v", repository.previews, err)
 	}
+}
+
+func TestPreviewWordUsesConfiguredWeekDate(t *testing.T) {
+	repository := &outputRepositoryStub{weekDate: WeekDate{SemesterName: "2026年秋季学期", WeekNo: 10, IssueDate: "2026-11-14"}}
+	service := NewService(repository, nil, nil, nil)
+	document := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)
+	semesterID := "10000000-0000-0000-0000-000000000001"
+	weekID := "10000000-0000-0000-0000-000000000002"
+	if _, err := service.PreviewWord(context.Background(), document, []string{"LATE_RETURN"}, semesterID, "", audit.Metadata{}); !errors.Is(err, ErrInvalidSelection) {
+		t.Fatalf("incomplete period accepted: %v", err)
+	}
+	if _, err := service.PreviewWord(context.Background(), document, []string{"LATE_RETURN"}, "invalid", weekID, audit.Metadata{}); !errors.Is(err, ErrInvalidSelection) {
+		t.Fatalf("invalid period accepted: %v", err)
+	}
+	data, err := service.PreviewWord(context.Background(), document, []string{"LATE_RETURN"}, semesterID, weekID, audit.Metadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range reader.File {
+		if file.Name != "word/document.xml" {
+			continue
+		}
+		bodyFile, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(bodyFile)
+		bodyFile.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "2026年11月14日") || strings.Contains(string(body), "2025年6月1日") {
+			t.Fatalf("preview did not use configured date: %s", body)
+		}
+		return
+	}
+	t.Fatal("Word document.xml missing")
 }
 
 type outputFilesStub struct {

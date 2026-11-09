@@ -60,10 +60,14 @@ func TestValidateRowsRejectsWithinFileAndExistingDuplicates(t *testing.T) {
 func TestValidateStudentsResolvesNamesAndCanonicalizesIdentifiers(t *testing.T) {
 	catalog := memoryCatalog{
 		records: map[string][]masterdata.Record{
-			masterdata.KindGrade:             {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
-			masterdata.KindFaculty:           {{ID: "faculty-1", Kind: masterdata.KindFaculty, Name: "计算机学院", Enabled: true}},
-			masterdata.KindMajor:             {{ID: "major-1", Kind: masterdata.KindMajor, Name: "软件工程", FacultyID: "faculty-1", Enabled: true}},
-			masterdata.KindClass:             {{ID: "class-1", Kind: masterdata.KindClass, Name: "软工2601", GradeID: "grade-2026", FacultyID: "faculty-1", MajorID: "major-1", Enabled: true}},
+			masterdata.KindGrade:   {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
+			masterdata.KindFaculty: {{ID: "faculty-1", Kind: masterdata.KindFaculty, Name: "计算机学院", Enabled: true}},
+			masterdata.KindMajor:   {{ID: "major-1", Kind: masterdata.KindMajor, Name: "软件工程", FacultyID: "faculty-1", Enabled: true}},
+			masterdata.KindClass: {
+				{ID: "class-1", Kind: masterdata.KindClass, Name: "软工2601", GradeID: "grade-2026", FacultyID: "faculty-1", MajorID: "major-1", Enabled: true},
+				{ID: "class-other-grade", Kind: masterdata.KindClass, Name: "软工2601", GradeID: "grade-2025", FacultyID: "faculty-1", MajorID: "major-1", Enabled: true},
+				{ID: "class-other-major", Kind: masterdata.KindClass, Name: "软工2601", GradeID: "grade-2026", FacultyID: "faculty-1", MajorID: "major-2", Enabled: true},
+			},
 			masterdata.KindDormitoryArea:     {{ID: "area-1", Kind: masterdata.KindDormitoryArea, Name: "东区", Enabled: true}},
 			masterdata.KindDormitoryBuilding: {{ID: "building-1", Kind: masterdata.KindDormitoryBuilding, Name: "1号楼", DormitoryAreaID: "area-1", Enabled: true}},
 			masterdata.KindDormitory:         {{ID: "dorm-1", Kind: masterdata.KindDormitory, Name: "401", RoomNo: "401", DormitoryBuildingID: "building-1", Enabled: true}},
@@ -196,6 +200,38 @@ func TestValidateClassEnrolledSizeRequiresUnsigned32BitInteger(t *testing.T) {
 		if gotValid := rows[0].Status == RowValid; gotValid != test.valid {
 			t.Fatalf("enrolled_size %q valid=%v want %v; errors=%+v", test.value, gotValid, test.valid, rows[0].Errors)
 		}
+	}
+}
+
+func TestClassImportAllowsNamesAcrossScopesAndRejectsSameScope(t *testing.T) {
+	catalog := memoryCatalog{records: map[string][]masterdata.Record{
+		masterdata.KindGrade:   {{ID: "grade-2026", Kind: masterdata.KindGrade, Name: "2026级", Enabled: true}},
+		masterdata.KindFaculty: {{ID: "faculty-1", Kind: masterdata.KindFaculty, Name: "计算机学院", Enabled: true}},
+		masterdata.KindMajor: {
+			{ID: "major-1", Kind: masterdata.KindMajor, Name: "软件工程", FacultyID: "faculty-1", Enabled: true},
+			{ID: "major-2", Kind: masterdata.KindMajor, Name: "网络工程", FacultyID: "faculty-1", Enabled: true},
+		},
+		masterdata.KindClass: {{ID: "existing", Kind: masterdata.KindClass, Name: "一班", GradeID: "grade-2026", FacultyID: "faculty-1", MajorID: "major-1", Enabled: true}},
+	}}
+	service := NewService(nil, catalog, 16<<20)
+	spec, _ := SpecFor(masterdata.KindClass)
+	rows, err := service.validateRows(context.Background(), spec, []importjob.ParsedRow{
+		{RowNo: 5, Values: map[string]string{"name": "一班", "grade_year": "2026", "faculty_name": "计算机学院", "major_name": "软件工程", "enrolled_size": "30"}},
+		{RowNo: 6, Values: map[string]string{"name": "一班", "grade_year": "2026", "faculty_name": "计算机学院", "major_name": "网络工程", "enrolled_size": "30"}},
+		{RowNo: 7, Values: map[string]string{"name": "一班", "grade_year": "2026", "faculty_name": "计算机学院", "major_name": "网络工程", "enrolled_size": "30"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Status != RowInvalid || rows[1].Status != RowInvalid || rows[2].Status != RowInvalid {
+		t.Fatalf("rows=%+v", rows)
+	}
+	if !hasRowError(rows[0], "name") || !hasRowError(rows[1], "name") || !hasRowError(rows[2], "name") {
+		t.Fatalf("scope errors=%+v", rows)
+	}
+	rows, err = service.validateRows(context.Background(), spec, []importjob.ParsedRow{{RowNo: 5, Values: map[string]string{"name": "一班", "grade_year": "2026", "faculty_name": "计算机学院", "major_name": "网络工程", "enrolled_size": "30"}}})
+	if err != nil || rows[0].Status != RowValid {
+		t.Fatalf("different major should be valid: row=%+v err=%v", rows, err)
 	}
 }
 

@@ -31,10 +31,13 @@ var (
 )
 
 type LookupKey struct {
-	ParentID string
-	Code     string
-	Name     string
-	RoomNo   string
+	ParentID  string
+	Code      string
+	Name      string
+	RoomNo    string
+	GradeID   string
+	FacultyID string
+	MajorID   string
 }
 
 // DictionaryOption keeps the persisted option value and user-facing label together

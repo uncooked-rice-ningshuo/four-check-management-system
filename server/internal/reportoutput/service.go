@@ -83,14 +83,21 @@ type Repository interface {
 	LoadReportOutputRecords(context.Context, string) ([]reporting.Record, error)
 	ListOutputTypes(context.Context) ([]OutputType, error)
 	RecordOutputPreview(context.Context, []string, audit.Metadata) error
+	RecordTransientOutput(context.Context, File, int, audit.Metadata) error
 }
 
 type OutputType struct {
-	Code         string   `json:"code"`
-	Name         string   `json:"name"`
-	Title        string   `json:"title"`
-	Columns      []string `json:"columns"`
-	ExcelColumns []string `json:"excelColumns"`
+	Code         string          `json:"code"`
+	Name         string          `json:"name"`
+	Title        string          `json:"title"`
+	Columns      []string        `json:"columns"`
+	Sections     []OutputSection `json:"sections,omitempty"`
+	ExcelColumns []string        `json:"excelColumns"`
+}
+
+type OutputSection struct {
+	Title   string   `json:"title"`
+	Columns []string `json:"columns"`
 }
 type FileStore interface {
 	Store(context.Context, storage.StoreInput, audit.Metadata) (storage.File, error)
@@ -171,6 +178,7 @@ func (s *Service) EditorSettings(ctx context.Context) (Settings, []OutputType, e
 	types, err := s.repository.ListOutputTypes(ctx)
 	for index := range types {
 		types[index].Title, types[index].Columns = outputTypeLayout(types[index].Code)
+		types[index].Sections = wordOutputSections(types[index].Code, types[index].Columns)
 		types[index].ExcelColumns = excelTypeColumns(types[index].Code)
 	}
 	return settings, types, err
@@ -196,15 +204,38 @@ func (s *Service) PreviewExcel(ctx context.Context, codes []string, metadata aud
 }
 
 // PreviewWord uses fictional period data and never stores a report output.
-func (s *Service) PreviewWord(ctx context.Context, document json.RawMessage, codes []string, metadata audit.Metadata) ([]byte, error) {
+func (s *Service) PreviewWord(ctx context.Context, document json.RawMessage, codes []string, semesterID, weekID string, metadata audit.Metadata) ([]byte, error) {
 	if _, err := decodeIntroduction(document); err != nil {
 		return nil, err
 	}
 	if _, err := chosenTypes(codes); err != nil {
 		return nil, err
 	}
-	content := reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 9}}
-	previewDocument, _, err := resolveIntroductionDate(document, "2025-06-01")
+	if (semesterID == "") != (weekID == "") {
+		return nil, ErrInvalidSelection
+	}
+	if semesterID != "" {
+		if _, err := uuid.Parse(semesterID); err != nil {
+			return nil, ErrInvalidSelection
+		}
+		if _, err := uuid.Parse(weekID); err != nil {
+			return nil, ErrInvalidSelection
+		}
+	}
+	period := reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 9}
+	issueDate := "2025-06-01"
+	if semesterID != "" {
+		weekDate, err := s.repository.GetWeekDate(ctx, semesterID, weekID)
+		if err != nil {
+			return nil, err
+		}
+		if weekDate.IssueDate == "" {
+			return nil, ErrIssueDateMissing
+		}
+		period.SemesterName, period.WeekNo, issueDate = weekDate.SemesterName, weekDate.WeekNo, weekDate.IssueDate
+	}
+	content := reporting.ReportVersionContent{Period: period}
+	previewDocument, _, err := resolveIntroductionDate(document, issueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -368,6 +399,113 @@ func (s *Service) Generate(ctx context.Context, actorID string, input GenerateIn
 	output.FileID = stored.ID
 	output.Status = "AVAILABLE"
 	return output, nil
+}
+
+// GenerateDownload renders a verified file for this request without creating an output record or stored object.
+func (s *Service) GenerateDownload(ctx context.Context, actorID string, input GenerateInput, metadata audit.Metadata) (File, []byte, error) {
+	types, err := chosenTypes(input.TypeCodes)
+	if err != nil {
+		return File{}, nil, err
+	}
+	if input.Format != "WORD" && input.Format != "EXCEL" || (!input.Combined && len(types) != 1) || input.SettingsVersion < 1 {
+		return File{}, nil, ErrInvalidSelection
+	}
+	version, err := s.version(ctx, actorID, input.SemesterID, input.WeekID, input.VersionNo)
+	if err != nil {
+		return File{}, nil, err
+	}
+	if version.Content.ScopeLimited {
+		return File{}, nil, reporting.ErrForbidden
+	}
+	available := make(map[string]bool)
+	for _, row := range version.Content.Rows {
+		available[row.InspectionTypeCode] = true
+	}
+	for _, item := range types {
+		if !available[item.code] {
+			return File{}, nil, ErrInvalidSelection
+		}
+	}
+	effective, err := s.permissions.Effective(ctx, actorID)
+	if err != nil {
+		return File{}, nil, err
+	}
+	for _, row := range version.Content.Rows {
+		selected := false
+		for _, item := range types {
+			if item.code == row.InspectionTypeCode {
+				selected = true
+				break
+			}
+		}
+		if !selected {
+			continue
+		}
+		scope := permission.Scope{AcademicYearID: version.Content.Period.AcademicYearID, SemesterID: input.SemesterID, WeekID: input.WeekID, InspectionTypeID: row.InspectionTypeID, DepartmentID: row.DepartmentID}
+		if !permission.AllowsWholeScope(effective.Permissions, permission.ActionReportGenerate, scope) {
+			return File{}, nil, reporting.ErrForbidden
+		}
+	}
+	settings, err := s.Settings(ctx)
+	if err != nil {
+		return File{}, nil, err
+	}
+	if input.SettingsVersion != settings.Version {
+		return File{}, nil, ErrConfigConflict
+	}
+	introduction := settings.IntroductionDocument
+	issueDate := ""
+	if input.Format == "WORD" && input.Combined {
+		weekDate, dateErr := s.repository.GetWeekDate(ctx, input.SemesterID, input.WeekID)
+		if dateErr != nil {
+			return File{}, nil, dateErr
+		}
+		if weekDate.IssueDate == "" {
+			return File{}, nil, ErrIssueDateMissing
+		}
+		issueDate = weekDate.IssueDate
+		introduction, _, err = resolveIntroductionDate(introduction, issueDate)
+		if err != nil {
+			return File{}, nil, err
+		}
+	}
+	records, err := s.repository.LoadReportOutputRecords(ctx, version.ID)
+	if err != nil {
+		return File{}, nil, err
+	}
+	for _, item := range types {
+		expected, observed := 0, 0
+		for _, row := range version.Content.Rows {
+			if row.InspectionTypeCode == item.code {
+				expected += row.RecordCount
+			}
+		}
+		for _, record := range records {
+			if record.TypeCode == item.code {
+				observed++
+			}
+		}
+		if expected != observed {
+			return File{}, nil, ErrInvalidGeneratedFile
+		}
+	}
+	var data []byte
+	if input.Format == "EXCEL" {
+		data, err = RenderExcel(version.Content, records, input.TypeCodes)
+	} else {
+		data, err = RenderWordDocument(version.Content, records, input.TypeCodes, introduction, input.Combined)
+	}
+	if err != nil {
+		return File{}, nil, err
+	}
+	if err := ValidateGeneratedFile(input.Format, data); err != nil {
+		return File{}, nil, err
+	}
+	output := File{ReportVersionID: version.ID, Format: input.Format, TypeCodes: append([]string(nil), input.TypeCodes...), Combined: input.Combined, Status: "AVAILABLE", SettingsVersion: settings.Version, LayoutVersion: "WORD_V2", IssueDate: issueDate}
+	if err := s.repository.RecordTransientOutput(ctx, output, len(data), metadata); err != nil {
+		return File{}, nil, err
+	}
+	return output, data, nil
 }
 func (s *Service) List(ctx context.Context, actorID, semesterID, weekID string, versionNo int) ([]File, error) {
 	version, err := s.version(ctx, actorID, semesterID, weekID, versionNo)

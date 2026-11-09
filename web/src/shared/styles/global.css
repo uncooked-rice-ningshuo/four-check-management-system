@@ -1297,8 +1297,7 @@ body {
   gap: 20px;
   padding-top: 4px;
 }
-.report-output-field,
-.report-output-existing {
+.report-output-field {
   display: grid;
   min-width: 0;
   gap: 8px;
@@ -1317,8 +1316,7 @@ body {
   border: 1px solid #e4e7ec;
   border-radius: 8px;
 }
-.report-output-order-row,
-.report-output-file {
+.report-output-order-row {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1326,24 +1324,8 @@ body {
   gap: 8px 16px;
   padding: 8px 12px;
 }
-.report-output-order-row + .report-output-order-row,
-.report-output-file + .report-output-file {
+.report-output-order-row + .report-output-order-row {
   border-top: 1px solid #e4e7ec;
-}
-.report-output-existing {
-  padding-top: 16px;
-  border-top: 1px solid #e4e7ec;
-}
-.report-output-file {
-  padding-inline: 0;
-}
-.report-output-file > div {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-.report-output-file > div > .ant-typography:first-child {
-  overflow-wrap: anywhere;
 }
 .report-output-settings-page {
   min-width: 0;
@@ -1464,6 +1446,7 @@ body {
 .report-intro-toolbar .report-intro-tool:focus-visible,
 .report-intro-toolbar .ant-select-focused { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 .report-intro-toolbar-action { margin-left: auto; padding-left: 12px; }
+.report-intro-page-count { flex: none; color: #475467; font-size: 12px; }
 .report-intro-stage {
   min-width: 0;
   min-height: 720px;
@@ -1471,11 +1454,12 @@ body {
   overflow-x: auto;
   background: #f1f2f4;
 }
+.report-intro-pages { position: relative; width: 794px; margin-inline: auto; }
 .report-intro-page {
-  position: relative;
-  width: min(794px, 100%);
-  min-height: 1123px;
-  margin-inline: auto;
+  position: absolute;
+  left: 0;
+  width: 794px;
+  height: 1123px;
   padding: 96px 72px 140px;
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -1533,9 +1517,10 @@ body {
 .report-document-attachment td { font-family: FangSong, '仿宋', serif; font-size: 12pt; }
 .report-document-attachment.hygiene h2 { font-family: STXinwei, '华文新魏', serif; font-size: 19pt; font-weight: 400; }
 .report-document-attachment.hygiene th, .report-document-attachment.hygiene td { font-family: 'FangSong GB2312', '仿宋_GB2312', FangSong, '仿宋', serif; }
-.report-intro-content { position: relative; min-height: 860px; }
+.report-intro-content { position: absolute; top: 96px; left: 72px; z-index: 1; width: 650px; }
 .report-intro-content .tiptap {
-  min-height: 860px;
+  width: 650px;
+  min-height: 887px;
   outline: none;
   color: #20232a;
   font-family: FangSong, '仿宋', serif;
@@ -1660,13 +1645,7 @@ body {
   .report-output-settings-header { align-items: flex-start; flex-direction: column; padding: 20px; }
   .report-output-settings-panel { margin: 0 12px 24px; padding: 20px; }
   .report-output-type-grid, .report-output-review { grid-template-columns: 1fr; }
-  .report-intro-page { min-height: 760px; padding: 70px 30px 130px; }
-  .report-intro-page-corners { inset: 70px 30px; }
-  .report-intro-page-header,
-  .report-intro-page-footer { left: 30px; right: 30px; }
-  .report-intro-page-header { top: 24px; }
-  .report-intro-page-footer { bottom: 16px; }
-  .report-intro-content, .report-intro-content .tiptap { min-height: 550px; }
+  .report-intro-stage { overflow-x: auto; }
 }
 .report-archive-section-heading {
   display: flex;

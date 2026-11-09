@@ -88,6 +88,17 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password) VALUES($1,$2,'预览测试账号',$3,'ACTIVE','SYSTEM','MEMBER',false,false)`, actorID, "preview-"+actorID, string(hash)); err != nil {
 		t.Fatal(err)
 	}
+	versionID := uuid.NewString()
+	if err := store.RecordTransientOutput(ctx, reportoutput.File{ReportVersionID: versionID, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, 1024, audit.Metadata{ActorID: actorID}); err != nil {
+		t.Fatal(err)
+	}
+	var outputRows, outputAudits int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM report_output_files`).Scan(&outputRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE actor_id=$1::uuid AND action='REPORT_OUTPUT_CHANGED' AND resource_type='reportOutputDownload' AND resource_id=$2`, actorID, versionID).Scan(&outputAudits); err != nil || outputRows != 0 || outputAudits != 1 {
+		t.Fatalf("transient output rows=%d audits=%d err=%v", outputRows, outputAudits, err)
+	}
 	yearID, semesterID, weekID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO academic_years(id,name,start_date,end_date) VALUES($1,'虚构测试学年','2025-09-01','2026-08-31')`, yearID); err != nil {
 		t.Fatal(err)

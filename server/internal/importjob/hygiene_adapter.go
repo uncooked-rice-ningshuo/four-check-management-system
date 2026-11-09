@@ -140,8 +140,8 @@ func validateHygieneRow(scope AttendanceImportScope, refs AttendanceReferences, 
 	}
 
 	className, studentNo := value("responsible_class_names"), value("responsible_student_no")
-	class, classOK := refs.ClassesByName[className]
 	student, studentOK := refs.StudentsByNo[studentNo]
+	class, classOK := importClassForStudent(refs, className, student)
 	if className != "" && !classOK {
 		issue(ErrorReferenceNotFound, "responsible_class_names", "责任班级不存在、未启用或不在当前范围", "填写当前授权范围内的完整班级名称")
 	}

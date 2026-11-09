@@ -93,9 +93,20 @@ type AttendanceReferences struct {
 	WeekPenaltyMultiplier *int
 	StudentsByNo          map[string]AttendanceStudentReference
 	ClassesByName         map[string]AttendanceClassReference
+	ClassesByID           map[string]AttendanceClassReference
 	CoursesByName         map[string]AttendanceCourseReference
 	CoursesByID           map[string]AttendanceCourseReference
 	ClassroomsByCode      map[string]AttendanceClassroomReference
+}
+
+// The student's class ID resolves duplicate class names without guessing from a label.
+func importClassForStudent(references AttendanceReferences, name string, student AttendanceStudentReference) (AttendanceClassReference, bool) {
+	if student.ClassID != "" && references.ClassesByID != nil {
+		class, ok := references.ClassesByID[student.ClassID]
+		return class, ok && class.Name == name
+	}
+	class, ok := references.ClassesByName[name]
+	return class, ok
 }
 
 type AttendanceReferenceRepository interface {
@@ -217,7 +228,7 @@ func (a *AttendanceAdapter) validateRow(scope AttendanceImportScope, references 
 		result.Errors = append(result.Errors, validationError(ErrorRequiredField, "course_name", "必填字段不能为空", "选择或填写有效课程名"))
 	}
 	student, studentOK := references.StudentsByNo[studentNo]
-	class, classOK := references.ClassesByName[className]
+	class, classOK := importClassForStudent(references, className, student)
 	var course AttendanceCourseReference
 	if courseID != "" {
 		course, _ = references.CoursesByID[courseID]

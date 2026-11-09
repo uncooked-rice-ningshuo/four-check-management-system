@@ -123,7 +123,7 @@ func validateStudentImportReferences(scope AttendanceImportScope, refs Attendanc
 	value := func(key string) string { return strings.TrimSpace(row.Values[key]) }
 	issues := []ValidationError{}
 	student, studentOK := refs.StudentsByNo[value("student_no")]
-	class, classOK := refs.ClassesByName[value("class_name")]
+	class, classOK := importClassForStudent(refs, value("class_name"), student)
 	if value("student_no") != "" && !studentOK {
 		issues = append(issues, validationError(ErrorReferenceNotFound, "student_no", "学号不存在或不在当前数据范围", "核对启用学生及授权范围"))
 	}

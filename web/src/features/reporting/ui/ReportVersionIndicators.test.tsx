@@ -28,7 +28,7 @@ it('keeps all scoped classes visible without showing an incomplete source as a v
   render(<ReportVersionIndicators version={version} />)
   expect(screen.getByText('一班')).toBeVisible()
   expect(screen.getByText('二班')).toBeVisible()
-  expect(screen.getAllByText('来源未完成')).toHaveLength(2)
+  expect(screen.getAllByText('当前没有确认数据')).toHaveLength(2)
   expect(screen.queryByText('100.00%')).not.toBeInTheDocument()
 })
 
@@ -43,4 +43,16 @@ it('uses the native table search form for archive indicator snapshots', () => {
   expect(screen.queryByText('V1 周指标')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /重\s*置/ }))
   expect(screen.getByText('一班')).toBeVisible()
+})
+
+it('keeps same named classes in different majors as distinct rows', () => {
+  const version = versionFixture()
+  const classes = version.content.indicators?.classes
+  if (!classes) throw new Error('missing indicator fixture')
+  classes[0].facultyName = '计算机学院'
+  classes[0].majorName = '软件工程'
+  classes[1] = { ...classes[1], className: '一班', facultyName: '计算机学院', majorName: '网络工程' }
+  render(<ReportVersionIndicators version={version} archiveTable />)
+  expect(screen.getByText('一班（计算机学院 · 软件工程）')).toBeVisible()
+  expect(screen.getByText('一班（计算机学院 · 网络工程）')).toBeVisible()
 })

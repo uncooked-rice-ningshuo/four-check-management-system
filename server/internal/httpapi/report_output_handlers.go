@@ -10,7 +10,6 @@ import (
 
 	"four-check-management-system/server/internal/reporting"
 	"four-check-management-system/server/internal/reportoutput"
-	"four-check-management-system/server/internal/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -66,11 +65,13 @@ func (h *handler) previewReportOutputWord(c *gin.Context) {
 	var input struct {
 		IntroductionDocument json.RawMessage `json:"introductionDocument"`
 		TypeCodes            []string        `json:"typeCodes"`
+		SemesterID           string          `json:"semesterId"`
+		WeekID               string          `json:"weekId"`
 	}
 	if !bind(c, &input) {
 		return
 	}
-	data, err := h.reportOutput.PreviewWord(c, input.IntroductionDocument, input.TypeCodes, requestMetadata(c, ""))
+	data, err := h.reportOutput.PreviewWord(c, input.IntroductionDocument, input.TypeCodes, input.SemesterID, input.WeekID, requestMetadata(c, ""))
 	if err != nil {
 		h.writeOutputError(c, err)
 		return
@@ -158,56 +159,16 @@ func (h *handler) generateReportOutput(c *gin.Context) {
 		return
 	}
 	input.SemesterID, input.WeekID, input.VersionNo = c.Param("semesterId"), c.Param("weekId"), version
-	result, err := h.reportOutput.Generate(c, account.ID, input, requestMetadata(c, ""))
-	if err != nil {
-		h.writeOutputError(c, err)
-		return
-	}
-	c.JSON(http.StatusCreated, result)
-}
-func (h *handler) listReportOutputs(c *gin.Context) {
-	account, ok := h.reportActor(c)
-	if !ok {
-		return
-	}
-	if h.reportOutput == nil {
-		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "通报输出服务尚未就绪")
-		return
-	}
-	version, ok := h.outputVersion(c)
-	if !ok {
-		return
-	}
-	result, err := h.reportOutput.List(c, account.ID, c.Param("semesterId"), c.Param("weekId"), version)
-	if err != nil {
-		h.writeOutputError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": result})
-}
-func (h *handler) downloadReportOutput(c *gin.Context) {
-	account, ok := h.reportActor(c)
-	if !ok {
-		return
-	}
-	if h.reportOutput == nil {
-		writeError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "通报输出服务尚未就绪")
-		return
-	}
-	version, ok := h.outputVersion(c)
-	if !ok {
-		return
-	}
-	output, data, err := h.reportOutput.Download(c, account.ID, c.Param("semesterId"), c.Param("weekId"), version, c.Param("outputId"), requestMetadata(c, ""))
+	result, data, err := h.reportOutput.GenerateDownload(c, account.ID, input, requestMetadata(c, ""))
 	if err != nil {
 		h.writeOutputError(c, err)
 		return
 	}
 	mime, ext := "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
-	if output.Format == "WORD" {
+	if result.Format == "WORD" {
 		mime, ext = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
 	}
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=report-v%d-%s.%s", version, output.ID, ext))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=report-v%d.%s", version, ext))
 	c.Data(http.StatusOK, mime, data)
 }
 func (h *handler) writeOutputError(c *gin.Context, err error) {
@@ -226,8 +187,6 @@ func (h *handler) writeOutputError(c *gin.Context, err error) {
 		writeError(c, http.StatusTooManyRequests, "REPORT_OUTPUT_PREVIEW_LIMIT", "预览过于频繁，请稍后再试")
 	case errors.Is(err, reportoutput.ErrNotFound), errors.Is(err, reporting.ErrReportNotFound):
 		writeError(c, http.StatusNotFound, "REPORT_OUTPUT_NOT_FOUND", "未找到对应通报文件")
-	case errors.Is(err, reportoutput.ErrUnavailable), errors.Is(err, storage.ErrFileUnavailable), errors.Is(err, storage.ErrObjectMissing):
-		writeError(c, http.StatusConflict, "REPORT_OUTPUT_UNAVAILABLE", "文件尚未生成或已不可用，请重试生成")
 	case errors.Is(err, reporting.ErrForbidden):
 		writeError(c, http.StatusForbidden, "FORBIDDEN", "无权生成或下载该通报文件")
 	case errors.Is(err, reporting.ErrInvalidPeriod), errors.Is(err, reporting.ErrReportIncomplete),

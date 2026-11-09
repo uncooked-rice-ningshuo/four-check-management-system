@@ -1063,7 +1063,7 @@ func masterDataError(err error) error {
 	switch databaseError.ConstraintName {
 	case "staff_employee_no_key", "students_student_no_key":
 		return masterdata.ErrDuplicateCode
-	case "faculties_name_key", "grades_name_key", "classes_name_key":
+	case "faculties_name_key", "grades_name_key", "classes_name_key", "classes_scope_name_key":
 		return masterdata.ErrDuplicateName
 	// PostgreSQL truncates this composite constraint name, including the name column.
 	case "public_dormitory_hygiene_area_dormitory_building_id_floor_u_key":
@@ -1543,7 +1543,7 @@ func attendanceOrderBy(sort string) (string, error) {
 // LoadAttendanceReferences bulk-loads only the identifiers present in one authorized import batch.
 func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjob.AttendanceReferenceLookup) (importjob.AttendanceReferences, error) {
 	result := importjob.AttendanceReferences{
-		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference),
+		StudentsByNo: make(map[string]importjob.AttendanceStudentReference), ClassesByName: make(map[string]importjob.AttendanceClassReference), ClassesByID: make(map[string]importjob.AttendanceClassReference),
 		CoursesByName: make(map[string]importjob.AttendanceCourseReference), CoursesByID: make(map[string]importjob.AttendanceCourseReference),
 		ClassroomsByCode: make(map[string]importjob.AttendanceClassroomReference),
 	}
@@ -1586,6 +1586,7 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 			return result, err
 		}
 		result.ClassesByName[value.Name] = value
+		result.ClassesByID[value.ID] = value
 	}
 	if err := classRows.Err(); err != nil {
 		classRows.Close()

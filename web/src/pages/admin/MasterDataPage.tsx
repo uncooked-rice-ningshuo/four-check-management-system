@@ -84,9 +84,13 @@ export function MasterDataPage() {
     referenceName('dormitory-buildings', record.dormitoryBuildingId),
     record.roomNo || record.name,
   ].filter(Boolean).join(' ') || record.name
+  const className = (record: MasterDataRecord) => {
+    const scope = [record.grade || referenceName('grades', record.gradeId), referenceName('faculties', record.facultyId), referenceName('majors', record.majorId)].filter(Boolean)
+    return scope.length ? `${record.name}（${scope.join(' · ')}）` : record.name
+  }
   const options = (referenceKind: MasterDataKind) => referenceItems(referenceKind).map(item => ({
       value: item.id,
-      label: referenceKind === 'dormitory-buildings' ? dormitoryBuildingName(item) : referenceKind === 'dormitories' ? dormitoryName(item) : item.name,
+      label: referenceKind === 'dormitory-buildings' ? dormitoryBuildingName(item) : referenceKind === 'dormitories' ? dormitoryName(item) : referenceKind === 'classes' ? className(item) : item.name,
     }))
   const dormitoryBuildingOptions = options('dormitory-buildings').filter(option => {
     if (!selectedDormitoryAreaID) return true

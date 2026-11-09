@@ -55,6 +55,7 @@ type InspectionRecord struct {
 	StudentNumber     string            `json:"studentNumber"`
 	StudentName       string            `json:"studentName"`
 	ClassName         string            `json:"className"`
+	ClassID           string            `json:"classId,omitempty"`
 	Grade             string            `json:"grade"`
 	ID                string            `json:"id"`
 	SemesterID        string            `json:"semesterId"`

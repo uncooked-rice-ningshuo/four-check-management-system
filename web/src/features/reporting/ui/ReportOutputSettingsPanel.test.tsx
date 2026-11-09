@@ -70,20 +70,35 @@ describe('ReportOutputSettingsPanel', () => {
     fireEvent.focus(document.querySelector('.report-intro-footer-content .tiptap')!)
     expect(screen.getByRole('toolbar', { name: '页脚工具' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '参考页脚版式' }))
-    fireEvent.click(screen.getByRole('button', { name: '完成编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
     await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       introductionDocument: expect.objectContaining({ headerText: '学院页首', footerText: '{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t', footerLayout: 'custom', footerAlign: 'left', content: expect.arrayContaining([expect.objectContaining({ attrs: expect.objectContaining({ style: 'title' }) })]) }),
     })))
   })
 
   it('previews the selected Word attachments', async () => {
+    vi.mocked(reportOutputApi.editorSettings).mockResolvedValue({ ...savedSettings, introductionDocument: { type: 'doc', content: [{ type: 'paragraph', attrs: { style: 'date', textAlign: 'right' }, content: [{ type: 'text', text: '{reportDate}' }] }] } })
     const view = renderSettings()
     expect(await screen.findByRole('menuitem', { name: /Word 配置/ })).toBeVisible()
     const preview = view.container.querySelector<HTMLButtonElement>('.report-output-settings-header button:first-child')
     expect(preview).not.toBeNull()
     fireEvent.click(preview!)
     expect(await screen.findByLabelText('晚归附件预览')).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '预览通报周次' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText('2026年5月1日').length).toBeGreaterThan(0))
+  })
+
+  it('downloads the Word preview for the configured week date', async () => {
+    vi.mocked(reportOutputApi.previewWord).mockResolvedValue(new Blob(['preview']))
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const createObjectURL = vi.fn(() => 'blob:preview')
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true })
+    const view = renderSettings()
+    expect(await screen.findByRole('menuitem', { name: /Word 配置/ })).toBeVisible()
+    fireEvent.click(view.container.querySelector<HTMLButtonElement>('.report-output-settings-header button:first-child')!)
+    fireEvent.click(await screen.findByRole('button', { name: '下载预览 Word' }))
+    await waitFor(() => expect(reportOutputApi.previewWord).toHaveBeenCalledWith(expect.any(Object), ['LATE_RETURN'], { semesterId: 'semester-1', weekId: 'week-2' }))
+    click.mockRestore()
   })
 
   it('saves the selected week date separately from template settings', async () => {
@@ -113,6 +128,34 @@ describe('ReportOutputSettingsPanel', () => {
     const dateVariable = document.querySelector('.report-intro-content .report-template-variable[data-template-variable="reportDate"]')
     expect(dateVariable).toHaveTextContent('文件日期')
     expect(dateVariable).toHaveAttribute('title', '通报文件设置中的每周文件日期')
+  })
+
+  it('saves an inserted weekly file date token in the Word introduction', async () => {
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
+    fireEvent.click(screen.getByRole('button', { name: '插入变量' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '每周文件日期' }))
+    expect(document.querySelector('.report-intro-content .report-template-variable[data-template-variable="reportDate"]')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
+    await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      introductionDocument: expect.objectContaining({ content: expect.arrayContaining([expect.objectContaining({
+        content: expect.arrayContaining([expect.objectContaining({ text: '{reportDate}' })]),
+      })]) }),
+    })))
+  })
+
+  it('saves Chinese week and page number formats', async () => {
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
+    fireEvent.click(screen.getByRole('button', { name: '插入变量' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '周次汉字' }))
+    expect(document.querySelector('.report-intro-content .report-template-variable[data-template-variable="weekNoChinese"]')).toBeInTheDocument()
+    fireEvent.focus(document.querySelector('.report-intro-footer-content .tiptap')!)
+    fireEvent.click(screen.getByRole('button', { name: '页码样式' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '第一页，共N页（汉字）' }))
+    expect(document.querySelector('.report-intro-footer-content')).toHaveTextContent('总页数（汉字）')
+    fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
+    await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ introductionDocument: expect.objectContaining({ footerText: '第{pageChinese}页，共{totalPagesChinese}页' }) })))
   })
 
   it('updates only an unchanged legacy attachment list to the reference format', async () => {

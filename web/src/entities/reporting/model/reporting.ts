@@ -82,6 +82,8 @@ export type ReportClassSizeSnapshot = {
   gradeId?: string
   grade: string
   className: string
+  facultyName?: string
+  majorName?: string
   expectedStudentCount: number
 }
 
@@ -97,6 +99,8 @@ export type ReportClassIndicators = {
   classId?: string
   grade: string
   className: string
+  facultyName?: string
+  majorName?: string
   sourceStates?: Record<string, string>
 } & ReportIndicatorValues
 

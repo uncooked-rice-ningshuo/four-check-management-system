@@ -659,14 +659,14 @@ func (s *Service) Records(ctx context.Context, accountID string, query RecordsQu
 func ReportRecordFromInspection(record inspection.InspectionRecord) Record {
 	return Record{
 		ID: record.ID, RowVersion: record.RowVersion, StudentNumber: record.StudentNumber, StudentName: record.StudentName,
-		ClassName: record.ClassName, Grade: record.Grade, TypeCode: record.TypeCode, Source: record.Source,
+		ClassID: record.ClassID, ClassName: record.ClassName, Grade: record.Grade, TypeCode: record.TypeCode, Source: record.Source,
 		Details:                reportRecordDetails(record.Details),
 		CurrentDormitoryName:   record.CurrentDormitoryName,
 		CurrentCourseName:      record.CurrentCourseName,
 		CurrentClassroomName:   record.CurrentClassroomName,
 		CurrentAreaName:        record.CurrentAreaName,
 		CurrentReasonLabel:     record.CurrentReasonLabel,
-		ResponsibleClasses:     reportRecordReferences(record.ResponsibleClasses),
+		ResponsibleClasses:     reportClassReferences(record.ResponsibleClasses),
 		ResponsibleStudents:    reportRecordReferences(record.ResponsibleStudents),
 		ResponsibleDormitories: reportRecordReferences(record.ResponsibleDormitories),
 	}
@@ -1058,6 +1058,14 @@ func reportRecordReferences(options []inspection.EntryOption) []RecordReference 
 	references := make([]RecordReference, 0, len(options))
 	for _, option := range options {
 		references = append(references, RecordReference{Label: option.Label, Grade: option.Grade})
+	}
+	return references
+}
+
+func reportClassReferences(options []inspection.EntryOption) []RecordReference {
+	references := reportRecordReferences(options)
+	for index := range references {
+		references[index].ID = options[index].ID
 	}
 	return references
 }

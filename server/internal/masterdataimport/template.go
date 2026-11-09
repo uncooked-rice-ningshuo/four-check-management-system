@@ -52,7 +52,7 @@ var templateSpecs = []TemplateSpec{
 		{Code: "faculty_name", Header: "所属院系名称", MaxRunes: 96, Format: "文本；选填；填写当前已启用院系的完整名称。"},
 	}},
 	{Kind: masterdata.KindClass, TemplateCode: "MASTER_DATA_CLASSES", TemplateVersion: templateVersion, SheetName: "班级导入", Label: "班级", ExampleRow: []string{"2026级软件工程一班", "2026", "32", "计算机科学与工程学院", "软件工程", "T2026001"}, Fields: []FieldSpec{
-		{Code: "name", Header: "班级名称", Required: true, MaxRunes: 96, Format: "文本；必填，1–96 个字符；班级名称不能与现有班级重复。"},
+		{Code: "name", Header: "班级名称", Required: true, MaxRunes: 96, Format: "文本；必填，1–96 个字符；同一年级、院系和专业内不能重名。"},
 		{Code: "grade_year", Header: "入学年份", Required: true, Format: "数字；必填，4 位 ASCII 数字，例如 2026；须对应已启用年级。"},
 		{Code: "enrolled_size", Header: "实际在籍人数", Required: true, Format: "整数；必填，十进制非负整数，范围 0–2147483647；不能有正负号、小数或千位分隔符。"},
 		{Code: "faculty_name", Header: "所属院系名称", MaxRunes: 96, Format: "文本；选填；填写当前已启用院系的完整名称。"},
@@ -84,7 +84,7 @@ var templateSpecs = []TemplateSpec{
 		{Code: "grade_year", Header: "入学年份", Required: true, Format: "数字；必填，4 位 ASCII 数字，例如 2026；须对应已启用年级。"},
 		{Code: "faculty_name", Header: "所属院系名称", MaxRunes: 96, Format: "文本；选填；填写当前已启用院系的完整名称。"},
 		{Code: "major_name", Header: "专业名称", MaxRunes: 96, Format: "文本；选填；须与当前已启用专业匹配；填写专业时若同名专业跨院系，须同时填写所属院系。"},
-		{Code: "class_name", Header: "班级名称", MaxRunes: 96, Format: "文本；选填；须与当前已启用班级名称完全一致，且该班级年级须与本行入学年份一致。"},
+		{Code: "class_name", Header: "班级名称", MaxRunes: 96, Format: "文本；选填；须与已启用班级名称一致，并由入学年份、院系和专业共同确定唯一班级。"},
 		{Code: "dormitory_area_name", Header: "宿舍区名称", MaxRunes: 96, Format: "文本；选填；宿舍区、宿舍楼、宿舍号须同时填写或同时留空。"},
 		{Code: "dormitory_building_name", Header: "宿舍楼名称", MaxRunes: 96, Format: "文本；选填；须与宿舍区组合后唯一匹配当前已启用宿舍楼。"},
 		{Code: "room_no", Header: "宿舍号", MaxRunes: 32, Format: "文本；选填，1–32 个字符；须与宿舍区和宿舍楼组合后匹配当前已启用宿舍。"},

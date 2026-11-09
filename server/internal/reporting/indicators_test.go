@@ -78,6 +78,24 @@ func TestCalculateReportIndicatorsV2KeepsEmptyClassesAndRejectsOutsideScope(t *t
 	}
 }
 
+func TestCalculateReportIndicatorsSeparatesSameNamedClassesByID(t *testing.T) {
+	inputs := ReportMetricInputs{WeekMultiplier: 1, ReportGradeScopeVersion: 1,
+		Grades: []ReportGradeSizeSnapshot{{GradeID: "grade-a", Grade: "2026级", ExpectedStudentCount: 5}},
+		Classes: []ReportClassSizeSnapshot{
+			{ClassID: "class-a", GradeID: "grade-a", Grade: "2026级", ClassName: "一班", MajorName: "软件工程", ExpectedStudentCount: 2},
+			{ClassID: "class-b", GradeID: "grade-a", Grade: "2026级", ClassName: "一班", MajorName: "网络工程", ExpectedStudentCount: 3},
+		}}
+	rows := []ReportCountRow{{InspectionTypeCode: inspection.InspectionTypeAttendance}}
+	records := []Record{{TypeCode: inspection.InspectionTypeAttendance, ClassID: "class-b", Grade: "2026级", ClassName: "一班", StudentNumber: "student-b"}}
+	result, err := CalculateReportIndicators(inputs, rows, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Classes) != 2 || result.Classes[0].ClassID != "class-a" || result.Classes[1].ClassID != "class-b" || result.Classes[0].AttendanceRate.ViolationStudentCount != 0 || result.Classes[1].AttendanceRate.ViolationStudentCount != 1 {
+		t.Fatalf("same-named classes merged: %+v", result.Classes)
+	}
+}
+
 func TestApplyReportSourceStatesDistinguishesZeroAndMissing(t *testing.T) {
 	content := &ReportVersionContent{
 		StatisticsRuleVersion: "WEEKLY_INDICATORS_V2",

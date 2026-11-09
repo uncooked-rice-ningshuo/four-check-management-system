@@ -74,6 +74,8 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	args := []any{q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID, owner}
 	guard := inspectionAccessSQL(a, "mutate", &args)
 	base := ` FROM classes c JOIN grades g ON g.id=c.grade_id
+	 LEFT JOIN faculties f ON f.id=c.faculty_id
+	 LEFT JOIN majors m ON m.id=c.major_id
  JOIN semesters sem ON sem.id=$1::uuid
  CROSS JOIN LATERAL (SELECT c.id AS id,c.id AS class_id,g.name AS grade_snapshot,
  $1::uuid AS semester_id,$2::uuid AS week_id,$3::uuid AS inspection_type_id,NULLIF($4,'')::uuid AS department_id,
@@ -86,7 +88,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 	var columns string
 	switch q.Kind {
 	case "classes":
-		columns = "c.id,c.name || '（' || CASE WHEN right(g.name, 1) = '级' THEN g.name ELSE g.name || '级' END || '）' AS label"
+		columns = "c.id,c.name || '（' || CASE WHEN right(g.name, 1) = '级' THEN g.name ELSE g.name || '级' END || COALESCE(' · ' || f.name,'') || COALESCE(' · ' || m.name,'') || '）' AS label"
 	case "students":
 		base += " JOIN students s ON s.class_id=c.id "
 		where += " AND s.enabled"

@@ -7,9 +7,7 @@ import { ReportOutputPanel } from './ReportOutputPanel'
 
 vi.mock('../../../shared/api/reportOutputApi', () => ({ reportOutputApi: {
   settings: vi.fn().mockResolvedValue({ introduction: '本周检查情况说明', defaultTypeCodes: ['ATTENDANCE_RATE'], version: 1 }),
-  list: vi.fn().mockResolvedValue({ items: [{ id: 'failed', reportVersionId: 'v1', format: 'WORD', typeCodes: ['ATTENDANCE_RATE'], combined: false, status: 'FAILED', createdAt: '2026-01-01' }] }),
-  generate: vi.fn().mockResolvedValue({ id: 'new', reportVersionId: 'v1', format: 'WORD', typeCodes: ['ATTENDANCE_RATE'], combined: true, status: 'AVAILABLE', createdAt: '2026-01-01' }),
-  download: vi.fn(),
+  generate: vi.fn().mockResolvedValue(new Blob(['test'])),
 } }))
 
 const version: ReportVersion = { id: 'v1', versionNo: 1, createdBy: 'actor', createdAt: '2026-01-01', content: {
@@ -25,9 +23,14 @@ function renderActions(canGenerate = true, reportVersion = version) {
 }
 
 describe('ReportOutputPanel', () => {
-  beforeEach(() => { vi.clearAllMocks() })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:report-output'), configurable: true })
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  })
 
-  it('opens separate Word and Excel dialogs with the configured selection and hides failed downloads', async () => {
+  it('generates and downloads Word and Excel without showing stored file history', async () => {
     renderActions()
     expect(screen.queryByText('V1 · Word/Excel 文件')).not.toBeInTheDocument()
     expect(reportOutputApi.settings).not.toHaveBeenCalled()
@@ -35,33 +38,21 @@ describe('ReportOutputPanel', () => {
     const wordDialog = await screen.findByRole('dialog', { name: 'V1 · Word 文件' })
     await waitFor(() => expect(reportOutputApi.settings).toHaveBeenCalled())
     expect(within(wordDialog).queryByText('本周检查情况说明')).not.toBeInTheDocument()
-    await waitFor(() => expect(within(wordDialog).getByText('生成失败')).toBeVisible())
-    expect(within(wordDialog).queryByRole('button', { name: '下载 Word 文件' })).not.toBeInTheDocument()
-    fireEvent.click(within(wordDialog).getByRole('button', { name: '生成 Word' }))
+    expect(within(wordDialog).queryByText('已生成文件')).not.toBeInTheDocument()
+    fireEvent.click(within(wordDialog).getByRole('button', { name: '生成并下载 Word' }))
     await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledWith('semester', 'week', 1, { format: 'WORD', typeCodes: ['ATTENDANCE_RATE'], combined: true, settingsVersion: 1 }))
-    fireEvent.click(within(wordDialog).getByRole('button', { name: /关\s*闭/ }))
+    await waitFor(() => expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'V1 · Word 文件' })).not.toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '生成 Excel' }))
     const excelDialog = await screen.findByRole('dialog', { name: 'V1 · Excel 文件' })
     expect(within(excelDialog).queryByText('本周检查情况说明')).not.toBeInTheDocument()
-    fireEvent.click(within(excelDialog).getByRole('button', { name: '生成 Excel' }))
+    fireEvent.click(within(excelDialog).getByRole('button', { name: '生成并下载 Excel' }))
     await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledWith('semester', 'week', 1, { format: 'EXCEL', typeCodes: ['ATTENDANCE_RATE'], combined: true, settingsVersion: 1 }))
   })
 
-  it('downloads available files from a format dialog without offering generation to read only viewers', async () => {
-    vi.mocked(reportOutputApi.list).mockResolvedValueOnce({ items: [{ id: 'available', reportVersionId: 'v1', format: 'EXCEL', typeCodes: ['ATTENDANCE_RATE'], combined: false, status: 'AVAILABLE', createdAt: '2026-01-01' }] })
-    vi.mocked(reportOutputApi.download).mockResolvedValueOnce({ blob: new Blob(['test']), headers: new Headers() })
-    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:report-output'), configurable: true })
-    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true })
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  it('does not offer a stored-file entry to read only viewers', () => {
     renderActions(false)
-    fireEvent.click(screen.getByRole('button', { name: '查看 Excel 文件' }))
-    const dialog = await screen.findByRole('dialog', { name: 'V1 · Excel 文件' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: '下载 Excel 文件' }))
-    await waitFor(() => expect(reportOutputApi.download).toHaveBeenCalledWith('semester', 'week', 1, 'available'))
-    await waitFor(() => expect(click).toHaveBeenCalledOnce())
-    expect(within(dialog).queryByRole('button', { name: '生成 Excel' })).not.toBeInTheDocument()
-    click.mockRestore()
+    expect(screen.queryByRole('button', { name: /Word|Excel/ })).not.toBeInTheDocument()
   })
 
   it('allows Word and Excel generation for an unsubmitted empty dimension', async () => {
@@ -70,10 +61,9 @@ describe('ReportOutputPanel', () => {
     for (const format of ['Word', 'Excel']) {
       fireEvent.click(screen.getByRole('button', { name: `生成 ${format}` }))
       const dialog = await screen.findByRole('dialog', { name: `V1 · ${format} 文件` })
-      await waitFor(() => expect(within(dialog).getByRole('button', { name: `生成 ${format}` })).toBeEnabled())
-      fireEvent.click(within(dialog).getByRole('button', { name: `生成 ${format}` }))
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: `生成并下载 ${format}` })).toBeEnabled())
+      fireEvent.click(within(dialog).getByRole('button', { name: `生成并下载 ${format}` }))
       await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledWith('semester', 'week', 1, { format: format.toUpperCase(), typeCodes: ['ATTENDANCE_RATE'], combined: true, settingsVersion: 1 }))
-      fireEvent.click(within(dialog).getByRole('button', { name: /关\s*闭/ }))
       await waitFor(() => expect(screen.queryByRole('dialog', { name: `V1 · ${format} 文件` })).not.toBeInTheDocument())
     }
   })
@@ -87,8 +77,20 @@ describe('ReportOutputPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成 Word' }))
     const dialog = await screen.findByRole('dialog', { name: 'V1 · Word 文件' })
     expect(within(dialog).queryByLabelText('文件日期')).not.toBeInTheDocument()
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '生成 Word' })).toBeEnabled())
-    fireEvent.click(within(dialog).getByRole('button', { name: '生成 Word' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '生成并下载 Word' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '生成并下载 Word' }))
     await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledWith('semester', 'week', 1, { format: 'WORD', typeCodes: ['ATTENDANCE_RATE'], combined: true, settingsVersion: 1 }))
+  })
+
+  it('keeps the selection open when generation fails so it can be retried', async () => {
+    vi.mocked(reportOutputApi.generate).mockRejectedValueOnce(new Error('生成失败，请重试'))
+    renderActions()
+    fireEvent.click(screen.getByRole('button', { name: '生成 Excel' }))
+    const dialog = await screen.findByRole('dialog', { name: 'V1 · Excel 文件' })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '生成并下载 Excel' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '生成并下载 Excel' }))
+    await waitFor(() => expect(reportOutputApi.generate).toHaveBeenCalledOnce())
+    expect(within(dialog).getByRole('button', { name: '生成并下载 Excel' })).toBeVisible()
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled()
   })
 })

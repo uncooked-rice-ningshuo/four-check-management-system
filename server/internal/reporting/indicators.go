@@ -13,6 +13,8 @@ type indicatorAccumulator struct {
 	classID              string
 	grade                string
 	className            string
+	facultyName          string
+	majorName            string
 	expectedStudents     int
 	attendancePeople     map[string]struct{}
 	unattendedPeople     map[string]struct{}
@@ -54,17 +56,26 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 	}
 
 	byClass := make(map[string]*indicatorAccumulator, len(inputs.Classes))
+	legacyKeys := make(map[string]string, len(inputs.Classes))
 	for _, class := range inputs.Classes {
-		key := reportClassKey(class.Grade, class.ClassName)
+		key := reportClassIdentity(class.ClassID, class.Grade, class.ClassName)
+		legacy := reportClassKey(class.Grade, class.ClassName)
+		if existing, present := legacyKeys[legacy]; !present {
+			legacyKeys[legacy] = key
+		} else if existing != key {
+			legacyKeys[legacy] = ""
+		}
 		accumulator := byClass[key]
 		if accumulator == nil {
 			accumulator = newIndicatorAccumulator(class.Grade, class.ClassName)
 			byClass[key] = accumulator
 		}
 		if inputs.ReportGradeScopeVersion > 0 && accumulator.classID != "" && accumulator.classID != class.ClassID {
-			return nil, fmt.Errorf("%w: duplicate class name", ErrReportMetricScopeInvalid)
+			return nil, fmt.Errorf("%w: duplicate class identity", ErrReportMetricScopeInvalid)
 		}
 		accumulator.classID = class.ClassID
+		accumulator.facultyName = class.FacultyName
+		accumulator.majorName = class.MajorName
 		accumulator.expectedStudents += class.ExpectedStudentCount
 	}
 	gradeTotals := make(map[string]int, len(inputs.Grades))
@@ -90,7 +101,13 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 		if len(classes) == 0 {
 			continue
 		}
-		for _, class := range classes {
+		for index := range classes {
+			class := &classes[index]
+			if byClass[class.key] == nil {
+				if matching := legacyKeys[reportClassKey(class.grade, class.className)]; matching != "" {
+					class.key = matching
+				}
+			}
 			if byClass[class.key] == nil {
 				if inputs.ReportGradeScopeVersion > 0 {
 					return nil, fmt.Errorf("%w: record class outside scope", ErrReportMetricScopeInvalid)
@@ -180,7 +197,10 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 		if left.grade != right.grade {
 			return left.grade < right.grade
 		}
-		return left.className < right.className
+		if left.className != right.className {
+			return left.className < right.className
+		}
+		return left.classID < right.classID
 	})
 
 	result := &ReportIndicators{
@@ -198,7 +218,7 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 			accumulator.morningRaw, accumulator.eveningRaw, accumulator.classroomHygieneRaw,
 			accumulator.dormitoryPersonalRaw, accumulator.dormitoryPublicRaw, accumulator.lateReturnRaw)
 		result.Classes = append(result.Classes, ReportClassIndicators{
-			ClassID: accumulator.classID, Grade: accumulator.grade, ClassName: accumulator.className, ReportIndicatorValues: values,
+			ClassID: accumulator.classID, Grade: accumulator.grade, ClassName: accumulator.className, FacultyName: accumulator.facultyName, MajorName: accumulator.majorName, ReportIndicatorValues: values,
 		})
 		if inputs.ReportGradeScopeVersion > 0 && values.AttendanceRate != nil && values.AttendanceRate.ViolationStudentCount > accumulator.expectedStudents {
 			return nil, fmt.Errorf("%w: attendance count exceeds class roster", ErrReportMetricScopeInvalid)
@@ -310,6 +330,7 @@ func classHasReportRecords(class ReportClassIndicators, code string) bool {
 
 type reportClassReference struct {
 	key       string
+	classID   string
 	grade     string
 	className string
 }
@@ -322,12 +343,12 @@ func reportRecordClasses(record Record) []reportClassReference {
 		if name == "" {
 			continue
 		}
-		key := reportClassKey(grade, name)
+		key := reportClassIdentity(reference.ID, grade, name)
 		if _, exists := seen[key]; exists {
 			continue
 		}
 		seen[key] = struct{}{}
-		classes = append(classes, reportClassReference{key: key, grade: grade, className: name})
+		classes = append(classes, reportClassReference{key: key, classID: reference.ID, grade: grade, className: name})
 	}
 	if len(classes) > 0 {
 		return classes
@@ -336,8 +357,8 @@ func reportRecordClasses(record Record) []reportClassReference {
 	if name == "" {
 		return nil
 	}
-	key := reportClassKey(grade, name)
-	return []reportClassReference{{key: key, grade: grade, className: name}}
+	key := reportClassIdentity(record.ClassID, grade, name)
+	return []reportClassReference{{key: key, classID: record.ClassID, grade: grade, className: name}}
 }
 
 func buildIndicatorValues(inputs ReportMetricInputs, included map[string]struct{}, expectedStudents,
@@ -418,6 +439,14 @@ func newIndicatorAccumulator(grade, className string) *indicatorAccumulator {
 
 func reportClassKey(grade, className string) string {
 	return strings.TrimSpace(grade) + "\x1f" + strings.TrimSpace(className)
+}
+
+func reportClassIdentity(classID, grade, className string) string {
+	if classID != "" {
+		return "id:" + classID
+	}
+	// Versions created before class IDs were frozen retain their original key.
+	return "legacy:" + reportClassKey(grade, className)
 }
 
 func reportTypeCodeForName(name string) string {

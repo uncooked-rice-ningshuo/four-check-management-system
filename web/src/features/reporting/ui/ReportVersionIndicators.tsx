@@ -5,7 +5,7 @@ import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import type { ColumnType } from 'antd/es/table'
 import type { ReportIndicators, ReportVersion, ReportClassIndicators } from '../../../entities/reporting/model/reporting'
 
-type MetricRow = { key: string; grade: string; className: string; values: ReportClassIndicators }
+type MetricRow = { key: string; grade: string; className: string; displayName: string; values: ReportClassIndicators }
 type CountMetricKey = 'eveningSelfStudy' | 'classroomHygiene' | 'dormitoryPersonalHygiene'
   | 'dormitoryPublicHygiene' | 'dormitoryHygieneTotal' | 'lateReturn'
 type IndicatorCard = {
@@ -25,7 +25,7 @@ type MetricTablePagination = {
 type ArchiveMetricFilter = {
   gradeOptions: { value: string; label: string }[]
   classOptions: { value: string; label: string }[]
-  onApply: (values: { grade?: string; className?: string }) => void
+  onApply: (values: { grade?: string; classKey?: string }) => void
   onReset: () => void
 }
 
@@ -44,6 +44,8 @@ function classMetricRows(indicators: ReportIndicators): MetricRow[] {
     key: item.classId ?? `class-${index}-${item.grade}-${item.className}`,
     grade: item.grade,
     className: item.className,
+    displayName: indicators.classes.some(other => other !== item && other.grade === item.grade && other.className === item.className)
+      ? `${item.className}（${[item.facultyName, item.majorName].filter(Boolean).join(' · ') || item.classId?.slice(0, 8) || `第 ${index + 1} 班`}）` : item.className,
     values: item,
   }))
 }
@@ -51,34 +53,34 @@ function classMetricRows(indicators: ReportIndicators): MetricRow[] {
 function baseColumns(): ColumnType<MetricRow>[] {
   return [
     { title: '年级', dataIndex: 'grade', key: 'grade', width: 100, render: (value: string) => value || '—' },
-    { title: '班级', dataIndex: 'className', key: 'className', width: 180 },
+    { title: '班级', dataIndex: 'displayName', key: 'className', width: 180 },
   ]
 }
 
 function sourceStateLabel(value: string | undefined) {
-  if (value === 'SOURCE_INCOMPLETE') return '来源未完成'
-  if (value === 'CONFIRMED_WITH_RECORDS') return '有已确认记录'
-  if (value === 'CONFIRMED_ZERO') return '本班无已确认记录'
-  return '来源状态不可用'
+  if (value === 'SOURCE_INCOMPLETE') return '当前没有确认数据'
+  if (value === 'CONFIRMED_WITH_RECORDS') return '有检查记录'
+  if (value === 'CONFIRMED_ZERO') return '没有检查记录'
+  return '数据暂不可用'
 }
 
 function tableFor(rows: MetricRow[], columns: ColumnType<MetricRow>[], pagination: MetricTablePagination, filter?: ArchiveMetricFilter, typeCode?: string, extraTypeCode?: string) {
   const sourceIncomplete = Boolean(typeCode && rows.some(row => row.values.sourceStates?.[typeCode] === 'SOURCE_INCOMPLETE' || (extraTypeCode && row.values.sourceStates?.[extraTypeCode] === 'SOURCE_INCOMPLETE')))
   const hasSourceStates = Boolean(typeCode && rows.some(row => row.values.sourceStates))
-  const metricColumns = [...(hasSourceStates ? [{ title: '来源状态', key: 'sourceState', width: 160, render: (_value: unknown, row: MetricRow) => sourceStateLabel(row.values.sourceStates?.[typeCode ?? '']) }] : []), ...(sourceIncomplete ? [] : columns)]
+  const metricColumns = [...(hasSourceStates ? [{ title: '数据情况', key: 'sourceState', width: 160, render: (_value: unknown, row: MetricRow) => sourceStateLabel(row.values.sourceStates?.[typeCode ?? '']) }] : []), ...(sourceIncomplete ? [] : columns)]
   if (filter) return <ProTable<MetricRow>
     className="report-archive-indicator-table"
     rowKey="key"
     size="middle"
     columns={[
       { title: '年级', dataIndex: 'grade', valueType: 'select', width: 120, fieldProps: { options: filter.gradeOptions, allowClear: true }, render: (_value, row) => row.grade || '—' },
-      { title: '班级', dataIndex: 'className', valueType: 'select', width: 200, fieldProps: { options: filter.classOptions, allowClear: true, showSearch: true, optionFilterProp: 'label' }, render: (_value, row) => row.className },
+      { title: '班级', dataIndex: 'key', valueType: 'select', width: 200, fieldProps: { options: filter.classOptions, allowClear: true, showSearch: true, optionFilterProp: 'label' }, render: (_value, row) => row.displayName },
       // These metric columns have static titles and row renders, shared with the plain table below.
       ...metricColumns.map(column => ({ ...column, search: false } as ProColumns<MetricRow>)),
     ]}
     dataSource={rows}
     search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false, span: 12 }}
-    onSubmit={values => filter.onApply({ grade: values.grade, className: values.className })}
+    onSubmit={values => filter.onApply({ grade: values.grade, classKey: values.key })}
     onReset={filter.onReset}
     options={{ density: false, setting: false, reload: false }}
     pagination={{ ...pagination, total: rows.length, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], showTotal: total => `共 ${total} 个班级` }}
@@ -250,13 +252,11 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
   const gradeOptions = [...new Set(allClassRows.map(row => row.grade).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'zh-CN'))
     .map(value => ({ value, label: value }))
-  const classOptions = [...new Set(allClassRows
-    .filter(row => !gradeFilter || row.grade === gradeFilter)
-    .map(row => row.className))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-    .map(value => ({ value, label: value }))
+  const classOptions = allClassRows.filter(row => !gradeFilter || row.grade === gradeFilter)
+    .map(row => ({ value: row.key, label: row.displayName }))
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
   const visibleClassRows = allClassRows.filter(row =>
-    (!gradeFilter || row.grade === gradeFilter) && (!classFilter || row.className === classFilter))
+    (!gradeFilter || row.grade === gradeFilter) && (!classFilter || row.key === classFilter))
   const tabs = indicatorTabs(indicators, mode === 'overview' || archiveTable ? visibleClassRows : allClassRows, {
     current: classPage,
     pageSize: classPageSize,
@@ -264,7 +264,7 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
   }, archiveTable ? {
     gradeOptions,
     classOptions,
-    onApply: values => { setGradeFilter(values.grade); setClassFilter(values.className); setClassPage(1) },
+    onApply: values => { setGradeFilter(values.grade); setClassFilter(values.classKey); setClassPage(1) },
     onReset: () => { setGradeFilter(undefined); setClassFilter(undefined); setClassPage(1) },
   } : undefined)
   const classBreakdown = <Tabs
@@ -275,7 +275,7 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
   />
 
   return <section aria-label={`V${version.versionNo} 周指标`} className={`report-version-indicators${archiveTable ? ' report-version-indicators-archive' : ''}`}>
-    {content.statisticsRuleVersion === 'WEEKLY_INDICATORS_V2' && content.incompleteCells.length > 0 && <Alert showIcon type="warning" title="部分检查来源未完成；对应数值暂不可判定" description="班级明细保留全部适用班级，未完成来源只显示状态，不显示零值或比率。" />}
+    {content.statisticsRuleVersion === 'WEEKLY_INDICATORS_V2' && content.incompleteCells.length > 0 && <Alert showIcon type="warning" title="部分检查还没有确认数据，相关统计暂不显示" description="下方仍列出适用班级；确认数据后才会显示人数和比率。" />}
     {!archiveTable && <header className="report-version-indicators-heading">
       <div>
         <Typography.Text strong>{mode === 'overview' ? '本版指标' : `V${version.versionNo} 周指标`}</Typography.Text>

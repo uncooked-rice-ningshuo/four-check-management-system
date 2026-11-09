@@ -294,8 +294,6 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.POST("/reports/output-settings/preview", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputWord)
 	v1.POST("/reports/output-settings/preview-excel", h.requireAction(permission.ActionReportOutputSettingsManage), h.previewReportOutputExcel)
 	v1.POST("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs", h.generateReportOutput)
-	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs", h.listReportOutputs)
-	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/outputs/:outputId/download", h.downloadReportOutput)
 	v1.GET("/reports/workflow/:semesterId/:weekId/versions/:versionNo/records", h.reportVersionRecords)
 	v1.GET("/reports/archive", h.reportArchive)
 	v1.GET("/reports/archive/:semesterId/:weekId", h.reportArchiveWorkflow)

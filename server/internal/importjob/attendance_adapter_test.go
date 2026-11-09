@@ -267,3 +267,17 @@ func TestAttendanceDuplicateFeedbackIdentifiesBothSourceRows(t *testing.T) {
 		t.Fatalf("feedback=%s", result.Rows[1].Errors[0].Message)
 	}
 }
+
+func TestImportClassForStudentUsesClassIDWhenNamesRepeat(t *testing.T) {
+	references := AttendanceReferences{
+		ClassesByName: map[string]AttendanceClassReference{"同名班": {ID: "wrong", Name: "同名班", Grade: "2027级"}},
+		ClassesByID:   map[string]AttendanceClassReference{"right": {ID: "right", Name: "同名班", Grade: "2026级"}},
+	}
+	class, ok := importClassForStudent(references, "同名班", AttendanceStudentReference{ClassID: "right"})
+	if !ok || class.ID != "right" {
+		t.Fatalf("resolved class = %+v, ok=%v", class, ok)
+	}
+	if _, ok := importClassForStudent(references, "另一班", AttendanceStudentReference{ClassID: "right"}); ok {
+		t.Fatal("mismatched class label was accepted")
+	}
+}

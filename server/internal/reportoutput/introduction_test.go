@@ -228,6 +228,23 @@ func TestWordFooterCustomEditableField(t *testing.T) {
 	}
 }
 
+func TestWordAcceptsChineseWeekAndPageVariables(t *testing.T) {
+	raw := json.RawMessage(`{"type":"doc","footerLayout":"custom","footerText":"第{pageChinese}页，共{totalPagesChinese}页 · 第{weekNoChinese}周","content":[{"type":"paragraph","attrs":{"style":"subtitle","textAlign":"center"},"content":[{"type":"text","text":"第{weekNoChinese}周日常管理检查通报"}]}]}`)
+	data, err := RenderWordDocument(reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 8}}, nil, []string{"ATTENDANCE_RATE"}, raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := wordDocumentForTest(t, data)
+	if !strings.Contains(document, "第八周日常管理检查通报") || !strings.Contains(document, "第八周到课率检查通报") {
+		t.Fatal("Chinese week missing from cover or attachment title")
+	}
+	if path := os.Getenv("REPORT_OUTPUT_CHINESE_SAMPLE_PATH"); path != "" {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestManualAttachmentTextAndHeadingStyle(t *testing.T) {
 	raw := json.RawMessage(`{"type":"doc","manualAttachmentList":true,"content":[{"type":"paragraph","attrs":{"style":"title","textAlign":"center"},"content":[{"type":"text","text":"计算机科学与工程学院"}]},{"type":"paragraph","attrs":{"style":"subtitle","textAlign":"center","spaceBefore":8},"content":[{"type":"text","text":"{semesterName} 第{weekNo}周通报"}]},{"type":"paragraph","attrs":{"style":"heading2","textAlign":"left","indent":2,"spaceBefore":16,"lineSpacing":25},"content":[{"type":"text","text":"自定义附件说明","marks":[{"type":"textStyle","attrs":{"fontFamily":"楷体"}}]}]}]}`)
 	data, err := RenderWordDocument(reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 9}}, nil, []string{"LATE_RETURN"}, raw, true)

@@ -181,6 +181,7 @@ type Record struct {
 	RowVersion             int               `json:"-"`
 	StudentNumber          string            `json:"studentNumber"`
 	StudentName            string            `json:"studentName"`
+	ClassID                string            `json:"classId,omitempty"`
 	ClassName              string            `json:"className"`
 	Grade                  string            `json:"grade"`
 	TypeCode               string            `json:"typeCode"`
@@ -213,8 +214,9 @@ type RecordDetails struct {
 	Remark            string   `json:"remark,omitempty"`
 }
 
-// RecordReference is a human-readable responsibility label without internal IDs.
+// RecordReference freezes a display label; class references also retain an ID for metrics.
 type RecordReference struct {
+	ID    string `json:"id,omitempty"`
 	Label string `json:"label"`
 	Grade string `json:"grade,omitempty"`
 }
@@ -287,6 +289,8 @@ type ReportClassSizeSnapshot struct {
 	GradeID              string `json:"gradeId,omitempty"`
 	Grade                string `json:"grade"`
 	ClassName            string `json:"className"`
+	FacultyName          string `json:"facultyName,omitempty"`
+	MajorName            string `json:"majorName,omitempty"`
 	HeadTeacherName      string `json:"headTeacherName,omitempty"`
 	ExpectedStudentCount int    `json:"expectedStudentCount"`
 }
@@ -304,6 +308,8 @@ type ReportClassIndicators struct {
 	ClassID      string            `json:"classId,omitempty"`
 	Grade        string            `json:"grade"`
 	ClassName    string            `json:"className"`
+	FacultyName  string            `json:"facultyName,omitempty"`
+	MajorName    string            `json:"majorName,omitempty"`
 	SourceStates map[string]string `json:"sourceStates,omitempty"`
 	ReportIndicatorValues
 }

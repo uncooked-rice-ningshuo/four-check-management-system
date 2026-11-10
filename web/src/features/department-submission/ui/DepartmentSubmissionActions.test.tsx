@@ -7,7 +7,7 @@ import { submissionCartApi } from '../../../shared/api/submissionCartApi'
 import { allOptions } from '../../../shared/api/inspectionOptionsApi'
 
 vi.mock('../../../shared/api/departmentSubmissionApi', () => ({ departmentSubmissionApi: {
-  list: vi.fn(), submit: vi.fn(), decide: vi.fn(), resubmit: vi.fn(),
+  list: vi.fn(), detail: vi.fn(), submit: vi.fn(), decide: vi.fn(), resubmit: vi.fn(),
 } }))
 vi.mock('../../../shared/api/submissionCartApi', () => ({ submissionCartApi: {
   candidates: vi.fn(), batches: vi.fn(), batchRecords: vi.fn(), detail: vi.fn(),
@@ -25,6 +25,7 @@ const batch = { id: 'batch', scope, semesterName: '秋季学期', weekNo: 3, dep
 
 beforeEach(() => {
   options.mockImplementation(async (_path, query) => ({ inspectionTypeId: 'type', items: query.kind === 'semesters' ? [{ id: 'semester', label: '秋季学期' }] : query.kind === 'weeks' ? [{ id: 'week', label: '第 3 周' }] : [{ id: 'department', label: '学习部' }] }))
+  api.detail.mockResolvedValue({...batch,revisions:[{revision:1,rows:[{id:'record','学生':'快照学生'}]}]})
   api.list.mockReset()
   api.submit.mockReset()
   api.decide.mockReset()
@@ -68,6 +69,8 @@ it('shows the named week and review actions from the authorized batch list', asy
   fireEvent.click(screen.getByRole('button', { name: '检查提交批次' }))
   expect(await screen.findByText(/秋季学期/)).toBeInTheDocument()
   expect(screen.getByText(/第 3 周/)).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', {name:'查看明细'}))
+  expect(await screen.findByText('快照学生')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '退回' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '确认' })).toBeInTheDocument()
 })
@@ -183,6 +186,7 @@ it('labels a confirmed college batch as college confirmed', async () => {
   api.decide.mockResolvedValue({ ...college, status: 'CONFIRMED' })
   show()
   fireEvent.click(screen.getByRole('button', { name: '检查提交批次' }))
+  fireEvent.click(await screen.findByRole('button', {name:'查看明细'}))
   fireEvent.click(await screen.findByRole('button', { name: '确认' }))
   fireEvent.click(await screen.findByRole('button', { name: '确认批次' }))
   expect(await screen.findByText('批次状态：管理员已确认')).toBeInTheDocument()

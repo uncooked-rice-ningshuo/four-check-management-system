@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const submissionSelect = `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.department_id::text,''),ds.inspection_type_id,
+const submissionColumns = `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.department_id::text,''),ds.inspection_type_id,
 	 ds.submission_kind,ds.status,ds.revision_no,ds.row_version,ds.created_by,COALESCE(ds.submitted_by::text,''),
  COALESCE(ds.reviewed_by::text,''),ds.return_reason,ds.created_at,
 	 COALESCE(ds.submitted_at,ds.created_at),ds.reviewed_at,rev.record_ids,
@@ -22,14 +22,17 @@ const submissionSelect = `SELECT ds.id,ds.semester_id,ds.week_id,COALESCE(ds.dep
 	 FROM inspection_records ir LEFT JOIN accounts record_creator ON record_creator.id=ir.created_by
 	 LEFT JOIN import_batches ib ON ib.id=ir.import_batch_id LEFT JOIN accounts batch_creator ON batch_creator.id=ib.created_by
 	 WHERE ir.submission_id=ds.id AND ir.deleted_at IS NULL),'[]'::jsonb) END
-	 ,sem.name,w.week_no,COALESCE(d.name, CASE WHEN ds.administrator_channel THEN '管理员' ELSE '历史校级' END),COALESCE(submission_creator.name,''),COALESCE(submission_actor.name,'')
- FROM department_submissions ds JOIN department_submission_revisions rev
+	 ,sem.name,w.week_no,COALESCE(d.name, CASE WHEN ds.administrator_channel THEN '管理员' ELSE '历史校级' END),COALESCE(submission_creator.name,''),COALESCE(submission_actor.name,'')`
+
+const submissionTables = ` FROM department_submissions ds JOIN department_submission_revisions rev
  ON rev.submission_id=ds.id AND rev.revision_no=ds.revision_no
  JOIN semesters sem ON sem.id=ds.semester_id
  JOIN semester_weeks w ON w.id=ds.week_id
 	 LEFT JOIN departments d ON d.id=ds.department_id
 	 LEFT JOIN accounts submission_creator ON submission_creator.id=ds.created_by
 	 LEFT JOIN accounts submission_actor ON submission_actor.id=ds.submitted_by`
+
+const submissionSelect = submissionColumns + submissionTables
 
 func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
 	a := inspection.MutationAccess{ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
@@ -107,14 +110,18 @@ func wholeCellActionSQL(access inspection.MutationAccess, action string, args *[
 	return "(" + allowSQL + " AND NOT " + denySQL + ")"
 }
 
-func scanSubmission(row pgx.Row) (workflow.Submission, error) {
+func scanSubmission(row pgx.Row, detail bool) (workflow.Submission, error) {
 	var value workflow.Submission
 	var recordsJSON []byte
-	err := row.Scan(&value.ID, &value.Scope.SemesterID, &value.Scope.WeekID, &value.Scope.DepartmentID,
+	fields := []any{&value.ID, &value.Scope.SemesterID, &value.Scope.WeekID, &value.Scope.DepartmentID,
 		&value.Scope.InspectionTypeID, &value.Kind, &value.Status, &value.RevisionNo, &value.RowVersion,
 		&value.CreatedBy, &value.SubmittedBy, &value.ReviewedBy, &value.ReturnReason,
 		&value.CreatedAt, &value.SubmittedAt, &value.ReviewedAt, &value.RecordIDs, &recordsJSON,
-		&value.SemesterName, &value.WeekNo, &value.DepartmentName, &value.CreatedByName, &value.SubmittedByName)
+		&value.SemesterName, &value.WeekNo, &value.DepartmentName, &value.CreatedByName, &value.SubmittedByName}
+	if detail {
+		fields = append(fields, &value.Revisions)
+	}
+	err := row.Scan(fields...)
 	if err != nil {
 		return workflow.Submission{}, err
 	}
@@ -127,7 +134,7 @@ func scanSubmission(row pgx.Row) (workflow.Submission, error) {
 // commitDepartmentBatch reads the complete response before commit, so a
 // successful mutation never returns a partial batch envelope.
 func commitDepartmentBatch(ctx context.Context, tx pgx.Tx, id string) (workflow.Submission, error) {
-	value, err := scanSubmission(tx.QueryRow(ctx, submissionSelect+` WHERE ds.id=$1`, id))
+	value, err := scanSubmission(tx.QueryRow(ctx, submissionSelect+` WHERE ds.id=$1`, id), false)
 	if err != nil {
 		return workflow.Submission{}, err
 	}
@@ -156,13 +163,13 @@ func (p *Postgres) ListDepartmentBatches(ctx context.Context, access workflow.Vi
 		return workflow.Page{}, err
 	}
 	args = append(args, query.PageSize, (query.Page-1)*query.PageSize)
-	rows, err := p.Pool.Query(ctx, submissionSelect+filter+fmt.Sprintf(" ORDER BY ds.updated_at DESC,ds.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
+	rows, err := p.Pool.Query(ctx, submissionSelect+filter+fmt.Sprintf(" ORDER BY ds.submitted_at DESC,ds.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
 	if err != nil {
 		return workflow.Page{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		value, err := scanSubmission(rows)
+		value, err := scanSubmission(rows, false)
 		if err != nil {
 			return workflow.Page{}, err
 		}
@@ -174,7 +181,32 @@ func (p *Postgres) ListDepartmentBatches(ctx context.Context, access workflow.Vi
 func (p *Postgres) GetDepartmentBatch(ctx context.Context, access workflow.ViewAccess, id string) (workflow.Submission, error) {
 	args := []any{id}
 	visible := submissionVisibilitySQL(access, &args)
-	result, err := scanSubmission(p.Pool.QueryRow(ctx, submissionSelect+` WHERE ds.id=$1 AND `+visible, args...))
+	// Only return display fields from immutable submission snapshots.
+	detailSelect := submissionColumns + `,
+      (SELECT jsonb_agg(jsonb_build_object('revision',h.revision_no,'rows',(
+        SELECT COALESCE(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+        'id',entry#>>'{record,id}','学生',NULLIF(entry#>>'{record,student_name_snapshot}',''),
+        '学号',NULLIF(entry#>>'{record,student_no_snapshot}',''),'班级',NULLIF(entry#>>'{record,class_name_snapshot}',''),
+        '日期',COALESCE(entry#>>'{record,inspection_date}',to_char((entry#>>'{record,occurred_at}')::timestamptz AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD')),
+        '课程',COALESCE(entry->>'courseName',CASE WHEN entry#>>'{attendanceDetails,course_id}' IS NOT NULL THEN '提交时未保存课程名称' END),
+        '检查对象',entry->>'objectName','检查区域',entry->>'areaName',
+        '年级',NULLIF(entry#>>'{record,grade_snapshot}',''),'轮次',entry#>>'{record,inspection_round}',
+        '缺勤次数',entry#>>'{morningDetails,absence_count}',
+        '周倍数',COALESCE(entry#>>'{attendanceDetails,penalty_multiplier}',entry#>>'{eveningSelfStudyDetails,penalty_multiplier}'),
+        '违纪计入次数',COALESCE(entry#>>'{attendanceDetails,penalty_count}',entry#>>'{eveningSelfStudyDetails,penalty_count}',entry#>>'{attendanceDetails,penalty_hours}'),
+        '节次',COALESCE(entry#>>'{attendanceDetails,period_text}',entry#>>'{eveningSelfStudyDetails,period_text}'),
+        '缺课节次数',CASE WHEN inspection_type.code='ATTENDANCE_RATE' THEN entry#>>'{attendanceDetails,absence_hours}' END,
+        '结果',CASE hygiene->>'result' WHEN 'QUALIFIED' THEN '合格' WHEN 'UNQUALIFIED' THEN '不合格' WHEN 'EXCELLENT' THEN '优秀' END,
+        '原因',COALESCE(entry->>'reasonLabel',hygiene->>'reason_code'),'情况',NULLIF(hygiene->>'description',''),'备注',NULLIF(entry#>>'{record,remark}',''),
+        '责任班级',(SELECT string_agg(x->>'label','、') FROM jsonb_array_elements(entry->'responsibleClasses') x),
+        '责任学生',(SELECT string_agg(x->>'label','、') FROM jsonb_array_elements(entry->'responsibleStudents') x),
+        '责任寝室',(SELECT string_agg(x->>'label','、') FROM jsonb_array_elements(entry->'responsibleDormitories') x)
+        )) ORDER BY ord),'[]'::jsonb)
+        FROM jsonb_array_elements(h.records_snapshot) WITH ORDINALITY AS entries(entry,ord)
+        CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(entry->'dormitoryHygieneDetails','null'),NULLIF(entry->'classroomHygieneDetails','null'),entry->'publicDormitoryHygieneDetails') AS hygiene) details
+      )) ORDER BY h.revision_no DESC) FROM department_submission_revisions h WHERE h.submission_id=ds.id AND h.record_ids <@ rev.record_ids)
+     ` + submissionTables + ` JOIN inspection_types inspection_type ON inspection_type.id=ds.inspection_type_id`
+	result, err := scanSubmission(p.Pool.QueryRow(ctx, detailSelect+` WHERE ds.id=$1 AND `+visible, args...), true)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workflow.Submission{}, workflow.ErrSubmissionMissing
 	}

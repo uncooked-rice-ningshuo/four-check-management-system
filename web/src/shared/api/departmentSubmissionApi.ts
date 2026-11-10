@@ -23,7 +23,12 @@ export const departmentSubmissionApi = {
     if (!object(value) || !Array.isArray(value.items) || !Number.isInteger(value.total) || !Number.isInteger(value.page) || !Number.isInteger(value.pageSize)) throw badResponse()
     return { items: value.items.map(submission), total: value.total as number, page: value.page as number, pageSize: value.pageSize as number }
   },
-  async detail(id: string) { return submission(await apiRequest<unknown>(`/department-submissions/${encodeURIComponent(id)}`)) },
+  async detail(id: string) {
+    const value = await apiRequest<unknown>(`/department-submissions/${encodeURIComponent(id)}`)
+    const batch = submission(value)
+    if (!batch.revisions?.length || !batch.revisions.every(rev => Number.isInteger(rev.revision) && Array.isArray(rev.rows) && rev.rows.every(row => object(row) && typeof row.id === 'string' && Object.values(row).every(field => typeof field === 'string')))) throw badResponse()
+    return batch
+  },
   async submit(scope: DepartmentSubmissionScope, records: VersionedInspectionRecord[], idempotencyKey: string,
     kind: DepartmentSubmissionKind = 'RECORDS', explanation = '') {
     return submission(await apiRequest<unknown>('/department-submissions', { method: 'POST', body: JSON.stringify({ scope, kind, records, idempotencyKey, explanation }) }))

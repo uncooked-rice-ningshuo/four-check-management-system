@@ -14,6 +14,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Save names at submission time so dictionary edits cannot rewrite a past review.
+const submissionDisplaySnapshotSQL = `
+     'courseName',(SELECT name FROM courses WHERE id=ad.course_id),
+     'objectName',COALESCE((SELECT b.name || ' ' || d.room_no FROM dormitories d JOIN dormitory_buildings b ON b.id=d.dormitory_building_id WHERE d.id=COALESCE(ld.dormitory_id,dh.dormitory_id)),
+     (SELECT b.name || ' ' || c.room_no FROM classrooms c JOIN teaching_buildings b ON b.id=c.teaching_building_id WHERE c.id=COALESCE(ch.classroom_id,ad.classroom_id,esd.classroom_id))),
+     'areaName',COALESCE((SELECT name FROM classroom_hygiene_areas WHERE id=ch.area_id),(SELECT b.name || ' ' || a.floor_unit || ' ' || a.name FROM public_dormitory_hygiene_areas a JOIN dormitory_buildings b ON b.id=a.dormitory_building_id WHERE a.id=pdh.area_id)),
+     'reasonLabel',(SELECT di.label FROM dictionary_items di JOIN dictionary_types dt ON dt.id=di.type_id
+       WHERE di.value=COALESCE(dh.reason_code,ch.reason_code,pdh.reason_code) AND dt.code=CASE
+       WHEN dh.record_id IS NOT NULL THEN 'DORMITORY_HYGIENE_REASON'
+       WHEN ch.record_id IS NOT NULL THEN 'CLASSROOM_HYGIENE_REASON' ELSE 'PUBLIC_DORMITORY_HYGIENE_REASON' END),`
+
 // SubmitDepartmentBatch creates one member batch and its first immutable
 // revision. All source records, submission state and audit commit together.
 func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.SubmitCommand) (workflow.Submission, error) {
@@ -113,6 +124,16 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		return workflow.Submission{}, err
 	}
 
+	if command.Kind == workflow.SubmissionKindZeroRecord {
+		var exists bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM department_submissions WHERE id<>$1 AND semester_id=$2 AND week_id=$3 AND inspection_type_id=$4 AND department_id IS NOT DISTINCT FROM NULLIF($5,'')::uuid)`, id, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.InspectionTypeID, command.Scope.DepartmentID).Scan(&exists)
+		if err != nil {
+			return workflow.Submission{}, err
+		}
+		if exists {
+			return workflow.Submission{}, workflow.ErrInvalidTransition
+		}
+	}
 	recordIDs := make([]string, 0, len(command.Records))
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
@@ -121,7 +142,9 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		var version int
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
-	jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
+	jsonb_build_object('record',to_jsonb(ir),
+`+submissionDisplaySnapshotSQL+`
+     'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
 	 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh),
 	 'classroomHygieneDetails',to_jsonb(ch),'publicDormitoryHygieneDetails',to_jsonb(pdh),
 	 'responsibleClasses',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rc.class_id,'label',rc.class_name_snapshot,'grade',rc.grade_snapshot) ORDER BY rc.class_name_snapshot) FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id),'[]'::jsonb),
@@ -194,7 +217,7 @@ func requireZeroReceiptCell(ctx context.Context, tx pgx.Tx, scope workflow.Scope
 	var obligationID string
 	err := tx.QueryRow(ctx, `SELECT id FROM weekly_report_obligations
  WHERE semester_id=$1 AND week_id=$2 AND department_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-   AND inspection_type_id=$4 AND removed_at IS NULL FOR SHARE`, scope.SemesterID, scope.WeekID,
+   AND inspection_type_id=$4 AND removed_at IS NULL FOR UPDATE`, scope.SemesterID, scope.WeekID,
 		scope.DepartmentID, scope.InspectionTypeID).Scan(&obligationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workflow.ErrSubmissionScope
@@ -386,7 +409,9 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 		var version int
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,
- jsonb_build_object('record',to_jsonb(ir),'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
+ jsonb_build_object('record',to_jsonb(ir),
+`+submissionDisplaySnapshotSQL+`
+     'attendanceDetails',to_jsonb(ad),'eveningSelfStudyDetails',to_jsonb(esd),
 	 'morningDetails',to_jsonb(md),'lateReturnDetails',to_jsonb(ld),'dormitoryHygieneDetails',to_jsonb(dh),
 	 'classroomHygieneDetails',to_jsonb(ch),'publicDormitoryHygieneDetails',to_jsonb(pdh),
 	 'responsibleClasses',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',rc.class_id,'label',rc.class_name_snapshot,'grade',rc.grade_snapshot) ORDER BY rc.class_name_snapshot) FROM inspection_responsibility_classes rc WHERE rc.record_id=ir.id),'[]'::jsonb),

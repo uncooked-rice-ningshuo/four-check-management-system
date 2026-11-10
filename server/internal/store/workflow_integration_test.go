@@ -331,6 +331,21 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
  WHERE submission_id=$1 AND revision_no=2`, created.ID).Scan(&newRemark); err != nil || oldRemark == newRemark || newRemark != "corrected" {
 		t.Fatalf("revision snapshots: old=%q new=%q err=%v", oldRemark, newRemark, err)
 	}
+	detail, err := service.Detail(ctx, actor, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var history []struct {
+		Revision int
+		Rows     []map[string]string
+	}
+	if err := json.Unmarshal(detail.Revisions, &history); err != nil || len(history) != 2 ||
+		len(history[0].Rows) != 2 || len(history[1].Rows) != 2 ||
+		history[0].Revision != 2 || history[0].Rows[0]["备注"] != newRemark ||
+		history[1].Revision != 1 || history[1].Rows[0]["备注"] != oldRemark {
+		t.Fatalf("unexpected revision details: %+v, %v", history, err)
+	}
+
 	if _, err := inspectionService.Update(ctx, inspection.ManualActor{ID: account}, first, inspection.InspectionEdit{
 		Version: 5, Reason: "不允许待审核修改", Record: inspection.InspectionInput{SemesterID: scope.SemesterID,
 			WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID, DepartmentID: department, Details: details},

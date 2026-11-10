@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -58,6 +59,7 @@ type SubmitInput struct {
 }
 
 type Submission struct {
+	Revisions       json.RawMessage    `json:"revisions,omitempty"`
 	ID              string             `json:"id"`
 	Scope           Scope              `json:"scope"`
 	SemesterName    string             `json:"semesterName,omitempty"`

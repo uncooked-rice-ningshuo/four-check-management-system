@@ -84,13 +84,11 @@ async (page) => {
   await logout()
   const submitterToken = await login(fixture.weeklyReport.submitter)
   await page.goto(attendancePath)
-  const zeroButton = page.getByRole('button', { name: '提交零记录回执', exact: true })
-  await zeroButton.waitFor()
-  await zeroButton.click()
-  const submitDialog = page.getByRole('dialog', { name: '确认提交零记录回执？' })
-  await submitDialog.waitFor()
-  await submitDialog.getByText(/已检查、确认零条/).waitFor()
-  const submitAction = submitDialog.getByRole('button', { name: '确认提交', exact: true })
+  await page.getByRole('button', { name: '提交记录', exact: true }).waitFor()
+  check(await page.getByRole('button', { name: '提交零记录回执' }).count() === 0, 'Daily page requested a zero receipt')
+  await page.goto(reportPath)
+  await page.getByRole('button', { name: '确认本周无记录' }).click()
+  const submitAction = page.getByRole('button', { name: '提交审核' })
   const submitResponsePromiseAfterDialog = page.waitForResponse(response =>
     response.url().endsWith('/api/v1/department-submissions') && response.request().method() === 'POST')
   await submitAction.click()
@@ -100,20 +98,25 @@ async (page) => {
     submissionBody.scope.weekId === fixture.weeklyReport.weekId && submissionBody.scope.departmentId === fixture.weeklyReport.departmentId &&
     submissionBody.recordIds.length === 0,
   `Browser zero receipt submission failed: ${submitResponse.status()} ${JSON.stringify(submissionBody)}`)
-  await page.getByText('批次状态已更新', { exact: true }).waitFor()
+  const duplicate = await page.request.post(base + '/api/v1/department-submissions', {
+    headers: { Authorization: 'Bearer ' + submitterToken },
+    data: { scope: submissionBody.scope, records: [], kind: 'ZERO_RECORD', idempotencyKey: 'second-receipt' },
+  })
+  check(duplicate.status() === 409, 'Weekly obligation accepted a second receipt')
   check(submissionBody.createdBy === (await (await page.request.get(`${base}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${submitterToken}` } })).json()).id,
     'Zero receipt was not submitted by the logged-in member')
-  cases.push('部门成员从到课率页显式提交空记录零回执，并进入待审核状态')
+  cases.push('部门成员从周通报待完成应交项显式提交空记录零回执，并进入待审核状态')
 
   await logout()
   const reviewerToken = await login(fixture.weeklyReport.reviewer)
   await page.goto(attendancePath)
   await page.getByRole('button', { name: '检查提交批次', exact: true }).click()
-  const batchDrawer = page.getByRole('dialog', { name: '检查提交批次' })
+  const batchDrawer = page.getByRole('dialog', { name: '到课率提交批次' })
   await batchDrawer.waitFor()
   const receiptRow = batchDrawer.getByRole('row').filter({ hasText: '确认零条' })
   await receiptRow.waitFor()
-  const returnButton = receiptRow.getByRole('button', { name: '退回', exact: true })
+  await receiptRow.getByRole('button', {name: '查看明细'}).click()
+  const returnButton = batchDrawer.getByRole('button', { name: '退回', exact: true })
   await returnButton.waitFor()
   await returnButton.click()
   const returnDialog = page.getByRole('dialog', { name: '退回提交批次' })
@@ -128,7 +131,6 @@ async (page) => {
     returnedBody.kind === 'ZERO_RECORD' && returnedBody.revisionNo === 1 && returnedBody.returnReason === '请复核本周检查范围后重提' &&
     returnedBody.recordIds.length === 0,
   `Reviewer return failed: ${returnResponse.status()} ${JSON.stringify(returnedBody)}`)
-  await page.getByText('批次状态已更新', { exact: true }).waitFor()
   await batchDrawer.getByRole('button', { name: '关闭', exact: true }).click()
   await batchDrawer.waitFor({ state: 'hidden' })
   cases.push('部门负责人填写原因退回零回执，保留原批次和修订')
@@ -137,11 +139,12 @@ async (page) => {
   await login(fixture.weeklyReport.submitter)
   await page.goto(attendancePath)
   await page.getByRole('button', { name: '检查提交批次', exact: true }).click()
-  const returnedDrawer = page.getByRole('dialog', { name: '检查提交批次' })
+  const returnedDrawer = page.getByRole('dialog', { name: '到课率提交批次' })
   await returnedDrawer.waitFor()
   const returnedRow = returnedDrawer.getByRole('row').filter({ hasText: '确认零条' })
   await returnedRow.waitFor()
-  const resubmitButton = returnedRow.getByRole('button', { name: '重提', exact: true })
+  await returnedRow.getByRole('button', {name: '查看明细'}).click()
+  const resubmitButton = returnedDrawer.getByRole('button', { name: '重提', exact: true })
   await resubmitButton.waitFor()
   await resubmitButton.click()
   const resubmitDialog = page.getByRole('dialog', { name: '重新提交该批次？' })
@@ -156,7 +159,6 @@ async (page) => {
     resubmittedBody.status === 'PENDING_REVIEW' && resubmittedBody.revisionNo === 2 && resubmittedBody.recordIds.length === 0 &&
     resubmitRequest.kind === 'ZERO_RECORD' && Array.isArray(resubmitRequest.records) && resubmitRequest.records.length === 0,
   `Member zero receipt resubmission failed: ${resubmitResponse.status()} ${JSON.stringify(resubmittedBody)}`)
-  await page.getByText('批次状态已更新', { exact: true }).waitFor()
   await returnedDrawer.getByRole('button', { name: '关闭', exact: true }).click()
   await returnedDrawer.waitFor({ state: 'hidden' })
   cases.push('部门成员原批次零记录重提，修订递增并重新进入审核')
@@ -165,11 +167,12 @@ async (page) => {
   await login(fixture.weeklyReport.reviewer)
   await page.goto(attendancePath)
   await page.getByRole('button', { name: '检查提交批次', exact: true }).click()
-  const confirmationDrawer = page.getByRole('dialog', { name: '检查提交批次' })
+  const confirmationDrawer = page.getByRole('dialog', { name: '到课率提交批次' })
   await confirmationDrawer.waitFor()
   const pendingReceiptRow = confirmationDrawer.getByRole('row').filter({ hasText: '确认零条' })
   await pendingReceiptRow.waitFor()
-  const confirmButton = pendingReceiptRow.getByRole('button', { name: '确认', exact: true })
+  await pendingReceiptRow.getByRole('button', {name: '查看明细'}).click()
+  const confirmButton = confirmationDrawer.getByRole('button', { name: '确认', exact: true })
   await confirmButton.waitFor()
   const confirmResponsePromise = page.waitForResponse(response =>
     response.url().endsWith(`/api/v1/department-submissions/${submissionBody.id}/confirm`) && response.request().method() === 'POST')
@@ -182,7 +185,6 @@ async (page) => {
   check(confirmResponse.status() === 200 && confirmedBody.id === submissionBody.id && confirmedBody.status === 'CONFIRMED' &&
     confirmedBody.kind === 'ZERO_RECORD' && confirmedBody.revisionNo === 2 && confirmedBody.recordIds.length === 0,
   `Reviewer confirmation after resubmission failed: ${confirmResponse.status()} ${JSON.stringify(confirmedBody)}`)
-  await page.getByText('批次状态已更新', { exact: true }).waitFor()
   await confirmationDrawer.getByRole('button', { name: '关闭', exact: true }).click()
   await confirmationDrawer.waitFor({ state: 'hidden' })
   cases.push('部门负责人审核重提版本并确认；零回执仍不包含记录')
@@ -191,8 +193,7 @@ async (page) => {
   await login(fixture.weeklyReport.manager)
   await page.goto(reportPath)
   await page.getByRole('heading', { name: '通报工作台', exact: true }).waitFor()
-  await page.getByText('零回执已确认 1', { exact: true }).waitFor()
-  await page.getByText('应交', { exact: true }).first().waitFor()
+  await page.getByRole('row').filter({ hasText: '到课率' }).getByText('1 批 · 0 条记录 · 零回执 1', { exact: true }).waitFor()
   cases.push('通报汇总页显示已确认零回执，不把它计成实际记录')
 
   check(browserErrors.length === 0, `Uncaught browser errors: ${browserErrors.join('; ')}`)

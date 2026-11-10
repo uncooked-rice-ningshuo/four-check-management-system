@@ -1,5 +1,5 @@
 import { absenceSummary } from './recordSummary'
-import { useCallback, useMemo, useState } from 'react'
+import { useContext, useCallback, useMemo, useState } from 'react'
 import { InfoCircleOutlined, TeamOutlined } from '@ant-design/icons'
 import { Icon } from '@iconify/react'
 import refreshCw from '@iconify-icons/lucide/refresh-cw'
@@ -10,7 +10,9 @@ import { useSearchParams } from 'react-router-dom'
 import { useCreateReportObligation, useRemoveReportObligation, useReportObligationOptions, useReportObligations, useReportWorkflow, useReportingPeriods, useReportingRecords, useReportingSummary } from '../../features/reporting/model/queries'
 import type { ReportObligation, ReportingPeriod, ReportingRecord, ReportingRecordsQuery, ReportingSummaryRow } from '../../entities/reporting/model/reporting'
 import { useWorkContext } from '../../features/work-context/useWorkContext'
-import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
+import { AuthContext } from '../../app/providers/authContext'
+import { departmentSubmissionApi } from '../../shared/api/departmentSubmissionApi'
+import { canInspectionAction, useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
 import { WeeklyReportWorkflowPanel } from '../../features/reporting/ui/WeeklyReportWorkflowPanel'
 import { ReportVersionRecordFilters, type ReportVersionRecordFiltersValue } from '../../features/reporting/ui/ReportVersionRecordFilters'
 import { inspectionResultLabel } from '../../features/reporting/model/labels'
@@ -175,6 +177,9 @@ function RecordDetailsView({ record }: { record: ReportingRecord }) {
 }
 
 export function WeeklyReportSummaryPage() {
+  const user = useContext(AuthContext)?.user
+  const [receiptError, setReceiptError] = useState('')
+
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedPeriodKey, setSelectedPeriodKey] = useState('')
@@ -413,11 +418,34 @@ export function WeeklyReportSummaryPage() {
           )}
           {incompleteCells.length > 0 && <section aria-label="待完成应交项">
             <Typography.Title level={5}>待完成应交项</Typography.Title>
+            {receiptError && <Alert type="error" title={receiptError} />}
             <Table<ReportingSummaryRow> rowKey={row => `${row.departmentId || 'college'}:${row.inspectionTypeId}`} size="small" pagination={false}
               dataSource={incompleteCells} columns={[
                 { title: '提交单位', key: 'unit', render: (_value, row) => row.collegeLevel ? '管理员' : row.departmentName },
                 { title: '检查类型', dataIndex: 'inspectionTypeName' },
                 { title: '状态', key: 'state', render: (_value, row) => requiredCellState(row) },
+                { title: '操作', key: 'receipt', render: (_, row) => {
+                  if (!selectedPeriod || !user || row.submissionCount > 0) return null
+                  if (user.systemRole === 'MEMBER' && user.primaryDepartmentId !== row.departmentId) return null
+                  const scope = { semesterId: selectedPeriod.semesterId, weekId: selectedPeriod.weekId, inspectionTypeId: row.inspectionTypeId, departmentId: row.departmentId }
+                  const context = { ...scope, academicYearId: selectedPeriod.academicYearId }
+                  if (!user.isSuperAdmin && !canInspectionAction(permissionQuery.data?.permissions, 'INSPECTION_ENTER', context)) return null
+                  const unit = row.collegeLevel ? '管理员' : row.departmentName
+                  return <Popconfirm title={`确认${unit}本周${row.inspectionTypeName}已检查且无记录？`} okText="提交审核" onConfirm={async () => {
+                    setReceiptError('')
+                    try {
+                      const key = `zero:${scope.weekId}:${scope.departmentId}:${scope.inspectionTypeId}`.replaceAll('-', '')
+                      await departmentSubmissionApi.submit(scope, [], key, 'ZERO_RECORD')
+                      await Promise.all([
+                        queryClient.invalidateQueries({ queryKey: ['reports', 'summary'] }),
+                        queryClient.invalidateQueries({ queryKey: ['department-submissions'] }),
+                        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+                      ])
+                    } catch {
+                      setReceiptError('回执提交未确认，请刷新应交项后重试')
+                    }
+                  }}><Button type="link">确认本周无记录</Button></Popconfirm>
+                } },
               ]} />
           </section>}
         </section>

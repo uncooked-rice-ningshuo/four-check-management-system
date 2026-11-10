@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Drawer, Empty, Input, Modal, Segmented, Select, Space, Steps, Table, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
-import type { DepartmentSubmission, DepartmentSubmissionKind, DepartmentSubmissionScope } from '../../../entities/inspection/model/departmentSubmission'
+import type { DepartmentSubmission, DepartmentSubmissionScope } from '../../../entities/inspection/model/departmentSubmission'
 import type { SubmissionCartRecord } from '../../../entities/inspection/model/submissionCart'
 import { departmentSubmissionApi } from '../../../shared/api/departmentSubmissionApi'
 import { submissionCartApi } from '../../../shared/api/submissionCartApi'
@@ -37,7 +37,7 @@ function submissionStatusLabel(status: DepartmentSubmission['status'], departmen
   return labels[status]
 }
 
-function explicitReceiptScope(listScope: Props['listScope'], inspectionTypeId: string): DepartmentSubmissionScope | undefined {
+function explicitSubmissionScope(listScope: Props['listScope'], inspectionTypeId: string): DepartmentSubmissionScope | undefined {
   const semesterId = listScope?.semesterId
   const weekId = listScope?.weekId
   const departmentId = listScope?.departmentId
@@ -51,7 +51,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [reasonFor, setReasonFor] = useState<DepartmentSubmission>()
-  const [pendingSubmit, setPendingSubmit] = useState<{ scope: DepartmentSubmissionScope; records: { id: string; version: number }[]; key: string; submissionKind: DepartmentSubmissionKind }>()
+  const [pendingSubmit, setPendingSubmit] = useState<{ scope: DepartmentSubmissionScope; records: { id: string; version: number }[]; key: string }>()
   const [decisionFor, setDecisionFor] = useState<{ item: DepartmentSubmission; kind: 'confirm' | 'resubmit' }>()
   const [reason, setReason] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
@@ -70,8 +70,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
   const [notice, noticeContext] = message.useMessage()
   const queryClient = useQueryClient()
   const retryKey = useRef<{ signature: string; key: string }>(undefined)
-  const receiptScope = explicitReceiptScope(memberDepartmentId !== undefined ? { ...listScope, departmentId: memberDepartmentId } : listScope, inspectionTypeId)
-  const cartScope = explicitReceiptScope(draftScope, inspectionTypeId)
+  const cartScope = explicitSubmissionScope(draftScope, inspectionTypeId)
   const optionsQuery = (kind: string, semesterId?: string) => ({ typeCode, purpose: 'submit', kind, semesterId })
   const semesters = useQuery({ queryKey: ['submission-options', typeCode, 'semesters'], queryFn: () => allOptions('/inspections/context-options', optionsQuery('semesters'), true), enabled: cartOpen && !!typeCode })
   const weeks = useQuery({ queryKey: ['submission-options', typeCode, 'weeks', draftScope.semesterId], queryFn: () => allOptions('/inspections/context-options', optionsQuery('weeks', draftScope.semesterId), true), enabled: cartOpen && !!typeCode && !!draftScope.semesterId })
@@ -104,10 +103,8 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
   const queryScope = { semesterId: listScope?.semesterId, weekId: listScope?.weekId, departmentId: listScope?.departmentId }
   const list = useQuery({ queryKey: ['department-submissions', inspectionTypeId, queryScope, page],
     queryFn: () => departmentSubmissionApi.list({ inspectionTypeId, ...queryScope, page, pageSize: 10 }), enabled: open && !!inspectionTypeId })
-  const action = useMutation({ mutationFn: async (input: { kind: 'submit'; scope: DepartmentSubmissionScope; records: { id: string; version: number }[]; key: string; submissionKind: DepartmentSubmissionKind; explanation?: string } | { kind: 'return' | 'confirm' | 'resubmit'; item: DepartmentSubmission; reason?: string; explanation?: string }) => {
-    if (input.kind === 'submit') return input.submissionKind === 'RECORDS'
-      ? departmentSubmissionApi.submit(input.scope, input.records, input.key)
-      : departmentSubmissionApi.submit(input.scope, input.records, input.key, input.submissionKind, input.explanation)
+  const action = useMutation({ mutationFn: async (input: { kind: 'submit'; scope: DepartmentSubmissionScope; records: { id: string; version: number }[]; key: string } | { kind: 'return' | 'confirm' | 'resubmit'; item: DepartmentSubmission; reason?: string; explanation?: string }) => {
+    if (input.kind === 'submit') return departmentSubmissionApi.submit(input.scope, input.records, input.key)
     if (input.kind === 'resubmit') {
       const records = input.item.records.map(item => ({ id: item.id, version: item.rowVersion }))
       return input.item.kind === 'ZERO_RECORD'
@@ -122,7 +119,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
     setReasonFor(undefined)
     setReason('')
     setStaleRecords([])
-    if (variables.kind === 'submit' && variables.submissionKind === 'RECORDS') {
+    if (variables.kind === 'submit') {
       setCart(new Map())
       setCartOpen(false)
     }
@@ -133,7 +130,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       queryClient.invalidateQueries({ queryKey: ['course-inspections'] }), queryClient.invalidateQueries({ queryKey: ['late-returns'] }),
       queryClient.invalidateQueries({ queryKey: ['dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['classroom-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['public-dormitory-hygienes'] }), queryClient.invalidateQueries({ queryKey: ['evening-self-studies'] }), queryClient.invalidateQueries({ queryKey: ['attendance'] })])
     onChanged()
-    void notice.success(variables.kind === 'submit' ? `已提交${variables.submissionKind === 'RECORDS' ? ` ${variables.records.length} 条记录` : '零记录回执'}，等待审核` : `批次状态：${submissionStatusLabel(result.status, result.scope.departmentId)}`)
+    void notice.success(variables.kind === 'submit' ? `已提交 ${variables.records.length} 条记录，等待审核` : `批次状态：${submissionStatusLabel(result.status, result.scope.departmentId)}`)
   }, onError: error => {
     void Promise.all([queryClient.invalidateQueries({ queryKey: ['department-submissions'] }),
       queryClient.invalidateQueries({ queryKey: ['submission-cart'] }),
@@ -190,26 +187,16 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
     const records = [...cart.values()].map(item => ({ id: item.id, version: item.rowVersion }))
     const signature = `RECORDS:${cartScope.semesterId}:${cartScope.weekId}:${cartScope.departmentId}:${cartScope.inspectionTypeId}:${records.map(item => `${item.id}:${item.version}`).sort().join('|')}:`
     if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: createIdempotencyKey() }
-    setPendingSubmit({ scope: cartScope, records, key: retryKey.current.key, submissionKind: 'RECORDS' })
+    setPendingSubmit({ scope: cartScope, records, key: retryKey.current.key })
   }
 
-  const submitZeroReceipt = () => {
-    if (!receiptScope) return
-    const signature = `ZERO_RECORD:${receiptScope.semesterId}:${receiptScope.weekId}:${receiptScope.departmentId}:${receiptScope.inspectionTypeId}::`
-    if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: createIdempotencyKey() }
-    setReason('')
-    setPendingSubmit({ scope: receiptScope, records: [], key: retryKey.current.key, submissionKind: 'ZERO_RECORD' })
-  }
   const decide = (item: DepartmentSubmission, kind: 'confirm' | 'resubmit') => {
     if (kind === 'resubmit') setReason('')
     setDecisionFor({ item, kind })
   }
   const confirmSubmit = () => {
     if (!pendingSubmit) return
-    const explanation = pendingSubmit.submissionKind === 'ZERO_RECORD' ? reason.trim() : ''
-    const signature = `${pendingSubmit.submissionKind}:${pendingSubmit.scope.semesterId}:${pendingSubmit.scope.weekId}:${pendingSubmit.scope.departmentId}:${pendingSubmit.scope.inspectionTypeId}:${pendingSubmit.records.map(item => `${item.id}:${item.version}`).sort().join('|')}:${explanation}`
-    if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: createIdempotencyKey() }
-    action.mutate({ kind: 'submit', ...pendingSubmit, key: retryKey.current.key, explanation })
+    action.mutate({ kind: 'submit', ...pendingSubmit })
   }
 
   const addWholeBatch = async (batchId: string) => {
@@ -239,30 +226,54 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
     return next
   })
 
+  const [batchId, setBatchId] = useState<string>()
+  const [revision, setRevision] = useState<number>()
+  const detail = useQuery({ queryKey: ['department-submissions','detail',batchId], queryFn: () => departmentSubmissionApi.detail(batchId!), enabled: open && !!batchId })
+  const item = detail.data
+  const snapshot = item?.revisions?.find(r => r.revision === (revision ?? item.revisionNo))
   const recordColumns = submissionRecordColumns(typeCode ?? '')
   const recordLabel = (record: SubmissionCartRecord) => [record.studentName, record.studentNumber, record.className, record.grade].filter(Boolean).join(' · ') || '检查记录'
 
   // The active drawer supplies Ant Design's overlay stacking context.
   const submissionConfirmation = (
-    <Modal title={pendingSubmit?.submissionKind === 'ZERO_RECORD' ? '确认提交零记录回执？' : '最终确认本次提交'} open={!!pendingSubmit} width="min(1100px, 95vw)" confirmLoading={action.isPending} okText="确认提交"
+    <Modal title="最终确认本次提交" open={!!pendingSubmit} width="min(1100px, 95vw)" confirmLoading={action.isPending} okText="确认提交"
       onCancel={() => setPendingSubmit(undefined)} onOk={confirmSubmit}>
-      {pendingSubmit?.submissionKind === 'ZERO_RECORD'
-        ? <><Typography.Paragraph>将提交所选部门或管理员范围在当前学期、周次和检查类型下“已检查、确认零条”的回执。提交后进入现有审核流程。</Typography.Paragraph><Input.TextArea aria-label="零记录说明（可选）" placeholder="说明可选" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} rows={3} /></>
-        : <><Typography.Paragraph>范围：{namedScope}；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选，提交后进入授权审核人的批次审核。</Typography.Paragraph><Table<SubmissionCartRecord> size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 'max-content', y: 280 }} columns={recordColumns} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph></>}
+      <Typography.Paragraph>范围：{namedScope}；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选，提交后进入授权审核人的批次审核。</Typography.Paragraph><Table<SubmissionCartRecord> size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 'max-content', y: 280 }} columns={recordColumns} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph>
     </Modal>
   )
 
   return <>
     {noticeContext}
     {canSubmit && <Button disabled={!inspectionTypeId || action.isPending} onClick={openCart}>提交记录</Button>}
-    {canSubmit && receiptScope && <Button disabled={action.isPending} onClick={submitZeroReceipt}>提交零记录回执</Button>}
     <Button disabled={!inspectionTypeId} onClick={() => setOpen(true)}>检查提交批次</Button>
-    {!cartOpen && submissionConfirmation}
-    <Drawer title="检查提交批次" open={open} onClose={() => setOpen(false)} width="min(920px, 100vw)" className="submission-batches-drawer" destroyOnHidden>
-      <div className="submission-batch-intro">
-        <Typography.Text strong>{typeLabels[typeCode ?? ''] ?? '检查记录'}提交批次</Typography.Text>
-        <Typography.Paragraph type="secondary">按批次查看部门或管理员范围的提交记录。退回后可更正记录，也可原样在原批次重提。</Typography.Paragraph>
-      </div>
+    <Drawer title={`${typeLabels[typeCode ?? ''] ?? '检查'}提交批次`} open={open} onClose={() => {setOpen(false); setBatchId(undefined)}} width="min(980px, 100vw)" className="submission-batches-drawer" destroyOnHidden>
+      {batchId ? <section className="submission-detail">
+        <Button type="link" onClick={() => setBatchId(undefined)}>返回批次列表</Button>
+        {detail.isError ? <Alert type="error" title="提交明细加载失败" action={<Button onClick={() => void detail.refetch()}>重试</Button>} /> : !item ? <p role="status">正在加载提交明细…</p> : <>
+          <Typography.Title level={4}>{item.semesterName} · 第 {item.weekNo} 周 · {item.departmentName}</Typography.Title>
+          <Space wrap><Tag>{submissionStatusLabel(item.status,item.scope.departmentId)}</Tag>{item.submittedByName} · {new Date(item.submittedAt).toLocaleString('zh-CN')}
+          {(item.revisions?.length ?? 0)>1 && <Select aria-label="查看提交版本" value={snapshot?.revision} onChange={setRevision} options={item.revisions?.map(r=>({value:r.revision,label:`第 ${r.revision} 次提交`}))}/>}</Space>
+          {item.returnReason && <Alert type="warning" title={`退回原因：${item.returnReason}`} />}
+          {item.kind === 'ZERO_RECORD' ? <p>本次检查确认零条记录</p> : snapshot?.rows.map((row, index) => (
+            <article key={row.id}>
+              <strong>记录 {index + 1}</strong>
+              <dl>{Object.entries(row).filter(([key]) => key !== 'id').map(([key, value]) => (
+                <div key={key}><dt>{key}</dt><dd>{value}</dd></div>
+              ))}</dl>
+              {item.status === 'RETURNED' && canSubmit && onOpenRecord && snapshot.revision === item.revisionNo &&
+                <Button onClick={() => { setOpen(false); setBatchId(undefined); onOpenRecord(row.id, 'RETURNED') }}>更正记录</Button>}
+            </article>
+          ))}
+          {snapshot?.revision === item.revisionNo && <Space>
+            {item.status === 'PENDING_REVIEW' && canReview && <>
+              <Button aria-label="退回" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button>
+              <Button aria-label="确认" type="primary" onClick={() => decide(item, 'confirm')}>确认</Button>
+            </>}
+            {item.status === 'RETURNED' && canSubmit && (memberDepartmentId === undefined || memberDepartmentId === item.scope.departmentId) &&
+              <Button aria-label="重提" onClick={() => decide(item, 'resubmit')}>重提</Button>}
+          </Space>}
+        </>}
+      </section> : <>
       {list.isError && <Alert type="error" title="批次加载失败" action={<Button onClick={() => void list.refetch()}>重试</Button>} />}
       <Table rowKey="id" loading={list.isLoading} dataSource={list.isError ? [] : list.data?.items ?? []}
         locale={{ emptyText: list.isError ? '批次加载失败，请重试' : <div className="submission-batch-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前范围暂无提交批次" /><Typography.Text type="secondary">完成记录提交后，相关批次会显示在这里。</Typography.Text></div> }}
@@ -270,13 +281,11 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
         scroll={{ x: 760 }} columns={[
           { title: '周次范围', key: 'scope', width: 240, render: (_, item) => <>{item.semesterName ?? '学期'}{item.weekNo ? ` · 第 ${item.weekNo} 周` : ''}<br />{item.departmentName || (item.scope.departmentId ? '部门名称不可用' : '管理员')}</> },
           { title: '记录数', key: 'count', width: 110, align: 'center', render: (_, item) => item.kind === 'ZERO_RECORD' ? <Tag color="blue">确认零条</Tag> : item.recordIds.length },
-          { title: '修订', dataIndex: 'revisionNo', width: 90, align: 'center' },
+          { title: '提交时间', key: 'submittedAt', render: (_, item) => new Date(item.submittedAt).toLocaleString('zh-CN') },
+          { title: '提交人', dataIndex: 'submittedByName' },
           { title: '状态', key: 'status', width: 140, render: (_, item) => <Tag>{submissionStatusLabel(item.status, item.scope.departmentId)}</Tag> },
-          { title: '操作', key: 'actions', width: 180, render: (_, item) => <Space wrap>
-            {item.status === 'PENDING_REVIEW' && canReview && <><Button type="link" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button><Button type="link" onClick={() => decide(item, 'confirm')}>确认</Button></>}
-            {item.status === 'RETURNED' && canSubmit && (memberDepartmentId === undefined || item.scope.departmentId === memberDepartmentId) && <Button type="link" onClick={() => decide(item, 'resubmit')}>重提</Button>}
-          </Space> },
-        ]} expandable={{ expandedRowRender: item => <Space direction="vertical"><Typography.Text>批次创建人：{item.createdByName || '账号不可用'}</Typography.Text><Typography.Text>实际提交人：{item.submittedByName || '账号不可用'}</Typography.Text><Typography.Text>提交时间：{new Date(item.submittedAt).toLocaleString('zh-CN')}</Typography.Text><Typography.Text>{item.kind === 'ZERO_RECORD' ? '已检查并确认零条；该回执不包含记录。后续发现实际记录时，应另行提交新批次。' : `记录数：${item.recordIds.length}`}</Typography.Text>{item.returnReason && <Alert type="warning" title={`退回原因：${item.returnReason}`} />}{canSubmit && onOpenRecord && item.records.map((record, index) => record.status === 'RETURNED' && <Button key={record.id} type="link" onClick={() => { setOpen(false); onOpenRecord(record.id, record.status) }}>更正第 {index + 1} 条记录</Button>)}</Space> }} />
+          { title: '操作', key: 'actions', render: (_, item) => <Button type="link" onClick={()=>{setRevision(undefined);setBatchId(item.id)}}>查看明细</Button> },
+        ]} /></>}
       <Modal title={decisionFor?.kind === 'confirm' ? '确认该批次？' : '重新提交该批次？'} open={!!decisionFor}
         confirmLoading={action.isPending} okText={decisionFor?.kind === 'confirm' ? '确认批次' : '重新提交'}
         onCancel={() => setDecisionFor(undefined)} onOk={() => { if (decisionFor) action.mutate({ ...decisionFor, explanation: decisionFor.kind === 'resubmit' && decisionFor.item.kind === 'ZERO_RECORD' ? reason.trim() : undefined }) }}>

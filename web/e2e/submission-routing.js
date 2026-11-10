@@ -90,6 +90,15 @@ async (page) => {
   const result = await posted
   check(result.status() === 201, 'administrator UI submission failed')
   const batch = await result.json()
+  await page.getByRole('button',{name:'检查提交批次'}).click()
+  const batches = page.getByRole('dialog',{name:'到课率提交批次'})
+  await batches.getByRole('button',{name:'查看明细'}).first().click()
+  await batches.getByText('E2E student B',{exact:true}).waitFor()
+  await batches.getByText('E2E course',{exact:true}).waitFor()
+  await batches.getByRole('button',{name:'返回批次列表'}).click()
+  await batches.getByRole('button',{name:'查看明细'}).first().waitFor()
+  await page.keyboard.press('Escape')
+
   check(batch.scope.departmentId === study.id, 'wrong submission department')
   for (const viewer of offices) {
     await api('/inspections/' + adminDraft.id, viewer.token, 'GET', undefined, 404)

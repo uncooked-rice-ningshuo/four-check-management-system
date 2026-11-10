@@ -40,6 +40,8 @@ func (h *handler) submitDepartmentBatch(c *gin.Context) {
 	switch {
 	case err == nil:
 		c.JSON(http.StatusCreated, result)
+	case errors.Is(err, workflow.ErrInvalidTransition):
+		writeError(c, http.StatusConflict, "INVALID_SUBMISSION_STATE", "该应交项已有提交批次，请刷新后查看")
 	case errors.Is(err, workflow.ErrInvalidSubmit):
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "提交范围、记录或幂等键无效")
 	case errors.Is(err, workflow.ErrSubmissionScope):

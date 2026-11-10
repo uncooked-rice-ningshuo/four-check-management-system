@@ -522,6 +522,9 @@ INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system
 SELECT fixture.account_id,fixture.login_name,fixture.display_name,source.password_hash,'ACTIVE','SYSTEM','MEMBER',false,false,fixture.department_id
 FROM accounts source CROSS JOIN (VALUES {account_values}) AS fixture(account_id,login_name,display_name,department_id)
 WHERE source.login_name='browser-admin';
+INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,inspection_type_id,note,enabled,created_by)
+SELECT gen_random_uuid(),'{weekly_report_user_ids['submitter']}','REPORT_VIEW','ALLOW','USER_RULE',id,'isolated weekly receipt viewer',true,
+ (SELECT id FROM accounts WHERE login_name='browser-admin') FROM inspection_types WHERE code='ATTENDANCE_RATE';
 INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) VALUES
  ('{uuid.uuid4()}','{manager_id}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002'),
  ('{uuid.uuid4()}','{reviewer_id}','10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002');

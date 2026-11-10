@@ -99,12 +99,13 @@ async (page) => {
   check(await page.getByRole('button', { name: '新增记录', exact: true }).count() === 0,
     'Review-only account must not see the evening entry action')
   await page.getByRole('button', { name: '检查提交批次' }).click()
-  const reviewDrawer = page.getByRole('dialog', { name: '检查提交批次' })
+  const reviewDrawer = page.getByRole('dialog', { name: /提交批次$/ })
   const reviewBatchRow = reviewDrawer.getByRole('row').filter({ hasText: '浏览器回归学期' })
   await reviewBatchRow.waitFor()
   const confirmResponsePromise = page.waitForResponse(response =>
     response.url().includes(`/api/v1/department-submissions/${batch.id}/confirm`) && response.request().method() === 'POST')
-  await reviewBatchRow.getByRole('button', { name: '确认', exact: true }).click()
+  await reviewBatchRow.getByRole('button', { name: '查看明细' }).click()
+  await reviewDrawer.getByRole('button', { name: '确认', exact: true }).click()
   const confirmBatch = page.getByRole('dialog', { name: '确认该批次？' })
   await confirmBatch.getByRole('button', { name: '确认批次' }).click()
   const confirmResponse = await confirmResponsePromise

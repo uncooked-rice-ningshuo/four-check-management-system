@@ -17,6 +17,7 @@ export type DepartmentSubmission = {
   departmentName?: string
   status: 'PENDING_REVIEW' | 'RETURNED' | 'CONFIRMED'
   kind?: DepartmentSubmissionKind
+  revisions?: { revision: number; rows: Record<string, string>[] }[]
   revisionNo: number
   rowVersion: number
   createdBy: string

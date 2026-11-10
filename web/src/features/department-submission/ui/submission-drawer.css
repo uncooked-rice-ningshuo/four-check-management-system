@@ -125,3 +125,9 @@
   .submission-footer > span { flex: 1 1 100%; }
   .submission-footer .ant-space { justify-content: flex-end; width: 100%; }
 }
+
+.submission-detail { display: grid; gap: 16px; justify-items: start; }
+.submission-detail article { width: 100%; border-top: 1px solid #dce3eb; padding-top: 16px; }
+.submission-detail dl { display: grid; grid-template-columns: repeat(auto-fit,minmax(148px,1fr)); gap: 12px; }
+.submission-detail dt { color: #586678; }
+.submission-detail dd { margin: 4px 0; overflow-wrap: anywhere; }

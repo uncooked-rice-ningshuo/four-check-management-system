@@ -74,7 +74,7 @@ func TestCourseImportDispatchUsesAuthoritativeBatchType(t *testing.T) {
 		typeCode, templateCode string
 		wantError              bool
 	}{
-		{"UNATTENDED_CLASSROOM", "UNATTENDED_CLASSROOM_IMPORT", false},
+		{"UNATTENDED_CLASSROOM", "UNATTENDED_CLASSROOM_IMPORT", true},
 		{"ATTENDANCE_RATE", "ATTENDANCE_IMPORT", true},
 		{"UNATTENDED_CLASSROOM", "ATTENDANCE_IMPORT", true},
 		{"DORMITORY_HYGIENE", "UNATTENDED_CLASSROOM_IMPORT", true},
@@ -89,6 +89,9 @@ func TestCourseImportDispatchUsesAuthoritativeBatchType(t *testing.T) {
 		_, err := service.ParseBatch(context.Background(), ParseBatchInput{BatchID: repository.batch.ID, ExpectedVersion: repository.batch.Version})
 		if (err != nil) != test.wantError {
 			t.Fatalf("type=%s template=%s error=%v", test.typeCode, test.templateCode, err)
+		}
+		if test.typeCode == "UNATTENDED_CLASSROOM" && test.templateCode == "UNATTENDED_CLASSROOM_IMPORT" && repository.batch.FailureMessage != "表格没有可导入的业务数据行" {
+			t.Fatalf("valid template dispatch failure = %+v", repository.batch)
 		}
 		if test.wantError && validator.calls != 0 {
 			t.Fatal("wrong template reached business validation")

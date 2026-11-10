@@ -33,13 +33,19 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 		if e != nil {
 			return result, e
 		}
-		if original.Status != inspection.RecordStatusDraft || original.HasSubmission || original.HasReportLock {
+		if !original.CanEdit {
 			return result, inspection.ErrRecordNotEditable
 		}
 		if original.InspectionTypeID != result.InspectionTypeID {
 			return result, inspection.ErrInspectionRequest
 		}
 		owner = original.CreatedBy
+		if original.Status == inspection.RecordStatusReturned {
+			if (q.SemesterID != "" && q.SemesterID != original.SemesterID) || (q.WeekID != "" && q.WeekID != original.WeekID) || (q.DepartmentID != "" && q.DepartmentID != original.DepartmentID) {
+				return result, inspection.ErrScopeMismatch
+			}
+			q.SemesterID, q.WeekID, q.DepartmentID = original.SemesterID, original.WeekID, original.DepartmentID
+		}
 	}
 	mode := "read"
 	if q.Purpose == "submit" {

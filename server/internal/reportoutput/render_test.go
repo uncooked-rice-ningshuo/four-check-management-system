@@ -187,8 +187,27 @@ func TestClassRecordNamesKeepsDifferentStudentsWithSameName(t *testing.T) {
 		{TypeCode: "ATTENDANCE_RATE", Grade: "2026级", ClassName: "一班", StudentName: "同名学生", StudentNumber: "001"},
 		{TypeCode: "ATTENDANCE_RATE", Grade: "2026级", ClassName: "一班", StudentName: "同名学生", StudentNumber: "002"},
 	}
-	if got := classRecordNames(records, "ATTENDANCE_RATE", reporting.ReportClassIndicators{Grade: "2026级", ClassName: "一班"}); got != "同名学生、同名学生" {
+	if got := classRecordNames(records, "ATTENDANCE_RATE", reporting.ReportClassIndicators{Grade: "2026级", ClassName: "一班"}); got != "同名学生（2）、同名学生" {
 		t.Fatalf("class student names=%q, want two distinct students", got)
+	}
+}
+
+func TestWordAbsenceNamesShowRepeatedCountInFourTypes(t *testing.T) {
+	for _, code := range []string{"ATTENDANCE_RATE", "MORNING_ATTENDANCE", "EVENING_SELF_STUDY", "UNATTENDED_CLASSROOM"} {
+		t.Run(code, func(t *testing.T) {
+			records := []reporting.Record{
+				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生甲", StudentNumber: "001"},
+				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生甲", StudentNumber: "001"},
+				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生乙", StudentNumber: "002"},
+			}
+			data, err := RenderWord(reporting.ReportVersionContent{}, records, []string{code}, "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if document := wordDocumentForTest(t, data); !strings.Contains(document, "学生甲（2）、学生乙") {
+				t.Fatalf("%s missing repeated absence count", code)
+			}
+		})
 	}
 }
 
@@ -232,6 +251,20 @@ func TestWordMorningWithoutIndicatorsGroupsStudentsByClass(t *testing.T) {
 	document := wordDocumentForTest(t, data)
 	if !strings.Contains(document, "应到/实到") || !strings.Contains(document, "学生甲、学生乙") || strings.Count(document, "<w:tr>") != 2 {
 		t.Fatal("morning Word must retain one class row with both students without indicator data")
+	}
+}
+
+func TestWordMorningUsesFrozenAttendanceCountsAndRate(t *testing.T) {
+	content := reporting.ReportVersionContent{Indicators: &reporting.ReportIndicators{Classes: []reporting.ReportClassIndicators{{Grade: "2026级", ClassName: "一班", ReportIndicatorValues: reporting.ReportIndicatorValues{MorningAttendance: &reporting.ReportMorningAttendanceMetric{ExpectedPersonTimes: 20, AttendedPersonTimes: 17, AbsencePersonTimes: 3}}}}}}
+	data, err := RenderWord(content, nil, []string{"MORNING_ATTENDANCE"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := wordDocumentForTest(t, data)
+	for _, value := range []string{"20/17", "3", "85.00%"} {
+		if !strings.Contains(document, ">"+value+"<") {
+			t.Fatalf("morning Word missing frozen value %s", value)
+		}
 	}
 }
 
@@ -289,6 +322,54 @@ func TestWordPublicDormitoryUsesFrozenResponsibilityLabels(t *testing.T) {
 	}
 }
 
+func TestWordDormitoryClassLabelsOmitGradeSuffix(t *testing.T) {
+	for _, code := range []string{"DORMITORY_HYGIENE", "PUBLIC_DORMITORY_HYGIENE"} {
+		t.Run(code, func(t *testing.T) {
+			record := reporting.Record{TypeCode: code, ClassName: "一班", CurrentDormitoryName: "寝室甲", Details: reporting.RecordDetails{Result: "UNQUALIFIED"}, ResponsibleClasses: []reporting.RecordReference{{Label: "一班（2026级）"}, {Label: "二班（2025级级）"}}}
+			data, err := RenderWord(reporting.ReportVersionContent{}, []reporting.Record{record}, []string{code}, "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := wordDocumentForTest(t, data)
+			if !strings.Contains(document, "一班、二班") || strings.Contains(document, "一班（2026级）") {
+				t.Fatalf("%s retained grade suffix in responsible class", code)
+			}
+		})
+	}
+}
+
+func TestWordHygieneWithOnlyQualifiedRecordsShowsNoReportableRows(t *testing.T) {
+	for _, code := range []string{"DORMITORY_HYGIENE", "PUBLIC_DORMITORY_HYGIENE"} {
+		t.Run(code, func(t *testing.T) {
+			record := reporting.Record{TypeCode: code, Details: reporting.RecordDetails{Result: "QUALIFIED"}, ResponsibleDormitories: []reporting.RecordReference{{Label: "寝室甲"}}}
+			data, err := RenderWord(reporting.ReportVersionContent{}, []reporting.Record{record}, []string{code}, "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := wordDocumentForTest(t, data)
+			if !strings.Contains(document, "本周无优秀或不合格记录") || strings.Contains(document, ">合格<") {
+				t.Fatalf("%s should show an accurate empty state", code)
+			}
+		})
+	}
+}
+
+func TestWordPublicDormitoryShowsExcellentThenUnqualifiedOnly(t *testing.T) {
+	records := []reporting.Record{
+		{TypeCode: "PUBLIC_DORMITORY_HYGIENE", ResponsibleDormitories: []reporting.RecordReference{{Label: "不合格寝室甲"}}, Details: reporting.RecordDetails{Result: "UNQUALIFIED"}},
+		{TypeCode: "PUBLIC_DORMITORY_HYGIENE", ResponsibleDormitories: []reporting.RecordReference{{Label: "合格寝室乙"}}, Details: reporting.RecordDetails{Result: "QUALIFIED"}},
+		{TypeCode: "PUBLIC_DORMITORY_HYGIENE", ResponsibleDormitories: []reporting.RecordReference{{Label: "优秀寝室丙"}}, Details: reporting.RecordDetails{Result: "EXCELLENT"}},
+	}
+	data, err := RenderWord(reporting.ReportVersionContent{}, records, []string{"PUBLIC_DORMITORY_HYGIENE"}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := wordDocumentForTest(t, data)
+	if strings.Count(document, "<w:tbl>") != 1 || strings.Contains(document, "合格寝室乙") || strings.Index(document, "优秀寝室丙") > strings.Index(document, "不合格寝室甲") {
+		t.Fatal("public dormitory Word must keep one table with excellent before unqualified and omit qualified")
+	}
+}
+
 func TestWordDetailRowsFollowGradeClassDateOrder(t *testing.T) {
 	records := []reporting.Record{
 		{TypeCode: "LATE_RETURN", Grade: "2026级", ClassName: "二班", StudentName: "学生乙", Details: reporting.RecordDetails{Date: "2026-11-02"}},
@@ -317,9 +398,12 @@ func TestWordDormitorySeparatesExcellentRoomsFromUnqualifiedDetails(t *testing.T
 	if !strings.Contains(document, "优秀寝室") || !strings.Contains(document, "不合格寝室") || strings.Count(document, "<w:tbl>") != 2 {
 		t.Fatal("dormitory Word must show separate excellent and unqualified tables")
 	}
+	if strings.Index(document, "优秀寝室甲") > strings.Index(document, "不合格寝室乙") {
+		t.Fatal("excellent dormitories must appear before unqualified dormitories")
+	}
 }
 
-func TestWordDormitoryRetainsQualifiedAndLegacyUnknownResults(t *testing.T) {
+func TestWordDormitoryOmitsQualifiedAndRetainsLegacyUnknownResults(t *testing.T) {
 	records := []reporting.Record{
 		{TypeCode: "DORMITORY_HYGIENE", CurrentDormitoryName: "合格寝室甲", Details: reporting.RecordDetails{Result: "QUALIFIED"}},
 		{TypeCode: "DORMITORY_HYGIENE", CurrentDormitoryName: "历史寝室乙", Details: reporting.RecordDetails{Result: "LEGACY"}},
@@ -329,8 +413,8 @@ func TestWordDormitoryRetainsQualifiedAndLegacyUnknownResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	document := wordDocumentForTest(t, data)
-	if !strings.Contains(document, "合格寝室甲") || !strings.Contains(document, "历史寝室乙") {
-		t.Fatal("dormitory Word must retain all frozen results, including legacy values")
+	if strings.Contains(document, "合格寝室甲") || !strings.Contains(document, "历史寝室乙") {
+		t.Fatal("dormitory Word must omit qualified results but retain unknown results")
 	}
 }
 
@@ -369,11 +453,11 @@ func TestWordExcellentDormitoryPairsTwoRoomsPerRow(t *testing.T) {
 func TestWordDormitoryPreviewSectionsMatchGeneratedHeaders(t *testing.T) {
 	_, columns := outputTypeLayout("DORMITORY_HYGIENE")
 	sections := wordOutputSections("DORMITORY_HYGIENE", columns)
-	if len(sections) != 4 || sections[0].Title != "不合格寝室" || sections[1].Title != "优秀寝室" || sections[2].Title != "合格寝室" || sections[3].Title != "其他宿舍检查记录" {
+	if len(sections) != 3 || sections[0].Title != "优秀寝室" || sections[1].Title != "不合格寝室" || sections[2].Title != "其他宿舍检查记录" {
 		t.Fatalf("unexpected dormitory preview sections: %+v", sections)
 	}
-	if len(sections[1].Columns) != 8 || sections[1].Columns[0] != "寝室号" || sections[1].Columns[4] != "寝室号" {
-		t.Fatalf("excellent dormitory preview must show two room groups: %+v", sections[1].Columns)
+	if len(sections[0].Columns) != 8 || sections[0].Columns[0] != "寝室号" || sections[0].Columns[4] != "寝室号" {
+		t.Fatalf("excellent dormitory preview must show two room groups: %+v", sections[0].Columns)
 	}
 }
 
@@ -414,9 +498,9 @@ func wordDocumentForTest(t *testing.T, data []byte) string {
 }
 
 func TestEmptyOutputKeepsUnsubmittedDimensionDistinctFromConfirmedZero(t *testing.T) {
-	for _, source := range []struct{ status, want string }{
-		{status: "NO_CONFIRMED_DATA", want: "来源未完成，暂无已确认数据"},
-		{status: "CONFIRMED_ZERO_RECORD_RECEIPT", want: "本周无已确认违纪记录"},
+	for _, source := range []struct{ status, excelWant, wordWant string }{
+		{status: "NO_CONFIRMED_DATA", excelWant: "来源未完成，暂无已确认数据", wordWant: "来源未完成，暂无已确认数据"},
+		{status: "CONFIRMED_ZERO_RECORD_RECEIPT", excelWant: "本周无已确认违纪记录", wordWant: "本周无优秀或不合格记录"},
 	} {
 		content := reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "示例学期", WeekNo: 8}, Rows: []reporting.ReportCountRow{{InspectionTypeCode: "PUBLIC_DORMITORY_HYGIENE", DataStatus: source.status}}}
 		xlsx, err := RenderExcel(content, nil, []string{"PUBLIC_DORMITORY_HYGIENE"})
@@ -429,7 +513,7 @@ func TestEmptyOutputKeepsUnsubmittedDimensionDistinctFromConfirmedZero(t *testin
 		}
 		value, cellErr := book.GetCellValue(book.GetSheetName(0), "A3")
 		book.Close()
-		if cellErr != nil || value != source.want {
+		if cellErr != nil || value != source.excelWant {
 			t.Fatalf("%s Excel empty row=%q err=%v", source.status, value, cellErr)
 		}
 		docx, err := RenderWord(content, nil, []string{"PUBLIC_DORMITORY_HYGIENE"}, "", false)
@@ -454,7 +538,7 @@ func TestEmptyOutputKeepsUnsubmittedDimensionDistinctFromConfirmedZero(t *testin
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			found = strings.Contains(string(contents), source.want) && strings.Contains(string(contents), "第八周公共宿舍卫生检查通报")
+			found = strings.Contains(string(contents), source.wordWant) && strings.Contains(string(contents), "第八周公共宿舍卫生检查通报")
 		}
 		if !found {
 			t.Fatalf("%s Word omitted the empty public dormitory hygiene dimension", source.status)

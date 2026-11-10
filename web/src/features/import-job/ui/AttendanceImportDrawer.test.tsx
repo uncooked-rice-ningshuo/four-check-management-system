@@ -118,6 +118,18 @@ describe('AttendanceImportDrawer', () => {
     expect(onBatchIdChange).toHaveBeenCalledWith(undefined)
   })
 
+  it('explains an empty preview and clears its reference when closed', async () => {
+    batchQuery.mockReturnValue({ data: batch({ totalRows: 0, validRows: 0 }), isLoading: false })
+    const onBatchIdChange = vi.fn()
+    setup('batch-1', onBatchIdChange)
+    expect(screen.getByText('表格没有可导入的业务数据行')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新上传文件' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认导入 0 条记录' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.click(await screen.findByRole('button', { name: '结束并关闭' }))
+    await waitFor(() => expect(onBatchIdChange).toHaveBeenCalledWith(undefined))
+  })
+
   it('shows business names rather than internal IDs in the confirmation dialog', async () => {
     batchQuery.mockReturnValue({ data: batch(), isLoading: false })
     setup('batch-1')

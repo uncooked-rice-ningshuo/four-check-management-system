@@ -49,7 +49,7 @@ it('treats network failure as recoverable without silently replaying credentials
 
 it('does not offer session recovery after an authoritative 401',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({code:'INVALID_SESSION',message:'登录状态已失效'}),{status:401})))
- showLogin();await screen.findByRole('heading',{name:'欢迎回来'})
+ showLogin();await screen.findByRole('heading',{name:'登录系统'})
  expect(screen.queryByRole('button',{name:'重试恢复登录'})).not.toBeInTheDocument()
 })
 

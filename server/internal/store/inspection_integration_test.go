@@ -14,6 +14,7 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/permission"
+	"four-check-management-system/server/internal/workflow"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -91,7 +92,10 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	admin := inspection.ManualActor{ID: rf("01"), IsSuperAdmin: true}
 	member := inspection.ManualActor{ID: rf("01")}
 	departmentActor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
-	departmentSvc := inspection.NewRecordService(db, &recordPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}}}})
+	departmentSvc := inspection.NewRecordService(db, &recordPermissions{rules: []permission.EffectivePermission{
+		{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}},
+		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}},
+	}})
 	types := map[string]string{}
 	rows, err := pool.Query(ctx, "SELECT code,id FROM inspection_types")
 	if err != nil {
@@ -919,7 +923,8 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			if _, e = svc.Detail(ctx, admin, r.ID); !errors.Is(e, inspection.ErrRecordNotFound) {
 				t.Fatal("deleted visible", e)
 			}
-			if _, e = departmentSvc.Create(ctx, departmentActor, input, audit.Metadata{}); e != nil {
+			recreated, recreateErr := departmentSvc.Create(ctx, departmentActor, input, audit.Metadata{})
+			if recreateErr != nil {
 				t.Fatal("recreate", e)
 			}
 			var auditText string
@@ -928,6 +933,53 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			}
 			if strings.Contains(auditText, "currentDormitoryName") || strings.Contains(auditText, "Fixture dormitory") || strings.Contains(auditText, "Synthetic private text") || strings.Contains(auditText, "corrected") {
 				t.Fatal("audit leaked text")
+			}
+			workflowAccess := &workflowPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID, InspectionTypeID: recreated.InspectionTypeID}}}}
+			batchService := workflow.NewService(db, workflowAccess)
+			batch, submitErr := batchService.Submit(ctx, workflow.Actor{ID: departmentActor.ID}, workflow.SubmitInput{
+				Scope:   workflow.Scope{SemesterID: recreated.SemesterID, WeekID: recreated.WeekID, DepartmentID: recreated.DepartmentID, InspectionTypeID: recreated.InspectionTypeID},
+				Records: []workflow.VersionedRecord{{ID: recreated.ID, Version: recreated.RowVersion}}, IdempotencyKey: "returned-edit-" + def.Code,
+			}, audit.Metadata{})
+			if submitErr != nil {
+				t.Fatalf("submit %s: %v", def.Code, submitErr)
+			}
+			optionService := inspection.NewContextOptionService(db, &recordPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}}}})
+			if _, pendingErr := optionService.ContextOptions(ctx, departmentActor, inspection.ContextOptionQuery{RecordID: recreated.ID, TypeCode: def.Code, Purpose: "entry", Kind: "semesters"}); !errors.Is(pendingErr, inspection.ErrRecordNotEditable) {
+				t.Fatalf("pending %s options exposed: %v", def.Code, pendingErr)
+			}
+			workflowAccess.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID, InspectionTypeID: recreated.InspectionTypeID}}}
+			returned, returnErr := batchService.Decide(ctx, workflow.Actor{ID: rf("24")}, batch.ID, workflow.Return, workflow.DecisionInput{Version: batch.RowVersion, Reason: "请核对"}, audit.Metadata{})
+			if returnErr != nil || returned.Status != workflow.Returned {
+				t.Fatalf("return %s: %+v %v", def.Code, returned, returnErr)
+			}
+			current, readErr := departmentSvc.Detail(ctx, departmentActor, recreated.ID)
+			if readErr != nil || !current.CanEdit || current.Status != inspection.RecordStatusReturned {
+				t.Fatalf("returned detail %s: %+v %v", def.Code, current, readErr)
+			}
+			for _, kind := range []string{"semesters", "weeks", "departments"} {
+				query := inspection.ContextOptionQuery{RecordID: current.ID, TypeCode: def.Code, Purpose: "entry", Kind: kind, SemesterID: current.SemesterID, WeekID: current.WeekID, DepartmentID: current.DepartmentID}
+				choices, optionErr := optionService.ContextOptions(ctx, departmentActor, query)
+				if optionErr != nil || len(choices.Items) == 0 {
+					t.Fatalf("returned %s %s options: %+v %v", def.Code, kind, choices, optionErr)
+				}
+			}
+			if _, scopeErr := optionService.ContextOptions(ctx, departmentActor, inspection.ContextOptionQuery{RecordID: current.ID, TypeCode: def.Code, Purpose: "entry", Kind: "weeks", SemesterID: current.SemesterID, WeekID: rf("99")}); !errors.Is(scopeErr, inspection.ErrScopeMismatch) {
+				t.Fatalf("returned %s accepted another week: %v", def.Code, scopeErr)
+			}
+			optionPermissions := &recordPermissions{rules: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}}}}
+			entryService := inspection.NewEntryOptionService(db, optionPermissions)
+			entryQuery := inspection.EntryOptionQuery{RecordID: current.ID, SemesterID: current.SemesterID, WeekID: current.WeekID, DepartmentID: current.DepartmentID, InspectionTypeID: current.InspectionTypeID, Kind: "classes"}
+			entryChoices, entryErr := entryService.EntryOptions(ctx, departmentActor, entryQuery)
+			if entryErr != nil || len(entryChoices.Items) == 0 {
+				t.Fatalf("returned %s class options: %+v %v", def.Code, entryChoices, entryErr)
+			}
+			optionPermissions.rules = nil
+			if _, deniedErr := entryService.EntryOptions(ctx, departmentActor, entryQuery); !errors.Is(deniedErr, inspection.ErrRecordNotFound) {
+				t.Fatalf("returned %s options exposed without grant: %v", def.Code, deniedErr)
+			}
+			corrected, correctionErr := departmentSvc.Update(ctx, departmentActor, current.ID, inspection.InspectionEdit{Version: current.RowVersion, Reason: "退回更正", Record: makeInput(def.Code, map[string]any{"remark": "revised"})}, audit.Metadata{})
+			if correctionErr != nil || corrected.RowVersion != current.RowVersion+1 {
+				t.Fatalf("correct returned %s: %+v %v", def.Code, corrected, correctionErr)
 			}
 		})
 	}

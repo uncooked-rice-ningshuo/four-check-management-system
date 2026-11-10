@@ -49,54 +49,58 @@ export function RegisterPage() {
             name="studentNo"
             rules={[{ required: true, message: "请输入学号" }]}
           >
-            <Input prefix={<UserOutlined />} placeholder="请输入您的学号…" />
+            <Input prefix={<UserOutlined />} />
           </Form.Item>
-          <Form.Item label="申请部门" name="requestedDepartmentId" rules={[{ required: true, message: "请选择申请部门" }]}>
-            <Select loading={options.isLoading} placeholder="请选择部门…" options={options.data?.departments.map(item => ({ value: item.id, label: item.name }))} />
-          </Form.Item>
-          <Form.Item label="申请角色" name="requestedOrgRoleId" rules={[{ required: true, message: "请选择申请角色" }]}>
-            <Select loading={options.isLoading} placeholder="请选择组织角色…" options={options.data?.organizationRoles.map(item => ({ value: item.id, label: item.name }))} />
-          </Form.Item>
+          <div className="auth-organization-row">
+            <Form.Item label="申请部门" name="requestedDepartmentId" rules={[{ required: true, message: "请选择申请部门" }]}>
+              <Select loading={options.isLoading} options={options.data?.departments.map(item => ({ value: item.id, label: item.name }))} />
+            </Form.Item>
+            <Form.Item label="申请角色" name="requestedOrgRoleId" rules={[{ required: true, message: "请选择申请角色" }]}>
+              <Select loading={options.isLoading} options={options.data?.organizationRoles.map(item => ({ value: item.id, label: item.name }))} />
+            </Form.Item>
+          </div>
           <Form.Item
             label="姓名"
             name="name"
             rules={[{ required: true, message: "请输入姓名" }]}
           >
-            <Input prefix={<UserOutlined />} placeholder="请输入您的真实姓名…" />
+            <Input prefix={<UserOutlined />} />
           </Form.Item>
-          <Form.Item
-            label="密码"
-            name="password"
-            rules={[
-              { required: true, message: "请输入密码" },
-              { min: 8, message: "密码至少 8 位" },
-            ]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="请设置登录密码…"
-            />
-          </Form.Item>
-          <Form.Item
-            label="确认密码"
-            name="confirmPassword"
-            dependencies={["password"]}
-            rules={[
-              { required: true, message: "请再次输入密码" },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  return !value || getFieldValue("password") === value
-                    ? Promise.resolve()
-                    : Promise.reject(new Error("两次输入的密码不一致"));
-                },
-              }),
-            ]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="请再次输入登录密码…"
-            />
-          </Form.Item>
+          <div className="auth-password-row">
+            <Form.Item
+              label="密码"
+              name="password"
+              rules={[
+                { required: true, message: "请输入密码" },
+                { min: 8, message: "密码至少 8 位" },
+              ]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                autoComplete="new-password"
+              />
+            </Form.Item>
+            <Form.Item
+              label="确认密码"
+              name="confirmPassword"
+              dependencies={["password"]}
+              rules={[
+                { required: true, message: "请再次输入密码" },
+                ({ getFieldValue }) => ({
+                  validator(_, value) {
+                    return !value || getFieldValue("password") === value
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("两次输入的密码不一致"));
+                  },
+                }),
+              ]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                autoComplete="new-password"
+              />
+            </Form.Item>
+          </div>
           <Form.Item
             name="agreement"
             valuePropName="checked"

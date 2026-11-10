@@ -179,8 +179,8 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   }
 
   const finishClose = () => {
-    // Keep resumable batches, but do not reopen a finished batch on the next import.
-    if (importedRows !== undefined || (activeBatch && terminalStatuses.has(activeBatch.status))) onBatchIdChange(undefined)
+    // Closing ends the current UI flow; the server keeps its auditable batch.
+    onBatchIdChange(undefined)
     setSelectedFile(undefined)
     setFileError('')
     setConfirmError('')
@@ -192,8 +192,8 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
     if (activeBatch && !terminalStatuses.has(activeBatch.status) && importedRows === undefined) {
       modal.confirm({
         title: '当前导入批次尚未确认',
-        content: '关闭后批次会保留，再次打开导入抽屉可以继续查看和确认。',
-        okText: '保留并关闭',
+        content: '关闭后再次打开将开始新导入；当前批次仍保留在导入历史中。',
+        okText: '结束并关闭',
         cancelText: '继续处理',
         onOk: finishClose,
       })
@@ -205,7 +205,8 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
   const previewReady = activeBatch?.status === 'PREVIEW_READY'
   const hasInvalidRows = (activeBatch?.invalidRows ?? 0) > 0
   const canConfirm = scopeResolved && !batch.isError && previewReady && !hasInvalidRows && (activeBatch?.validRows ?? 0) > 0 && importedRows === undefined
-  const canRestart = !batch.isError && !confirming && !confirm.isPending && (activeBatch?.status === 'PARSE_FAILED' || (previewReady && hasInvalidRows))
+  const emptyPreview = previewReady && activeBatch?.totalRows === 0
+  const canRestart = !batch.isError && !confirming && !confirm.isPending && (activeBatch?.status === 'PARSE_FAILED' || (previewReady && (hasInvalidRows || emptyPreview)))
   const currentStep = importedRows !== undefined || activeBatch?.status === 'CONFIRMED' ? 3 : batchId ? 2 : selectedFile ? 1 : 0
   const processing = activeBatch?.status === 'UPLOADED' || activeBatch?.status === 'PARSING'
 
@@ -283,12 +284,13 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
 
         {previewReady && <>
           <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 4 }} items={[
-            { key: 'status', label: '批次状态', children: <Tag color={hasInvalidRows ? 'warning' : 'success'}>{hasInvalidRows ? '存在错误' : '校验通过'}</Tag> },
+            { key: 'status', label: '批次状态', children: <Tag color={hasInvalidRows || emptyPreview ? 'warning' : 'success'}>{emptyPreview ? '没有业务数据' : hasInvalidRows ? '存在错误' : '校验通过'}</Tag> },
             { key: 'template', label: '模板版本', children: `v${activeBatch.templateVersion}` },
             { key: 'total', label: '总行数', children: activeBatch.totalRows },
             { key: 'valid', label: '有效 / 错误', children: `${activeBatch.validRows} / ${activeBatch.invalidRows}` },
           ]} />
           {hasInvalidRows && <Alert type="warning" showIcon title="存在错误行，当前批次不能确认" description="请根据行级建议修正文件后重新上传。" />}
+          {emptyPreview && <Alert type="warning" showIcon title="表格没有可导入的业务数据行" description="请填写业务数据后重新上传。" />}
           <ImportPreviewTable
             typeCode={typeCode}
             rows={rows.data?.items ?? []}

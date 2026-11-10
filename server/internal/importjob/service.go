@@ -175,6 +175,10 @@ func (s *Service) ParseBatch(ctx context.Context, input ParseBatchInput) (Batch,
 		err = parseError(ErrorTemplateVersionMismatch, "模板版本与批次记录不一致")
 		return Batch{}, s.failParsing(ctx, batch, stableParseFailure(err), err)
 	}
+	if len(workbook.Rows) == 0 {
+		err = parseError(ErrorInvalidWorkbook, "表格没有可导入的业务数据行")
+		return Batch{}, s.failParsing(ctx, batch, stableParseFailure(err), err)
+	}
 	scope := AttendanceImportScope{
 		TypeCode: batch.TypeCode, InspectionTypeID: batch.InspectionTypeID, SemesterID: batch.SemesterID, WeekID: batch.WeekID,
 		DepartmentID: batch.DepartmentID, ImportBatchID: batch.ID, CreatedBy: batch.CreatedBy,

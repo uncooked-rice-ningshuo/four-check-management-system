@@ -54,13 +54,16 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
 		if e != nil {
 			return result, e
 		}
-		if original.Status != inspection.RecordStatusDraft || original.HasSubmission || original.HasReportLock {
+		if !original.CanEdit {
 			return result, inspection.ErrRecordNotEditable
 		}
 		if original.InspectionTypeID != q.InspectionTypeID {
 			return result, inspection.ErrInspectionRequest
 		}
 		owner = original.CreatedBy
+		if original.Status == inspection.RecordStatusReturned && (q.SemesterID != original.SemesterID || q.WeekID != original.WeekID || q.DepartmentID != original.DepartmentID) {
+			return result, inspection.ErrScopeMismatch
+		}
 	} else {
 		// Management grants permit editing, never creating a new inspection.
 		rules := make([]permission.EffectivePermission, 0, len(a.Permissions))

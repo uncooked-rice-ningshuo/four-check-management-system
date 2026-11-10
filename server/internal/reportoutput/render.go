@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -53,7 +54,7 @@ func wordRecordColumns(item reportType, teachers map[string]string) []column {
 	case "DORMITORY_HYGIENE":
 		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("所在班级", responsibleClassNames), teacher}
 	case "PUBLIC_DORMITORY_HYGIENE":
-		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return references(r.ResponsibleClasses) }), field("备注", func(r reporting.Record) string { return r.Details.Remark })}
+		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return wordResponsibleClassNames(r.ResponsibleClasses) }), field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	case "LATE_RETURN":
 		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("晚归人员", func(r reporting.Record) string { return r.StudentName }), teacher, field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	default:
@@ -116,8 +117,20 @@ func references(values []reporting.RecordReference) string {
 	return strings.Join(names, "、")
 }
 
+var wordClassGradeSuffix = regexp.MustCompile(`（[0-9]{4}级+）$`)
+
+func wordResponsibleClassNames(values []reporting.RecordReference) string {
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		if name := strings.TrimSpace(wordClassGradeSuffix.ReplaceAllString(value.Label, "")); name != "" {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, "、")
+}
+
 func responsibleClassNames(record reporting.Record) string {
-	if names := references(record.ResponsibleClasses); names != "" {
+	if names := wordResponsibleClassNames(record.ResponsibleClasses); names != "" {
 		return names
 	}
 	return record.ClassName
@@ -147,8 +160,12 @@ func classRecordValues(records []reporting.Record, code string, class reporting.
 }
 
 func classRecordNames(records []reporting.Record, code string, class reporting.ReportClassIndicators) string {
-	seen := make(map[string]bool)
-	var names []string
+	type studentAbsences struct {
+		name  string
+		count int
+	}
+	positions := make(map[string]int)
+	students := make([]studentAbsences, 0)
 	for _, record := range records {
 		if record.TypeCode != code || !recordInReportClass(record, class) {
 			continue
@@ -165,9 +182,19 @@ func classRecordNames(records []reporting.Record, code string, class reporting.R
 		} else {
 			identity = "number:" + identity
 		}
-		if !seen[identity] {
-			seen[identity] = true
-			names = append(names, name)
+		if position, exists := positions[identity]; exists {
+			students[position].count++
+		} else {
+			positions[identity] = len(students)
+			students = append(students, studentAbsences{name: name, count: 1})
+		}
+	}
+	names := make([]string, 0, len(students))
+	for _, student := range students {
+		if student.count > 1 {
+			names = append(names, fmt.Sprintf("%s（%d）", student.name, student.count))
+		} else {
+			names = append(names, student.name)
 		}
 	}
 	return strings.Join(names, "、")
@@ -265,7 +292,11 @@ func morningWordLines(content reporting.ReportVersionContent, records []reportin
 			metric := class.MorningAttendance
 			values[2] = fmt.Sprintf("%d/%d", metric.ExpectedPersonTimes, metric.AttendedPersonTimes)
 			values[5] = fmt.Sprint(metric.AbsencePersonTimes)
-			values[6] = rate(metric.Rate)
+			if metric.ExpectedPersonTimes > 0 {
+				values[6] = fmt.Sprintf("%.2f%%", float64(metric.AttendedPersonTimes)*100/float64(metric.ExpectedPersonTimes))
+			} else {
+				values[6] = "不可计算"
+			}
 		}
 		lines = append(lines, values)
 	}
@@ -381,9 +412,8 @@ func wordOutputSections(code string, columns []string) []OutputSection {
 	}
 	excellent := []string{"寝室号", "所在班级", "责任人", "班主任"}
 	return []OutputSection{
-		{Title: "不合格寝室", Columns: columns},
 		{Title: "优秀寝室", Columns: append(append([]string{}, excellent...), excellent...)},
-		{Title: "合格寝室", Columns: excellent},
+		{Title: "不合格寝室", Columns: columns},
 		{Title: "其他宿舍检查记录", Columns: columns},
 	}
 }
@@ -416,6 +446,16 @@ func emptyOutputText(content reporting.ReportVersionContent, code string) string
 		return "来源未完成，暂无已确认数据"
 	}
 	return "本周无已确认违纪记录"
+}
+
+func emptyWordOutputText(content reporting.ReportVersionContent, code string) string {
+	if outputSourceUnsubmitted(content, code) {
+		return emptyOutputText(content, code)
+	}
+	if code == "DORMITORY_HYGIENE" || code == "PUBLIC_DORMITORY_HYGIENE" {
+		return "本周无优秀或不合格记录"
+	}
+	return emptyOutputText(content, code)
 }
 
 // RenderExcel creates only the selected inspection sheets from immutable records.
@@ -571,11 +611,29 @@ func sortedWordRecords(records []reporting.Record, code string) []reporting.Reco
 	selected := make([]reporting.Record, 0)
 	for _, record := range records {
 		if record.TypeCode == code {
+			if (code == "DORMITORY_HYGIENE" || code == "PUBLIC_DORMITORY_HYGIENE") && record.Details.Result == inspection.HygieneQualified {
+				continue
+			}
 			selected = append(selected, record)
 		}
 	}
 	sort.SliceStable(selected, func(i, j int) bool {
 		left, right := selected[i], selected[j]
+		if code == "PUBLIC_DORMITORY_HYGIENE" {
+			resultOrder := func(result string) int {
+				switch result {
+				case inspection.HygieneExcellent:
+					return 0
+				case inspection.HygieneUnqualified:
+					return 1
+				default:
+					return 2
+				}
+			}
+			if resultOrder(left.Details.Result) != resultOrder(right.Details.Result) {
+				return resultOrder(left.Details.Result) < resultOrder(right.Details.Result)
+			}
+		}
 		for index, value := range []string{left.Grade, left.ClassName, left.Details.Date, left.CurrentDormitoryName, left.StudentNumber, left.ID} {
 			other := []string{right.Grade, right.ClassName, right.Details.Date, right.CurrentDormitoryName, right.StudentNumber, right.ID}[index]
 			if value != other {
@@ -657,9 +715,8 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 		result, title string
 		columns       []column
 	}{
-		{inspection.HygieneUnqualified, "不合格寝室", wordRecordColumns(item, teachers)},
 		{inspection.HygieneExcellent, "优秀寝室", pairedExcellentColumns},
-		{inspection.HygieneQualified, "合格寝室", excellentColumns},
+		{inspection.HygieneUnqualified, "不合格寝室", wordRecordColumns(item, teachers)},
 	}
 	selected := sortedWordRecords(records, item.code)
 	written := false
@@ -705,7 +762,7 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 	if !written {
 		columns := wordRecordColumns(item, teachers)
 		empty := make([]string, len(columns))
-		empty[0] = emptyOutputText(content, item.code)
+		empty[0] = emptyWordOutputText(content, item.code)
 		renderWordTablePages(document, item.title, item.code, columns, [][]string{empty}, false)
 	}
 }
@@ -799,7 +856,7 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		}
 		if len(lines) == 0 {
 			empty := make([]string, len(columns))
-			empty[0] = emptyOutputText(content, item.code)
+			empty[0] = emptyWordOutputText(content, item.code)
 			lines = append(lines, empty)
 		}
 		renderWordTablePages(&document, wordTitle, item.code, columns, lines, grouped)

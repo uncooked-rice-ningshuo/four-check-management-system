@@ -3,7 +3,6 @@ import {
   AUTH_REGISTER_FORM_SPACING,
   AUTH_SHELL_DESKTOP_LAYOUT,
 } from "./authLayoutConfig";
-import { BrandLockup } from "./BrandLockup";
 
 export function AuthLayout({
   variant,
@@ -26,20 +25,11 @@ export function AuthLayout({
   return (
     <main className="auth-page">
       <section className={`auth-shell ${variant}`} style={shellVariables}>
-        <aside className="auth-visual">
-          <BrandLockup className="system-brand--auth" />
-          {variant === "login" && (
-            <div className="visual-copy">
-              <h1>
-                把每一周的日常管理，
-                <br />
-                留成可追溯的数据。
-              </h1>
-              <p>日常检查 · 数据确认 · 通报制作 · 历史归档</p>
-            </div>
-          )}
-        </aside>
-        <section className="auth-panel">{children}</section>
+        <section className="auth-panel">
+          <img className="auth-combination-logo" src="/assets/brand/combination-logo.png" alt="湖南科技大学计算机科学与工程学院学生日常管理系统" />
+          {children}
+        </section>
+        <aside className="auth-visual" aria-hidden="true" />
       </section>
     </main>
   );

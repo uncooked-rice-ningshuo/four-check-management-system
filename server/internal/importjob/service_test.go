@@ -289,6 +289,17 @@ func TestParseBatchMarksStableFailureWhenFileIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestParseBatchRejectsEmptyBusinessRows(t *testing.T) {
+	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded)}
+	reader := &fakeVerifiedFileReader{file: storage.File{ID: "file-1", OriginalName: "attendance.xlsx", Status: storage.StatusAvailable}, content: []byte("xlsx")}
+	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: CurrentTemplateVersion}}
+	validator := &fakeAttendanceValidator{}
+	_, err := NewService(repository, reader, parser, validator).ParseBatch(context.Background(), ParseBatchInput{BatchID: "batch-1", ExpectedVersion: 1})
+	if err == nil || repository.batch.Status != BatchStatusParseFailed || repository.batch.FailureCode != string(ErrorInvalidWorkbook) || repository.batch.FailureMessage != "表格没有可导入的业务数据行" || validator.calls != 0 {
+		t.Fatalf("empty preview: batch=%+v err=%v validator calls=%d", repository.batch, err, validator.calls)
+	}
+}
+
 func TestParseBatchRejectsDuplicateParsingAndOldVersion(t *testing.T) {
 	reader := &fakeVerifiedFileReader{}
 	parser := &fakeWorkbookParser{}
@@ -327,7 +338,7 @@ func TestCancelBatchAllowsOnlyRecoverableIdleStates(t *testing.T) {
 func TestParseBatchMarksSafeFailureWhenPreviewTransactionRollsBack(t *testing.T) {
 	repository := &memoryImportRepository{batch: previewBatch(BatchStatusUploaded), replaceErr: errors.New("transaction rolled back")}
 	reader := &fakeVerifiedFileReader{file: storage.File{ID: "file-1", OriginalName: "attendance.xlsx", Status: storage.StatusAvailable}, content: []byte("xlsx")}
-	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: CurrentTemplateVersion}}
+	parser := &fakeWorkbookParser{workbook: ParsedWorkbook{TemplateVersion: CurrentTemplateVersion, Rows: []ParsedRow{{RowNo: 5, Values: map[string]string{"student_no": "S20260001"}}}}}
 	validator := &fakeAttendanceValidator{result: AttendanceValidationResult{}}
 	_, err := NewService(repository, reader, parser, validator).ParseBatch(context.Background(), ParseBatchInput{BatchID: "batch-1", ExpectedVersion: 1})
 	if err == nil {

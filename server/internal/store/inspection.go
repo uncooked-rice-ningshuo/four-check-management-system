@@ -707,6 +707,43 @@ func (t *inspectionTx) currentReferenceLabels(ctx context.Context, r *inspection
  (SELECT da.name || ' ' || b.name || ' / ' || ar.floor_unit || ' / ' || ar.name FROM public_dormitory_hygiene_areas ar JOIN dormitory_buildings b ON b.id=ar.dormitory_building_id JOIN dormitory_areas da ON da.id=b.dormitory_area_id WHERE ar.id=NULLIF($4,'')::uuid AND $5='PUBLIC_DORMITORY_HYGIENE'),'')`, course, classroom, dormitoryRef, area, r.TypeCode).Scan(&r.CurrentCourseName, &r.CurrentClassroomName, &r.CurrentDormitoryName, &r.CurrentDormitoryAreaID, &r.CurrentDormitoryBuildingID, &r.CurrentAreaName)
 }
 
+// responsibilityClasses reads the responsibility class labels attached to an
+// already authorized record. Snapshots may store the grade with the 级 suffix
+// ("2024级") or without it ("2024"), so the label normalizes both forms.
+func (t *inspectionTx) responsibilityClasses(ctx context.Context, recordID string) ([]inspection.EntryOption, error) {
+	rows, err := t.tx.Query(ctx, `SELECT class_id,class_name_snapshot,COALESCE(grade_snapshot,'') FROM inspection_responsibility_classes WHERE record_id=$1 ORDER BY class_id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]inspection.EntryOption, 0)
+	for rows.Next() {
+		var item inspection.EntryOption
+		var className, grade string
+		if err = rows.Scan(&item.ID, &className, &grade); err != nil {
+			return nil, err
+		}
+		item.Label = classGradeLabel(className, grade)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// classGradeLabel renders "计算机科学与技术1班（2024级）". The 级 suffix is added
+// only when the stored grade does not already end with it, so grades saved as
+// "2024级" no longer render as "2024级级".
+func classGradeLabel(className, grade string) string {
+	name := strings.TrimSpace(className)
+	suffix := strings.TrimSpace(grade)
+	if suffix == "" {
+		return name
+	}
+	if !strings.HasSuffix(suffix, "级") {
+		suffix += "级"
+	}
+	return name + "（" + suffix + "）"
+}
+
 // responsibilityLabels reads only snapshots attached to an already authorized record.
 func (t *inspectionTx) responsibilityLabels(ctx context.Context, r *inspection.InspectionRecord) error {
 	if r.TypeCode != inspection.InspectionTypeDormitoryHygiene &&
@@ -731,8 +768,7 @@ func (t *inspectionTx) responsibilityLabels(ctx context.Context, r *inspection.I
 		return items, rows.Err()
 	}
 	var err error
-	r.ResponsibleClasses, err = read(`SELECT class_id,class_name_snapshot || '（' || grade_snapshot || '级）' FROM inspection_responsibility_classes WHERE record_id=$1 ORDER BY class_id`)
-	if err != nil {
+	if r.ResponsibleClasses, err = t.responsibilityClasses(ctx, r.ID); err != nil {
 		return err
 	}
 	r.ResponsibleStudents, err = read(`SELECT student_id,student_name_snapshot || '（' || student_no_snapshot || '）' FROM inspection_responsibility_students WHERE record_id=$1 ORDER BY student_id`)

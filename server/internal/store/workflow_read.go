@@ -35,6 +35,13 @@ const submissionTables = ` FROM department_submissions ds JOIN department_submis
 const submissionSelect = submissionColumns + submissionTables
 
 func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
+	department := ""
+	// Office members may read confirmed submissions only through their effective
+	// inspection-view grant; ConfirmedOnly keeps unconfirmed source batches hidden.
+	if access.IsMember && !access.ConfirmedOnly {
+		*args = append(*args, access.MemberDepartmentID)
+		department = fmt.Sprintf("ds.department_id=NULLIF($%d,'')::uuid AND ", len(*args))
+	}
 	a := inspection.MutationAccess{ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
 	view := inspectionAccessSQL(a, "read", args)
 	mutate := inspectionAccessSQL(a, "mutate", args)
@@ -44,7 +51,7 @@ func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
 	if access.ConfirmedOnly {
 		prefix = "ds.status='CONFIRMED' AND "
 	}
-	return prefix + `CASE WHEN ds.submission_kind='ZERO_RECORD' THEN cardinality(rev.record_ids)=0 AND ` + cell + `
+	return department + prefix + `CASE WHEN ds.submission_kind='ZERO_RECORD' THEN cardinality(rev.record_ids)=0 AND ` + cell + `
 	ELSE cardinality(rev.record_ids)=(SELECT count(*) FROM inspection_records existing
 	 WHERE existing.submission_id=ds.id AND existing.deleted_at IS NULL)
 	 AND NOT EXISTS(SELECT 1 FROM inspection_records ir JOIN semesters sem ON sem.id=ir.semester_id

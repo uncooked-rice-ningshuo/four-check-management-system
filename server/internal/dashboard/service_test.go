@@ -69,12 +69,12 @@ func TestWorkbenchCountsPersonalTodosButShowsDepartmentOverall(t *testing.T) {
 		},
 	}, organizationStub{
 		catalogs: organization.Catalogs{
-			Departments:     []organization.Department{{ID: "study", Name: "学习部", Enabled: true}},
+			Departments:     []organization.Department{{ID: "study", Name: "学习部", Enabled: true}, {ID: "sports", Name: "文体部", Enabled: true}},
 			InspectionTypes: []organization.InspectionType{{ID: "attendance", Code: "ATTENDANCE_RATE", Name: "到课率", Enabled: true}},
 		},
-		scopes: []organization.DepartmentInspectionScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanView: true, CanEnter: true, Enabled: true}},
-	}, permissionStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{
-		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "study", InspectionTypeID: "attendance"}},
+		scopes: []organization.DepartmentInspectionScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanView: true, CanEnter: true, Enabled: true}, {DepartmentID: "sports", InspectionTypeID: "attendance", CanView: true, Enabled: true}},
+	}, permissionStub{result: permission.EffectiveResult{SystemRole: permission.SystemRoleMember, PrimaryDepartmentID: "study", Permissions: []permission.EffectivePermission{
+		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
 		{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "study", InspectionTypeID: "attendance"}},
 	}}})
 

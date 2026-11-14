@@ -260,6 +260,9 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 	if err != nil {
 		return workflow.Submission{}, err
 	}
+	if command.IsMember && (command.MemberDepartmentID == "" || result.Scope.DepartmentID != command.MemberDepartmentID) {
+		return workflow.Submission{}, workflow.ErrSubmissionScope
+	}
 	var expected int
 	var revisionKind workflow.SubmissionKind
 	if err = tx.QueryRow(ctx, `SELECT submission_kind,cardinality(record_ids) FROM department_submission_revisions

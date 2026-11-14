@@ -20,12 +20,15 @@ import (
 )
 
 type workflowPermissions struct {
-	role  string
-	rules []permission.EffectivePermission
+	role                 string
+	primaryDepartmentID  string
+	organizationRoleCode string
+	confirmedOnly        bool
+	rules                []permission.EffectivePermission
 }
 
 func (p *workflowPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
-	return permission.EffectiveResult{SystemRole: p.role, Permissions: p.rules}, nil
+	return permission.EffectiveResult{SystemRole: p.role, PrimaryDepartmentID: p.primaryDepartmentID, OrganizationRoleCode: p.organizationRoleCode, ConfirmedInspectionsOnly: p.confirmedOnly, Permissions: p.rules}, nil
 }
 
 func TestSubmitDepartmentBatchPostgres(t *testing.T) {
@@ -185,6 +188,34 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 	}
 	if _, err := service.Detail(ctx, actor, created.ID); err != nil {
 		t.Fatalf("scoped batch detail: %v", err)
+	}
+	// A second department can own the same type without gaining this batch.
+	for _, caseItem := range []struct {
+		name, primaryDepartmentID string
+		visible                   bool
+	}{{"own department", department, true}, {"other department", "10000000-0000-0000-0000-000000000001", false}} {
+		t.Run(caseItem.name, func(t *testing.T) {
+			access := &workflowPermissions{role: permission.SystemRoleMember, primaryDepartmentID: caseItem.primaryDepartmentID, organizationRoleCode: "MINISTER", rules: []permission.EffectivePermission{
+				{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID}},
+				{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID}},
+			}}
+			isolated := workflow.NewService(&Postgres{Pool: pool}, access)
+			page, listErr := isolated.List(ctx, workflow.Actor{ID: reviewer}, workflow.ListQuery{InspectionTypeID: typeID, Page: 1, PageSize: 20})
+			if listErr != nil || (page.Total == 1) != caseItem.visible {
+				t.Fatalf("department list: %+v %v", page, listErr)
+			}
+			_, detailErr := isolated.Detail(ctx, workflow.Actor{ID: reviewer}, created.ID)
+			if (detailErr == nil) != caseItem.visible || (!caseItem.visible && !errors.Is(detailErr, workflow.ErrSubmissionMissing)) {
+				t.Fatalf("department detail: %v", detailErr)
+			}
+			if !caseItem.visible {
+				_, decisionErr := isolated.Decide(ctx, workflow.Actor{ID: reviewer}, created.ID, workflow.Confirm, workflow.DecisionInput{Version: 1}, audit.Metadata{})
+				if !errors.Is(decisionErr, workflow.ErrSubmissionScope) {
+					t.Fatalf("cross-department review: %v", decisionErr)
+				}
+				assertWorkflowState(t, pool, first, "PENDING_REVIEW", true, 2)
+			}
+		})
 	}
 	permissions.rules = nil
 	if _, err := service.Submit(ctx, actor, input, audit.Metadata{}); !errors.Is(err, workflow.ErrRecordUnavailable) {
@@ -355,6 +386,29 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 	confirmed, err := reviewService.Decide(ctx, reviewActor, other.ID, workflow.Confirm, workflow.DecisionInput{Version: 1}, audit.Metadata{})
 	if err != nil || confirmed.Status != workflow.Confirmed || confirmed.RowVersion != 2 {
 		t.Fatalf("confirm batch: %+v %v", confirmed, err)
+	}
+	// Office's explicit view grant permits confirmed source batches across
+	// departments; without the grant it cannot read any batch.
+	officePermissions := &workflowPermissions{role: permission.SystemRoleMember, primaryDepartmentID: "10000000-0000-0000-0000-000000000001", confirmedOnly: true}
+	officeService := workflow.NewService(&Postgres{Pool: pool}, officePermissions)
+	officeActor := workflow.Actor{ID: reviewer}
+	officePage, err := officeService.List(ctx, officeActor, workflow.ListQuery{InspectionTypeID: typeID, Page: 1, PageSize: 20})
+	if err != nil || officePage.Total != 0 {
+		t.Fatalf("office without view grant listed batches: %+v %v", officePage, err)
+	}
+	if _, err := officeService.Detail(ctx, officeActor, other.ID); !errors.Is(err, workflow.ErrSubmissionMissing) {
+		t.Fatalf("office without view grant read confirmed batch: %v", err)
+	}
+	officePermissions.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: typeID}}}
+	officePage, err = officeService.List(ctx, officeActor, workflow.ListQuery{InspectionTypeID: typeID, Page: 1, PageSize: 20})
+	if err != nil || officePage.Total != 1 || officePage.Items[0].ID != other.ID {
+		t.Fatalf("office view grant did not limit list to confirmed batch: %+v %v", officePage, err)
+	}
+	if _, err := officeService.Detail(ctx, officeActor, other.ID); err != nil {
+		t.Fatalf("office with view grant could not read confirmed batch: %v", err)
+	}
+	if _, err := officeService.Detail(ctx, officeActor, created.ID); !errors.Is(err, workflow.ErrSubmissionMissing) {
+		t.Fatalf("office read unconfirmed batch: %v", err)
 	}
 	assertWorkflowState(t, pool, third, "CONFIRMED", true, 3)
 	batchCounts, err = (&Postgres{Pool: pool}).Aggregate(ctx, dashboard.AggregateQuery{SemesterID: scope.SemesterID,

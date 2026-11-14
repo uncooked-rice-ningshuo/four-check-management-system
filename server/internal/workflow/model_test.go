@@ -39,6 +39,12 @@ type submitPermissions struct {
 	err error
 }
 
+type decisionPermissions struct{ result permission.EffectiveResult }
+
+func (p decisionPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
+	return p.result, nil
+}
+
 func (p submitPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
 	return permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow}}}, p.err
 }
@@ -105,5 +111,22 @@ func TestDecideRequiresVersionAndReturnReason(t *testing.T) {
 	}
 	if _, err := svc.Decide(context.Background(), actor, id, Return, DecisionInput{Version: 1, Reason: "  核对  "}, audit.Metadata{}); err != nil || repo.decision.Reason != "核对" || repo.decision.Metadata.Reason != "核对" {
 		t.Fatalf("valid return: %+v %v", repo.decision, err)
+	}
+}
+
+func TestMemberReviewRequiresDepartmentLeadership(t *testing.T) {
+	const actor = "10000000-0000-0000-0000-000000000001"
+	const batch = "10000000-0000-0000-0000-000000000002"
+	grant := permission.EffectivePermission{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow}
+	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER"} {
+		repo := &submitRepository{}
+		service := NewService(repo, decisionPermissions{result: permission.EffectiveResult{SystemRole: permission.SystemRoleMember, OrganizationRoleCode: role, PrimaryDepartmentID: "department", Permissions: []permission.EffectivePermission{grant}}})
+		_, err := service.Decide(context.Background(), Actor{ID: actor}, batch, Confirm, DecisionInput{Version: 1}, audit.Metadata{})
+		if role == "MEMBER" && (!errors.Is(err, ErrSubmissionScope) || repo.decision.SubmissionID != "") {
+			t.Fatalf("ordinary member reached review: %v", err)
+		}
+		if role != "MEMBER" && (err != nil || !repo.decision.IsMember || repo.decision.MemberDepartmentID != "department") {
+			t.Fatalf("department leader review command: %+v %v", repo.decision, err)
+		}
 	}
 }

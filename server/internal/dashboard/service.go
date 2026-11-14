@@ -183,6 +183,9 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 	authorized := make([]Scope, 0)
 	capabilities := make(map[Scope]DepartmentStatus)
 	for _, mapping := range mappings {
+		if !actor.IsSuperAdmin && effective.SystemRole == permission.SystemRoleMember && mapping.DepartmentID != effective.PrimaryDepartmentID {
+			continue
+		}
 		department, departmentExists := departments[mapping.DepartmentID]
 		inspectionType, typeExists := types[mapping.InspectionTypeID]
 		if !mapping.Enabled || !mapping.CanView || !departmentExists || !typeExists {
@@ -204,6 +207,9 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 	// College records and batches are a separate scope, visible only under an
 	// explicit type-level grant that is not constrained to a department.
 	for _, inspectionType := range catalogs.InspectionTypes {
+		if !actor.IsSuperAdmin && effective.SystemRole == permission.SystemRoleMember {
+			continue
+		}
 		if !inspectionType.Enabled || !collegeWorkbenchType(inspectionType.Code) {
 			continue
 		}

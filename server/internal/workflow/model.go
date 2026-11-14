@@ -109,10 +109,12 @@ type Page struct {
 }
 
 type ViewAccess struct {
-	ConfirmedOnly bool
-	ActorID       string
-	Unrestricted  bool
-	Permissions   []permission.EffectivePermission
+	ConfirmedOnly      bool
+	ActorID            string
+	Unrestricted       bool
+	IsMember           bool
+	MemberDepartmentID string
+	Permissions        []permission.EffectivePermission
 }
 
 type Actor struct {
@@ -170,14 +172,16 @@ type DecisionInput struct {
 }
 
 type DecisionCommand struct {
-	ActorID      string
-	Unrestricted bool
-	Permissions  []permission.EffectivePermission
-	SubmissionID string
-	Version      int
-	Action       Action
-	Reason       string
-	Metadata     audit.Metadata
+	ActorID            string
+	Unrestricted       bool
+	IsMember           bool
+	MemberDepartmentID string
+	Permissions        []permission.EffectivePermission
+	SubmissionID       string
+	Version            int
+	Action             Action
+	Reason             string
+	Metadata           audit.Metadata
 }
 
 type permissionService interface {
@@ -283,6 +287,8 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 		return Submission{}, ErrInvalidDecision
 	}
 	permissions := []permission.EffectivePermission(nil)
+	memberDepartmentID := ""
+	isMember := false
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
 			return Submission{}, ErrSubmissionScope
@@ -292,9 +298,16 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 			return Submission{}, err
 		}
 		permissions = effective.Permissions
+		if effective.SystemRole == permission.SystemRoleMember {
+			if effective.OrganizationRoleCode != "MINISTER" && effective.OrganizationRoleCode != "VICE_MINISTER" {
+				return Submission{}, ErrSubmissionScope
+			}
+			isMember = true
+			memberDepartmentID = effective.PrimaryDepartmentID
+		}
 	}
 	metadata.ActorID, metadata.Reason = actorID.String(), reason
-	return s.repository.DecideDepartmentBatch(ctx, DecisionCommand{ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
+	return s.repository.DecideDepartmentBatch(ctx, DecisionCommand{ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin, IsMember: isMember, MemberDepartmentID: memberDepartmentID,
 		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Action: action,
 		Reason: reason, Metadata: metadata})
 }
@@ -365,6 +378,10 @@ func (s *Service) viewAccess(ctx context.Context, actor Actor) (ViewAccess, erro
 		}
 		access.ConfirmedOnly = effective.ConfirmedInspectionsOnly
 		access.Permissions = effective.Permissions
+		if effective.SystemRole == permission.SystemRoleMember {
+			access.IsMember = true
+			access.MemberDepartmentID = effective.PrimaryDepartmentID
+		}
 	}
 	return access, nil
 }

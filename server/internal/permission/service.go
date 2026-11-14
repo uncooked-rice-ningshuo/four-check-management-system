@@ -114,6 +114,7 @@ type EffectivePermission struct {
 
 type EffectiveResult struct {
 	PrimaryDepartmentID      string                `json:"-"`
+	OrganizationRoleCode     string                `json:"-"`
 	ConfirmedInspectionsOnly bool                  `json:"confirmedInspectionsOnly,omitempty"`
 	AccountID                string                `json:"accountId"`
 	SystemRole               string                `json:"systemRole"`
@@ -202,7 +203,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	if err != nil {
 		return EffectiveResult{}, err
 	}
-	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
+	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, OrganizationRoleCode: profile.OrganizationRoleCode, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
 	if profile.SystemRole == SystemRoleSuperAdmin {
 		for _, action := range allActions {
 			if action == ActionReportForceGenerate || action == ActionReportObligationManage {

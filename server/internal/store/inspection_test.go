@@ -43,6 +43,24 @@ func TestReportScopedReadIncludesClasslessRecordsWithinAuthorizedCell(t *testing
 	}
 }
 
+func TestClassGradeLabelKeepsSingleGradeSuffix(t *testing.T) {
+	cases := []struct{ className, grade, want string }{
+		{"计算机科学与技术1班", "2024级", "计算机科学与技术1班（2024级）"},
+		{"计算机科学与技术1班", "2024", "计算机科学与技术1班（2024级）"},
+		{"软件工程1班", " 2025级 ", "软件工程1班（2025级）"},
+		{"软件工程1班", "", "软件工程1班"},
+		{"软件工程1班", "   ", "软件工程1班"},
+	}
+	for _, c := range cases {
+		if got := classGradeLabel(c.className, c.grade); got != c.want {
+			t.Errorf("classGradeLabel(%q, %q) = %q, want %q", c.className, c.grade, got, c.want)
+		}
+		if strings.Contains(classGradeLabel(c.className, c.grade), "级级") {
+			t.Errorf("classGradeLabel(%q, %q) repeated the 级 suffix", c.className, c.grade)
+		}
+	}
+}
+
 func TestInspectionViewIsBusinessScopedAndMutationSeparatesEntryFromManagement(t *testing.T) {
 	access := inspection.MutationAccess{ActorID: "actor", Permissions: []permission.EffectivePermission{
 		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},

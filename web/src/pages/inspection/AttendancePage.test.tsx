@@ -179,12 +179,14 @@ describe('AttendancePage', () => {
   })
 
   it('renders record status/source, pagination and opens only an in-page import drawer', () => {
-    recordsQuery.mockReturnValue({ data: { items: [{ id: 'record-1', studentNo: 'S001', studentName: '测试同学', classId: 'class-1', className: '计科 2401', grade: '2026级', courseId: 'course-1', courseName: '软件工程', occurredAt: '2026-08-30T08:00:00Z', absenceHours: 2, period: '1-2', remark: '', source: 'EXCEL', status: 'DRAFT', rowVersion: 1 }], total: 21, page: 1, pageSize: 20 }, isLoading: false })
+    recordsQuery.mockReturnValue({ data: { items: [{ id: 'record-1', studentNo: 'S001', studentName: '测试同学', classId: 'class-1', className: '计科 2401', grade: '2026级', courseId: 'course-1', courseName: '软件工程', classroomCode: '第五教学楼 211', occurredAt: '2026-08-30T08:00:00Z', absenceHours: 2, period: '1-2', remark: '', source: 'EXCEL', status: 'DRAFT', rowVersion: 1 }], total: 21, page: 1, pageSize: 20 }, isLoading: false })
     currentWeekQuery.mockReturnValue({ data: { week: filterOptions.weeks[0] }, isLoading: false })
     render(<MemoryRouter initialEntries={[entry]}><AttendancePage /></MemoryRouter>)
     expect(screen.getByText('测试同学')).toBeInTheDocument()
 		expect(screen.getByText('2026级')).toBeInTheDocument()
 		expect(screen.queryByText('2026级 级')).not.toBeInTheDocument()
+		expect(screen.getByRole('columnheader', { name: '上课教室' })).toBeInTheDocument()
+		expect(screen.getByText('第五教学楼 211')).toBeInTheDocument()
     expect(screen.getByText('Excel 导入')).toBeInTheDocument()
     expect(screen.getByText('草稿')).toBeInTheDocument()
 		fireEvent.click(screen.getByTitle('2'))

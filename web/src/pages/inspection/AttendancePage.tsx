@@ -176,6 +176,7 @@ export function AttendancePage() {
 			{ title: '年级', dataIndex: 'grade', width: 90, search: false, renderText: value => value ? gradeLabel(String(value)) : '—' },
 			{ title: '班级', dataIndex: 'className', width: 150, search: false },
 			{ title: '课程', dataIndex: 'courseName', width: 180, search: false, ellipsis: true },
+			{ title: '上课教室', dataIndex: 'classroomCode', width: 170, search: false, ellipsis: true, renderText: value => value ? String(value) : '—' },
 			{ title: '旷课日期', dataIndex: 'occurredAt', width: 130, search: false, renderText: value => dateFormatter.format(new Date(value)) },
 			{ title: '节次', dataIndex: 'period', width: 100, search: false },
 			{ title: '实际旷课学时', dataIndex: 'absenceHours', width: 125, search: false },

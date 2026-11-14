@@ -14,7 +14,7 @@ export type DepartmentInspectionScope = {
 export type InspectionRoleDefaults = { inspectionTypeId: string; roleCode: 'MEMBER' | 'LEADERSHIP' | 'PRESIDIUM'; canView: boolean; canEnter: boolean; canManage: boolean; canReview: boolean; canExport: boolean }
 export type ReportRoleDefaults = { roleCode: 'MEMBER' | 'MINISTER' | 'VICE_MINISTER'; canView: boolean; canGenerate: boolean; canCorrect: boolean; canReview: boolean; canReturn: boolean; canFinalize: boolean; canPublish: boolean; canOutputSettings: boolean; canArchive: boolean }
 export type DepartmentReportScope = Omit<ReportRoleDefaults, 'roleCode'> & { enabled: boolean }
-export type DepartmentDefaultPermissions = { departmentId: string; version: number; scopes: DepartmentInspectionScope[]; inspectionRoles: InspectionRoleDefaults[]; reportScope: DepartmentReportScope; reportRoles: ReportRoleDefaults[] }
+export type DepartmentDefaultPermissions = { reportMaintenance: { state: 'assigned' | 'unassigned'; departmentId: string; departmentName: string }; departmentId: string; version: number; scopes: DepartmentInspectionScope[]; inspectionRoles: InspectionRoleDefaults[]; reportScope: DepartmentReportScope; reportRoles: ReportRoleDefaults[] }
 export type OrganizationCatalogs = {
   departments: Department[]
   organizationRoles: OrganizationRole[]

@@ -7,6 +7,7 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/organization"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (p *Postgres) GetDepartmentDefaults(ctx context.Context, departmentID string) (organization.DepartmentDefaultPermissions, error) {
@@ -16,6 +17,14 @@ func (p *Postgres) GetDepartmentDefaults(ctx context.Context, departmentID strin
 			return result, organization.ErrInvalidInput
 		}
 		return result, err
+	}
+	result.ReportMaintenance.State = "unassigned"
+	maintenanceErr := p.Pool.QueryRow(ctx, `SELECT d.id::text,d.name FROM department_report_scopes s JOIN departments d ON d.id=s.department_id WHERE s.enabled`).Scan(&result.ReportMaintenance.DepartmentID, &result.ReportMaintenance.DepartmentName)
+	if maintenanceErr != nil && !errors.Is(maintenanceErr, pgx.ErrNoRows) {
+		return result, maintenanceErr
+	}
+	if maintenanceErr == nil {
+		result.ReportMaintenance.State = "assigned"
 	}
 	err := p.Pool.QueryRow(ctx, `SELECT enabled,can_view,can_generate,can_correct,can_review,can_return,can_finalize,
 		can_publish,can_output_settings,can_archive FROM department_report_scopes WHERE department_id=$1::uuid`, departmentID).
@@ -88,6 +97,17 @@ func (p *Postgres) SaveDepartmentDefaults(ctx context.Context, input organizatio
 			}
 			return err
 		}
+		// The version update locks the department row, also used by department deactivation.
+		var enabled, maintaining bool
+		if err := tx.QueryRow(ctx, `SELECT d.enabled,COALESCE(s.enabled,false) FROM departments d LEFT JOIN department_report_scopes s ON s.department_id=d.id WHERE d.id=$1::uuid`, input.DepartmentID).Scan(&enabled, &maintaining); err != nil {
+			return err
+		}
+		if maintaining && !input.ReportScope.Enabled {
+			return organization.ErrReportMaintenanceRequired
+		}
+		if input.ReportScope.Enabled && !enabled {
+			return organization.ErrInvalidInput
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO department_report_scopes
 			(department_id,enabled,can_view,can_generate,can_correct,can_review,can_return,can_finalize,can_publish,can_output_settings,can_archive)
 			VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -138,9 +158,24 @@ func (p *Postgres) SaveDepartmentDefaults(ctx context.Context, input organizatio
 		if _, err := tx.Exec(ctx, `UPDATE accounts SET session_version=session_version+1,updated_at=now() WHERE primary_department_id=$1::uuid`, input.DepartmentID); err != nil {
 			return err
 		}
+		result.ReportMaintenance = organization.ReportMaintenance{State: "unassigned"}
+		ownerErr := tx.QueryRow(ctx, `SELECT d.id::text,d.name FROM department_report_scopes s JOIN departments d ON d.id=s.department_id WHERE s.enabled`).Scan(&result.ReportMaintenance.DepartmentID, &result.ReportMaintenance.DepartmentName)
+		if ownerErr != nil && !errors.Is(ownerErr, pgx.ErrNoRows) {
+			return ownerErr
+		}
+		if ownerErr == nil {
+			result.ReportMaintenance.State = "assigned"
+		}
 		_, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now())
 			WHERE account_id IN (SELECT id FROM accounts WHERE primary_department_id=$1::uuid) AND revoked_at IS NULL`, input.DepartmentID)
 		return err
 	})
-	return result, err
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "department_report_scopes_one_enabled" {
+			return result, organization.ErrReportMaintenanceAssigned
+		}
+		return result, err
+	}
+	return result, nil
 }

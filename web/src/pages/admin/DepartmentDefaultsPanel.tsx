@@ -86,6 +86,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
   const selectedDepartment = catalogs.departments.find(item => item.id === selectedId)
   const configQuery = useQuery({ queryKey: ['department-defaults', selectedId], queryFn: async () => {
     const result = await getDepartmentDefaults(selectedId)
+    if (!result.reportMaintenance || !['assigned', 'unassigned'].includes(result.reportMaintenance.state)) throw new Error('部门权限响应缺少维护部门配置，请刷新重试')
     if (!result.reportScope) throw new Error('部门权限响应缺少周通报配置')
     return result
   }, enabled: Boolean(selectedId), retry: false })
@@ -97,10 +98,11 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
   const save = useMutation({ mutationFn: saveDepartmentDefaults, onSuccess: result => {
     client.setQueryData(['department-defaults', result.departmentId], result)
     setDrafts(previous => { const next = { ...previous }; delete next[result.departmentId]; return next })
-    void client.invalidateQueries({ queryKey: ['department-defaults', result.departmentId] })
+    void client.invalidateQueries({ queryKey: ['department-defaults'] })
     void client.invalidateQueries({ queryKey: ['effective-permissions'] })
     message.success('部门默认权限已保存')
   }, onError: error => {
+    if (error instanceof ApiError && error.code === 'REPORT_MAINTENANCE_ALREADY_ASSIGNED') void client.invalidateQueries({ queryKey: ['department-defaults'] })
     if (error instanceof ApiError && error.code === 'DEPARTMENT_PERMISSIONS_VERSION_CONFLICT') {
       message.error('配置已被其他人更新。请刷新后核对差异，你的未保存修改仍保留。')
     } else message.error(error.message)
@@ -173,14 +175,14 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
         </section>
         <section className="department-defaults-section" aria-labelledby="department-report-title">
           <div className="department-defaults-section-heading"><div><Typography.Title id="department-report-title" level={3}>周通报</Typography.Title>
-            <Typography.Text type="secondary">与日常检查使用相同的配置方式</Typography.Text></div></div>
+            <Typography.Text type="secondary">{baseline?.reportMaintenance.state === 'assigned' ? baseline.reportMaintenance.departmentId === selectedId ? '当前维护部门；周通报须保留维护部门，不能直接关闭' : `已由${baseline.reportMaintenance.departmentName}维护，不能重复开启` : '请选择一个有效部门承担周通报'}</Typography.Text></div></div>
           <div className="department-defaults-table-scroll" role="region" aria-label="周通报权限表" tabIndex={0}><table className="department-defaults-table department-defaults-list">
             <thead><tr><th scope="col">业务项</th><th scope="col">部门承担</th><th scope="col">部门功能</th><th scope="col">岗位信息</th><th scope="col">设置</th></tr></thead>
-            <tbody><tr><th scope="row">周通报</th><td className="department-defaults-assignment"><Switch size="small" checked={reportEnabled} disabled={save.isPending} onChange={value => updateReportScope('enabled', value)} aria-label={`${selectedDepartment?.name} 承担周通报`} /><span>{reportEnabled ? '承担' : '未承担'}</span></td>
+            <tbody><tr><th scope="row">周通报</th><td className="department-defaults-assignment"><Switch size="small" checked={reportEnabled} disabled={save.isPending || !selectedDepartment?.enabled || baseline?.reportMaintenance.state === 'assigned'} onChange={value => updateReportScope('enabled', value)} aria-label={`${selectedDepartment?.name} 承担周通报`} /><span>{reportEnabled ? '承担' : '未承担'}</span></td>
               <td className="department-defaults-action-summary">{reportSummary}</td>
               <td className="department-defaults-role-summary">{draft.reportRoles.map(role => <div key={role.roleCode} className="department-defaults-role-line"><span>{reportRoleName(role.roleCode)}</span><span>{reportEnabled ? enabledReportActions(draft.reportScope, role) : '无'}</span></div>)}</td>
-              <td><div className="department-defaults-row-actions"><Button type="link" onClick={() => setEditor({ kind: 'reportScope' })}>部门功能</Button>
-                <Button type="link" onClick={() => setEditor({ kind: 'reportRoles' })}>角色权限</Button></div></td></tr></tbody>
+              <td><div className="department-defaults-row-actions"><Button type="link" disabled={!reportEnabled} onClick={() => setEditor({ kind: 'reportScope' })}>部门功能</Button>
+                <Button type="link" disabled={!reportEnabled} onClick={() => setEditor({ kind: 'reportRoles' })}>角色权限</Button></div></td></tr></tbody>
           </table></div>
         </section>
       </div>

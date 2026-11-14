@@ -91,14 +91,25 @@ type InspectionRoleDefaults struct {
 }
 
 type DepartmentDefaultPermissions struct {
-	DepartmentID    string                      `json:"departmentId"`
-	Version         int                         `json:"version"`
-	ReportScope     DepartmentReportScope       `json:"reportScope"`
-	Scopes          []DepartmentInspectionScope `json:"scopes"`
-	InspectionRoles []InspectionRoleDefaults    `json:"inspectionRoles"`
-	ReportRoles     []ReportRoleDefaults        `json:"reportRoles"`
+	ReportMaintenance ReportMaintenance           `json:"reportMaintenance"`
+	DepartmentID      string                      `json:"departmentId"`
+	Version           int                         `json:"version"`
+	ReportScope       DepartmentReportScope       `json:"reportScope"`
+	Scopes            []DepartmentInspectionScope `json:"scopes"`
+	InspectionRoles   []InspectionRoleDefaults    `json:"inspectionRoles"`
+	ReportRoles       []ReportRoleDefaults        `json:"reportRoles"`
 }
 
+// ReportMaintenance identifies the globally exclusive weekly-report maintainer.
+type ReportMaintenance struct {
+	State          string `json:"state"`
+	DepartmentID   string `json:"departmentId"`
+	DepartmentName string `json:"departmentName"`
+}
+
+var ErrReportMaintenanceAssigned = errors.New("report maintenance already assigned")
+var ErrReportMaintenanceRequired = errors.New("report maintenance required")
+var ErrReportMaintenanceDepartmentInUse = errors.New("report maintenance department in use")
 var ErrPermissionVersionConflict = errors.New("department permission version conflict")
 
 type defaultPermissionRepository interface {

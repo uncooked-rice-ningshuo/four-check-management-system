@@ -20,12 +20,15 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
   const [modalOpen, setModalOpen] = useState(false)
   const [form] = Form.useForm<PermissionRule>()
   const client = useQueryClient()
+  const ruleEffect = Form.useWatch('effect', form)
+  const isReportWrite = (action: string) => action.startsWith('REPORT_') && action !== 'REPORT_VIEW'
   const effective = useQuery({ queryKey: ['effective-permissions', accountId], queryFn: () => getEffectivePermissions(accountId), enabled: Boolean(accountId) })
   const rules = useQuery({ queryKey: ['permission-rules', accountId], queryFn: () => getPermissionRules(accountId), enabled: Boolean(accountId) })
   const catalogs = useQuery({ queryKey: ['admin-catalogs'], queryFn: getCatalogs, enabled: Boolean(accountId) })
   const calendar = useQuery({ queryKey: ['academic-calendar'], queryFn: getAcademicCalendar, enabled: Boolean(accountId) })
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['effective-permissions', accountId] }); await client.invalidateQueries({ queryKey: ['permission-rules', accountId] }) }
   const save = useMutation({ mutationFn: (values: PermissionRule) => {
+    if (values.effect === 'ALLOW' && isReportWrite(values.action) && !effective.data?.reportGrantableActions?.includes(values.action)) throw new Error('该账号不能获授此周通报维护权限，请核对维护部门及系统角色')
     const scope = values.action === 'REPORT_OUTPUT_SETTINGS_MANAGE' ? {} : permissionRuleScope(values.scope)
     return editing
       ? updatePermissionRule({ ...editing, ...values, scope })
@@ -54,11 +57,13 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data ?? []} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}权限规则`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} width={720} destroyOnHidden>
       <Form key={editing?.id ?? 'new'} form={form} layout="vertical" initialValues={editing ? { ...editing, scope: permissionRuleScope(editing.scope) } : { effect: 'ALLOW', scope: {}, note: '' }} onFinish={values => save.mutate(values)} preserve={false}>
-        <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions} /></Form.Item>
+        <Typography.Paragraph type="secondary">非维护部门的普通账号不能获授周通报维护权限；系统管理员可单独授权。强制生成和应交配置仍限办公室负责人。不可授予的动作已禁用；拒绝规则仍可设置。</Typography.Paragraph>
+        {(!effective.data?.reportGrantableActions || effective.isError) && <Typography.Paragraph type="danger">授权资格尚未加载，维护动作暂不可授予。请关闭后重新打开重试。</Typography.Paragraph>}
+        <Form.Item name="action" label="权限动作" rules={[{ required: true, message: '请选择权限动作' }]}><Select showSearch optionFilterProp="label" options={actionOptions.map(option => ({ ...option, disabled: ruleEffect !== 'DENY' && isReportWrite(option.value) && !effective.data?.reportGrantableActions?.includes(option.value) }))} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(previous, current) => previous.action !== current.action}>{({ getFieldValue }) => {
           if (getFieldValue('action') === 'REPORT_FORCE_GENERATE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；一般通报权限不会自动包含此权限。此操作作用于整份周通报，只能按学年、学期、周次和检查类型收窄范围。</Typography.Paragraph>
           if (getFieldValue('action') === 'REPORT_OBLIGATION_MANAGE') return <Typography.Paragraph type="secondary">仅可单独授予学生会办公室部长或副部长；此权限允许维护各周应交部门和检查类型，与日常录入范围分开管理，可按学年、学期、周次和检查类型收窄。</Typography.Paragraph>
-          if (getFieldValue('action') === 'REPORT_OUTPUT_SETTINGS_MANAGE') return <Typography.Paragraph type="secondary">通报文件设置作用于全局。办公室部长、副部长默认可编辑，也可给其他账号单独授权；此权限不包含通报数据查看、生成或定稿。</Typography.Paragraph>
+          if (getFieldValue('action') === 'REPORT_OUTPUT_SETTINGS_MANAGE') return <Typography.Paragraph type="secondary">通报文件设置作用于全局。办公室部长、副部长默认可编辑，也可给系统管理员单独授权；此权限不包含通报数据查看、生成或定稿。</Typography.Paragraph>
           if (getFieldValue('action')?.startsWith('REPORT_')) return <Typography.Paragraph type="secondary">通报动作规则可按学年、学期、周次和检查类型收窄范围；不再设置部门、班级或年级范围。</Typography.Paragraph>
           return null
         }}</Form.Item>

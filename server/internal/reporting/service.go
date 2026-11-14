@@ -935,7 +935,7 @@ func (s *Service) AddReportAdjustment(ctx context.Context, accountID, reportID s
 
 func canReviseFinalizedReport(effective permission.EffectiveResult) bool {
 	return effective.SystemRole == permission.SystemRoleSuperAdmin ||
-		((effective.OrganizationRoleCode == "MINISTER" || effective.OrganizationRoleCode == "VICE_MINISTER") &&
+		((effective.SystemRole == permission.SystemRoleAdmin || effective.OrganizationRoleCode == "MINISTER" || effective.OrganizationRoleCode == "VICE_MINISTER") &&
 			effective.CanReviseFinalizedReport && effective.Allowed(permission.ActionReportCorrect, permission.Scope{}))
 }
 

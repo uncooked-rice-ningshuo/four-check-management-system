@@ -49,6 +49,7 @@ const (
 var ErrInvalidRule = errors.New("invalid permission rule")
 var ErrForceGenerateRoleRequired = errors.New("force generation permission requires student union office leadership")
 var ErrReportObligationRoleRequired = errors.New("weekly obligation permission requires student union office leadership")
+var ErrReportMaintenanceRequired = errors.New("report maintenance department required")
 var ErrReportLeadershipRequired = errors.New("report approval and output settings require department leadership")
 
 var allActions = []string{
@@ -130,6 +131,7 @@ type EffectivePermission struct {
 }
 
 type EffectiveResult struct {
+	ReportGrantableActions   []string              `json:"reportGrantableActions"`
 	PrimaryDepartmentID      string                `json:"-"`
 	DepartmentCode           string                `json:"-"`
 	OrganizationRoleCode     string                `json:"-"`
@@ -223,6 +225,12 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		return EffectiveResult{}, err
 	}
 	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, DepartmentCode: profile.DepartmentCode, OrganizationRoleCode: profile.OrganizationRoleCode, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
+	result.ReportGrantableActions = []string{}
+	for _, action := range allActions {
+		if requiresReportMaintenance(action) && reportGrantEligible(profile, action) {
+			result.ReportGrantableActions = append(result.ReportGrantableActions, action)
+		}
+	}
 	if profile.SystemRole == SystemRoleSuperAdmin {
 		result.CanReviseFinalizedReport = true
 		for _, action := range allActions {
@@ -305,6 +313,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		if !rule.Enabled {
 			continue
 		}
+		if rule.Effect == EffectAllow && requiresReportMaintenance(rule.Action) && !reportGrantEligible(profile, rule.Action) {
+			continue
+		}
 		if requiresReportLeadership(rule.Action) && !isReportLeadership(profile) {
 			continue
 		}
@@ -335,7 +346,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	// assign inspection work without a code change.
 	result.ConfirmedInspectionsOnly = profile.DepartmentCode == "OFFICE" &&
 		!result.HasAnyAllowed(ActionInspectionEnter) && !result.HasAnyAllowed(ActionInspectionManage) && !result.HasAnyAllowed(ActionInspectionReview)
-	result.CanReviseFinalizedReport = result.CanReviseFinalizedReport && result.HasAnyAllowed(ActionReportCorrect)
+	result.CanReviseFinalizedReport = (result.CanReviseFinalizedReport || profile.SystemRole == SystemRoleAdmin) && result.HasAnyAllowed(ActionReportCorrect)
 	return result, nil
 }
 
@@ -361,6 +372,9 @@ func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, met
 	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
 		return Rule{}, err
 	}
+	if err := s.validateReportMaintenanceTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
 	if err := s.validateReportLeadershipTarget(ctx, rule); err != nil {
 		return Rule{}, err
 	}
@@ -381,6 +395,9 @@ func (s *Service) UpdateRule(ctx context.Context, rule Rule, metadata ...audit.M
 		return Rule{}, err
 	}
 	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
+	if err := s.validateReportMaintenanceTarget(ctx, rule); err != nil {
 		return Rule{}, err
 	}
 	if err := s.validateReportLeadershipTarget(ctx, rule); err != nil {
@@ -460,6 +477,45 @@ func (s *Service) validateReportObligationTarget(ctx context.Context, rule Rule)
 	return nil
 }
 
+// Write grants never bypass the exclusive department qualification.
+func isReportMaintainer(profile AccessProfile) bool {
+	return profile.ReportScope != nil && profile.ReportScope.Enabled
+}
+
+// Eligibility is shared by grant validation, historical-rule evaluation and the UI catalog.
+func reportGrantEligible(profile AccessProfile, action string) bool {
+	if action == ActionReportForceGenerate {
+		return isReportMaintainer(profile) && isForceGenerateEligible(profile)
+	}
+	if action == ActionReportObligationManage {
+		return isReportMaintainer(profile) && isReportObligationManagerEligible(profile)
+	}
+	if profile.SystemRole == SystemRoleSuperAdmin || profile.SystemRole == SystemRoleAdmin {
+		return true
+	}
+	return isReportMaintainer(profile) && (!requiresReportLeadership(action) || isReportLeadership(profile))
+}
+func requiresReportMaintenance(action string) bool {
+	switch action {
+	case ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionReportOutputSettingsManage:
+		return true
+	default:
+		return false
+	}
+}
+func (s *Service) validateReportMaintenanceTarget(ctx context.Context, rule Rule) error {
+	if rule.Effect != EffectAllow || !requiresReportMaintenance(rule.Action) {
+		return nil
+	}
+	profile, err := s.repository.LoadAccessProfile(ctx, rule.AccountID)
+	if err != nil {
+		return err
+	}
+	if !reportGrantEligible(profile, rule.Action) {
+		return ErrReportMaintenanceRequired
+	}
+	return nil
+}
 func requiresReportLeadership(action string) bool {
 	switch action {
 	case ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionReportOutputSettingsManage:
@@ -470,7 +526,7 @@ func requiresReportLeadership(action string) bool {
 }
 
 func isReportLeadership(profile AccessProfile) bool {
-	return profile.SystemRole == SystemRoleSuperAdmin ||
+	return profile.SystemRole == SystemRoleSuperAdmin || profile.SystemRole == SystemRoleAdmin ||
 		(profile.ReportDefaults != nil && (profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER"))
 }
 

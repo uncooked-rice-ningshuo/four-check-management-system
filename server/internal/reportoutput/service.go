@@ -515,7 +515,7 @@ func (s *Service) GenerateDownload(ctx context.Context, actorID string, input Ge
 }
 
 func (s *Service) restrictReportMemberToDraft(ctx context.Context, actorID string, input GenerateInput, effective permission.EffectiveResult) error {
-	if effective.OrganizationRoleCode != "MEMBER" {
+	if effective.SystemRole == permission.SystemRoleAdmin || effective.SystemRole == permission.SystemRoleSuperAdmin || effective.OrganizationRoleCode != "MEMBER" {
 		return nil
 	}
 	workflow, err := s.reports.Workflow(ctx, actorID, input.SemesterID, input.WeekID)

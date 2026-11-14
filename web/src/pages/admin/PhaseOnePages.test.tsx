@@ -154,7 +154,21 @@ describe('阶段一管理页面', () => {
 	expect(screen.queryByText('CONFIGURATION_VIEW')).not.toBeInTheDocument()
   })
 
+  it.each(['MEMBER', 'ADMIN'] as const)('非维护部门 %s 的维护动作选择服从服务端授权资格', async systemRole => {
+    vi.mocked(getUsers).mockResolvedValue([{ version: 1, accountId: 'target', loginName: 'target', studentNo: '', name: '测试账号', status: 'ACTIVE', systemRole, isSuperAdmin: false, mustChangePassword: false, departmentId: 'study', organizationRoleId: '' }])
+    vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'target', systemRole, permissions: [], reportGrantableActions: systemRole === 'ADMIN' ? ['REPORT_GENERATE'] : [] })
+    renderPage(<UserManagementPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '权限详情' }))
+    fireEvent.click(await screen.findByRole('button', { name: '新增权限规则' }))
+    const select = screen.getByRole('combobox', { name: '权限动作' })
+    fireEvent.mouseDown(select)
+    fireEvent.change(select, { target: { value: '生成通报草稿' } })
+    const option = (await screen.findByText('生成通报草稿')).closest('.ant-select-item-option')
+    expect(option?.classList.contains('ant-select-item-option-disabled')).toBe(systemRole === 'MEMBER')
+  })
+
   it('权限详情将未完成通报强制生成作为单独权限并提示适用角色', async () => {
+    vi.mocked(getEffectivePermissions).mockResolvedValue({ accountId: 'office-vice', systemRole: 'MEMBER', permissions: [], reportGrantableActions: ['REPORT_FORCE_GENERATE'] })
     vi.mocked(getUsers).mockResolvedValue([{ version: 1, accountId: 'office-vice', loginName: 'office-vice', studentNo: '', name: '办公室副部长', status: 'ACTIVE', systemRole: 'MEMBER', isSuperAdmin: false, mustChangePassword: false, departmentId: 'office', organizationRoleId: 'vice-minister' }])
     renderPage(<UserManagementPage />)
 
@@ -842,13 +856,15 @@ describe('阶段一管理页面', () => {
 				{ inspectionTypeId: 'inspection-1', roleCode: 'MEMBER', canView: true, canEnter: true, canManage: false, canReview: false, canExport: false },
 				{ inspectionTypeId: 'inspection-1', roleCode: 'LEADERSHIP', canView: true, canEnter: true, canManage: true, canReview: true, canExport: false },
 				{ inspectionTypeId: 'inspection-1', roleCode: 'PRESIDIUM', canView: true, canEnter: false, canManage: false, canReview: false, canExport: false },
-			], reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [] }
+			], reportMaintenance: { state: 'assigned' as const, departmentId: 'office', departmentName: '学生会办公室' }, reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [] }
 		vi.mocked(getDepartmentDefaults).mockResolvedValue(baseline)
 		vi.mocked(saveDepartmentDefaults).mockImplementation(async input => input)
 		renderPage(<OrganizationConfigPage />)
 
 		expect(await screen.findByRole('heading', { name: '日常检查' })).toBeInTheDocument()
 		expect(screen.getByRole('switch', { name: '学习部 承担周通报' })).not.toBeChecked()
+		expect(screen.getByRole('switch', { name: '学习部 承担周通报' })).toBeDisabled()
+		expect(screen.getByText('已由学生会办公室维护，不能重复开启')).toBeInTheDocument()
 		expect(screen.queryByText('系统角色 · 独立职责')).not.toBeInTheDocument()
 		fireEvent.click(screen.getByRole('button', { name: '配置晚归检查部门功能' }))
 		fireEvent.click(await screen.findByRole('switch', { name: '学习部 晚归检查 录入与提交' }))
@@ -870,7 +886,7 @@ describe('阶段一管理页面', () => {
 		const role = (inspectionTypeId: string, roleCode: 'MEMBER' | 'LEADERSHIP' | 'PRESIDIUM') => ({ inspectionTypeId, roleCode, canView: false, canEnter: false, canManage: false, canReview: false, canExport: false })
 		vi.mocked(getDepartmentDefaults).mockResolvedValue({ departmentId: 'department-1', version: 1,
 			scopes: types.map(type => ({ departmentId: 'department-1', inspectionTypeId: type.id, enabled: true, canView: true, canEnter: true, canManage: false, canReview: false, canExport: false })),
-			inspectionRoles: types.flatMap(type => (['MEMBER', 'LEADERSHIP', 'PRESIDIUM'] as const).map(code => role(type.id, code))), reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [],
+			inspectionRoles: types.flatMap(type => (['MEMBER', 'LEADERSHIP', 'PRESIDIUM'] as const).map(code => role(type.id, code))), reportMaintenance: { state: 'assigned' as const, departmentId: 'office', departmentName: '学生会办公室' }, reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [],
 		})
 		vi.mocked(saveDepartmentDefaults).mockImplementation(async input => input)
 		renderPage(<OrganizationConfigPage />)

@@ -24,6 +24,7 @@ export type EffectivePermission = {
 }
 
 export type EffectivePermissions = {
+  reportGrantableActions?: string[]
   confirmedInspectionsOnly?: boolean
   canReviseFinalizedReport?: boolean
   accountId: string

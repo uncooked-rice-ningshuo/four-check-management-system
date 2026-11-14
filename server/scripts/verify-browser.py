@@ -631,6 +631,8 @@ VALUES
  ('{uuid.uuid4()}','{role_user_ids['studyPresidium'][1]}','10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001');
 """.encode()
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=role_sql)
+            if os.environ.get('BROWSER_SUITE') == 'weekly-report-permissions':
+                run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"UPDATE accounts SET system_role='ADMIN' WHERE id='{role_user_ids['scopedAdmin'][1]}';".encode())
             fixture['reportingRoleUsers'] = {name: login_name for name, (login_name, _) in reporting_role_users.items()}
             fixture['authPassword'] = changed_password
             # The calendar regression above intentionally changes week A's

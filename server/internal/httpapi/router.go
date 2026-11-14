@@ -1755,6 +1755,14 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusNotFound, "REPORT_GRADES_NOT_FOUND", "学期年级配置不存在")
 	case errors.Is(err, academic.ErrReportGradesConflict):
 		writeError(c, http.StatusConflict, "REPORT_GRADES_VERSION_CONFLICT", "学期年级配置已变化，请刷新后重试")
+	case errors.Is(err, permission.ErrReportMaintenanceRequired):
+		writeError(c, http.StatusBadRequest, "REPORT_MAINTENANCE_DEPARTMENT_REQUIRED", "该账号不具备此通报维护权限的授权资格；非维护部门仅系统管理员可接受单独授权")
+	case errors.Is(err, organization.ErrReportMaintenanceAssigned):
+		writeError(c, http.StatusConflict, "REPORT_MAINTENANCE_ALREADY_ASSIGNED", "周通报已由其他部门维护，不能重复开启；请刷新查看维护部门")
+	case errors.Is(err, organization.ErrReportMaintenanceRequired):
+		writeError(c, http.StatusConflict, "REPORT_MAINTENANCE_REQUIRED", "周通报须保留维护部门，不能直接关闭")
+	case errors.Is(err, organization.ErrReportMaintenanceDepartmentInUse):
+		writeError(c, http.StatusConflict, "REPORT_MAINTENANCE_DEPARTMENT_IN_USE", "该部门正在维护周通报，不能停用")
 	case errors.Is(err, organization.ErrPermissionVersionConflict):
 		writeError(c, http.StatusConflict, "DEPARTMENT_PERMISSIONS_VERSION_CONFLICT", "部门权限配置已变化，请刷新后重新核对")
 	case errors.Is(err, academic.ErrReportGradeUnavailable):

@@ -98,7 +98,7 @@ func TestInspectionRoleDefaultsAreIndependentByType(t *testing.T) {
 }
 
 func TestOfficeConfiguredInspectionWorkOverridesReadOnlyBaseline(t *testing.T) {
-	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER",
+	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MEMBER",
 		InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": {CanView: true, CanManage: true, CanReview: true}},
 		DepartmentScopes:   []DepartmentScope{{DepartmentID: "office", InspectionTypeID: "attendance", CanView: true, CanEnter: true, CanManage: true, CanReview: true, Enabled: true}},
 	}
@@ -130,7 +130,7 @@ func TestPresidiumGetsOnlyPrimaryDepartmentInspectionView(t *testing.T) {
 }
 
 func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
-	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER", ReportDefaults: officeLeadershipDefaults, ReportScope: officeReportScope}
+	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "VICE_MINISTER", ReportDefaults: officeLeadershipDefaults}
 	result, _ := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "office")
 	for _, action := range []string{ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
 		if !result.Allowed(action, Scope{}) {
@@ -143,7 +143,7 @@ func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
 }
 
 func TestOfficeMemberReceivesDraftAndArchiveActionsOnly(t *testing.T) {
-	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults, ReportScope: officeReportScope}
+	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults}
 	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestInspectionManageRequiresMatchingDepartmentAction(t *testing.T) {
 }
 
 func TestOfficeMemberCannotGainLeadershipActionThroughPersonalRule(t *testing.T) {
-	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults,
+	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults,
 		Rules: []Rule{{Action: ActionReportReview, Effect: EffectAllow, Enabled: true}}}
 	service := NewService(&memoryRepository{profile: profile})
 	result, err := service.Effective(context.Background(), profile.AccountID)
@@ -220,7 +220,7 @@ func TestOfficeMemberCannotGainLeadershipActionThroughPersonalRule(t *testing.T)
 	if result.Allowed(ActionReportReview, Scope{}) {
 		t.Fatal("legacy personal rule bypassed office leadership requirement")
 	}
-	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: profile.AccountID, Action: ActionReportFinalize, Effect: EffectAllow}); !errors.Is(err, ErrReportLeadershipRequired) {
+	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: profile.AccountID, Action: ActionReportFinalize, Effect: EffectAllow}); !errors.Is(err, ErrReportMaintenanceRequired) {
 		t.Fatalf("new personal rule error = %v", err)
 	}
 }
@@ -284,7 +284,7 @@ func TestReportOutputSettingsPermissionIsGlobalAndIndependent(t *testing.T) {
 	}
 	repository := &memoryRepository{profile: AccessProfile{AccountID: "member", SystemRole: SystemRoleMember}}
 	service := NewService(repository)
-	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow}); !errors.Is(err, ErrReportLeadershipRequired) {
+	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow}); !errors.Is(err, ErrReportMaintenanceRequired) {
 		t.Fatalf("non-office grant error = %v", err)
 	}
 	result, err := service.Effective(context.Background(), "member")
@@ -294,7 +294,7 @@ func TestReportOutputSettingsPermissionIsGlobalAndIndependent(t *testing.T) {
 	if result.Allowed(ActionReportOutputSettingsManage, Scope{}) || result.Allowed(ActionReportView, Scope{}) {
 		t.Fatalf("unexpected permission: %+v", result.Permissions)
 	}
-	repository.profile = AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MINISTER"}
+	repository.profile = AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MINISTER"}
 	for _, scope := range []Scope{{AcademicYearID: "year"}, {SemesterID: "semester"}, {WeekID: "week"}, {InspectionTypeID: "type"}} {
 		_, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow, Scope: scope})
 		if !errors.Is(err, ErrInvalidRule) {
@@ -330,7 +330,7 @@ func TestOnlySportsLeadershipReceivesMorningScheduleManagement(t *testing.T) {
 
 func TestOfficeLeadershipCanReceiveSeparatelyConfiguredForceGeneratePermission(t *testing.T) {
 	profile := AccessProfile{AccountID: "office-deputy", SystemRole: SystemRoleMember,
-		DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}
+		DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "VICE_MINISTER"}
 	repository := &memoryRepository{profile: profile}
 	service := NewService(repository)
 	defaultPermissions, err := service.Effective(context.Background(), profile.AccountID)
@@ -365,7 +365,7 @@ func TestOfficeLeadershipCanReceiveSeparatelyConfiguredForceGeneratePermission(t
 
 func TestForceGeneratePermissionRejectsAccountsOutsideOfficeLeadership(t *testing.T) {
 	for _, profile := range []AccessProfile{
-		{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER"},
+		{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MEMBER"},
 		{AccountID: "other-minister", SystemRole: SystemRoleMember, DepartmentCode: "STUDY", OrganizationRoleCode: "MINISTER"},
 		{AccountID: "superadmin", SystemRole: SystemRoleSuperAdmin},
 	} {
@@ -380,7 +380,7 @@ func TestForceGeneratePermissionRejectsAccountsOutsideOfficeLeadership(t *testin
 
 func TestUpdateRuleCannotGrantForcePermissionToIneligibleAccount(t *testing.T) {
 	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember,
-		DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER",
+		DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "MEMBER",
 		Rules: []Rule{{ID: "existing-rule", AccountID: "member", Action: ActionReportView, Effect: EffectAllow, Enabled: true}}}
 	_, err := NewService(&memoryRepository{profile: profile}).UpdateRule(context.Background(), Rule{
 		ID: "existing-rule", AccountID: profile.AccountID,
@@ -393,7 +393,7 @@ func TestUpdateRuleCannotGrantForcePermissionToIneligibleAccount(t *testing.T) {
 
 func TestForceGeneratePermissionCannotBeLimitedToDepartmentOrClass(t *testing.T) {
 	profile := AccessProfile{AccountID: "office-vice", SystemRole: SystemRoleMember,
-		DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}
+		DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "VICE_MINISTER"}
 	for _, scope := range []Scope{
 		{DepartmentID: "office"},
 		{ClassID: "class-1"},
@@ -432,7 +432,7 @@ func TestForceGenerateGrantStopsWorkingWhenOfficeLeadershipChanges(t *testing.T)
 		t.Run(testCase.name, func(t *testing.T) {
 			repository := &memoryRepository{profile: AccessProfile{
 				AccountID: "office-deputy", SystemRole: SystemRoleMember,
-				DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER",
+				DepartmentCode: "OFFICE", ReportScope: officeReportScope, OrganizationRoleCode: "VICE_MINISTER",
 				Rules: []Rule{{AccountID: "office-deputy", Action: ActionReportForceGenerate, Effect: EffectAllow, Enabled: true}},
 			}}
 			service := NewService(repository)
@@ -547,7 +547,7 @@ func TestHasAnyAllowedForScopedReportDefaults(t *testing.T) {
 func TestOfficeInspectionRulesCanGrantWorkWhenExplicitlyConfigured(t *testing.T) {
 	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER", "PRESIDIUM"} {
 		t.Run(role, func(t *testing.T) {
-			profile := AccessProfile{AccountID: "office", DepartmentID: "office", DepartmentCode: "OFFICE", SystemRole: SystemRoleMember, OrganizationRoleCode: role}
+			profile := AccessProfile{AccountID: "office", DepartmentID: "office", DepartmentCode: "OFFICE", ReportScope: officeReportScope, SystemRole: SystemRoleMember, OrganizationRoleCode: role}
 			for _, action := range []string{ActionInspectionEnter, ActionInspectionReview, ActionInspectionManage, ActionInspectionView} {
 				profile.Rules = append(profile.Rules, Rule{Action: action, Enabled: true, Effect: EffectAllow})
 			}
@@ -561,5 +561,62 @@ func TestOfficeInspectionRulesCanGrantWorkWhenExplicitlyConfigured(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+func TestNonMaintainerCannotUsePersonalReportWriteGrant(t *testing.T) {
+	for _, action := range []string{ActionReportGenerate, ActionReportCorrect, ActionReportFinalize, ActionReportOutputSettingsManage} {
+		t.Run(action, func(t *testing.T) {
+			repo := &memoryRepository{profile: AccessProfile{AccountID: "other", DepartmentID: "other", OrganizationRoleCode: "MINISTER", ReportDefaults: officeLeadershipDefaults, Rules: []Rule{{Action: action, Effect: EffectAllow, Enabled: true}}}}
+			result, err := NewService(repo).Effective(context.Background(), "other")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Allowed(action, Scope{}) {
+				t.Fatal("non-maintainer received write permission")
+			}
+		})
+	}
+}
+
+func TestReportPersonalGrantEligibilityAtWriteAndRead(t *testing.T) {
+	for _, action := range []string{ActionReportGenerate, ActionReportCorrect, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportOutputSettingsManage} {
+		for _, role := range []string{SystemRoleMember, SystemRoleAdmin} {
+			t.Run(role+action, func(t *testing.T) {
+				repo := &memoryRepository{profile: AccessProfile{AccountID: "target", SystemRole: role, DepartmentCode: "STUDY"}}
+				svc := NewService(repo)
+				before, _ := svc.Effective(context.Background(), "target")
+				if before.Allowed(action, Scope{}) {
+					t.Fatal("default grant")
+				}
+				rule, err := svc.CreateRule(context.Background(), "operator", Rule{AccountID: "target", Action: action, Effect: EffectAllow})
+				if role == SystemRoleMember {
+					if !errors.Is(err, ErrReportMaintenanceRequired) {
+						t.Fatalf("grant: %v", err)
+					}
+					if len(repo.mutations) != 0 {
+						t.Fatal("rejected grant persisted")
+					}
+					_, err = svc.UpdateRule(context.Background(), Rule{ID: "existing", AccountID: "target", Action: action, Effect: EffectAllow})
+					if !errors.Is(err, ErrReportMaintenanceRequired) {
+						t.Fatalf("update: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, _ := svc.Effective(context.Background(), "target")
+				if !result.Allowed(action, Scope{}) {
+					t.Fatal("explicit admin grant missing")
+				}
+				repo.profile.SystemRole = SystemRoleMember
+				result, _ = svc.Effective(context.Background(), "target")
+				if result.Allowed(action, Scope{}) {
+					t.Fatal("old grant survived role change")
+				}
+				_ = rule
+			})
+		}
 	}
 }

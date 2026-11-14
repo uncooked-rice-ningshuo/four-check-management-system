@@ -684,6 +684,19 @@ func (p *Postgres) CreateDepartment(ctx context.Context, department organization
 
 func (p *Postgres) UpdateDepartment(ctx context.Context, department organization.Department, mutation audit.Mutation) (organization.Department, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		var currentEnabled bool
+		if err := tx.QueryRow(ctx, `SELECT enabled FROM departments WHERE id=$1 FOR UPDATE`, department.ID).Scan(&currentEnabled); err != nil {
+			return err
+		}
+		if !department.Enabled {
+			var maintaining bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM department_report_scopes WHERE department_id=$1 AND enabled)`, department.ID).Scan(&maintaining); err != nil {
+				return err
+			}
+			if maintaining {
+				return organization.ErrReportMaintenanceDepartmentInUse
+			}
+		}
 		_, execErr := tx.Exec(ctx, `UPDATE departments SET name=$2,enabled=$3,updated_at=now() WHERE id=$1`, department.ID, department.Name, department.Enabled)
 		return execErr
 	})
@@ -809,7 +822,7 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 	if profile.DepartmentID != "" {
 		scope := &permission.ReportScope{}
 		err = p.Pool.QueryRow(ctx, `SELECT enabled,can_view,can_generate,can_correct,can_review,can_return,
-			can_finalize,can_publish,can_output_settings,can_archive FROM department_report_scopes WHERE department_id=$1::uuid`, profile.DepartmentID).
+			can_finalize,can_publish,can_output_settings,can_archive FROM department_report_scopes WHERE department_id=$1::uuid AND EXISTS (SELECT 1 FROM departments WHERE id=$1::uuid AND enabled)`, profile.DepartmentID).
 			Scan(&scope.Enabled, &scope.CanView, &scope.CanGenerate, &scope.CanCorrect, &scope.CanReview,
 				&scope.CanReturn, &scope.CanFinalize, &scope.CanPublish, &scope.CanOutputSettings, &scope.CanArchive)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {

@@ -20,11 +20,13 @@ import (
 )
 
 type reportWorkflowPermissionStub struct {
-	permissions []permission.EffectivePermission
+	permissions    []permission.EffectivePermission
+	departmentCode string
+	role           string
 }
 
 func (p reportWorkflowPermissionStub) Effective(context.Context, string) (permission.EffectiveResult, error) {
-	return permission.EffectiveResult{Permissions: p.permissions}, nil
+	return permission.EffectiveResult{Permissions: p.permissions, DepartmentCode: p.departmentCode, OrganizationRoleCode: p.role}, nil
 }
 
 func TestWeeklyReportVersionWorkflowPostgres(t *testing.T) {
@@ -183,7 +185,7 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	if err != nil || len(preview.Grades) != 1 || preview.ClassCount != 2 || preview.StudentCount != 2 || preview.UnassignedCount != 1 {
 		t.Fatalf("current roster preview = %+v, err=%v", preview, err)
 	}
-	service := reporting.NewService(database, reportWorkflowPermissionStub{permissions: permissions})
+	service := reporting.NewService(database, reportWorkflowPermissionStub{permissions: permissions, departmentCode: "OFFICE", role: "MINISTER"})
 	draft, err := service.GenerateDraft(ctx, actorID, reporting.GenerateDraftInput{SemesterID: semesterID, WeekID: weekID}, audit.Metadata{})
 	if err != nil {
 		t.Fatal("generate report draft:", err)
@@ -535,6 +537,24 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 	}
 	if _, err := partialArchiveService.ArchiveWorkflow(ctx, actorID, semesterID, weekID); !errors.Is(err, reporting.ErrForbidden) {
 		t.Fatalf("partial-scope archive viewer read a report with an out-of-scope cell: %v", err)
+	}
+	officeMemberService := reporting.NewService(database, reportWorkflowPermissionStub{permissions: permissions, departmentCode: "OFFICE", role: "MEMBER"})
+	if _, err := officeMemberService.GenerateDraft(ctx, actorID, reporting.GenerateDraftInput{SemesterID: semesterID, WeekID: weekID, ExpectedRowVersion: finalized.RowVersion}, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) {
+		t.Fatalf("office member generated a new draft from finalized report: %v", err)
+	}
+	if _, err := officeMemberService.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
+		RowVersion: finalized.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{Field: "details.remark", AfterValue: []byte(`"member correction"`)}}, Reason: "测试委员越权",
+	}, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) {
+		t.Fatalf("office member revised finalized report: %v", err)
+	}
+	if _, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
+		RowVersion: finalized.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{Field: "details.remark", AfterValue: []byte(`"premature correction"`)}}, Reason: "未确认直接修正",
+	}, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) {
+		t.Fatalf("finalized revision without confirmation = %v", err)
+	}
+	intent, err := service.StartFinalizedRevision(ctx, actorID, draft.ID, finalized.RowVersion, audit.Metadata{})
+	if err != nil || intent.ReportID != draft.ID || intent.BaseVersion != finalized.VersionNo {
+		t.Fatalf("start finalized revision = %+v, %v", intent, err)
 	}
 	archiveCorrection, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{
 		RowVersion: finalized.RowVersion, RecordID: recordID, Changes: []reporting.ReportCorrectionChange{{

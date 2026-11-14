@@ -32,7 +32,6 @@ const (
 	ActionInspectionView             = "INSPECTION_VIEW"
 	ActionInspectionReview           = "INSPECTION_REVIEW"
 	ActionInspectionExport           = "INSPECTION_EXPORT"
-	ActionInspectionSummary          = "INSPECTION_SUMMARIZE"
 	ActionMorningScheduleManage      = "MORNING_SCHEDULE_MANAGE"
 	ActionReportView                 = "REPORT_VIEW"
 	ActionReportGenerate             = "REPORT_GENERATE"
@@ -50,10 +49,11 @@ const (
 var ErrInvalidRule = errors.New("invalid permission rule")
 var ErrForceGenerateRoleRequired = errors.New("force generation permission requires student union office leadership")
 var ErrReportObligationRoleRequired = errors.New("weekly obligation permission requires student union office leadership")
+var ErrReportLeadershipRequired = errors.New("report approval and output settings require department leadership")
 
 var allActions = []string{
 	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
-	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionInspectionSummary, ActionMorningScheduleManage,
+	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionMorningScheduleManage,
 	ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }
 
@@ -89,9 +89,9 @@ type DepartmentScope struct {
 	InspectionTypeID string
 	CanEnter         bool
 	CanView          bool
+	CanManage        bool
 	CanReview        bool
 	CanExport        bool
-	CanSummarize     bool
 	Enabled          bool
 }
 
@@ -103,6 +103,23 @@ type AccessProfile struct {
 	OrganizationRoleCode string
 	DepartmentScopes     []DepartmentScope
 	Rules                []Rule
+	ReportDefaults       *ReportRoleDefaults
+	ReportScope          *ReportScope
+	InspectionDefaults   map[string]*InspectionRoleDefaults
+}
+
+type InspectionRoleDefaults struct {
+	CanView, CanEnter, CanManage, CanReview, CanExport bool
+}
+
+type ReportRoleDefaults struct {
+	CanView, CanGenerate, CanCorrect, CanReview, CanReturn, CanFinalize bool
+	CanPublish, CanOutputSettings, CanArchive                           bool
+}
+
+type ReportScope struct {
+	Enabled bool
+	ReportRoleDefaults
 }
 
 type EffectivePermission struct {
@@ -114,7 +131,9 @@ type EffectivePermission struct {
 
 type EffectiveResult struct {
 	PrimaryDepartmentID      string                `json:"-"`
+	DepartmentCode           string                `json:"-"`
 	OrganizationRoleCode     string                `json:"-"`
+	CanReviseFinalizedReport bool                  `json:"canReviseFinalizedReport"`
 	ConfirmedInspectionsOnly bool                  `json:"confirmedInspectionsOnly,omitempty"`
 	AccountID                string                `json:"accountId"`
 	SystemRole               string                `json:"systemRole"`
@@ -203,8 +222,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	if err != nil {
 		return EffectiveResult{}, err
 	}
-	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, OrganizationRoleCode: profile.OrganizationRoleCode, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
+	result := EffectiveResult{PrimaryDepartmentID: profile.DepartmentID, DepartmentCode: profile.DepartmentCode, OrganizationRoleCode: profile.OrganizationRoleCode, AccountID: profile.AccountID, SystemRole: profile.SystemRole, Permissions: make([]EffectivePermission, 0)}
 	if profile.SystemRole == SystemRoleSuperAdmin {
+		result.CanReviseFinalizedReport = true
 		for _, action := range allActions {
 			if action == ActionReportForceGenerate || action == ActionReportObligationManage {
 				continue
@@ -243,33 +263,49 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		// The user's primary-department mapping grants actions for an inspection
 		// type; the action applies to that type across departments.
 		scope := Scope{InspectionTypeID: mapping.InspectionTypeID}
-		source := Source{Type: SourceDepartmentMap, Label: "部门与检查类型映射"}
-		if leadership && mapping.CanEnter {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionManage, scope, Source{Type: SourceOrganizationRole, Label: "部门负责人记录管理"}))
+		inspectionDefaults := profile.InspectionDefaults[mapping.InspectionTypeID]
+		source := Source{Type: SourceDepartmentMap, Label: "部门检查项功能"}
+		roleSource := Source{Type: SourceOrganizationRole, Label: "检查项岗位默认权限"}
+		if inspectionDefaults != nil && inspectionDefaults.CanManage && mapping.CanManage {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionManage, scope, source, roleSource))
 		}
-		if mapping.CanEnter {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionEnter, scope, source))
+		if inspectionDefaults != nil && inspectionDefaults.CanEnter && mapping.CanEnter {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionEnter, scope, source, roleSource))
 		}
-		if mapping.CanView {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionView, scope, source))
+		if inspectionDefaults != nil && inspectionDefaults.CanView && mapping.CanView {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionView, scope, source, roleSource))
 		}
-		if leadership && mapping.CanReview {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionReview, scope, source))
+		if inspectionDefaults != nil && inspectionDefaults.CanReview && mapping.CanReview {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionReview, scope, source, roleSource))
 		}
-		if mapping.CanExport {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionExport, scope, source))
-		}
-		if leadership && mapping.CanSummarize {
-			result.Permissions = append(result.Permissions, allow(ActionInspectionSummary, scope, source))
+		if leadership && inspectionDefaults != nil && inspectionDefaults.CanExport && (profile.DepartmentCode == "STUDY" || profile.DepartmentCode == "SPORTS" || profile.DepartmentCode == "DORMITORY") && mapping.CanExport {
+			result.Permissions = append(result.Permissions, allow(ActionInspectionExport, scope, source, roleSource))
 		}
 	}
-	if profile.DepartmentCode == "OFFICE" && leadership {
-		for _, action := range []string{ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
-			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceOrganizationRole, Label: "学生会办公室部长/副部长"}))
+	reportScope := profile.ReportScope
+	result.CanReviseFinalizedReport = leadership && reportScope != nil && reportScope.Enabled && reportScope.CanCorrect && profile.ReportDefaults != nil && profile.ReportDefaults.CanCorrect
+	if reportScope != nil && reportScope.Enabled && profile.ReportDefaults != nil {
+		defaults := profile.ReportDefaults
+		for _, entry := range []struct {
+			action  string
+			enabled bool
+		}{
+			{ActionReportView, reportScope.CanView && defaults.CanView}, {ActionReportGenerate, reportScope.CanGenerate && defaults.CanGenerate},
+			{ActionReportCorrect, reportScope.CanCorrect && defaults.CanCorrect}, {ActionArchiveView, reportScope.CanArchive && defaults.CanArchive},
+			{ActionReportReview, reportScope.CanReview && defaults.CanReview && leadership}, {ActionReportReturn, reportScope.CanReturn && defaults.CanReturn && leadership},
+			{ActionReportFinalize, reportScope.CanFinalize && defaults.CanFinalize && leadership}, {ActionReportPublish, reportScope.CanPublish && defaults.CanPublish && leadership},
+			{ActionReportOutputSettingsManage, reportScope.CanOutputSettings && defaults.CanOutputSettings && leadership},
+		} {
+			if entry.enabled {
+				result.Permissions = append(result.Permissions, allow(entry.action, Scope{}, Source{Type: SourceDepartmentMap, Label: "部门周通报功能"}, Source{Type: SourceOrganizationRole, Label: "周通报岗位默认权限"}))
+			}
 		}
 	}
 	for _, rule := range profile.Rules {
 		if !rule.Enabled {
+			continue
+		}
+		if requiresReportLeadership(rule.Action) && !isReportLeadership(profile) {
 			continue
 		}
 		if rule.Action == ActionMorningScheduleManage && !(profile.DepartmentCode == "SPORTS" && leadership) {
@@ -294,18 +330,12 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 		}
 		result.Permissions = append(result.Permissions, userRulePermission(rule))
 	}
-	if profile.DepartmentCode == "OFFICE" {
-		result.ConfirmedInspectionsOnly = true
-		allowed := result.Permissions[:0]
-		for _, p := range result.Permissions {
-			switch p.Action {
-			case ActionInspectionEnter, ActionInspectionManage, ActionInspectionReview:
-				continue
-			}
-			allowed = append(allowed, p)
-		}
-		result.Permissions = allowed
-	}
+	// The office starts with a read-only template. Its confirmed-source view
+	// policy follows effective write actions, so administrators can later
+	// assign inspection work without a code change.
+	result.ConfirmedInspectionsOnly = profile.DepartmentCode == "OFFICE" &&
+		!result.HasAnyAllowed(ActionInspectionEnter) && !result.HasAnyAllowed(ActionInspectionManage) && !result.HasAnyAllowed(ActionInspectionReview)
+	result.CanReviseFinalizedReport = result.CanReviseFinalizedReport && result.HasAnyAllowed(ActionReportCorrect)
 	return result, nil
 }
 
@@ -331,6 +361,9 @@ func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, met
 	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
 		return Rule{}, err
 	}
+	if err := s.validateReportLeadershipTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
 	rule.ID = uuid.NewString()
 	rule.Note = strings.TrimSpace(rule.Note)
 	rule.SourceType = SourceUserRule
@@ -348,6 +381,9 @@ func (s *Service) UpdateRule(ctx context.Context, rule Rule, metadata ...audit.M
 		return Rule{}, err
 	}
 	if err := s.validateReportObligationTarget(ctx, rule); err != nil {
+		return Rule{}, err
+	}
+	if err := s.validateReportLeadershipTarget(ctx, rule); err != nil {
 		return Rule{}, err
 	}
 	rule.Note = strings.TrimSpace(rule.Note)
@@ -424,6 +460,34 @@ func (s *Service) validateReportObligationTarget(ctx context.Context, rule Rule)
 	return nil
 }
 
+func requiresReportLeadership(action string) bool {
+	switch action {
+	case ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionReportOutputSettingsManage:
+		return true
+	default:
+		return false
+	}
+}
+
+func isReportLeadership(profile AccessProfile) bool {
+	return profile.SystemRole == SystemRoleSuperAdmin ||
+		(profile.ReportDefaults != nil && (profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER"))
+}
+
+func (s *Service) validateReportLeadershipTarget(ctx context.Context, rule Rule) error {
+	if rule.Effect != EffectAllow || !requiresReportLeadership(rule.Action) {
+		return nil
+	}
+	profile, err := s.repository.LoadAccessProfile(ctx, rule.AccountID)
+	if err != nil {
+		return err
+	}
+	if !isReportLeadership(profile) {
+		return ErrReportLeadershipRequired
+	}
+	return nil
+}
+
 func isForceGenerateEligible(profile AccessProfile) bool {
 	return profile.DepartmentCode == "OFFICE" &&
 		(profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER")
@@ -442,8 +506,8 @@ func userRulePermission(rule Rule) EffectivePermission {
 	return EffectivePermission{Action: rule.Action, Effect: rule.Effect, Scope: rule.Scope, Sources: []Source{{Type: SourceUserRule, Label: label}}}
 }
 
-func allow(action string, scope Scope, source Source) EffectivePermission {
-	return EffectivePermission{Action: action, Effect: EffectAllow, Scope: scope, Sources: []Source{source}}
+func allow(action string, scope Scope, sources ...Source) EffectivePermission {
+	return EffectivePermission{Action: action, Effect: EffectAllow, Scope: scope, Sources: sources}
 }
 
 func validRule(rule Rule) bool {
@@ -451,6 +515,9 @@ func validRule(rule Rule) bool {
 		return false
 	}
 	if hasRemovedScopeDimensions(rule.Scope) {
+		return false
+	}
+	if rule.Action == ActionInspectionExport {
 		return false
 	}
 	if rule.Action == ActionReportOutputSettingsManage && !isGlobalScope(rule.Scope) {

@@ -218,6 +218,10 @@ func attendanceRouterWithRole(t *testing.T, allowed, superAdmin bool) (http.Hand
 }
 
 func attendanceRouterWithPasswordState(t *testing.T, allowed, superAdmin, mustChangePassword bool, customRules ...[]permission.Rule) (http.Handler, string, *importHTTPStub, *attendanceHTTPStub) {
+	return attendanceRouterWithProfileRole(t, allowed, superAdmin, mustChangePassword, "MEMBER", customRules...)
+}
+
+func attendanceRouterWithProfileRole(t *testing.T, allowed, superAdmin, mustChangePassword bool, orgRole string, customRules ...[]permission.Rule) (http.Handler, string, *importHTTPStub, *attendanceHTTPStub) {
 	t.Helper()
 	accountsRepository := &accounts{values: map[string]auth.Account{}}
 	authService := auth.NewService(accountsRepository, &sessions{values: map[string]auth.RefreshSession{}}, []byte("01234567890123456789012345678901"), time.Minute, time.Hour)
@@ -236,7 +240,7 @@ func attendanceRouterWithPasswordState(t *testing.T, allowed, superAdmin, mustCh
 	if allowed {
 		effect = permission.EffectAllow
 	}
-	permissionRepository := &permissionRepository{profile: permission.AccessProfile{AccountID: account.ID, SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{
+	permissionRepository := &permissionRepository{profile: permission.AccessProfile{AccountID: account.ID, DepartmentID: account.PrimaryDepartmentID, OrganizationRoleCode: orgRole, SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{
 		{Action: permission.ActionInspectionView, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002"}},
 		{Action: permission.ActionInspectionEnter, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002"}},
 		{Action: permission.ActionInspectionView, Effect: permission.EffectDeny, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002", ClassID: "blocked-class"}},
@@ -310,6 +314,17 @@ func TestAttendanceListUsesTypeWideDepartmentOptionsWhenFilterIsEmpty(t *testing
 	}
 	if response.Code != http.StatusOK || attendance.scope.DepartmentID != "" || !departments["10000000-0000-0000-0000-000000000002"] || !departments["department-office"] || !departments["other-department"] || !departments["00000000-0000-0000-0000-000000000000"] {
 		t.Fatalf("response=%d %s scope=%#v", response.Code, response.Body.String(), attendance.scope)
+	}
+}
+
+func TestPresidiumAttendanceListUsesOnlyPrimaryDepartment(t *testing.T) {
+	router, token, _, attendance := attendanceRouterWithProfileRole(t, true, false, false, "PRESIDIUM")
+	base := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&page=1&pageSize=20"
+	if response := performJSON(router, http.MethodGet, base, nil, token); response.Code != http.StatusOK || attendance.scope.DepartmentID != "10000000-0000-0000-0000-000000000002" {
+		t.Fatalf("primary department scope: response=%d scope=%+v", response.Code, attendance.scope)
+	}
+	if response := performJSON(router, http.MethodGet, base+"&departmentId=other-department", nil, token); response.Code != http.StatusForbidden {
+		t.Fatalf("cross department response=%d %s", response.Code, response.Body.String())
 	}
 }
 

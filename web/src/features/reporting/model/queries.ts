@@ -124,6 +124,20 @@ export function useReportArchiveWorkflow(semesterId: string, weekId: string, ena
   })
 }
 
+export function useStartReportRevision() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { reportId: string; semesterId: string; weekId: string; versionNo: number }) => {
+      const workflow = await reportingApi.archiveWorkflow(input.semesterId, input.weekId)
+      if (!workflow.report || workflow.report.id !== input.reportId || workflow.report.versionNo !== input.versionNo) {
+        throw new ApiError(409, 'REPORT_VERSION_CONFLICT', '通报版本已变化，请刷新后重新核对')
+      }
+      return reportingApi.startRevision(input.reportId, workflow.report.rowVersion)
+    },
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['reports', 'archive'] }) },
+  })
+}
+
 export function useGenerateReportDraft(query: ReportObligationPeriodQuery) {
   const queryClient = useQueryClient()
   return useMutation({

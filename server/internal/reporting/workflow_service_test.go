@@ -250,7 +250,7 @@ func TestTransitionAllowsCreatorToReviewWhenActionPermissionAllows(t *testing.T)
 	review := permission.EffectivePermission{Action: permission.ActionReportReview, Effect: permission.EffectAllow}
 	repository := &reportWorkflowRepositoryStub{reportingRepositoryStub: &reportingRepositoryStub{},
 		transition: ReportState{ID: "a0000000-0000-0000-0000-000000000009", Status: ReportStatusFinalizing}}
-	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{view, review}}})
+	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{DepartmentCode: "OFFICE", OrganizationRoleCode: "MINISTER", Permissions: []permission.EffectivePermission{view, review}}})
 	result, err := service.TransitionReport(context.Background(), reportTestActor, repository.transition.ID,
 		ReportActionApprove, ReportTransitionInput{RowVersion: 1}, audit.Metadata{})
 	if err != nil || result.Status != ReportStatusFinalizing || repository.transitionAction != ReportActionApprove || len(repository.transitionRules) != 1 {

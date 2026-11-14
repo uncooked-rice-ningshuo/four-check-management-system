@@ -183,6 +183,8 @@ func (s *RecordService) access(ctx context.Context, a ManualActor) (MutationAcce
 	p, err := s.permissions.Effective(ctx, a.ID)
 	result.ConfirmedOnly = p.ConfirmedInspectionsOnly
 	result.CanRouteOwn = p.SystemRole == permission.SystemRoleAdmin
+	result.RestrictReadDepartment = p.OrganizationRoleCode == "PRESIDIUM"
+	result.ReadDepartmentID = p.PrimaryDepartmentID
 	result.Permissions = p.Permissions
 	return result, err
 }

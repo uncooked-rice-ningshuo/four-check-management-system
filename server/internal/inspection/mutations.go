@@ -17,9 +17,11 @@ var (
 
 // MutationAccess is compiled from server-side permissions, never request JSON.
 type MutationAccess struct {
-	ConfirmedOnly bool
-	CanRouteOwn   bool
-	ActorID       string
+	ConfirmedOnly          bool
+	CanRouteOwn            bool
+	ReadDepartmentID       string
+	RestrictReadDepartment bool
+	ActorID                string
 	// ReportScopeValidated allows classless rows after the reporting service
 	// has authorized the exact report cell and the repository applies its dimensions.
 	ReportScopeValidated bool

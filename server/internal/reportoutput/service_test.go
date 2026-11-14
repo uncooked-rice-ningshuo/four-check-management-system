@@ -252,6 +252,27 @@ type outputPermissionsStub struct {
 	permissions []permission.EffectivePermission
 }
 
+type officeOutputPermissionsStub struct{ outputPermissionsStub }
+
+func (p officeOutputPermissionsStub) Effective(context.Context, string) (permission.EffectiveResult, error) {
+	return permission.EffectiveResult{DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", Permissions: p.permissions}, nil
+}
+
+func TestOfficeMemberCannotGenerateFinalizedReportFile(t *testing.T) {
+	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002"}
+	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeCode: "LATE_RETURN"}}}}
+	workflow := reporting.ReportWorkflow{Report: &reporting.ReportState{Status: reporting.ReportStatusFinalized, VersionNo: 1}, Versions: []reporting.ReportVersion{version}}
+	repo := &outputRepositoryStub{settings: Settings{Version: 1}}
+	service := NewService(repo, &outputFilesStub{}, officeOutputPermissionsStub{outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}}, outputWorkflowStub{workflow})
+	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
+	if _, err := service.Generate(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) || repo.starts != 0 {
+		t.Fatalf("finalized file generation was not denied before write: err=%v starts=%d", err, repo.starts)
+	}
+	if _, _, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) || repo.transientOutputs != 0 {
+		t.Fatalf("finalized direct download was not denied before audit: err=%v audits=%d", err, repo.transientOutputs)
+	}
+}
+
 func (p outputPermissionsStub) Effective(context.Context, string) (permission.EffectiveResult, error) {
 	return permission.EffectiveResult{Permissions: p.permissions}, nil
 }

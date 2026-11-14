@@ -9,10 +9,10 @@ import { createPermissionRule, deletePermissionRule, getAcademicCalendar, getCat
 const actionOptions = [
   ['USER_MANAGE', '用户管理'], ['PERMISSION_MANAGE', '权限管理'], ['MASTER_DATA_MANAGE', '基础数据管理'], ['DICTIONARY_MANAGE', '字典管理'],
   ['CONFIGURATION_VIEW', '系统配置查看'],
-  ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'], ['INSPECTION_EXPORT', '检查导出'], ['INSPECTION_SUMMARIZE', '检查汇总'],
+  ['INSPECTION_ENTER', '检查录入'], ['INSPECTION_MANAGE', '管理检查记录'], ['INSPECTION_VIEW', '检查查看'], ['INSPECTION_REVIEW', '检查审核'],
   ['REPORT_VIEW', '通报工作台查看'], ['REPORT_GENERATE', '生成通报草稿'], ['REPORT_CORRECT', '通报内修正'], ['REPORT_OBLIGATION_MANAGE', '管理逐周应交范围'], ['REPORT_OUTPUT_SETTINGS_MANAGE', '编辑通报文件设置'], ['REPORT_FORCE_GENERATE', '强制生成未完成通报'], ['REPORT_REVIEW', '通报审核'], ['REPORT_RETURN', '通报退回'], ['REPORT_FINALIZE', '通报定稿'], ['REPORT_PUBLISH', '通报发布'], ['ARCHIVE_VIEW', '通报归档查看'],
 ].map(([value, label]) => ({ value, label }))
-const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? value
+const actionName = (value: string) => actionOptions.find(item => item.value === value)?.label ?? (value === 'INSPECTION_EXPORT' ? '检查导出（规划中）' : value)
 
 export function PermissionDetailDrawer({ accountId, userName, onClose }: { accountId: string; userName: string; onClose: () => void }) {
   const { message } = App.useApp()
@@ -49,7 +49,7 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openRule(record)}>编辑</Button><Popconfirm title="确认删除这条权限规则？" onConfirm={() => remove.mutate(record.id)}><Button type="link" danger>删除</Button></Popconfirm></Space> },
   ]
   return <Drawer title={`${userName} · 生效权限`} open={Boolean(accountId)} onClose={onClose} size="large" destroyOnHidden>
-    <Typography.Paragraph type="secondary">部门与检查类型映射决定可用的检查类型和操作；获得的操作按检查类型跨部门生效。新增或导入记录仍归属账号主部门。用户单独授权/限制可按学年、学期、周次和检查类型设置，匹配范围内的拒绝优先。</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">部门与检查类型映射决定可用的检查类型和操作。主席团记录查看仅限主部门；其他账号获得的检查操作按检查类型生效。新增或导入记录仍归属账号主部门。用户单独授权/限制可按学年、学期、周次和检查类型设置，匹配范围内的拒绝优先。</Typography.Paragraph>
     <ProTable<EffectivePermission> rowKey={(record, index) => `${record.action}-${record.effect}-${index}`} headerTitle="当前生效权限" loading={effective.isLoading} search={false} options={false} pagination={{ pageSize: 8 }} dataSource={effective.data?.permissions ?? []} columns={permissionColumns} locale={{ emptyText: <Empty description="当前没有生效权限" /> }} />
     <ProTable<PermissionRule> rowKey="id" headerTitle="用户补充规则" loading={rules.isLoading} search={false} options={false} pagination={false} dataSource={rules.data ?? []} columns={ruleColumns} toolBarRender={() => [<Button key="add" type="primary" icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限规则</Button>]} locale={{ emptyText: <Empty description="暂无用户单独规则" /> }} />
     <Modal title={`${editing ? '编辑' : '新增'}权限规则`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} width={720} destroyOnHidden>

@@ -299,9 +299,6 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 		}
 		permissions = effective.Permissions
 		if effective.SystemRole == permission.SystemRoleMember {
-			if effective.OrganizationRoleCode != "MINISTER" && effective.OrganizationRoleCode != "VICE_MINISTER" {
-				return Submission{}, ErrSubmissionScope
-			}
 			isMember = true
 			memberDepartmentID = effective.PrimaryDepartmentID
 		}

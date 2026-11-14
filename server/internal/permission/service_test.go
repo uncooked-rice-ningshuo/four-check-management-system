@@ -13,6 +13,13 @@ type memoryRepository struct {
 	mutations []audit.Mutation
 }
 
+var inspectionMemberDefaults = &InspectionRoleDefaults{CanView: true, CanEnter: true}
+var inspectionLeadershipDefaults = &InspectionRoleDefaults{CanView: true, CanEnter: true, CanManage: true, CanReview: true, CanExport: true}
+var inspectionPresidiumDefaults = &InspectionRoleDefaults{CanView: true}
+var officeMemberDefaults = &ReportRoleDefaults{CanView: true, CanGenerate: true, CanCorrect: true, CanArchive: true}
+var officeLeadershipDefaults = &ReportRoleDefaults{CanView: true, CanGenerate: true, CanCorrect: true, CanReview: true, CanReturn: true, CanFinalize: true, CanPublish: true, CanOutputSettings: true, CanArchive: true}
+var officeReportScope = &ReportScope{Enabled: true, ReportRoleDefaults: *officeLeadershipDefaults}
+
 func (m *memoryRepository) LoadAccessProfile(context.Context, string) (AccessProfile, error) {
 	return m.profile, nil
 }
@@ -48,7 +55,7 @@ func TestSuperAdminReceivesGeneralActionsWithSystemSource(t *testing.T) {
 }
 
 func TestDepartmentMemberReceivesMappedEnterAndViewOnly(t *testing.T) {
-	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MEMBER", DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, CanView: true, CanReview: true, Enabled: true}}}
+	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MEMBER", InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": inspectionMemberDefaults}, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, CanView: true, CanReview: true, Enabled: true}}}
 	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "member")
 	if err != nil {
 		t.Fatal(err)
@@ -70,21 +77,186 @@ func TestDepartmentMemberReceivesMappedEnterAndViewOnly(t *testing.T) {
 	}
 }
 
+func TestInspectionRoleDefaultsAreIndependentByType(t *testing.T) {
+	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MEMBER",
+		InspectionDefaults: map[string]*InspectionRoleDefaults{
+			"attendance": {CanView: true, CanEnter: true},
+			"hygiene":    {CanView: true, CanReview: true},
+		},
+		DepartmentScopes: []DepartmentScope{
+			{DepartmentID: "study", InspectionTypeID: "attendance", CanView: true, CanEnter: true, Enabled: true},
+			{DepartmentID: "study", InspectionTypeID: "hygiene", CanView: true, CanEnter: true, CanReview: true, Enabled: true},
+		},
+	}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed(ActionInspectionEnter, Scope{InspectionTypeID: "attendance"}) || result.Allowed(ActionInspectionEnter, Scope{InspectionTypeID: "hygiene"}) || !result.Allowed(ActionInspectionView, Scope{InspectionTypeID: "hygiene"}) || !result.Allowed(ActionInspectionReview, Scope{InspectionTypeID: "hygiene"}) {
+		t.Fatalf("per-type role defaults not enforced: %+v", result.Permissions)
+	}
+}
+
+func TestOfficeConfiguredInspectionWorkOverridesReadOnlyBaseline(t *testing.T) {
+	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER",
+		InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": {CanView: true, CanManage: true, CanReview: true}},
+		DepartmentScopes:   []DepartmentScope{{DepartmentID: "office", InspectionTypeID: "attendance", CanView: true, CanEnter: true, CanManage: true, CanReview: true, Enabled: true}},
+	}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil || result.ConfirmedInspectionsOnly || !result.Allowed(ActionInspectionManage, Scope{InspectionTypeID: "attendance"}) || !result.Allowed(ActionInspectionReview, Scope{InspectionTypeID: "attendance"}) {
+		t.Fatalf("configured office work did not take effect: result=%+v err=%v", result, err)
+	}
+}
+
 func TestDepartmentMinisterReceivesMappedReview(t *testing.T) {
-	profile := AccessProfile{AccountID: "minister", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MINISTER", DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanReview: true, Enabled: true}}}
+	profile := AccessProfile{AccountID: "minister", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MINISTER", InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": inspectionLeadershipDefaults}, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanReview: true, Enabled: true}}}
 	result, _ := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "minister")
 	if !result.Allowed(ActionInspectionReview, Scope{DepartmentID: "study", InspectionTypeID: "attendance"}) {
 		t.Fatalf("permissions = %+v", result.Permissions)
 	}
 }
 
+func TestPresidiumGetsOnlyPrimaryDepartmentInspectionView(t *testing.T) {
+	profile := AccessProfile{AccountID: "presidium", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "PRESIDIUM", InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": inspectionPresidiumDefaults}, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, CanView: true, CanReview: true, CanExport: true, Enabled: true}}}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "presidium")
+	if err != nil || !result.Allowed(ActionInspectionView, Scope{InspectionTypeID: "attendance"}) || result.PrimaryDepartmentID != "study" {
+		t.Fatalf("presidium view or department missing: result=%+v err=%v", result, err)
+	}
+	for _, action := range []string{ActionInspectionEnter, ActionInspectionManage, ActionInspectionReview, ActionInspectionExport} {
+		if result.Allowed(action, Scope{InspectionTypeID: "attendance"}) {
+			t.Errorf("presidium inherited %s", action)
+		}
+	}
+}
+
 func TestOfficeLeadershipReceivesReportWorkflowActions(t *testing.T) {
-	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER"}
+	profile := AccessProfile{AccountID: "office", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "VICE_MINISTER", ReportDefaults: officeLeadershipDefaults, ReportScope: officeReportScope}
 	result, _ := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "office")
 	for _, action := range []string{ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish} {
 		if !result.Allowed(action, Scope{}) {
 			t.Errorf("missing %s in %+v", action, result.Permissions)
 		}
+	}
+	if !result.CanReviseFinalizedReport {
+		t.Fatal("office deputy cannot initiate finalized correction")
+	}
+}
+
+func TestOfficeMemberReceivesDraftAndArchiveActionsOnly(t *testing.T) {
+	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentID: "office", DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults, ReportScope: officeReportScope}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{ActionReportView, ActionReportGenerate, ActionReportCorrect, ActionArchiveView} {
+		if !result.Allowed(action, Scope{}) {
+			t.Errorf("missing %s", action)
+		}
+	}
+	for _, action := range []string{ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionReportOutputSettingsManage, ActionReportForceGenerate, ActionReportObligationManage} {
+		if result.Allowed(action, Scope{}) {
+			t.Errorf("unexpected %s", action)
+		}
+	}
+	if result.CanReviseFinalizedReport {
+		t.Fatal("office member can initiate finalized correction")
+	}
+}
+
+func TestReportDefaultsRequireMatchingDepartmentAction(t *testing.T) {
+	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentID: "dormitory", DepartmentCode: "DORMITORY", OrganizationRoleCode: "MEMBER",
+		ReportDefaults: officeMemberDefaults, ReportScope: &ReportScope{Enabled: true, ReportRoleDefaults: ReportRoleDefaults{CanView: true, CanGenerate: true}}}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed(ActionReportView, Scope{}) || !result.Allowed(ActionReportGenerate, Scope{}) || result.Allowed(ActionReportCorrect, Scope{}) || result.Allowed(ActionArchiveView, Scope{}) {
+		t.Fatalf("department action intersection failed: %+v", result.Permissions)
+	}
+	for _, grant := range result.Permissions {
+		if grant.Action == ActionReportGenerate && (len(grant.Sources) != 2 || grant.Sources[0].Type != SourceDepartmentMap || grant.Sources[1].Type != SourceOrganizationRole) {
+			t.Fatalf("report grant must explain both configuration layers: %+v", grant.Sources)
+		}
+	}
+	profile.ReportScope.Enabled = false
+	result, err = NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed(ActionReportView, Scope{}) || result.Allowed(ActionReportGenerate, Scope{}) {
+		t.Fatalf("disabled report module granted action: %+v", result.Permissions)
+	}
+}
+
+func TestInspectionManageRequiresMatchingDepartmentAction(t *testing.T) {
+	profile := AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: "MEMBER",
+		InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": {CanManage: true}},
+		DepartmentScopes:   []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, Enabled: true}}}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed(ActionInspectionManage, Scope{InspectionTypeID: "attendance"}) {
+		t.Fatal("manage granted without department action")
+	}
+	profile.DepartmentScopes[0].CanManage = true
+	result, err = NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed(ActionInspectionManage, Scope{InspectionTypeID: "attendance"}) {
+		t.Fatal("manage denied after both actions enabled")
+	}
+}
+
+func TestOfficeMemberCannotGainLeadershipActionThroughPersonalRule(t *testing.T) {
+	profile := AccessProfile{AccountID: "office-member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", ReportDefaults: officeMemberDefaults,
+		Rules: []Rule{{Action: ActionReportReview, Effect: EffectAllow, Enabled: true}}}
+	service := NewService(&memoryRepository{profile: profile})
+	result, err := service.Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed(ActionReportReview, Scope{}) {
+		t.Fatal("legacy personal rule bypassed office leadership requirement")
+	}
+	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: profile.AccountID, Action: ActionReportFinalize, Effect: EffectAllow}); !errors.Is(err, ErrReportLeadershipRequired) {
+		t.Fatalf("new personal rule error = %v", err)
+	}
+}
+
+func TestOfficeAccountWithoutOrganizationRoleHasNoReportDefaults(t *testing.T) {
+	profile := AccessProfile{AccountID: "office-unassigned", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE"}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed(ActionReportGenerate, Scope{}) || result.Allowed(ActionReportReview, Scope{}) {
+		t.Fatalf("unassigned office account inherited report defaults: %+v", result.Permissions)
+	}
+}
+
+func TestInspectionExportIsNotInheritedByMemberOrOffice(t *testing.T) {
+	for _, test := range []struct {
+		name, department, role string
+		want                   bool
+	}{
+		{"business member", "STUDY", "MEMBER", false},
+		{"business minister", "STUDY", "MINISTER", true},
+		{"business deputy", "STUDY", "VICE_MINISTER", true},
+		{"office minister", "OFFICE", "MINISTER", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			profile := AccessProfile{AccountID: "actor", SystemRole: SystemRoleMember, DepartmentID: "department", DepartmentCode: test.department, OrganizationRoleCode: test.role, InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": inspectionLeadershipDefaults},
+				DepartmentScopes: []DepartmentScope{{DepartmentID: "department", InspectionTypeID: "attendance", CanExport: true, Enabled: true}}}
+			result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), profile.AccountID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Allowed(ActionInspectionExport, Scope{InspectionTypeID: "attendance"}) != test.want {
+				t.Error("export permission mismatch")
+			}
+		})
 	}
 }
 
@@ -96,12 +268,12 @@ func TestReportOutputSettingsPermissionIsGlobalAndIndependent(t *testing.T) {
 		{"office minister", SystemRoleMember, "OFFICE", "MINISTER", true},
 		{"office deputy", SystemRoleMember, "OFFICE", "VICE_MINISTER", true},
 		{"office member", SystemRoleMember, "OFFICE", "MEMBER", false},
-		{"other minister", SystemRoleMember, "STUDY", "MINISTER", false},
+		{"other minister with report defaults", SystemRoleMember, "STUDY", "MINISTER", true},
 		{"system admin", SystemRoleAdmin, "", "", false},
 		{"super admin", SystemRoleSuperAdmin, "", "", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := NewService(&memoryRepository{profile: AccessProfile{AccountID: "user", SystemRole: test.role, DepartmentCode: test.department, OrganizationRoleCode: test.organizationRole}}).Effective(context.Background(), "user")
+			result, err := NewService(&memoryRepository{profile: AccessProfile{AccountID: "user", SystemRole: test.role, DepartmentCode: test.department, OrganizationRoleCode: test.organizationRole, ReportDefaults: officeLeadershipDefaults, ReportScope: officeReportScope}}).Effective(context.Background(), "user")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,16 +284,17 @@ func TestReportOutputSettingsPermissionIsGlobalAndIndependent(t *testing.T) {
 	}
 	repository := &memoryRepository{profile: AccessProfile{AccountID: "member", SystemRole: SystemRoleMember}}
 	service := NewService(repository)
-	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow}); err != nil {
-		t.Fatal(err)
+	if _, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow}); !errors.Is(err, ErrReportLeadershipRequired) {
+		t.Fatalf("non-office grant error = %v", err)
 	}
 	result, err := service.Effective(context.Background(), "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Allowed(ActionReportOutputSettingsManage, Scope{}) || result.Allowed(ActionReportView, Scope{}) {
+	if result.Allowed(ActionReportOutputSettingsManage, Scope{}) || result.Allowed(ActionReportView, Scope{}) {
 		t.Fatalf("unexpected permission: %+v", result.Permissions)
 	}
+	repository.profile = AccessProfile{AccountID: "member", SystemRole: SystemRoleMember, DepartmentCode: "OFFICE", OrganizationRoleCode: "MINISTER"}
 	for _, scope := range []Scope{{AcademicYearID: "year"}, {SemesterID: "semester"}, {WeekID: "week"}, {InspectionTypeID: "type"}} {
 		_, err := service.CreateRule(context.Background(), "admin", Rule{AccountID: "member", Action: ActionReportOutputSettingsManage, Effect: EffectAllow, Scope: scope})
 		if !errors.Is(err, ErrInvalidRule) {
@@ -346,12 +519,12 @@ func TestEmptyPermissionCollectionsAreArrays(t *testing.T) {
 
 func TestInspectionManageIsSeparateFromEntry(t *testing.T) {
 	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER"} {
-		profile := AccessProfile{AccountID: "user", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: role, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, Enabled: true}}}
+		profile := AccessProfile{AccountID: "user", SystemRole: SystemRoleMember, DepartmentID: "study", OrganizationRoleCode: role, InspectionDefaults: map[string]*InspectionRoleDefaults{"attendance": inspectionLeadershipDefaults}, DepartmentScopes: []DepartmentScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanEnter: true, CanManage: true, Enabled: true}}}
 		result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "user")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Allowed("INSPECTION_MANAGE", Scope{DepartmentID: "study", InspectionTypeID: "attendance"}) != (role != "MEMBER") {
+		if !result.Allowed("INSPECTION_MANAGE", Scope{DepartmentID: "study", InspectionTypeID: "attendance"}) {
 			t.Fatalf("management permission for %s", role)
 		}
 	}
@@ -371,7 +544,7 @@ func TestHasAnyAllowedForScopedReportDefaults(t *testing.T) {
 	}
 }
 
-func TestOfficeInspectionActionsRemainReadOnly(t *testing.T) {
+func TestOfficeInspectionRulesCanGrantWorkWhenExplicitlyConfigured(t *testing.T) {
 	for _, role := range []string{"MEMBER", "MINISTER", "VICE_MINISTER", "PRESIDIUM"} {
 		t.Run(role, func(t *testing.T) {
 			profile := AccessProfile{AccountID: "office", DepartmentID: "office", DepartmentCode: "OFFICE", SystemRole: SystemRoleMember, OrganizationRoleCode: role}
@@ -379,12 +552,12 @@ func TestOfficeInspectionActionsRemainReadOnly(t *testing.T) {
 				profile.Rules = append(profile.Rules, Rule{Action: action, Enabled: true, Effect: EffectAllow})
 			}
 			result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "office")
-			if err != nil || !result.ConfirmedInspectionsOnly || !result.Allowed(ActionInspectionView, Scope{}) {
-				t.Fatalf("office view %v", err)
+			if err != nil || result.ConfirmedInspectionsOnly || !result.Allowed(ActionInspectionView, Scope{}) {
+				t.Fatalf("office configured view %v", err)
 			}
 			for _, action := range []string{ActionInspectionEnter, ActionInspectionReview, ActionInspectionManage} {
-				if result.Allowed(action, Scope{}) {
-					t.Errorf("unexpected %s", action)
+				if !result.Allowed(action, Scope{}) {
+					t.Errorf("missing configured %s", action)
 				}
 			}
 		})

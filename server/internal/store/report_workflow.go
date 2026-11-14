@@ -113,6 +113,18 @@ FROM weekly_reports wr LEFT JOIN weekly_report_versions version ON version.repor
 		status != reporting.ReportStatusFinalized && status != reporting.ReportStatusPublished && status != reporting.ReportStatusArchived {
 		return reporting.ReportDraft{}, reporting.ErrInvalidReportTransition
 	}
+	if !command.AllowFinalizedRevision && (status == reporting.ReportStatusFinalized || status == reporting.ReportStatusPublished || status == reporting.ReportStatusArchived) {
+		return reporting.ReportDraft{}, reporting.ErrForbidden
+	}
+	if status == reporting.ReportStatusFinalized || status == reporting.ReportStatusPublished || status == reporting.ReportStatusArchived {
+		started, err := hasReportRevisionIntent(ctx, tx, reportID, currentVersion)
+		if err != nil {
+			return reporting.ReportDraft{}, err
+		}
+		if !started {
+			return reporting.ReportDraft{}, reporting.ErrForbidden
+		}
+	}
 	versionNo := currentVersion + 1
 	rows := make([]reportSourceRecord, 0)
 	recordSnapshots := make(map[string]reporting.ReportRecordSnapshot, len(command.Records))
@@ -398,6 +410,18 @@ WHERE wr.id=$1::uuid FOR UPDATE OF wr`, reportID).Scan(&state.ID, &state.Semeste
 		state.Status != reporting.ReportStatusFinalized && state.Status != reporting.ReportStatusPublished && state.Status != reporting.ReportStatusArchived {
 		return reporting.ReportCorrectionResult{}, reporting.ErrInvalidReportTransition
 	}
+	if !input.AllowFinalizedRevision && (state.Status == reporting.ReportStatusFinalized || state.Status == reporting.ReportStatusPublished || state.Status == reporting.ReportStatusArchived) {
+		return reporting.ReportCorrectionResult{}, reporting.ErrForbidden
+	}
+	if state.Status == reporting.ReportStatusFinalized || state.Status == reporting.ReportStatusPublished || state.Status == reporting.ReportStatusArchived {
+		started, err := hasReportRevisionIntent(ctx, tx, state.ID, state.VersionNo)
+		if err != nil {
+			return reporting.ReportCorrectionResult{}, err
+		}
+		if !started {
+			return reporting.ReportCorrectionResult{}, reporting.ErrForbidden
+		}
+	}
 	var recordJSON, submissionID, inspectionTypeID, departmentID, typeCode string
 	err = tx.QueryRow(ctx, `SELECT version_record.included_data_json::text,
  version_record.source_submission_id::text,inspection_record.inspection_type_id::text,COALESCE(inspection_record.department_id::text,''),inspection_type.code
@@ -604,6 +628,18 @@ WHERE wr.id=$1::uuid FOR UPDATE OF wr`, reportID).Scan(&state.ID, &state.Semeste
 		state.Status != reporting.ReportStatusFinalized && state.Status != reporting.ReportStatusPublished &&
 		state.Status != reporting.ReportStatusArchived {
 		return reporting.ReportAdjustmentResult{}, reporting.ErrInvalidReportTransition
+	}
+	if !input.AllowFinalizedRevision && (state.Status == reporting.ReportStatusFinalized || state.Status == reporting.ReportStatusPublished || state.Status == reporting.ReportStatusArchived) {
+		return reporting.ReportAdjustmentResult{}, reporting.ErrForbidden
+	}
+	if state.Status == reporting.ReportStatusFinalized || state.Status == reporting.ReportStatusPublished || state.Status == reporting.ReportStatusArchived {
+		started, err := hasReportRevisionIntent(ctx, tx, state.ID, state.VersionNo)
+		if err != nil {
+			return reporting.ReportAdjustmentResult{}, err
+		}
+		if !started {
+			return reporting.ReportAdjustmentResult{}, reporting.ErrForbidden
+		}
 	}
 	var content reporting.ReportVersionContent
 	if err := json.Unmarshal([]byte(contentJSON), &content); err != nil {

@@ -23,6 +23,24 @@ func TestInspectionScopeQuery(t *testing.T) {
 	}
 }
 
+func TestPresidiumInspectionReadRequiresPrimaryDepartment(t *testing.T) {
+	access := inspection.MutationAccess{RestrictReadDepartment: true, Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow}}}
+	args := []any{}
+	if sql := inspectionAccessSQL(access, "read", &args); sql != "FALSE" {
+		t.Fatalf("missing primary department must deny read: %s", sql)
+	}
+	access.ReadDepartmentID = "department-1"
+	args = nil
+	sql := inspectionAccessSQL(access, "read", &args)
+	if !strings.Contains(sql, "ir.department_id=$1::uuid") || len(args) != 1 || args[0] != "department-1" {
+		t.Fatalf("primary department must be a bound read condition: sql=%s args=%#v", sql, args)
+	}
+	args = nil
+	if sql := inspectionAccessSQL(access, "mutate", &args); strings.Contains(sql, "ir.department_id=$1::uuid") {
+		t.Fatalf("read restriction changed mutation semantics: %s", sql)
+	}
+}
+
 func TestReportScopedReadIncludesClasslessRecordsWithinAuthorizedCell(t *testing.T) {
 	access := inspection.MutationAccess{
 		ReportScopeValidated: true,

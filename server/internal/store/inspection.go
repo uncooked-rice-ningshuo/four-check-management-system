@@ -22,6 +22,18 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 	if a.Unrestricted {
 		return "TRUE"
 	}
+	if mode == "read" && a.RestrictReadDepartment {
+		if a.ReadDepartmentID == "" {
+			return "FALSE"
+		}
+		*args = append(*args, a.ReadDepartmentID)
+		department := fmt.Sprintf("ir.department_id=$%d::uuid", len(*args))
+		return "(" + department + " AND " + inspectionPermissionSQL(a, mode, args) + ")"
+	}
+	return inspectionPermissionSQL(a, mode, args)
+}
+
+func inspectionPermissionSQL(a inspection.MutationAccess, mode string, args *[]any) string {
 	one := func(class, grade string) string {
 		action := func(name string) string {
 			rules := func(effect string) string {

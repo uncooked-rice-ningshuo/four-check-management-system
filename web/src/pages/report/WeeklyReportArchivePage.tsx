@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
-import { Alert, Button, Drawer, Empty, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
+import { Alert, Button, Drawer, Empty, Modal, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
 import { BarChartOutlined, HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ReportArchiveEntry, ReportArchiveQuery, ReportArchiveStatus, ReportCorrectionLog, ReportReview, ReportWorkflow } from '../../entities/reporting/model/reporting'
-import { useReportArchive, useReportArchiveWorkflow } from '../../features/reporting/model/queries'
+import { useReportArchive, useReportArchiveWorkflow, useStartReportRevision } from '../../features/reporting/model/queries'
 import { reportCorrectionFieldLabel, reportReviewActionLabel, reportStatusLabel } from '../../features/reporting/model/labels'
 import { ReportVersionSnapshots } from '../../features/reporting/ui/ReportVersionSnapshots'
 import { ReportVersionIndicators } from '../../features/reporting/ui/ReportVersionIndicators'
@@ -122,6 +122,10 @@ export function WeeklyReportArchiveDetailPage() {
   const { semesterId = '', weekId = '' } = useParams()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [confirmRevision, setConfirmRevision] = useState(false)
+  const [revisionError, setRevisionError] = useState('')
+  const startRevision = useStartReportRevision()
+  const permissionQuery = useAttendancePermissions()
   const [accessChanged, setAccessChanged] = useState(false)
   const clearArchiveScope = useCallback(() => {
     queryClient.removeQueries({ queryKey: ['reports', 'archive'] })
@@ -132,12 +136,32 @@ export function WeeklyReportArchiveDetailPage() {
   const version = workflowQuery.data?.versions.find(item => item.versionNo === workflowQuery.data?.report?.versionNo)
   const period = version?.content.period ?? workflowQuery.data?.versions[0]?.content.period
   const isFinalized = ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(workflowQuery.data?.report?.status ?? '')
+  const canRevise = Boolean(permissionQuery.data?.canReviseFinalizedReport)
+  const canContinueDraft = permissionQuery.data?.permissions.some(item => item.action === 'REPORT_GENERATE' && item.effect === 'ALLOW') ?? false
+  const openWorkbench = () => {
+    const target = `/reports/workbench?semesterId=${encodeURIComponent(semesterId)}&weekId=${encodeURIComponent(weekId)}&stage=${isFinalized ? 1 : 2}`
+    if (!isFinalized) { navigate(target); return }
+    setRevisionError('')
+    setConfirmRevision(true)
+  }
   return <section className="attendance-page weekly-report-archive-detail-page" aria-label="周通报归档详情">
+    <Modal title="基于定稿发起更正？" open={confirmRevision} okText="确认发起" cancelText="取消" confirmLoading={startRevision.isPending} onCancel={() => setConfirmRevision(false)} onOk={async () => {
+      const report = workflowQuery.data?.report
+      if (!report) return
+      try {
+        await startRevision.mutateAsync({ reportId: report.id, semesterId, weekId, versionNo: report.versionNo })
+        setRevisionError(''); setConfirmRevision(false)
+        navigate(`/reports/workbench?semesterId=${encodeURIComponent(semesterId)}&weekId=${encodeURIComponent(weekId)}&stage=1`)
+      } catch (error) { setRevisionError(error instanceof Error ? error.message : '发起更正失败，请重试') }
+    }}>
+      第 {period?.weekNo ?? '—'} 周当前定稿 V{workflowQuery.data?.report?.versionNo ?? '—'} 将保留；确认后会记录发起操作，后续更正创建新版本并经过审核。
+      {revisionError && <Alert type="error" showIcon title={revisionError} />}
+    </Modal>
     <div className="attendance-page-heading report-archive-page-heading"><div>
       <Button type="link" className="report-archive-back" onClick={() => navigate('/reports/archive')}>返回通报归档</Button>
       <Typography.Title level={2}>{period ? displayPeriod({ period } as ReportArchiveEntry) : '周通报归档详情'}</Typography.Title>
       <Typography.Text type="secondary">只读归档</Typography.Text>
-    </div>{period && <Button onClick={() => navigate(`/reports/workbench?semesterId=${encodeURIComponent(semesterId)}&weekId=${encodeURIComponent(weekId)}&stage=${isFinalized ? 1 : 2}`)}>{isFinalized ? '基于定稿修正' : '在工作台继续'}</Button>}</div>
+    </div>{period && (isFinalized ? canRevise : (['DRAFT', 'RETURNED'].includes(workflowQuery.data?.report?.status ?? '') && canContinueDraft)) && <Button onClick={openWorkbench}>{isFinalized ? '基于定稿修正' : '在工作台继续'}</Button>}</div>
     {accessChanged && <Alert type="warning" showIcon title="你的归档查看权限已变化，请返回归档重新进入" />}
     {workflowQuery.isPending && <div role="status">正在加载通报快照</div>}
     {workflowQuery.isError && <Alert type="error" showIcon title="历史版本读取失败" action={<Button onClick={() => void workflowQuery.refetch()}>重试</Button>} />}
@@ -148,6 +172,10 @@ export function WeeklyReportArchiveDetailPage() {
 export function WeeklyReportArchivePage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [confirmRevision, setConfirmRevision] = useState<ReportArchiveEntry | null>(null)
+  const [revisionError, setRevisionError] = useState('')
+  const startRevision = useStartReportRevision()
+  const permissionQuery = useAttendancePermissions()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [status, setStatus] = useState<ReportArchiveStatus | ''>('')
@@ -180,16 +208,35 @@ export function WeeklyReportArchivePage() {
     { title: '操作', key: 'action', search: false, width: 230, render: (_value, item) => {
       const isFinalized = ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(item.status)
       const stage = ['DRAFT', 'RETURNED'].includes(item.status) || isFinalized ? 1 : 2
+      const canRevise = Boolean(permissionQuery.data?.canReviseFinalizedReport)
+      const canContinueDraft = permissionQuery.data?.permissions.some(permission => permission.action === 'REPORT_GENERATE' && permission.effect === 'ALLOW') ?? false
       return <Space wrap>
         <Button type="link" onClick={() => navigate(`/reports/archive/${encodeURIComponent(item.period.semesterId)}/${encodeURIComponent(item.period.weekId)}`)}>查看详情</Button>
-        <Button type="link" onClick={() => navigate(`/reports/workbench?semesterId=${encodeURIComponent(item.period.semesterId)}&weekId=${encodeURIComponent(item.period.weekId)}&stage=${stage}`)}>
+        {(isFinalized ? canRevise : (['DRAFT', 'RETURNED'].includes(item.status) && canContinueDraft)) && <Button type="link" onClick={() => {
+          const target = `/reports/workbench?semesterId=${encodeURIComponent(item.period.semesterId)}&weekId=${encodeURIComponent(item.period.weekId)}&stage=${stage}`
+          if (!isFinalized) { navigate(target); return }
+          setRevisionError('')
+          setConfirmRevision(item)
+        }}>
           {isFinalized ? '基于定稿修正' : '在工作台继续'}
-        </Button>
+        </Button>}
       </Space>
     } },
   ]
 
   return <section className="attendance-page weekly-report-archive-page" aria-labelledby="weekly-report-archive-title">
+    <Modal title="基于定稿发起更正？" open={confirmRevision !== null} okText="确认发起" cancelText="取消" confirmLoading={startRevision.isPending} onCancel={() => setConfirmRevision(null)} onOk={async () => {
+      if (!confirmRevision) return
+      try {
+        await startRevision.mutateAsync({ reportId: confirmRevision.id, semesterId: confirmRevision.period.semesterId,
+          weekId: confirmRevision.period.weekId, versionNo: confirmRevision.versionNo })
+        navigate(`/reports/workbench?semesterId=${encodeURIComponent(confirmRevision.period.semesterId)}&weekId=${encodeURIComponent(confirmRevision.period.weekId)}&stage=1`)
+        setRevisionError(''); setConfirmRevision(null)
+      } catch (error) { setRevisionError(error instanceof Error ? error.message : '发起更正失败，请重试') }
+    }}>
+      {confirmRevision && `${displayPeriod(confirmRevision)} 当前定稿 V${confirmRevision.versionNo} 将保留；确认后会记录发起操作，后续更正创建新版本并经过审核。`}
+      {revisionError && <Alert type="error" showIcon title={revisionError} />}
+    </Modal>
     <div className="attendance-page-heading">
       <div>
         <Typography.Title id="weekly-report-archive-title" level={2}>通报归档</Typography.Title>

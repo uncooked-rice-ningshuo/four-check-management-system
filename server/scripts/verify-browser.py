@@ -299,9 +299,9 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
   page.on('console', message => {
     if (message.type() === 'error' && message.text().includes('Static function can not consume context')) messageContextWarnings.push(message.text());
   });
-  const logo = page.locator('.system-brand--auth img');
+  const logo = page.locator('.auth-combination-logo');
   await logo.waitFor();
-  if (await logo.getAttribute('src') !== '/logo.png' || !(await logo.evaluate(image => image.complete && image.naturalWidth > 0))) throw new Error('Login brand logo did not load');
+  if (await logo.getAttribute('src') !== '/assets/brand/combination-logo.png' || !(await logo.evaluate(image => image.complete && image.naturalWidth > 0))) throw new Error('Login brand logo did not load');
   const icon = page.locator('link[rel="icon"]');
   const origin = page.url().split('/').slice(0, 3).join('/');
   if (await icon.getAttribute('href') !== '/logo.png' || !(await page.request.get(origin + '/logo.png')).ok()) throw new Error('Browser icon did not load');
@@ -465,11 +465,11 @@ FROM accounts source CROSS JOIN (VALUES {account_values}) AS fixture(account_id,
 WHERE source.login_name='browser-admin';
 INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id)
 VALUES {role_values};
-INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_view,can_review,can_export,can_summarize)
-SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true,true,false,false
+INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_view,can_review,can_export)
+SELECT '10000000-0000-0000-0000-000000000002',id,true,true,true,true,false
 FROM inspection_types WHERE code='EVENING_SELF_STUDY'
 ON CONFLICT(department_id,inspection_type_id) DO UPDATE
-SET enabled=true,can_enter=true,can_view=true,can_review=true,can_export=false,can_summarize=false;
+SET enabled=true,can_enter=true,can_view=true,can_review=true,can_export=false;
 INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,inspection_type_id,note,enabled,created_by)
 SELECT '{uuid.uuid4()}', '{reviewer_id}', 'INSPECTION_ENTER', 'DENY', 'USER_RULE', id, 'isolated evening reviewer cannot enter', true, '{admin_id}'
 FROM inspection_types WHERE code='EVENING_SELF_STUDY';
@@ -547,7 +547,7 @@ SET enabled=true,can_enter=true,can_view=true,can_review=true;
             report['status'] = 'passed'
             raise SystemExit(0)
 
-        if os.environ.get('BROWSER_SUITE') in ('weekly-report-summary', 'weekly-report-correction'):
+        if os.environ.get('BROWSER_SUITE') in ('weekly-report-summary', 'weekly-report-correction', 'weekly-report-permissions'):
             actor = run(sql_command('-tAc', "SELECT id FROM accounts WHERE login_name='browser-admin'"), text=True).stdout.strip()
             actor = str(uuid.UUID(actor))
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
@@ -600,6 +600,8 @@ VALUES ('{report_record_id}','{ids['course']}',1,'1','{ids['room']}',1);
                 'presidium': ('reporting-browser-presidium', str(uuid.uuid4())),
                 'scopedAdmin': ('reporting-browser-scoped-admin', str(uuid.uuid4())),
                 'member': ('reporting-browser-member', str(uuid.uuid4())),
+                'officeMember': ('reporting-browser-office-member', str(uuid.uuid4())),
+                'studyPresidium': ('reporting-browser-study-presidium', str(uuid.uuid4())),
             }
             role_user_values = ',\n'.join(
                 f"('{user_id}'::uuid,'{login_name}','{display_name}',{department_id})"
@@ -609,6 +611,8 @@ VALUES ('{report_record_id}','{ids['course']}',1,'1','{ids['room']}',1);
                     (reporting_role_users['presidium'][1], reporting_role_users['presidium'][0], '浏览器主席团成员', "'10000000-0000-0000-0000-000000000001'::uuid"),
                     (reporting_role_users['scopedAdmin'][1], reporting_role_users['scopedAdmin'][0], '浏览器指定通报管理员', 'NULL::uuid'),
                     (reporting_role_users['member'][1], reporting_role_users['member'][0], '浏览器普通成员', 'NULL::uuid'),
+                    (reporting_role_users['officeMember'][1], reporting_role_users['officeMember'][0], '浏览器办公室委员', "'10000000-0000-0000-0000-000000000001'::uuid"),
+                    (reporting_role_users['studyPresidium'][1], reporting_role_users['studyPresidium'][0], '浏览器学习部主席团', "'10000000-0000-0000-0000-000000000002'::uuid"),
                 ]
             )
             role_user_ids = reporting_role_users
@@ -622,7 +626,9 @@ INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id)
 VALUES
  ('{uuid.uuid4()}','{role_user_ids['minister'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002'),
  ('{uuid.uuid4()}','{role_user_ids['viceMinister'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000003'),
- ('{uuid.uuid4()}','{role_user_ids['presidium'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001');
+ ('{uuid.uuid4()}','{role_user_ids['presidium'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001'),
+ ('{uuid.uuid4()}','{role_user_ids['officeMember'][1]}','10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000004'),
+ ('{uuid.uuid4()}','{role_user_ids['studyPresidium'][1]}','10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001');
 """.encode()
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=role_sql)
             fixture['reportingRoleUsers'] = {name: login_name for name, (login_name, _) in reporting_role_users.items()}
@@ -630,6 +636,10 @@ VALUES
             # The calendar regression above intentionally changes week A's
             # number to 3; restore this report fixture's current week to 1.
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=b"UPDATE semester_weeks SET week_no=1 WHERE id='b0000000-0000-0000-0000-000000000003';")
+            if os.environ.get('BROWSER_SUITE') == 'weekly-report-permissions':
+                browser_suite('weekly-report-permissions')
+                report['status'] = 'passed'
+                raise SystemExit(0)
             browser_suite('weekly-report-summary')
             if os.environ.get('BROWSER_SUITE') == 'weekly-report-summary':
                 browser_suite('weekly-report-roles')

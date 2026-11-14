@@ -378,10 +378,11 @@ type ReportAdjustmentSummary struct {
 }
 
 type AddReportAdjustmentInput struct {
-	RowVersion int    `json:"rowVersion"`
-	RecordID   string `json:"recordId"`
-	Operation  string `json:"operation"`
-	Reason     string `json:"reason"`
+	RowVersion             int    `json:"rowVersion"`
+	RecordID               string `json:"recordId"`
+	Operation              string `json:"operation"`
+	Reason                 string `json:"reason"`
+	AllowFinalizedRevision bool   `json:"-"`
 }
 
 type ReportAdjustmentResult struct {
@@ -395,10 +396,11 @@ type ReportCorrectionChange struct {
 }
 
 type AddReportCorrectionInput struct {
-	RowVersion int                      `json:"rowVersion"`
-	RecordID   string                   `json:"recordId"`
-	Changes    []ReportCorrectionChange `json:"changes"`
-	Reason     string                   `json:"reason"`
+	RowVersion             int                      `json:"rowVersion"`
+	RecordID               string                   `json:"recordId"`
+	Changes                []ReportCorrectionChange `json:"changes"`
+	Reason                 string                   `json:"reason"`
+	AllowFinalizedRevision bool                     `json:"-"`
 }
 
 type ReportCorrectionResult struct {
@@ -495,6 +497,13 @@ type ReportState struct {
 	VersionNo  int       `json:"versionNo"`
 	RowVersion int       `json:"rowVersion"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type ReportRevisionIntent struct {
+	ID          string    `json:"id"`
+	ReportID    string    `json:"reportId"`
+	BaseVersion int       `json:"baseVersion"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // ReportWorkflow is the authorized history view for one weekly report. Every

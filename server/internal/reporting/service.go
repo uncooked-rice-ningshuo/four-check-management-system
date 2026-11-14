@@ -70,15 +70,16 @@ type ReportCell struct {
 }
 
 type CreateReportDraftCommand struct {
-	ReportID           string
-	VersionID          string
-	ActorID            string
-	ExpectedRowVersion int
-	Content            ReportVersionContent
-	Records            []ReportRecordSnapshot
-	ForceReason        string
-	Cells              []ReportCell
-	Metadata           audit.Metadata
+	ReportID               string
+	VersionID              string
+	ActorID                string
+	ExpectedRowVersion     int
+	Content                ReportVersionContent
+	Records                []ReportRecordSnapshot
+	ForceReason            string
+	Cells                  []ReportCell
+	Metadata               audit.Metadata
+	AllowFinalizedRevision bool
 }
 
 type reportWorkflowRepository interface {
@@ -87,6 +88,10 @@ type reportWorkflowRepository interface {
 	TransitionReport(context.Context, string, string, string, ReportTransitionInput, []permission.EffectivePermission, audit.Metadata) (ReportState, error)
 	AddReportCorrection(context.Context, string, string, AddReportCorrectionInput, []permission.EffectivePermission, audit.Metadata) (ReportCorrectionResult, error)
 	AddReportAdjustment(context.Context, string, string, AddReportAdjustmentInput, []permission.EffectivePermission, audit.Metadata) (ReportAdjustmentResult, error)
+}
+
+type reportRevisionRepository interface {
+	StartReportRevision(context.Context, string, string, int, []permission.EffectivePermission, audit.Metadata) (ReportRevisionIntent, error)
 }
 
 type reportArchiveRepository interface {
@@ -797,6 +802,7 @@ func (s *Service) GenerateDraft(ctx context.Context, accountID string, input Gen
 		ReportID: uuid.NewString(), VersionID: uuid.NewString(), ActorID: accountID,
 		ExpectedRowVersion: input.ExpectedRowVersion, Content: content,
 		Records: recordSnapshots, ForceReason: input.Reason, Cells: cells, Metadata: metadata,
+		AllowFinalizedRevision: canReviseFinalizedReport(effective),
 	})
 }
 
@@ -828,6 +834,10 @@ func (s *Service) TransitionReport(ctx context.Context, accountID, reportID, act
 	effective, err := s.permissions.Effective(ctx, accountID)
 	if err != nil {
 		return ReportState{}, err
+	}
+	if action != ReportActionSubmit && effective.SystemRole != permission.SystemRoleSuperAdmin &&
+		(effective.OrganizationRoleCode != "MINISTER" && effective.OrganizationRoleCode != "VICE_MINISTER") {
+		return ReportState{}, ErrForbidden
 	}
 	actionRules := actionPermissions(effective.Permissions, permissionAction)
 	if !hasUsableReportGrant(actionRules) {
@@ -877,6 +887,7 @@ func (s *Service) AddReportCorrection(ctx context.Context, accountID, reportID s
 	if !hasUsableReportGrant(correctionPermissions) {
 		return ReportCorrectionResult{}, ErrForbidden
 	}
+	input.AllowFinalizedRevision = canReviseFinalizedReport(effective)
 	metadata.ActorID = accountID
 	metadata.Reason = input.Reason
 	result, err := repository.AddReportCorrection(ctx, canonicalID, accountID, input, correctionPermissions, metadata)
@@ -916,9 +927,41 @@ func (s *Service) AddReportAdjustment(ctx context.Context, accountID, reportID s
 	if !hasUsableReportGrant(correctionPermissions) {
 		return ReportAdjustmentResult{}, ErrForbidden
 	}
+	input.AllowFinalizedRevision = canReviseFinalizedReport(effective)
 	metadata.ActorID = accountID
 	metadata.Reason = input.Reason
 	return repository.AddReportAdjustment(ctx, canonicalID, accountID, input, correctionPermissions, metadata)
+}
+
+func canReviseFinalizedReport(effective permission.EffectiveResult) bool {
+	return effective.SystemRole == permission.SystemRoleSuperAdmin ||
+		((effective.OrganizationRoleCode == "MINISTER" || effective.OrganizationRoleCode == "VICE_MINISTER") &&
+			effective.CanReviseFinalizedReport && effective.Allowed(permission.ActionReportCorrect, permission.Scope{}))
+}
+
+// StartFinalizedRevision records a version-bound intent before a finalized report can be revised.
+func (s *Service) StartFinalizedRevision(ctx context.Context, accountID, reportID string, rowVersion int, metadata audit.Metadata) (ReportRevisionIntent, error) {
+	canonicalID, err := canonicalUUID(reportID)
+	if err != nil || rowVersion < 1 {
+		return ReportRevisionIntent{}, ErrInvalidReportRequest
+	}
+	effective, err := s.permissions.Effective(ctx, accountID)
+	if err != nil {
+		return ReportRevisionIntent{}, err
+	}
+	if !canReviseFinalizedReport(effective) {
+		return ReportRevisionIntent{}, ErrForbidden
+	}
+	actionRules := actionPermissions(effective.Permissions, permission.ActionReportCorrect)
+	if !hasUsableReportGrant(actionRules) {
+		return ReportRevisionIntent{}, ErrForbidden
+	}
+	repository, ok := s.repository.(reportRevisionRepository)
+	if !ok {
+		return ReportRevisionIntent{}, errors.New("report revision repository unavailable")
+	}
+	metadata.ActorID = accountID
+	return repository.StartReportRevision(ctx, canonicalID, accountID, rowVersion, actionRules, metadata)
 }
 
 func validateCorrectionValue(field string, raw json.RawMessage) ([]string, error) {

@@ -114,7 +114,7 @@ func TestDecideRequiresVersionAndReturnReason(t *testing.T) {
 	}
 }
 
-func TestMemberReviewRequiresDepartmentLeadership(t *testing.T) {
+func TestMemberReviewUsesConfiguredPermissionAndOwnDepartment(t *testing.T) {
 	const actor = "10000000-0000-0000-0000-000000000001"
 	const batch = "10000000-0000-0000-0000-000000000002"
 	grant := permission.EffectivePermission{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow}
@@ -122,11 +122,8 @@ func TestMemberReviewRequiresDepartmentLeadership(t *testing.T) {
 		repo := &submitRepository{}
 		service := NewService(repo, decisionPermissions{result: permission.EffectiveResult{SystemRole: permission.SystemRoleMember, OrganizationRoleCode: role, PrimaryDepartmentID: "department", Permissions: []permission.EffectivePermission{grant}}})
 		_, err := service.Decide(context.Background(), Actor{ID: actor}, batch, Confirm, DecisionInput{Version: 1}, audit.Metadata{})
-		if role == "MEMBER" && (!errors.Is(err, ErrSubmissionScope) || repo.decision.SubmissionID != "") {
-			t.Fatalf("ordinary member reached review: %v", err)
-		}
-		if role != "MEMBER" && (err != nil || !repo.decision.IsMember || repo.decision.MemberDepartmentID != "department") {
-			t.Fatalf("department leader review command: %+v %v", repo.decision, err)
+		if err != nil || !repo.decision.IsMember || repo.decision.MemberDepartmentID != "department" {
+			t.Fatalf("configured department review command: %+v %v", repo.decision, err)
 		}
 	}
 }

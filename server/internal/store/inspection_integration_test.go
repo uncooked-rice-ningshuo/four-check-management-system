@@ -1019,6 +1019,19 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		if err != nil || adminRecord.AttributionMode != inspection.AttributionModeAdministrator || adminRecord.DepartmentID != "" {
 			t.Fatalf("administrator attribution: %+v %v", adminRecord, err)
 		}
+		presidiumAccess := inspection.MutationAccess{ActorID: rf("01"), RestrictReadDepartment: true, ReadDepartmentID: "10000000-0000-0000-0000-000000000002", Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID}}}}
+		presidiumPage, err := db.ListInspections(ctx, inspection.InspectionFilter{InspectionTypeID: adminRecord.InspectionTypeID, Page: 1, PageSize: 100}, presidiumAccess)
+		if err != nil || presidiumPage.Total == 0 {
+			t.Fatalf("presidium primary department list: %+v %v", presidiumPage, err)
+		}
+		for _, item := range presidiumPage.Items {
+			if item.DepartmentID != presidiumAccess.ReadDepartmentID {
+				t.Fatalf("cross-department record leaked: %+v", item)
+			}
+		}
+		if _, err := db.GetInspection(ctx, adminRecord.ID, presidiumAccess); !errors.Is(err, inspection.ErrRecordNotFound) {
+			t.Fatalf("presidium read administrator record: %v", err)
+		}
 		attendancePage, err := db.ListAttendance(ctx, inspection.AttendanceListQuery{
 			SemesterID: rf("03"), WeekID: rf("04"), InspectionTypeID: adminRecord.InspectionTypeID,
 			DepartmentID: inspection.CollegeDepartmentOptionID, Sort: inspection.SortOccurredAtDescending, Page: 1, PageSize: 20,

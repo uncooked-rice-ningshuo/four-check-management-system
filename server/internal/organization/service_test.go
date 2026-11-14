@@ -15,6 +15,17 @@ type memoryRepository struct {
 	scopes    []DepartmentInspectionScope
 	mutations []audit.Mutation
 	users     []UserAssignment
+	defaults  DepartmentDefaultPermissions
+}
+
+func (m *memoryRepository) GetDepartmentDefaults(context.Context, string) (DepartmentDefaultPermissions, error) {
+	return m.defaults, nil
+}
+func (m *memoryRepository) SaveDepartmentDefaults(_ context.Context, input DepartmentDefaultPermissions, mutation audit.Mutation) (DepartmentDefaultPermissions, error) {
+	m.mutations = append(m.mutations, mutation)
+	input.Version++
+	m.defaults = input
+	return input, nil
 }
 
 func (m *memoryRepository) ListCatalogs(context.Context, bool) (Catalogs, error) {
@@ -83,6 +94,74 @@ func TestScopeRequiresDepartmentAndInspectionType(t *testing.T) {
 	err := svc.UpsertScope(context.Background(), DepartmentInspectionScope{CanView: true})
 	if err != ErrInvalidInput {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestScopeAllowsConfiguredOfficeInspectionWorkButRejectsUndeliveredExport(t *testing.T) {
+	repository := &memoryRepository{}
+	repository.catalogs.Departments = []Department{{ID: "office", Code: "OFFICE"}, {ID: "other", Code: "OTHER"}}
+	service := NewService(repository)
+	for _, test := range []struct {
+		scope DepartmentInspectionScope
+		want  error
+	}{
+		{DepartmentInspectionScope{DepartmentID: "office", InspectionTypeID: "type", CanEnter: true}, nil},
+		{DepartmentInspectionScope{DepartmentID: "office", InspectionTypeID: "type", CanReview: true}, nil},
+		{DepartmentInspectionScope{DepartmentID: "office", InspectionTypeID: "type", CanExport: true}, ErrInvalidInput},
+		{DepartmentInspectionScope{DepartmentID: "other", InspectionTypeID: "type", CanExport: true}, ErrInvalidInput},
+	} {
+		if err := service.UpsertScope(context.Background(), test.scope); err != test.want {
+			t.Errorf("scope %+v: error = %v, want %v", test.scope, err, test.want)
+		}
+	}
+}
+
+func TestDepartmentDefaultsKeepReportMemberBoundaryAndConfigureInspectionWork(t *testing.T) {
+	repository := &memoryRepository{catalogs: Catalogs{
+		Departments: []Department{{ID: "office", Code: "OFFICE"}}, InspectionTypes: []InspectionType{{ID: "type"}},
+	}}
+	input := DepartmentDefaultPermissions{DepartmentID: "office", Version: 1,
+		Scopes:          []DepartmentInspectionScope{{DepartmentID: "office", InspectionTypeID: "type", CanView: true, Enabled: true}},
+		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER", CanView: true}, {InspectionTypeID: "type", RoleCode: "LEADERSHIP", CanView: true}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM", CanView: true}},
+		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanView: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}},
+	}
+	service := NewService(repository)
+	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
+		t.Fatalf("valid office defaults: %v", err)
+	}
+	if repository.defaults.Version != 2 || len(repository.mutations) != 1 {
+		t.Fatalf("save result = %+v, mutations = %d", repository.defaults, len(repository.mutations))
+	}
+	input.ReportRoles[0].CanReview = true
+	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != ErrInvalidInput {
+		t.Fatalf("office member approval error = %v", err)
+	}
+	input.ReportRoles[0].CanReview = false
+	input.Scopes[0].CanEnter = true
+	input.InspectionRoles[0].CanManage = true
+	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
+		t.Fatalf("configured office inspection work error = %v", err)
+	}
+	if len(repository.mutations) != 2 {
+		t.Fatal("configured inspection work was not persisted")
+	}
+}
+
+func TestDepartmentDefaultsAllowReportRolesForAnotherDepartment(t *testing.T) {
+	repository := &memoryRepository{catalogs: Catalogs{
+		Departments: []Department{{ID: "other", Code: "OTHER"}}, InspectionTypes: []InspectionType{{ID: "type"}},
+	}}
+	input := DepartmentDefaultPermissions{DepartmentID: "other", Version: 1,
+		Scopes:          []DepartmentInspectionScope{{DepartmentID: "other", InspectionTypeID: "type"}},
+		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER"}, {InspectionTypeID: "type", RoleCode: "LEADERSHIP"}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM"}},
+		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanGenerate: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}},
+	}
+	if _, err := NewService(repository).SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
+		t.Fatalf("non-office report defaults: %v", err)
+	}
+	input.ReportRoles[0].CanFinalize = true
+	if _, err := NewService(repository).SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != ErrInvalidInput {
+		t.Fatalf("non-office member finalize error = %v", err)
 	}
 }
 

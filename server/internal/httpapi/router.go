@@ -97,6 +97,7 @@ type reportingHTTPService interface {
 	ArchiveWorkflow(context.Context, string, string, string) (reporting.ReportWorkflow, error)
 	Records(context.Context, string, reporting.RecordsQuery) (reporting.RecordPage, error)
 	GenerateDraft(context.Context, string, reporting.GenerateDraftInput, audit.Metadata) (reporting.ReportDraft, error)
+	StartFinalizedRevision(context.Context, string, string, int, audit.Metadata) (reporting.ReportRevisionIntent, error)
 	TransitionReport(context.Context, string, string, string, reporting.ReportTransitionInput, audit.Metadata) (reporting.ReportState, error)
 	AddReportCorrection(context.Context, string, string, reporting.AddReportCorrectionInput, audit.Metadata) (reporting.ReportCorrectionResult, error)
 	AddReportAdjustment(context.Context, string, string, reporting.AddReportAdjustmentInput, audit.Metadata) (reporting.ReportAdjustmentResult, error)
@@ -215,7 +216,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.PUT("/departments/:id", h.updateDepartment)
 	admin.PUT("/inspection-types/:id", h.updateInspectionType)
 	admin.GET("/department-inspection-scopes", h.listScopes)
-	admin.PUT("/department-inspection-scopes", h.upsertScope)
+	admin.GET("/departments/:id/default-permissions", h.getDepartmentDefaults)
+	admin.PUT("/departments/:id/default-permissions", h.saveDepartmentDefaults)
 	admin.GET("/users", h.listUsers)
 	admin.POST("/users", h.createUser)
 	admin.PUT("/users/:id", h.updateUser)
@@ -299,6 +301,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.GET("/reports/archive/:semesterId/:weekId", h.reportArchiveWorkflow)
 	v1.GET("/reports/records", h.reportRecords)
 	v1.POST("/reports/drafts", h.generateReportDraft)
+	v1.POST("/reports/:id/revision-intents", h.startReportRevision)
 	v1.POST("/reports/:id/submit", h.submitReportDraft)
 	v1.POST("/reports/:id/return", h.returnReportDraft)
 	v1.POST("/reports/:id/approve", h.approveReportDraft)
@@ -545,6 +548,18 @@ func (h *handler) updateInspectionType(c *gin.Context) {
 func (h *handler) listScopes(c *gin.Context) {
 	result, err := h.organization.ListScopes(c)
 	writeResult(c, result, err)
+}
+func (h *handler) getDepartmentDefaults(c *gin.Context) {
+	result, err := h.organization.GetDepartmentDefaults(c, c.Param("id"))
+	writeResult(c, result, err)
+}
+func (h *handler) saveDepartmentDefaults(c *gin.Context) {
+	var input organization.DepartmentDefaultPermissions
+	if bind(c, &input) {
+		input.DepartmentID = c.Param("id")
+		result, err := h.organization.SaveDepartmentDefaults(c, input, requestMetadata(c, ""))
+		writeResult(c, result, err)
+	}
 }
 func (h *handler) upsertScope(c *gin.Context) {
 	var in organization.DepartmentInspectionScope
@@ -1095,6 +1110,18 @@ func (h *handler) authorizeAttendanceList(c *gin.Context) (auth.Account, permiss
 	if err != nil {
 		writeInspectionForbidden(c, false)
 		return auth.Account{}, permission.Scope{}, nil, false
+	}
+	if effective.OrganizationRoleCode == "PRESIDIUM" {
+		if effective.PrimaryDepartmentID == "" || (scope.DepartmentID != "" && scope.DepartmentID != effective.PrimaryDepartmentID) {
+			writeInspectionForbidden(c, false)
+			return auth.Account{}, permission.Scope{}, nil, false
+		}
+		scope.DepartmentID = effective.PrimaryDepartmentID
+		if !effective.Allowed(permission.ActionInspectionView, scope) {
+			writeInspectionForbidden(c, false)
+			return auth.Account{}, permission.Scope{}, nil, false
+		}
+		return account, scope, []string{effective.PrimaryDepartmentID}, true
 	}
 	if scope.DepartmentID != "" {
 		requested := scope
@@ -1717,6 +1744,10 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "REPORT_OBLIGATION_MANAGER_ROLE_REQUIRED", "逐周应交范围管理权限仅可单独授予学生会办公室部长或副部长")
 		return
 	}
+	if errors.Is(err, permission.ErrReportLeadershipRequired) {
+		writeError(c, http.StatusBadRequest, "REPORT_LEADERSHIP_REQUIRED", "该通报权限仅可授予学生会办公室主任或副主任")
+		return
+	}
 	switch {
 	case errors.Is(err, masterdata.ErrNotFound), errors.Is(err, dictionary.ErrNotFound), errors.Is(err, auth.ErrAccountNotFound), errors.Is(err, organization.ErrUserNotFound):
 		writeError(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "记录不存在或已被删除")
@@ -1724,6 +1755,8 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusNotFound, "REPORT_GRADES_NOT_FOUND", "学期年级配置不存在")
 	case errors.Is(err, academic.ErrReportGradesConflict):
 		writeError(c, http.StatusConflict, "REPORT_GRADES_VERSION_CONFLICT", "学期年级配置已变化，请刷新后重试")
+	case errors.Is(err, organization.ErrPermissionVersionConflict):
+		writeError(c, http.StatusConflict, "DEPARTMENT_PERMISSIONS_VERSION_CONFLICT", "部门权限配置已变化，请刷新后重新核对")
 	case errors.Is(err, academic.ErrReportGradeUnavailable):
 		writeError(c, http.StatusBadRequest, "REPORT_GRADE_UNAVAILABLE", "所选年级不存在或已停用")
 	case errors.Is(err, academic.ErrDateOverlap):

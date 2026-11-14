@@ -1,6 +1,6 @@
 import type { User } from '../../entities/user/model/user'
 import type { AcademicCalendar, AcademicYear, Semester, SemesterWeek } from '../../entities/academic/model/academic'
-import type { Department, DepartmentInspectionScope, InspectionType, OrganizationCatalogs, UserAssignment } from '../../entities/organization/model/organization'
+import type { Department, DepartmentDefaultPermissions, DepartmentInspectionScope, InspectionType, OrganizationCatalogs, UserAssignment } from '../../entities/organization/model/organization'
 import type { EffectivePermissions, PermissionRule } from '../../entities/permission/model/permission'
 import type { MasterDataChange, MasterDataImportBatch, MasterDataImportConfirmResult, MasterDataImportSpec, MasterDataKind, MasterDataPage, MasterDataRecord } from '../../entities/masterdata/model/masterData'
 import type { DictionaryCatalog, DictionaryItem, DictionaryType } from '../../entities/dictionary/model/dictionary'
@@ -15,7 +15,8 @@ export const createDepartment = (input: Pick<Department, 'code' | 'name'>) => ap
 export const updateDepartment = (input: Department) => apiRequest<Department>(`/admin/departments/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const updateInspectionType = (input: InspectionType) => apiRequest<InspectionType>(`/admin/inspection-types/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const getDepartmentInspectionScopes = () => apiRequest<DepartmentInspectionScope[]>('/admin/department-inspection-scopes')
-export const updateDepartmentInspectionScope = (input: DepartmentInspectionScope) => apiRequest<void>('/admin/department-inspection-scopes', { method: 'PUT', body: JSON.stringify(input) })
+export const getDepartmentDefaults = (departmentId: string) => apiRequest<DepartmentDefaultPermissions>(`/admin/departments/${departmentId}/default-permissions`)
+export const saveDepartmentDefaults = (input: DepartmentDefaultPermissions) => apiRequest<DepartmentDefaultPermissions>(`/admin/departments/${input.departmentId}/default-permissions`, { method: 'PUT', body: JSON.stringify(input) })
 export const getUsers = async () => parseUserAssignments(await apiRequest<unknown>('/admin/users'))
 export const createUser = (input: { studentNo: string; name: string; systemRole: 'ADMIN' | 'MEMBER' }) => apiRequest<User & { temporaryPassword: string }>('/admin/users', { method: 'POST', body: JSON.stringify(input) })
 export const updateUser = (id: string, input: { studentNo: string; name: string; systemRole: 'ADMIN' | 'MEMBER'; version: number }) => apiRequest<User & { version: number }>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(input) })

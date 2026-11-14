@@ -38,6 +38,8 @@ type reportingHTTPStub struct {
 	recordsQuery       reporting.RecordsQuery
 	draft              reporting.ReportDraft
 	draftErr           error
+	revisionIntent     reporting.ReportRevisionIntent
+	revisionErr        error
 	transition         reporting.ReportState
 	transitionErr      error
 	transitionID       string
@@ -90,6 +92,9 @@ func (s *reportingHTTPStub) Records(_ context.Context, _ string, query reporting
 
 func (s *reportingHTTPStub) GenerateDraft(_ context.Context, _ string, _ reporting.GenerateDraftInput, _ audit.Metadata) (reporting.ReportDraft, error) {
 	return s.draft, s.draftErr
+}
+func (s *reportingHTTPStub) StartFinalizedRevision(_ context.Context, _, _ string, _ int, _ audit.Metadata) (reporting.ReportRevisionIntent, error) {
+	return s.revisionIntent, s.revisionErr
 }
 
 func (s *reportingHTTPStub) TransitionReport(_ context.Context, _ string, id, action string, _ reporting.ReportTransitionInput, _ audit.Metadata) (reporting.ReportState, error) {

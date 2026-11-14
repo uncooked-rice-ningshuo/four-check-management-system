@@ -163,6 +163,7 @@ export type ReportState = {
   rowVersion: number
   updatedAt: string
 }
+export type ReportRevisionIntent = { id: string; reportId: string; baseVersion: number; createdAt: string }
 
 export type ReportVersion = {
   id: string

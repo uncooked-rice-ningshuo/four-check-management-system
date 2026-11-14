@@ -1,0 +1,77 @@
+.organization-config-page .page-heading { margin-bottom: 16px; }
+.organization-config-page .page-heading h2.ant-typography { margin-bottom: 4px; font-size: 28px; line-height: 1.25; font-weight: 600; }
+.organization-config-page .page-heading .ant-typography { max-width: 72ch; line-height: 1.55; }
+.organization-config-page > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
+.department-defaults-surface { container: department-defaults / inline-size; }
+.department-defaults-layout { min-width: 0; background: #fff; border: 1px solid #dfe7ef; border-radius: 12px; }
+.department-defaults-heading { padding: 16px 24px; border-bottom: 1px solid #e6ecf2; }
+.department-defaults-controls { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.department-defaults-controls label { flex: none; font-weight: 500; color: #24394e; }
+.department-defaults-controls .ant-select { width: 216px; max-width: 100%; }
+.department-defaults-version { color: #61758a; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.department-defaults-controls .ant-btn { margin-inline-start: auto; }
+.department-defaults-layout > .ant-alert, .department-defaults-layout > [role='status'] { margin: 16px 24px 0; }
+.department-defaults-compact { display: grid; min-width: 0; }
+.department-defaults-section { min-width: 0; padding: 24px; }
+.department-defaults-section + .department-defaults-section { border-top: 1px solid #e6ecf2; }
+.department-defaults-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.department-defaults-section-heading h3.ant-typography { margin: 0 0 4px; color: #173b5f; font-size: 19px; line-height: 1.35; font-weight: 600; }
+.department-defaults-section-heading .ant-typography-secondary { color: #61758a; font-size: 13px; }
+.department-defaults-count { flex: none; color: #52677c; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.department-defaults-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; border: 1px solid #dfe7ef; border-radius: 8px; }
+.department-defaults-table-scroll:focus-visible { outline: 2px solid #155eef; outline-offset: 2px; }
+.department-defaults-table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; }
+.department-defaults-list { min-width: 860px; }
+.department-defaults-table th, .department-defaults-table td { padding: 12px 16px; border-bottom: 1px solid #ebeff4; vertical-align: middle; }
+.department-defaults-table thead th { background: #f6f8fb; color: #475d72; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.department-defaults-table tbody th { color: #18324d; font-weight: 600; white-space: nowrap; }
+.department-defaults-table tbody tr:last-child th, .department-defaults-table tbody tr:last-child td { border-bottom: 0; }
+.department-defaults-table tbody tr:hover { background: #f9fbfd; }
+.department-defaults-list th:first-child { width: 16%; }
+.department-defaults-list td:nth-child(2) { width: 12%; }
+.department-defaults-list td:nth-child(3) { width: 20%; }
+.department-defaults-list td:nth-child(4) { width: 36%; }
+.department-defaults-list td:last-child { width: 16%; }
+.department-defaults-assignment { white-space: nowrap; }
+.department-defaults-assignment .ant-switch { margin-inline-end: 8px; }
+.department-defaults-assignment span, .department-defaults-action-summary { color: #4e6277; font-size: 13px; }
+.department-defaults-role-summary { min-width: 220px; }
+.department-defaults-role-line { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.5; }
+.department-defaults-role-line + .department-defaults-role-line { margin-top: 4px; }
+.department-defaults-role-line span:first-child { color: #61758a; }
+.department-defaults-role-line span:last-child { color: #213951; overflow-wrap: anywhere; }
+.department-defaults-row-actions { display: flex; justify-content: flex-end; gap: 4px; white-space: nowrap; }
+.department-defaults-row-actions .ant-btn { padding-inline: 4px; }
+.department-defaults-matrix { min-width: 580px; text-align: center; }
+.department-defaults-matrix th:first-child { text-align: left; }
+.department-defaults-matrix tbody td:nth-child(2) { color: #52677c; font-size: 13px; }
+.department-defaults-table .ant-switch:focus-visible, .department-defaults-option .ant-switch:focus-visible { outline: 2px solid #155eef; outline-offset: 3px; }
+.department-defaults-option-list { border-top: 1px solid #e6ecf2; }
+.department-defaults-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; padding: 12px 4px; border-bottom: 1px solid #e6ecf2; }
+.department-defaults-footnote { margin: 12px 0 0; color: #61758a; font-size: 13px; line-height: 1.5; }
+.department-defaults-change-list { max-height: 240px; overflow: auto; padding-inline-start: 24px; }
+@container department-defaults (width < 760px) {
+  .department-defaults-heading, .department-defaults-section { padding: 16px; }
+  .department-defaults-controls { flex-wrap: wrap; gap: 8px; }
+  .department-defaults-controls .ant-select { flex: 1 1 180px; width: auto; }
+  .department-defaults-controls .ant-btn { margin-inline-start: auto; }
+  .department-defaults-section-heading { align-items: flex-start; }
+  .department-defaults-table-scroll { overflow-x: visible; }
+  .department-defaults-list, .department-defaults-list tbody, .department-defaults-list tr, .department-defaults-list th, .department-defaults-list td { display: block; min-width: 0; width: 100%; }
+  .department-defaults-list thead { display: none; }
+  .department-defaults-list tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px; border-bottom: 1px solid #e6ecf2; }
+  .department-defaults-list tr:last-child { border-bottom: 0; }
+  .department-defaults-list th, .department-defaults-list td { padding: 0; border: 0; }
+  .department-defaults-list th { grid-column: 1; }
+  .department-defaults-list td:nth-child(2) { grid-column: 2; width: auto; text-align: right; }
+  .department-defaults-list td:nth-child(3), .department-defaults-list td:nth-child(4), .department-defaults-list td:nth-child(5) { grid-column: 1 / -1; }
+  .department-defaults-list td:nth-child(3)::before, .department-defaults-list td:nth-child(4)::before { display: inline-block; width: 72px; margin-inline-end: 8px; color: #61758a; font-size: 12px; }
+  .department-defaults-list td:nth-child(3)::before { content: '部门功能'; }
+  .department-defaults-list td:nth-child(4)::before { content: '岗位信息'; }
+  .department-defaults-list td:nth-child(4) { display: grid; grid-template-columns: 1fr; gap: 2px; }
+  .department-defaults-list td:nth-child(4)::before { display: none; }
+  .department-defaults-role-line { grid-template-columns: 100px minmax(0, 1fr); gap: 8px; min-width: 0; }
+  .department-defaults-role-line + .department-defaults-role-line { margin-top: 0; }
+  .department-defaults-list td:nth-child(5) { margin-top: 4px; }
+  .department-defaults-row-actions { justify-content: flex-start; }
+}

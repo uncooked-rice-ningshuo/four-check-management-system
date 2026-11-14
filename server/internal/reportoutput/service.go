@@ -300,6 +300,9 @@ func (s *Service) Generate(ctx context.Context, actorID string, input GenerateIn
 	if err != nil {
 		return File{}, err
 	}
+	if err := s.restrictReportMemberToDraft(ctx, actorID, input, effective); err != nil {
+		return File{}, err
+	}
 	for _, row := range version.Content.Rows {
 		selected := false
 		for _, item := range types {
@@ -430,6 +433,9 @@ func (s *Service) GenerateDownload(ctx context.Context, actorID string, input Ge
 	if err != nil {
 		return File{}, nil, err
 	}
+	if err := s.restrictReportMemberToDraft(ctx, actorID, input, effective); err != nil {
+		return File{}, nil, err
+	}
 	for _, row := range version.Content.Rows {
 		selected := false
 		for _, item := range types {
@@ -506,6 +512,21 @@ func (s *Service) GenerateDownload(ctx context.Context, actorID string, input Ge
 		return File{}, nil, err
 	}
 	return output, data, nil
+}
+
+func (s *Service) restrictReportMemberToDraft(ctx context.Context, actorID string, input GenerateInput, effective permission.EffectiveResult) error {
+	if effective.OrganizationRoleCode != "MEMBER" {
+		return nil
+	}
+	workflow, err := s.reports.Workflow(ctx, actorID, input.SemesterID, input.WeekID)
+	if err != nil {
+		return err
+	}
+	if workflow.Report == nil || (workflow.Report.Status != reporting.ReportStatusDraft && workflow.Report.Status != reporting.ReportStatusReturned) ||
+		workflow.Report.VersionNo != input.VersionNo {
+		return reporting.ErrForbidden
+	}
+	return nil
 }
 func (s *Service) List(ctx context.Context, actorID, semesterID, weekID string, versionNo int) ([]File, error) {
 	version, err := s.version(ctx, actorID, semesterID, weekID, versionNo)

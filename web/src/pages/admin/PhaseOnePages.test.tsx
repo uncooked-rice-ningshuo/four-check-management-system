@@ -11,7 +11,8 @@ import { OrganizationConfigPage } from './OrganizationConfigPage'
 import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
 import type { MasterDataImportBatch, MasterDataKind, MasterDataRecord, MasterDataImportSpec } from '../../entities/masterdata/model/masterData'
-import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getCatalogs, getDepartmentInspectionScopes, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, updateDepartment, updateDepartmentInspectionScope, updateDictionaryItem, updateInspectionType, updateUser, updateUserStatus } from '../../shared/api/adminApi'
+import type { DepartmentDefaultPermissions } from '../../entities/organization/model/organization'
+import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getCatalogs, getDepartmentDefaults, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, saveDepartmentDefaults, updateDepartment, updateDictionaryItem, updateInspectionType, updateUser, updateUserStatus } from '../../shared/api/adminApi'
 import { ApiError } from '../../shared/api/httpClient'
 
 vi.mock('../../shared/api/adminApi', () => ({
@@ -20,8 +21,8 @@ vi.mock('../../shared/api/adminApi', () => ({
   reviewRegistration: vi.fn(),
   getUsers: vi.fn().mockResolvedValue([]),
   getCatalogs: vi.fn().mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] }),
-	getDepartmentInspectionScopes: vi.fn().mockResolvedValue([]),
-	createDepartment: vi.fn(), updateDepartment: vi.fn(), updateInspectionType: vi.fn(), updateDepartmentInspectionScope: vi.fn(),
+	getDepartmentDefaults: vi.fn(), saveDepartmentDefaults: vi.fn(),
+	createDepartment: vi.fn(), updateDepartment: vi.fn(), updateInspectionType: vi.fn(),
   createUser: vi.fn(), updateUser: vi.fn(), updateUserStatus: vi.fn(), resetUserPassword: vi.fn(), assignUserRole: vi.fn(),
   getEffectivePermissions: vi.fn().mockResolvedValue({ accountId: '', systemRole: 'MEMBER', permissions: [] }),
   getPermissionRules: vi.fn().mockResolvedValue([]), createPermissionRule: vi.fn(), updatePermissionRule: vi.fn(), deletePermissionRule: vi.fn(),
@@ -46,7 +47,7 @@ describe('阶段一管理页面', () => {
     vi.mocked(getUsers).mockResolvedValue([])
     vi.mocked(getPendingRegistrations).mockResolvedValue([])
     vi.mocked(getCatalogs).mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [] })
-	vi.mocked(getDepartmentInspectionScopes).mockResolvedValue([])
+	vi.mocked(getDepartmentDefaults).mockReset()
     vi.mocked(getMasterData).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
     vi.mocked(getMasterDataImportSpec).mockResolvedValue({ kind: 'students', templateCode: 'MASTER_DATA_STUDENTS', templateVersion: 1, sheetName: '学生导入', label: '学生', fields: [] })
     vi.mocked(getDictionaries).mockResolvedValue({ types: [], items: [] })
@@ -804,6 +805,7 @@ describe('阶段一管理页面', () => {
 		vi.mocked(updateDepartment).mockImplementation(async input => input)
 		renderPage(<OrganizationConfigPage />)
 
+		fireEvent.click(await screen.findByRole('tab', { name: '部门' }))
 		fireEvent.click(await screen.findByRole('switch', { name: '停用部门 学习部' }))
 		expect(updateDepartment).not.toHaveBeenCalled()
 		const dialog = await screen.findByRole('dialog', { name: /停用“学习部”部门/ })
@@ -829,23 +831,65 @@ describe('阶段一管理页面', () => {
 		await waitFor(() => expect(vi.mocked(updateInspectionType).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ id: 'inspection-1', enabled: false })))
 	})
 
-	it('修改部门检查权限前展示映射对象和权限影响并等待确认', async () => {
+	it('按部门编辑默认权限时只在确认保存后提交整份配置', async () => {
 		vi.mocked(getCatalogs).mockResolvedValue({
 			departments: [{ id: 'department-1', code: 'STUDY', name: '学习部', enabled: true }], organizationRoles: [],
 			inspectionTypes: [{ id: 'inspection-1', code: 'LATE', name: '晚归检查', extensionKind: '', enabled: true, sortOrder: 1, participatesInReport: true }],
 		})
-		vi.mocked(getDepartmentInspectionScopes).mockResolvedValue([{ departmentId: 'department-1', inspectionTypeId: 'inspection-1', canEnter: false, canView: false, canReview: false, canExport: false, canSummarize: false, enabled: true }])
-		vi.mocked(updateDepartmentInspectionScope).mockResolvedValue(undefined)
+		const baseline: DepartmentDefaultPermissions = { departmentId: 'department-1', version: 1,
+			scopes: [{ departmentId: 'department-1', inspectionTypeId: 'inspection-1', canEnter: false, canView: false, canManage: false, canReview: false, canExport: false, enabled: true }],
+			inspectionRoles: [
+				{ inspectionTypeId: 'inspection-1', roleCode: 'MEMBER', canView: true, canEnter: true, canManage: false, canReview: false, canExport: false },
+				{ inspectionTypeId: 'inspection-1', roleCode: 'LEADERSHIP', canView: true, canEnter: true, canManage: true, canReview: true, canExport: false },
+				{ inspectionTypeId: 'inspection-1', roleCode: 'PRESIDIUM', canView: true, canEnter: false, canManage: false, canReview: false, canExport: false },
+			], reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [] }
+		vi.mocked(getDepartmentDefaults).mockResolvedValue(baseline)
+		vi.mocked(saveDepartmentDefaults).mockImplementation(async input => input)
 		renderPage(<OrganizationConfigPage />)
 
-		fireEvent.click(await screen.findByRole('tab', { name: '部门业务映射' }))
-		fireEvent.click(await screen.findByRole('switch', { name: '学习部 晚归检查 录入权限' }))
-		expect(updateDepartmentInspectionScope).not.toHaveBeenCalled()
-		const dialog = await screen.findByRole('dialog', { name: /学习部.*晚归检查.*录入权限/ })
-		expect(within(dialog).getByText(/改变该部门成员可执行的业务范围/)).toBeInTheDocument()
-		fireEvent.click(within(dialog).getByRole('button', { name: '确认修改' }))
-		await waitFor(() => expect(vi.mocked(updateDepartmentInspectionScope).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ canEnter: true })))
+		expect(await screen.findByRole('heading', { name: '日常检查' })).toBeInTheDocument()
+		expect(screen.getByRole('switch', { name: '学习部 承担周通报' })).not.toBeChecked()
+		expect(screen.queryByText('系统角色 · 独立职责')).not.toBeInTheDocument()
+		fireEvent.click(screen.getByRole('button', { name: '配置晚归检查部门功能' }))
+		fireEvent.click(await screen.findByRole('switch', { name: '学习部 晚归检查 录入与提交' }))
+		expect(saveDepartmentDefaults).not.toHaveBeenCalled()
+		fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+		fireEvent.click(screen.getByRole('button', { name: /^保存修改 \(1\)$/ }))
+		const dialog = await screen.findByRole('dialog', { name: /保存“学习部”默认权限/ })
+		expect(within(dialog).getByText(/本次将修改 1 项/)).toBeInTheDocument()
+		fireEvent.click(within(dialog).getByRole('button', { name: '保存全部修改' }))
+		await waitFor(() => expect(vi.mocked(saveDepartmentDefaults).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ version: 1, scopes: [expect.objectContaining({ canEnter: true })] })))
 	})
+
+	it('每个检查项独立编辑岗位默认动作', async () => {
+		const types = [
+			{ id: 'inspection-1', code: 'ONE', name: '检查一', extensionKind: '', enabled: true, sortOrder: 1, participatesInReport: true },
+			{ id: 'inspection-2', code: 'TWO', name: '检查二', extensionKind: '', enabled: true, sortOrder: 2, participatesInReport: true },
+		]
+		vi.mocked(getCatalogs).mockResolvedValue({ departments: [{ id: 'department-1', code: 'STUDY', name: '学习部', enabled: true }], organizationRoles: [], inspectionTypes: types })
+		const role = (inspectionTypeId: string, roleCode: 'MEMBER' | 'LEADERSHIP' | 'PRESIDIUM') => ({ inspectionTypeId, roleCode, canView: false, canEnter: false, canManage: false, canReview: false, canExport: false })
+		vi.mocked(getDepartmentDefaults).mockResolvedValue({ departmentId: 'department-1', version: 1,
+			scopes: types.map(type => ({ departmentId: 'department-1', inspectionTypeId: type.id, enabled: true, canView: true, canEnter: true, canManage: false, canReview: false, canExport: false })),
+			inspectionRoles: types.flatMap(type => (['MEMBER', 'LEADERSHIP', 'PRESIDIUM'] as const).map(code => role(type.id, code))), reportScope: { enabled: false, canView: false, canGenerate: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [],
+		})
+		vi.mocked(saveDepartmentDefaults).mockImplementation(async input => input)
+		renderPage(<OrganizationConfigPage />)
+		fireEvent.click(await screen.findByRole('button', { name: '配置检查一角色权限' }))
+		fireEvent.click(screen.getByRole('switch', { name: '学习部 检查一 委员 录入与提交' }))
+		const memberManage = screen.getByRole('switch', { name: '学习部 检查一 委员 管理记录' })
+		expect(memberManage).toBeDisabled()
+		fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+		fireEvent.click(screen.getByRole('button', { name: '配置检查一部门功能' }))
+		fireEvent.click(screen.getByRole('switch', { name: '学习部 检查一 管理记录' }))
+		fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+		fireEvent.click(screen.getByRole('button', { name: '配置检查一角色权限' }))
+		const enabledManage = screen.getByRole('switch', { name: '学习部 检查一 委员 管理记录' })
+		expect(enabledManage).toBeEnabled()
+		fireEvent.click(enabledManage)
+		fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+		fireEvent.click(screen.getByRole('button', { name: '配置检查二角色权限' }))
+		expect(screen.getByRole('switch', { name: '学习部 检查二 委员 录入与提交' })).not.toBeChecked()
+	}, 30_000)
 
 	it('停用字典值前展示引用影响并等待确认', async () => {
 		vi.mocked(getDictionaries).mockImplementation(async typeId => typeId

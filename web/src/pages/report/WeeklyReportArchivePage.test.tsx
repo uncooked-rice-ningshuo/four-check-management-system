@@ -5,14 +5,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReportArchivePage, ReportWorkflow, ReportingPeriod } from '../../entities/reporting/model/reporting'
 import { WeeklyReportArchiveDetailPage, WeeklyReportArchivePage } from './WeeklyReportArchivePage'
 
-const mocks = vi.hoisted(() => ({ useReportArchive: vi.fn(), useReportArchiveWorkflow: vi.fn(), records: vi.fn() }))
+const mocks = vi.hoisted(() => ({ useReportArchive: vi.fn(), useReportArchiveWorkflow: vi.fn(), records: vi.fn(), startRevision: vi.fn(), permissionResult: { data: { permissions: [] as Array<{action: string; effect: 'ALLOW'}>, canReviseFinalizedReport: false } } }))
 vi.mock('../../features/reporting/model/queries', () => ({
   useReportArchive: mocks.useReportArchive,
   useReportArchiveWorkflow: mocks.useReportArchiveWorkflow,
   useReportVersionRecords: mocks.records,
+  useStartReportRevision: () => ({ mutateAsync: mocks.startRevision, isPending: false }),
 }))
 vi.mock('../../features/attendance/hooks/useAttendancePermissions', () => ({
-  useAttendancePermissions: () => ({ data: { permissions: [] } }),
+  useAttendancePermissions: () => mocks.permissionResult,
 }))
 
 const period: ReportingPeriod = {
@@ -42,6 +43,8 @@ function renderPage() {
 
 describe('WeeklyReportArchivePage', () => {
   beforeEach(() => {
+    mocks.startRevision.mockReset().mockResolvedValue({ id: 'intent-1', reportId: 'report-1', baseVersion: 1 })
+    mocks.permissionResult.data = { permissions: [], canReviseFinalizedReport: false }
     mocks.useReportArchive.mockReturnValue({ data: archivePage, isPending: false, isFetching: false, isError: false, refetch: vi.fn() })
     mocks.useReportArchiveWorkflow.mockReturnValue({ data: archiveWorkflow, isPending: false, isError: false, refetch: vi.fn() })
     mocks.records.mockReturnValue({ data: { items: [], total: 0 }, isPending: false, isFetching: false, isError: false, refetch: vi.fn() })
@@ -60,6 +63,32 @@ describe('WeeklyReportArchivePage', () => {
     expect(await screen.findByRole('dialog', { name: 'V1 · 周指标' })).toBeVisible()
     expect(screen.queryByRole('dialog', { name: '归档版本明细' })).not.toBeInTheDocument()
     expect(mocks.useReportArchiveWorkflow).toHaveBeenCalledWith(period.semesterId, period.weekId, true, expect.any(Function))
+  })
+  it('keeps archive correction unavailable to office members', async () => {
+    renderPage()
+    expect(screen.queryByRole('button', { name: '基于定稿修正' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    expect(await screen.findByRole('region', { name: '周通报归档详情' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '基于定稿修正' })).not.toBeInTheDocument()
+  })
+  it('requires confirmation before an office director opens finalized correction', async () => {
+    mocks.permissionResult.data = { permissions: [], canReviseFinalizedReport: true }
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '基于定稿修正' }))
+    expect(await screen.findByText(/当前定稿 V1 将保留/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '通报归档' })).toBeVisible()
+    expect(mocks.startRevision).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '确认发起' }))
+    await waitFor(() => expect(mocks.startRevision).toHaveBeenCalledWith({ reportId: 'report-1', semesterId: 'semester-1', weekId: 'week-2', versionNo: 1 }))
+  })
+  it('keeps the confirmation open when starting a revision fails', async () => {
+    mocks.permissionResult.data = { permissions: [], canReviseFinalizedReport: true }
+    mocks.startRevision.mockRejectedValue(new Error('配置版本已变化'))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '基于定稿修正' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认发起' }))
+    expect(await screen.findByText('配置版本已变化')).toBeVisible()
+    expect(screen.getByRole('button', { name: '确认发起' })).toBeVisible()
   })
   it('shows correction history and returns to the snapshot', async () => {
     mocks.useReportArchiveWorkflow.mockReturnValue({ data: { ...archiveWorkflow, corrections: [{ id: 'correction-1', versionNo: 1, recordId: 'record-1', field: 'studentName', reason: '核对姓名', beforeValue: '原姓名', afterValue: '修正姓名', correctedBy: 'office-user', correctedAt: '2026-03-16T08:00:00Z' }] }, isPending: false, isError: false, refetch: vi.fn() })

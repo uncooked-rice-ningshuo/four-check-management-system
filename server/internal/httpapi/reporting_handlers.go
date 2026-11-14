@@ -142,6 +142,26 @@ func (h *handler) generateReportDraft(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
+func (h *handler) startReportRevision(c *gin.Context) {
+	account, ok := h.reportActor(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		RowVersion int `json:"rowVersion"`
+	}
+	if c.ShouldBindJSON(&input) != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_REPORT_REQUEST", "定稿更正参数无效")
+		return
+	}
+	result, err := h.reporting.StartFinalizedRevision(c, account.ID, c.Param("id"), input.RowVersion, requestMetadata(c, ""))
+	if err != nil {
+		h.writeReportError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
 func (h *handler) submitReportDraft(c *gin.Context) {
 	h.transitionReport(c, reporting.ReportActionSubmit)
 }

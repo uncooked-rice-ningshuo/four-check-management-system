@@ -1,4 +1,4 @@
-import type { AddReportAdjustmentInput, AddReportCorrectionInput, CreateReportObligationInput, GenerateReportDraftInput, ReportAdjustmentSummary, ReportAdjustmentResult, ReportArchiveEntry, ReportArchivePage, ReportArchiveQuery, ReportCorrectionLog, ReportCorrectionResult, ReportCountMetric, ReportDraft, ReportObligation, ReportObligationDepartmentScope, ReportObligationInspectionType, ReportObligationOptions, ReportReview, ReportState, ReportTransitionAction, ReportTransitionInput, ReportVersion, ReportWorkflow, ReportVersionContent, ReportVersionRecordsQuery, ReportingPeriod, ReportingPeriodPage, ReportingRecord, ReportingRecordPage, ReportingRecordsQuery, ReportingSummary, ReportingSummaryRow, ReportingSummaryTotals } from '../../entities/reporting/model/reporting'
+import type { AddReportAdjustmentInput, AddReportCorrectionInput, CreateReportObligationInput, GenerateReportDraftInput, ReportAdjustmentSummary, ReportAdjustmentResult, ReportArchiveEntry, ReportArchivePage, ReportArchiveQuery, ReportCorrectionLog, ReportCorrectionResult, ReportCountMetric, ReportDraft, ReportObligation, ReportObligationDepartmentScope, ReportObligationInspectionType, ReportObligationOptions, ReportReview, ReportRevisionIntent, ReportState, ReportTransitionAction, ReportTransitionInput, ReportVersion, ReportWorkflow, ReportVersionContent, ReportVersionRecordsQuery, ReportingPeriod, ReportingPeriodPage, ReportingRecord, ReportingRecordPage, ReportingRecordsQuery, ReportingSummary, ReportingSummaryRow, ReportingSummaryTotals } from '../../entities/reporting/model/reporting'
 import { apiRequest } from './httpClient'
 import { badResponse, object } from './inspectionOptionsApi'
 
@@ -305,6 +305,7 @@ export const reportingApi = {
     if (!isReportWorkflow(value)) throw badResponse()
     return value
   },
+  startRevision: (reportId: string, rowVersion: number) => apiRequest<ReportRevisionIntent>(`/reports/${encodeURIComponent(reportId)}/revision-intents`, { method: 'POST', body: JSON.stringify({ rowVersion }) }),
   async versionRecords(query: ReportVersionRecordsQuery): Promise<ReportingRecordPage> {
     const params = new URLSearchParams({ page: String(query.page), pageSize: String(query.pageSize) })
     if (query.inspectionTypeId) {

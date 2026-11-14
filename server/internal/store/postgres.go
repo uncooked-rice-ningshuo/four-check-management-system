@@ -633,13 +633,13 @@ func (p *Postgres) ListCatalogs(ctx context.Context, enabledOnly bool) (organiza
 		filter = " WHERE enabled"
 	}
 	var result organization.Catalogs
-	departmentRows, err := p.Pool.Query(ctx, `SELECT id,code,name,enabled FROM departments`+filter+` ORDER BY code`)
+	departmentRows, err := p.Pool.Query(ctx, `SELECT id,code,name,enabled,permission_version FROM departments`+filter+` ORDER BY code`)
 	if err != nil {
 		return result, err
 	}
 	for departmentRows.Next() {
 		var value organization.Department
-		if err := departmentRows.Scan(&value.ID, &value.Code, &value.Name, &value.Enabled); err != nil {
+		if err := departmentRows.Scan(&value.ID, &value.Code, &value.Name, &value.Enabled, &value.PermissionVersion); err != nil {
 			departmentRows.Close()
 			return result, err
 		}
@@ -699,7 +699,7 @@ func (p *Postgres) UpdateInspectionType(ctx context.Context, value organization.
 }
 
 func (p *Postgres) ListScopes(ctx context.Context) ([]organization.DepartmentInspectionScope, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_review,can_export,can_summarize,enabled FROM department_inspection_scopes ORDER BY department_id,inspection_type_id`)
+	rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_manage,can_review,can_export,enabled FROM department_inspection_scopes ORDER BY department_id,inspection_type_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +707,7 @@ func (p *Postgres) ListScopes(ctx context.Context) ([]organization.DepartmentIns
 	var result []organization.DepartmentInspectionScope
 	for rows.Next() {
 		var value organization.DepartmentInspectionScope
-		if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanReview, &value.CanExport, &value.CanSummarize, &value.Enabled); err != nil {
+		if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanManage, &value.CanReview, &value.CanExport, &value.Enabled); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
@@ -717,11 +717,11 @@ func (p *Postgres) ListScopes(ctx context.Context) ([]organization.DepartmentIns
 
 func (p *Postgres) UpsertScope(ctx context.Context, value organization.DepartmentInspectionScope, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO department_inspection_scopes(department_id,inspection_type_id,can_enter,can_view,can_review,can_export,can_summarize,enabled)
+		_, err := tx.Exec(ctx, `INSERT INTO department_inspection_scopes(department_id,inspection_type_id,can_enter,can_view,can_manage,can_review,can_export,enabled)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET
-			can_enter=EXCLUDED.can_enter,can_view=EXCLUDED.can_view,can_review=EXCLUDED.can_review,can_export=EXCLUDED.can_export,
-			can_summarize=EXCLUDED.can_summarize,enabled=EXCLUDED.enabled,updated_at=now()`, value.DepartmentID, value.InspectionTypeID,
-			value.CanEnter, value.CanView, value.CanReview, value.CanExport, value.CanSummarize, value.Enabled)
+			can_enter=EXCLUDED.can_enter,can_view=EXCLUDED.can_view,can_manage=EXCLUDED.can_manage,can_review=EXCLUDED.can_review,can_export=EXCLUDED.can_export,
+			enabled=EXCLUDED.enabled,updated_at=now()`, value.DepartmentID, value.InspectionTypeID,
+			value.CanEnter, value.CanView, value.CanManage, value.CanReview, value.CanExport, value.Enabled)
 		if err != nil {
 			return err
 		}
@@ -807,14 +807,67 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 		return profile, err
 	}
 	if profile.DepartmentID != "" {
-		rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_review,can_export,can_summarize,enabled
+		scope := &permission.ReportScope{}
+		err = p.Pool.QueryRow(ctx, `SELECT enabled,can_view,can_generate,can_correct,can_review,can_return,
+			can_finalize,can_publish,can_output_settings,can_archive FROM department_report_scopes WHERE department_id=$1::uuid`, profile.DepartmentID).
+			Scan(&scope.Enabled, &scope.CanView, &scope.CanGenerate, &scope.CanCorrect, &scope.CanReview,
+				&scope.CanReturn, &scope.CanFinalize, &scope.CanPublish, &scope.CanOutputSettings, &scope.CanArchive)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return profile, err
+		}
+		if err == nil {
+			profile.ReportScope = scope
+		}
+	}
+	if profile.DepartmentID != "" && (profile.OrganizationRoleCode == "MEMBER" || profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER") {
+		defaults := &permission.ReportRoleDefaults{}
+		err = p.Pool.QueryRow(ctx, `SELECT can_view,can_generate,can_correct,can_review,can_return,can_finalize,
+			can_publish,can_output_settings,can_archive FROM department_report_role_defaults
+			WHERE department_id=$1::uuid AND role_code=$2`, profile.DepartmentID, profile.OrganizationRoleCode).
+			Scan(&defaults.CanView, &defaults.CanGenerate, &defaults.CanCorrect, &defaults.CanReview, &defaults.CanReturn,
+				&defaults.CanFinalize, &defaults.CanPublish, &defaults.CanOutputSettings, &defaults.CanArchive)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return profile, err
+		}
+		if err == nil {
+			profile.ReportDefaults = defaults
+		}
+	}
+	inspectionRole := profile.OrganizationRoleCode
+	if inspectionRole == "MINISTER" || inspectionRole == "VICE_MINISTER" {
+		inspectionRole = "LEADERSHIP"
+	}
+	if profile.DepartmentID != "" && (inspectionRole == "MEMBER" || inspectionRole == "LEADERSHIP" || inspectionRole == "PRESIDIUM") {
+		rows, queryErr := p.Pool.Query(ctx, `SELECT inspection_type_id::text,can_view,can_enter,can_manage,can_review,can_export
+			FROM department_inspection_role_defaults WHERE department_id=$1::uuid AND role_code=$2`, profile.DepartmentID, inspectionRole)
+		if queryErr != nil {
+			return profile, queryErr
+		}
+		profile.InspectionDefaults = make(map[string]*permission.InspectionRoleDefaults)
+		for rows.Next() {
+			var inspectionTypeID string
+			defaults := &permission.InspectionRoleDefaults{}
+			if scanErr := rows.Scan(&inspectionTypeID, &defaults.CanView, &defaults.CanEnter, &defaults.CanManage, &defaults.CanReview, &defaults.CanExport); scanErr != nil {
+				rows.Close()
+				return profile, scanErr
+			}
+			profile.InspectionDefaults[inspectionTypeID] = defaults
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return profile, rowsErr
+		}
+		rows.Close()
+	}
+	if profile.DepartmentID != "" {
+		rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_manage,can_review,can_export,enabled
 			FROM department_inspection_scopes WHERE department_id=$1::uuid`, profile.DepartmentID)
 		if err != nil {
 			return profile, err
 		}
 		for rows.Next() {
 			var value permission.DepartmentScope
-			if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanReview, &value.CanExport, &value.CanSummarize, &value.Enabled); err != nil {
+			if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanManage, &value.CanReview, &value.CanExport, &value.Enabled); err != nil {
 				rows.Close()
 				return profile, err
 			}

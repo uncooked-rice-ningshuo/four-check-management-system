@@ -6,8 +6,8 @@ it('removes fully denied grants but retains partially available scopes', () => {
   const allow: EffectivePermission = { action: 'INSPECTION_VIEW', effect: 'ALLOW', scope: {}, sources: [] }
   const deny: EffectivePermission = { ...allow, effect: 'DENY' }
   expect(hasNavigableInspectionAction([allow, deny], allow.action)).toBe(false)
-  expect(hasNavigableInspectionAction([allow, { ...deny, scope: { weekId: 'one' } }], allow.action)).toBe(true)
-  expect(hasNavigableInspectionAction([{ ...allow, scope: { weekId: 'one' } }, { ...deny, scope: { weekId: 'one' } }], allow.action)).toBe(false)
+  expect(hasNavigableInspectionAction([allow, { ...deny, scope: { inspectionTypeId: 'one' } }], allow.action)).toBe(true)
+  expect(hasNavigableInspectionAction([{ ...allow, scope: { inspectionTypeId: 'one' } }, { ...deny, scope: { inspectionTypeId: 'one' } }], allow.action)).toBe(false)
   expect(hasNavigableInspectionAction([deny], allow.action)).toBe(false)
 })
 
@@ -23,4 +23,10 @@ it('uses inspection type for navigation and does not add department scope', () =
  const deny:EffectivePermission={...allow,effect:'DENY',scope:{inspectionTypeId:'attendance'}}
  expect(hasNavigableInspectionAction([allow,deny],allow.action,'attendance')).toBe(false)
  expect(hasNavigableInspectionAction([allow,deny],allow.action,'sports')).toBe(true)
+})
+
+it('keeps other departmental sources available after a scoped denial', () => {
+ const allow: EffectivePermission = { action: 'INSPECTION_ENTER', effect: 'ALLOW', scope: {}, sourceDepartmentId: 'study', sources: [] }
+ expect(hasNavigableInspectionAction([allow, { ...allow, effect: 'DENY', sourceDepartmentId: 'year-one' }], allow.action)).toBe(true)
+ expect(hasNavigableInspectionAction([allow, { ...allow, effect: 'DENY', ranges: [{ classId: 'one' }] }], allow.action)).toBe(true)
 })

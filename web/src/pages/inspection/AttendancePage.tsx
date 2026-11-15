@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../app/providers/authContext'
 import type { AttendanceFilters, AttendanceRecord, InspectionContext } from '../../entities/inspection/model/inspection'
-import { useAttendanceFilterOptions, useAttendancePermissions, useCurrentAcademicWeek } from '../../features/attendance/hooks/useAttendancePermissions'
+import { useAttendanceSuggestedFilters, useAttendanceFilterOptions, useAttendancePermissions, useCurrentAcademicWeek } from '../../features/attendance/hooks/useAttendancePermissions'
 import { useAttendanceRecords } from '../../features/attendance/hooks/useAttendanceRecords'
 import { importErrorMessage } from '../../features/import-job/model/importErrorMessages'
 import { InspectionImportScopePanel } from '../../features/import-job/ui/InspectionImportScopePanel'
@@ -84,8 +84,10 @@ export function AttendancePage() {
 	const weekId = availableId(semesterWeeks, requestedWeekId, currentWeekId)
 	const attendanceTypeId = options?.inspectionType.id ?? ''
 	const departmentId = options ? availableId(options.departments, search.get('departmentId')) : ''
-	const classId = search.get('classId') ?? ''
-	const grade = search.get('grade') ?? ''
+  const suggested = useAttendanceSuggestedFilters(semesterId, !user?.isSuperAdmin)
+  const useSuggested = !search.has('filtersApplied') && !['departmentId', 'classId', 'grade', 'keyword', 'status', 'source', 'sort'].some(key => search.has(key))
+  const classId = search.get('classId') ?? (useSuggested ? suggested.data?.defaultFilters?.classId : '') ?? ''
+	const grade = search.get('grade') ?? (useSuggested ? suggested.data?.defaultFilters?.grade : '') ?? ''
 	const context = useMemo<InspectionContext>(() => ({
 		semesterId,
 		weekId,
@@ -134,6 +136,7 @@ export function AttendancePage() {
 		Object.entries(entries).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
 		next.set('page', String(nextPage))
 		next.set('pageSize', String(nextPageSize))
+    next.set('filtersApplied', '1')
 		setSearch(next, { state: location.state })
 	}
 	const searchValues: AttendanceSearchValues = {
@@ -217,17 +220,17 @@ export function AttendancePage() {
 			onSubmit={values => { replaceSearch({ ...searchValues, ...values }); setDraftSemester(undefined) }}
 			onReset={() => { setSelectedGrade(''); replaceSearch({ semesterId, weekId }); setDraftSemester(undefined) }}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
-			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), ...((canSubmit || canReview) ? [<DepartmentSubmissionActions memberDepartmentId={user?.systemRole === 'MEMBER' ? (user.primaryDepartmentId ?? '') : undefined} canSubmit={canSubmit} typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />] : []), ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
+			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), ...((canSubmit || canReview) ? [<DepartmentSubmissionActions memberDepartmentIds={user?.systemRole === 'MEMBER' ? permissions.data?.departmentIds : undefined} memberDepartmentId={user?.systemRole === 'MEMBER' ? (user.primaryDepartmentId ?? '') : undefined} canSubmit={canSubmit} typeCode="ATTENDANCE_RATE" key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />] : []), ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}
 			scroll={{ x: 1320 }}
 			locale={{ emptyText: records.isError ? <Alert role="alert" type={error?.status === 403 ? 'warning' : 'error'} showIcon title={importErrorMessage(error?.code)} action={<Button onClick={() => records.refetch?.()}>重试</Button>} /> : <Empty description={listReady ? '当前范围暂无到课率记录' : '请选择学期和周次'} /> }}
 		/>
-		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin || user?.systemRole === 'ADMIN'} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
-		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin || user?.systemRole === 'ADMIN'} onClose={() => setManualOpen(false)} />}
+		{(editId || deleting.length > 0) && <AttendanceMutationDialogs editId={editId} deleting={deleting} memberDepartmentId={user?.systemRole === 'MEMBER' && (permissions.data?.departmentIds?.length ?? 1) === 1 ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin || user?.systemRole === 'ADMIN'} onClose={() => { setEditId(undefined); setDeleting([]); setSelection([]) }} />}
+		{manualOpen && options && <CourseCreatePanel inspectionTypeId={options.inspectionType.id} typeCode="ATTENDANCE_RATE" title="到课率" memberDepartmentId={user?.systemRole === 'MEMBER' && (permissions.data?.departmentIds?.length ?? 1) === 1 ? user.primaryDepartmentId : undefined} isSuperAdmin={!!user?.isSuperAdmin || user?.systemRole === 'ADMIN'} onClose={() => setManualOpen(false)} />}
 		{drawerOpen && attendanceTypeId && <InspectionImportScopePanel
 			typeCode="ATTENDANCE_RATE"
 			inspectionTypeId={attendanceTypeId}
-			memberDepartmentId={user?.systemRole === 'MEMBER' ? user.primaryDepartmentId : undefined}
+			memberDepartmentId={user?.systemRole === 'MEMBER' && (permissions.data?.departmentIds?.length ?? 1) === 1 ? user.primaryDepartmentId : undefined}
 			isSuperAdmin={!!user?.isSuperAdmin || user?.systemRole === 'ADMIN'}
 			batchId={importBatchId}
 			onBatchIdChange={updateImportBatchId}

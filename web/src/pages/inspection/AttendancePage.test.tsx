@@ -15,6 +15,7 @@ const currentWeekQuery = vi.fn()
 let currentUser = { isSuperAdmin: false, primaryDepartmentId: 'department-study' }
 vi.mock('../../features/attendance/hooks/useAttendanceRecords', () => ({ useAttendanceRecords: (...args: unknown[]) => recordsQuery(...args) }))
 vi.mock('../../features/attendance/hooks/useAttendancePermissions', () => ({
+ useAttendanceSuggestedFilters: () => ({ data: undefined }),
 	useAttendancePermissions: () => permissionsQuery(),
 	useCurrentAcademicWeek: () => currentWeekQuery(),
 	useAttendanceFilterOptions: () => filterOptionsQuery(),

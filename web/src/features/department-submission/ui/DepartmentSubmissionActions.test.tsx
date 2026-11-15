@@ -113,6 +113,7 @@ it('shows a recoverable option failure instead of accepting an unresolved scope'
 })
 
 it('adds only eligible Excel batch records and shows changed records before submission', async () => {
+  cartApi.candidates.mockResolvedValue({ items: [cartRecord], total: 1, page: 1, pageSize: 100 })
   cartApi.batches.mockResolvedValue({ items: [{ ...scope, id: 'import-id', originalName: '晚归.xlsx', createdByName: '其他委员', status: 'CONFIRMED', createdAt: '2026-09-01T00:00:00Z', confirmedAt: '2026-09-01T00:00:00Z', importedRows: 2, selectableRecords: 1, submittedRecords: 1, unavailableRecords: 0 }], total: 1, page: 1, pageSize: 10 })
   cartApi.batchRecords.mockResolvedValue({ items: [{ record: { ...cartRecord, source: 'EXCEL', importBatchId: 'import-id' }, selectable: true }, { record: { ...cartRecord, id: 'already', status: 'PENDING_REVIEW' }, selectable: false, unavailableReason: 'ALREADY_SUBMITTED' }], total: 2, page: 1, pageSize: 100 })
   cartApi.detail.mockResolvedValue({ ...cartRecord, rowVersion: 2 })
@@ -159,6 +160,7 @@ it('shows the imported record details in batch selection and final confirmation'
   const imported = { ...cartRecord, source: 'EXCEL', importBatchId: 'import-id', currentCourseName: '线性代数', details: { date: '2026-09-11', time: '10:00:00', period: '3-4' } }
   cartApi.batches.mockResolvedValue({ items: [{ ...scope, id: 'import-id', originalName: '考勤.xlsx', status: 'CONFIRMED', createdAt: '2026-09-01T00:00:00Z', confirmedAt: '2026-09-01T00:00:00Z', importedRows: 1, selectableRecords: 1, submittedRecords: 0, unavailableRecords: 0 }], total: 1, page: 1, pageSize: 10 })
   cartApi.batchRecords.mockResolvedValue({ items: [{ record: imported, selectable: true }], total: 1, page: 1, pageSize: 10 })
+  cartApi.candidates.mockResolvedValue({ items: [imported], total: 1, page: 1, pageSize: 100 })
   cartApi.detail.mockResolvedValue(imported)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><DepartmentSubmissionActions typeCode="ATTENDANCE_RATE" inspectionTypeId="type" listScope={scope} selected={[]} canReview onChanged={() => {}} /></QueryClientProvider>)

@@ -47,6 +47,11 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 			q.SemesterID, q.WeekID, q.DepartmentID = original.SemesterID, original.WeekID, original.DepartmentID
 		}
 	}
+	// Creation provenance is not the submission route. Only submit options bind grants to the selected department.
+	a.RouteOptions = q.Purpose == "submit"
+	if a.RouteOptions {
+		a.TargetDepartmentID = q.DepartmentID
+	}
 	mode := "read"
 	if q.Purpose == "submit" {
 		mode = "mutate"
@@ -60,6 +65,17 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 			}
 		}
 		a.Permissions = rules
+	}
+	if q.Purpose != "view" && !a.Unrestricted {
+		if err := requireStageConfiguration(ctx, tx, q.SemesterID, result.InspectionTypeID, a.Permissions); err != nil {
+			return result, err
+		}
+	}
+	if q.Purpose == "view" && q.Kind == "weeks" && !a.Unrestricted {
+		result.DefaultFilters, err = suggestedInspectionFilters(ctx, tx, q.SemesterID, result.InspectionTypeID, a.Permissions)
+		if err != nil {
+			return result, err
+		}
 	}
 	args := []any{result.InspectionTypeID, owner}
 	// Candidate creation scopes require enabled calendars, mappings and classes.
@@ -82,6 +98,10 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 	}
 	guard := inspectionAccessSQL(a, mode, &args)
 	base := ` FROM (` + candidates + `) ir JOIN semesters sem ON sem.id=ir.semester_id JOIN academic_years y ON y.id=sem.academic_year_id JOIN semester_weeks w ON w.id=ir.week_id LEFT JOIN departments d ON d.id=ir.department_id JOIN classes c ON c.id=ir.class_id WHERE ` + guard
+	if q.Purpose == "entry" && len(a.EntryDepartmentIDs) > 0 {
+		args = append(args, a.EntryDepartmentIDs)
+		base += fmt.Sprintf(" AND ir.department_id::text=ANY($%d::text[])", len(args))
+	}
 	for _, filter := range []struct{ column, value string }{{"ir.semester_id", q.SemesterID}, {"ir.week_id", q.WeekID}, {"ir.department_id", q.DepartmentID}} {
 		if filter.value != "" {
 			args = append(args, filter.value)

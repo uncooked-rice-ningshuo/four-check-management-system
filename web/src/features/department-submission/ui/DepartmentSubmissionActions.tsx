@@ -19,6 +19,7 @@ type Props = {
   listScope?: Partial<Record<'semesterId' | 'weekId' | 'departmentId', string | number | undefined>>
   selected: SelectableRecord[]
   memberDepartmentId?: string
+  memberDepartmentIds?: string[]
   canSubmit?: boolean
   canReview: boolean
   onChanged: () => void
@@ -47,7 +48,9 @@ function explicitSubmissionScope(listScope: Props['listScope'], inspectionTypeId
 }
 
 /** Batch actions are shared by all inspection pages. The API enforces every scope and transition. */
-export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listScope, memberDepartmentId, canSubmit = true, canReview, onChanged, onOpenRecord }: Props) {
+export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listScope, memberDepartmentId, memberDepartmentIds, canSubmit = true, canReview, onChanged, onOpenRecord }: Props) {
+  const routeDepartments = memberDepartmentIds ?? (memberDepartmentId === undefined ? undefined : [memberDepartmentId])
+  const singleDepartment = routeDepartments?.length === 1 ? routeDepartments[0] : undefined
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [reasonFor, setReasonFor] = useState<DepartmentSubmission>()
@@ -143,7 +146,8 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
   } })
 
   const openCart = () => {
-    setDraftScope({ semesterId: typeof listScope?.semesterId === 'string' ? listScope.semesterId : '', weekId: typeof listScope?.weekId === 'string' ? listScope.weekId : '', departmentId: memberDepartmentId ?? (typeof listScope?.departmentId === 'string' ? listScope.departmentId : '') })
+    routeValidation.current++
+    setDraftScope({ semesterId: typeof listScope?.semesterId === 'string' ? listScope.semesterId : '', weekId: typeof listScope?.weekId === 'string' ? listScope.weekId : '', departmentId: singleDepartment ?? (routeDepartments && routeDepartments.length > 1 ? '' : typeof listScope?.departmentId === 'string' ? listScope.departmentId : '') })
     setStep(0)
     setSourceTab('records')
     setStaleRecords([])
@@ -165,9 +169,34 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
     })
   }
 
+  const routeValidation = useRef(0)
+  const changeDepartment = async (departmentId: string) => {
+    const next = { ...draftScope, departmentId }
+    setDraftScope(next)
+    setCartScopeSnapshot(`${next.semesterId}:${next.weekId}:${departmentId === COLLEGE_DEPARTMENT_OPTION_ID ? '' : departmentId}:${inspectionTypeId}`)
+    setStaleRecords([])
+    const request = ++routeValidation.current
+    const scope = explicitSubmissionScope(next, inspectionTypeId)
+    if (!scope || !cart.size) return
+    try {
+      const eligible = await submissionCartApi.candidates({ ...scope, departmentId, ids: [...cart.keys()].join(','), page: 1, pageSize: 100 })
+      if (request !== routeValidation.current) return
+      const allowed = new Set(eligible.items.map(item => item.id))
+      setStaleRecords([...cart.keys()].filter(id => !allowed.has(id)).map(id => ({ id, reason: '不在所选部门的操作范围内，请改选部门或调整所选记录' })))
+    } catch {
+      if (request === routeValidation.current) setStaleRecords([...cart.keys()].map(id => ({ id, reason: '范围校验失败，请重试；已选记录保持不变' })))
+    }
+  }
+
   const verifyCart = async () => {
     if (!cartScope || !cart.size || contextChanged) return
     setStaleRecords([])
+    try {
+      const eligible = await submissionCartApi.candidates({ ...cartScope, departmentId: cartScope.departmentId || COLLEGE_DEPARTMENT_OPTION_ID, ids: [...cart.keys()].join(','), page: 1, pageSize: 100 })
+      const allowedIds = new Set(eligible.items.map(item => item.id))
+      const invalid = [...cart.keys()].filter(id => !allowedIds.has(id)).map(id => ({ id, reason: '此记录不在所选部门的可提交范围内，请改选部门或调整所选记录' }))
+      if (invalid.length) { setStaleRecords(invalid); return }
+    } catch { void notice.error('提交范围校验失败，请重试；已选记录保持不变'); return }
     const checks = await Promise.all([...cart.values()].map(async record => {
       try {
         const current = await submissionCartApi.detail(record.id)
@@ -238,7 +267,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
   const submissionConfirmation = (
     <Modal title="最终确认本次提交" open={!!pendingSubmit} width="min(1100px, 95vw)" confirmLoading={action.isPending} okText="确认提交"
       onCancel={() => setPendingSubmit(undefined)} onOk={confirmSubmit}>
-      <Typography.Paragraph>范围：{namedScope}；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选，提交后进入授权审核人的批次审核。</Typography.Paragraph><Table<SubmissionCartRecord> size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 'max-content', y: 280 }} columns={recordColumns} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph>
+      <Typography.Paragraph>提交至{namedScope}，进入对应部门审核流程；共 {pendingSubmit?.records.length ?? 0} 条。请确认本次无遗漏和多选。</Typography.Paragraph><Table<SubmissionCartRecord> size="small" rowKey="id" pagination={false} dataSource={[...cart.values()]} scroll={{ x: 'max-content', y: 280 }} columns={recordColumns} /><Typography.Paragraph type="secondary">点击“确认提交”后仍会由服务端重新验证每条记录的权限、状态和版本。</Typography.Paragraph>
     </Modal>
   )
 
@@ -269,7 +298,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
               <Button aria-label="退回" onClick={() => { setReasonFor(item); setReason('') }}>退回</Button>
               <Button aria-label="确认" type="primary" onClick={() => decide(item, 'confirm')}>确认</Button>
             </>}
-            {item.status === 'RETURNED' && canSubmit && (memberDepartmentId === undefined || memberDepartmentId === item.scope.departmentId) &&
+            {item.status === 'RETURNED' && canSubmit && (routeDepartments === undefined || routeDepartments.includes(item.scope.departmentId)) &&
               <Button aria-label="重提" onClick={() => decide(item, 'resubmit')}>重提</Button>}
           </Space>}
         </>}
@@ -298,13 +327,13 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       </Modal>
     </Drawer>
     <Drawer title="提交检查记录" open={cartOpen} width="min(1040px, 100vw)" destroyOnHidden className="submission-drawer" onClose={() => {
-      if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
-      else setCartOpen(false)
+      if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { routeValidation.current++; setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
+      else { routeValidation.current++; setCartOpen(false) }
     }}>
       <div className="submission-steps"><Steps current={step} size="small" responsive={false} items={[{ title: '确定范围' }, { title: '添加记录' }, { title: '核对提交' }]} /></div>
       {step === 0 && <section className="submission-stage"><div className="submission-stage-heading"><Typography.Title level={5}>确定提交范围</Typography.Title><Typography.Paragraph type="secondary">一次提交对应一个学期、周次和归属。</Typography.Paragraph></div>
         {(semesters.isError || weeks.isError || departments.isError) && <Alert type="error" title="范围选项加载失败" action={<Button onClick={() => { void semesters.refetch(); void departments.refetch(); if (draftScope.semesterId) void weeks.refetch() }}>重试</Button>} />}
-        <div className="submission-scope-grid"><label>学期<Select aria-label="提交学期" placeholder="请选择学期" value={semesters.data?.items.some(item => item.id === draftScope.semesterId) ? draftScope.semesterId : undefined} options={semesters.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => setDraftScope({ ...draftScope, semesterId: value, weekId: '' })} /></label><label>周次<Select aria-label="提交周次" placeholder="请选择周次" value={weeks.data?.items.some(item => item.id === draftScope.weekId) ? draftScope.weekId : undefined} disabled={!draftScope.semesterId} options={weeks.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => setDraftScope({ ...draftScope, weekId: value })} /></label><label>提交归属<Select disabled={memberDepartmentId !== undefined} aria-label="提交归属" placeholder="请选择部门或管理员" value={departments.data?.items.some(item => item.id === draftScope.departmentId) ? draftScope.departmentId : undefined} options={departments.data?.items.filter(item => memberDepartmentId === undefined || item.id === memberDepartmentId).map(item => ({ value: item.id, label: item.label }))} onChange={value => setDraftScope({ ...draftScope, departmentId: value })} /></label></div>
+        <div className="submission-scope-grid"><label>学期<Select aria-label="提交学期" placeholder="请选择学期" value={semesters.data?.items.some(item => item.id === draftScope.semesterId) ? draftScope.semesterId : undefined} options={semesters.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => setDraftScope({ ...draftScope, semesterId: value, weekId: '' })} /></label><label>周次<Select aria-label="提交周次" placeholder="请选择周次" value={weeks.data?.items.some(item => item.id === draftScope.weekId) ? draftScope.weekId : undefined} disabled={!draftScope.semesterId} options={weeks.data?.items.map(item => ({ value: item.id, label: item.label }))} onChange={value => setDraftScope({ ...draftScope, weekId: value })} /></label><label>提交归属<Select disabled={Boolean(singleDepartment)} aria-label="提交归属" placeholder="请选择部门或管理员" value={departments.data?.items.some(item => item.id === draftScope.departmentId) ? draftScope.departmentId : undefined} options={departments.data?.items.filter(item => routeDepartments === undefined || routeDepartments.includes(item.id)).map(item => ({ value: item.id, label: item.label }))} onChange={value => void changeDepartment(value)} /></label></div>
         <div className="submission-footer"><span>范围确认后可添加记录</span><Button type="primary" disabled={!scopeOptionsReady} onClick={() => { setCartScopeSnapshot(cartScopeKey); setActiveImportBatch(undefined); setCandidateSearch(''); setCandidateKeyword(''); setCandidatePage(1); setImportPage(1); setStep(1) }}>下一步：添加记录</Button></div></section>}
       {step > 0 && <div className="submission-scope-summary">提交范围 <strong>{namedScope}</strong></div>}
       {step === 1 && <section className="submission-stage"><div className="submission-stage-heading"><Typography.Title level={5}>添加记录</Typography.Title><Typography.Paragraph type="secondary">可从已有记录逐条选择，也可以按 Excel 批次添加。</Typography.Paragraph></div><Segmented className="submission-tabs" aria-label="选择记录来源" value={sourceTab} options={[{ label: '逐条添加', value: 'records' }, { label: 'Excel 批次', value: 'excel' }]} onChange={value => { if (value === 'records' || value === 'excel') setSourceTab(value) }} />
@@ -333,7 +362,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       </>}
       <div className="submission-footer"><span>已加入 <strong>{cart.size}</strong> 条记录</span><Space><Button onClick={() => { if (cart.size) { Modal.confirm({ title: '更改范围并清空清单？', onOk: () => { setCart(new Map()); setStep(0) } }) } else setStep(0) }}>上一步</Button><Button type="primary" disabled={!cart.size} onClick={() => setStep(2)}>下一步：核对清单</Button></Space></div></section>}
       {step === 2 && <section className="submission-stage"><div className="submission-stage-heading"><Typography.Title level={5}>核对并提交</Typography.Title><Typography.Paragraph type="secondary">共 {cart.size} 条记录，提交后进入审核流程。</Typography.Paragraph></div>
-      {staleRecords.length > 0 && <Alert type="warning" showIcon title="部分记录已失效，请移除后重新添加" description={staleRecords.map(item => `${recordLabel(cart.get(item.id) ?? { studentName: '检查记录' } as SubmissionCartRecord)}：${item.reason}`).join('；')} />}
+      {staleRecords.length > 0 && <Alert type="warning" showIcon title="部分记录不可提交，请调整部门或记录" description={staleRecords.map(item => `${recordLabel(cart.get(item.id) ?? { studentName: '检查记录' } as SubmissionCartRecord)}：${item.reason}`).join('；')} />}
       <Typography.Title level={5}>统一待提交清单</Typography.Title>
       <Space style={{ marginBottom: 8 }}><Button onClick={() => { setCart(new Map()); setCartScopeSnapshot(cartScopeKey); setStaleRecords([]) }} disabled={!cart.size}>清空清单</Button><Typography.Text type="secondary">移除清单项不会修改业务记录。</Typography.Text></Space>
       <Table<SubmissionCartRecord> size="small" rowKey="id" dataSource={[...cart.values()]} pagination={{ pageSize: 8 }} scroll={{ x: 'max-content' }} columns={[...recordColumns, { title: '操作', key: 'remove', width: 90, fixed: 'right', render: (_, item) => <Button type="link" danger onClick={() => removeCartRecord(item.id)}>移除</Button> }]} />

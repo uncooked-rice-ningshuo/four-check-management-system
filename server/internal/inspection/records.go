@@ -113,6 +113,7 @@ type InspectionContext struct {
 
 // InspectionFilter supports bounded, structured list queries.
 type InspectionFilter struct {
+	IDs                      string `form:"ids"`
 	CollegeOnly              bool   `form:"-"`
 	ConfirmedSubmissionOnly  bool   `form:"-"`
 	SubmissionCandidatesOnly bool   `form:"-"`
@@ -182,9 +183,13 @@ func (s *RecordService) access(ctx context.Context, a ManualActor) (MutationAcce
 	}
 	p, err := s.permissions.Effective(ctx, a.ID)
 	result.ConfirmedOnly = p.ConfirmedInspectionsOnly
-	result.CanRouteOwn = p.SystemRole == permission.SystemRoleAdmin
-	result.RestrictReadDepartment = p.OrganizationRoleCode == "PRESIDIUM"
+	result.CanRouteAdministrator = p.SystemRole == permission.SystemRoleAdmin
+	result.CanRouteOwn = p.SystemRole == permission.SystemRoleAdmin || len(p.DepartmentIDs) > 0
+	result.RestrictReadDepartment = false
 	result.ReadDepartmentID = p.PrimaryDepartmentID
+	if p.SystemRole == permission.SystemRoleMember {
+		result.EntryDepartmentIDs = p.DepartmentIDs
+	}
 	result.Permissions = p.Permissions
 	return result, err
 }
@@ -389,6 +394,17 @@ func (s *RecordService) Detail(ctx context.Context, actor ManualActor, id string
 	return s.repository.GetInspection(ctx, id, a)
 }
 func (s *RecordService) List(ctx context.Context, actor ManualActor, f InspectionFilter) (InspectionPage, error) {
+	if f.IDs != "" {
+		ids := strings.Split(f.IDs, ",")
+		if len(ids) > 100 {
+			return InspectionPage{}, ErrInspectionRequest
+		}
+		for _, id := range ids {
+			if _, ok := canonicalDetailID(id); !ok {
+				return InspectionPage{}, ErrInspectionRequest
+			}
+		}
+	}
 	if f.DepartmentID == CollegeDepartmentOptionID {
 		f.DepartmentID = ""
 		f.CollegeOnly = true

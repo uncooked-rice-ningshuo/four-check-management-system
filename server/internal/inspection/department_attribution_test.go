@@ -7,7 +7,7 @@ import (
 
 func TestResolveEntryDepartmentUsesTrustedMemberAssignment(t *testing.T) {
 	const primary = "10000000-0000-0000-0000-000000000002"
-	member := ManualActor{IsMember: true, PrimaryDepartmentID: primary}
+	member := ManualActor{IsMember: true, PrimaryDepartmentID: primary, DepartmentIDs: []string{primary}}
 	if got, err := ResolveEntryDepartment(member, ""); err != nil || got != primary {
 		t.Fatalf("empty member department = %q, %v", got, err)
 	}

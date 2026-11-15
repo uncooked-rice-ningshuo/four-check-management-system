@@ -73,9 +73,9 @@ func TestWorkbenchCountsPersonalTodosButShowsDepartmentOverall(t *testing.T) {
 			InspectionTypes: []organization.InspectionType{{ID: "attendance", Code: "ATTENDANCE_RATE", Name: "到课率", Enabled: true}},
 		},
 		scopes: []organization.DepartmentInspectionScope{{DepartmentID: "study", InspectionTypeID: "attendance", CanView: true, CanEnter: true, Enabled: true}, {DepartmentID: "sports", InspectionTypeID: "attendance", CanView: true, Enabled: true}},
-	}, permissionStub{result: permission.EffectiveResult{SystemRole: permission.SystemRoleMember, PrimaryDepartmentID: "study", Permissions: []permission.EffectivePermission{
-		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
-		{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "study", InspectionTypeID: "attendance"}},
+	}, permissionStub{result: permission.EffectiveResult{SystemRole: permission.SystemRoleMember, PrimaryDepartmentID: "study", DepartmentIDs: []string{"study"}, Permissions: []permission.EffectivePermission{
+		{SourceDepartmentID: "study", Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: "attendance"}},
+		{SourceDepartmentID: "study", Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: "study", InspectionTypeID: "attendance"}},
 	}}})
 
 	result, err := service.Workbench(context.Background(), Actor{ID: "member-1"}, time.Now())

@@ -28,7 +28,20 @@ type workflowPermissions struct {
 }
 
 func (p *workflowPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
-	return permission.EffectiveResult{SystemRole: p.role, PrimaryDepartmentID: p.primaryDepartmentID, OrganizationRoleCode: p.organizationRoleCode, ConfirmedInspectionsOnly: p.confirmedOnly, Permissions: p.rules}, nil
+	rules := append([]permission.EffectivePermission(nil), p.rules...)
+	var departments []string
+	if p.role == permission.SystemRoleMember && p.primaryDepartmentID != "" {
+		departments = []string{p.primaryDepartmentID}
+		for i := range rules {
+			if rules[i].Action == permission.ActionInspectionView {
+				rules[i].ConfirmedOnly = p.confirmedOnly
+			}
+			if rules[i].Effect == permission.EffectAllow && rules[i].SourceDepartmentID == "" {
+				rules[i].SourceDepartmentID = p.primaryDepartmentID
+			}
+		}
+	}
+	return permission.EffectiveResult{SystemRole: p.role, DepartmentIDs: departments, PrimaryDepartmentID: p.primaryDepartmentID, OrganizationRoleCode: p.organizationRoleCode, ConfirmedInspectionsOnly: p.confirmedOnly, Permissions: rules}, nil
 }
 
 func TestSubmitDepartmentBatchPostgres(t *testing.T) {
@@ -695,14 +708,14 @@ func TestSubmitDepartmentBatchPostgres(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, target := range []string{department, ""} {
-					imports, err := db.ListSubmissionBatches(ctx, account, importjob.SubmissionBatchQuery{CanRouteOwn: true, SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: typeID, DepartmentID: target, Page: 1, PageSize: 10})
+					imports, err := db.ListSubmissionBatches(ctx, account, importjob.SubmissionBatchQuery{CanRouteOwn: true, CanRouteAdministrator: true, SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: typeID, DepartmentID: target, Page: 1, PageSize: 10})
 					if err != nil || len(imports.Items) != 1 || imports.Items[0].SelectableRecords != 1 {
 						t.Fatalf("import candidates %q: %+v %v", target, imports, err)
 					}
 				}
 			}
 			for _, target := range []string{department, ""} {
-				page, err := db.ListInspections(ctx, inspection.InspectionFilter{WeekID: scope.WeekID, DepartmentID: target, CollegeOnly: target == "", SubmissionCandidatesOnly: true, Page: 1, PageSize: 100}, inspection.MutationAccess{ActorID: account, CanRouteOwn: true, Permissions: adminRules.rules})
+				page, err := db.ListInspections(ctx, inspection.InspectionFilter{WeekID: scope.WeekID, DepartmentID: target, CollegeOnly: target == "", SubmissionCandidatesOnly: true, Page: 1, PageSize: 100}, inspection.MutationAccess{ActorID: account, CanRouteOwn: true, CanRouteAdministrator: true, Permissions: adminRules.rules})
 				found := false
 				for _, record := range page.Items {
 					if record.ID == recordID {

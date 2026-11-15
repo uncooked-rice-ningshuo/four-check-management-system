@@ -96,7 +96,7 @@ function ArchiveWorkflowDetail({ workflow, onAccessDenied }: { workflow: ReportW
           <Button icon={<BarChartOutlined aria-hidden="true" />} onClick={() => setIndicatorsOpen(true)}>周指标</Button>
           <Button icon={<HistoryOutlined aria-hidden="true" />} onClick={() => choose(selectedVersion.versionNo, 'history')}>流程与修正记录{workflow.reviews.length + workflow.corrections.length > 0 ? ` (${workflow.reviews.length + workflow.corrections.length})` : ''}</Button>
           <ReportOutputPanel key={selectedVersion.id} version={selectedVersion} semesterId={period.semesterId} weekId={period.weekId}
-            canGenerate={permissionCoversReportTypes(permissionQuery.data?.permissions ?? [], 'REPORT_GENERATE', period, selectedVersion.content.rows)} /></div>
+            canOutput={permissionCoversReportTypes(permissionQuery.data?.permissions ?? [], 'REPORT_FILE_OUTPUT', period, selectedVersion.content.rows)} /></div>
       </header>
       {selectedVersion.content.scopeLimited && <Alert type="warning" showIcon title="此版本只覆盖生成账号当时有权查看的范围" />}
       <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} inlineRecordDetail showIndicators={false} showHeading={false} />

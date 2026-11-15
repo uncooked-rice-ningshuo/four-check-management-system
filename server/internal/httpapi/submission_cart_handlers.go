@@ -46,11 +46,11 @@ func (h *handler) listSubmissionImportBatches(c *gin.Context) {
 			writeInspectionError(c, err)
 			return
 		}
-		canManage = access.Allowed(permission.ActionInspectionManage, enriched)
+		canManage = access.ForDepartment(scope.DepartmentID).Allowed(permission.ActionInspectionManage, enriched)
 	}
 	result, err := h.importJobs.ListSubmissionBatches(c, account.ID, importjob.SubmissionBatchQuery{
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
-		CanManage: canManage, CanRouteOwn: account.IsSuperAdmin || account.SystemRole == auth.SystemRoleAdmin, DepartmentID: scope.DepartmentID, Page: page, PageSize: pageSize,
+		CanRouteAdministrator: account.IsSuperAdmin || account.SystemRole == auth.SystemRoleAdmin, CanManage: canManage, CanRouteOwn: account.IsSuperAdmin || account.SystemRole == auth.SystemRoleAdmin || len(account.DepartmentIDs) > 0, DepartmentID: scope.DepartmentID, Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		writeImportError(c, err)
@@ -98,7 +98,7 @@ func (h *handler) listSubmissionBatchRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
+	actor := inspection.ManualActor{ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID, DepartmentIDs: account.DepartmentIDs}
 	result, err := h.inspections.List(c, actor, inspection.InspectionFilter{
 		SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID,
 		ImportBatchID: batch.ID, Page: page, PageSize: pageSize,

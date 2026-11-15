@@ -3,7 +3,10 @@ package organization
 import (
 	"context"
 	"errors"
+	"four-check-management-system/server/internal/permission"
+	"slices"
 	"strings"
+	"time"
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
@@ -53,31 +56,37 @@ type DepartmentInspectionScope struct {
 
 // ReportRoleDefaults stores the weekly-report baseline for a role in one department.
 type ReportRoleDefaults struct {
-	RoleCode          string `json:"roleCode"`
-	CanView           bool   `json:"canView"`
-	CanGenerate       bool   `json:"canGenerate"`
-	CanCorrect        bool   `json:"canCorrect"`
-	CanReview         bool   `json:"canReview"`
-	CanReturn         bool   `json:"canReturn"`
-	CanFinalize       bool   `json:"canFinalize"`
-	CanPublish        bool   `json:"canPublish"`
-	CanOutputSettings bool   `json:"canOutputSettings"`
-	CanArchive        bool   `json:"canArchive"`
+	CanForceGenerate    bool   `json:"canForceGenerate"`
+	CanObligationManage bool   `json:"canObligationManage"`
+	RoleCode            string `json:"roleCode"`
+	CanView             bool   `json:"canView"`
+	CanFileOutput       bool   `json:"canFileOutput"`
+	CanGenerate         bool   `json:"canGenerate"`
+	CanCorrect          bool   `json:"canCorrect"`
+	CanReview           bool   `json:"canReview"`
+	CanReturn           bool   `json:"canReturn"`
+	CanFinalize         bool   `json:"canFinalize"`
+	CanPublish          bool   `json:"canPublish"`
+	CanOutputSettings   bool   `json:"canOutputSettings"`
+	CanArchive          bool   `json:"canArchive"`
 }
 
 // DepartmentReportScope is the department's default weekly-report capability
 // ceiling. A role default grants an action only when this scope also enables it.
 type DepartmentReportScope struct {
-	Enabled           bool `json:"enabled"`
-	CanView           bool `json:"canView"`
-	CanGenerate       bool `json:"canGenerate"`
-	CanCorrect        bool `json:"canCorrect"`
-	CanReview         bool `json:"canReview"`
-	CanReturn         bool `json:"canReturn"`
-	CanFinalize       bool `json:"canFinalize"`
-	CanPublish        bool `json:"canPublish"`
-	CanOutputSettings bool `json:"canOutputSettings"`
-	CanArchive        bool `json:"canArchive"`
+	CanForceGenerate    bool `json:"canForceGenerate"`
+	CanObligationManage bool `json:"canObligationManage"`
+	Enabled             bool `json:"enabled"`
+	CanView             bool `json:"canView"`
+	CanFileOutput       bool `json:"canFileOutput"`
+	CanGenerate         bool `json:"canGenerate"`
+	CanCorrect          bool `json:"canCorrect"`
+	CanReview           bool `json:"canReview"`
+	CanReturn           bool `json:"canReturn"`
+	CanFinalize         bool `json:"canFinalize"`
+	CanPublish          bool `json:"canPublish"`
+	CanOutputSettings   bool `json:"canOutputSettings"`
+	CanArchive          bool `json:"canArchive"`
 }
 
 type InspectionRoleDefaults struct {
@@ -90,7 +99,21 @@ type InspectionRoleDefaults struct {
 	CanExport        bool   `json:"canExport"`
 }
 
+type RolePolicy struct {
+	ModuleValidity           []permission.ModuleValidity `json:"moduleValidity,omitempty"`
+	RoleCode                 string                      `json:"roleCode"`
+	ValidityYears            int                         `json:"validityYears"`
+	EndsAt                   *time.Time                  `json:"endsAt,omitempty"`
+	CanManageMorningSchedule bool                        `json:"canManageMorningSchedule"`
+	OperationRanges          []permission.GrantAction    `json:"operationRanges"`
+}
+
+var roleCodes = []string{"MEMBER", "MINISTER", "VICE_MINISTER", "PRESIDIUM", "TEACHER"}
+
 type DepartmentDefaultPermissions struct {
+	RolePolicies             []RolePolicy `json:"rolePolicies"`
+	CanManageMorningSchedule bool         `json:"canManageMorningSchedule"`
+
 	ReportMaintenance ReportMaintenance           `json:"reportMaintenance"`
 	DepartmentID      string                      `json:"departmentId"`
 	Version           int                         `json:"version"`
@@ -118,6 +141,9 @@ type defaultPermissionRepository interface {
 }
 
 type UserAssignment struct {
+	DepartmentIDs         []string        `json:"departmentIds"`
+	PersonalRuleDecisions map[string]bool `json:"personalRuleDecisions,omitempty"`
+
 	// SessionVersion is the internal authentication epoch; Version is its one-based client concurrency token.
 	SessionVersion     int    `json:"-"`
 	Version            int    `json:"version"`
@@ -275,25 +301,49 @@ func (s *Service) SaveDepartmentDefaults(ctx context.Context, input DepartmentDe
 	seenInspectionRoles := map[string]bool{}
 	for _, role := range input.InspectionRoles {
 		key := role.InspectionTypeID + ":" + role.RoleCode
-		if !knownTypes[role.InspectionTypeID] || seenInspectionRoles[key] || (role.RoleCode != "MEMBER" && role.RoleCode != "LEADERSHIP" && role.RoleCode != "PRESIDIUM") ||
+		if !knownTypes[role.InspectionTypeID] || seenInspectionRoles[key] || !slices.Contains(roleCodes, role.RoleCode) ||
 			(role.CanExport && departmentCode != "STUDY" && departmentCode != "SPORTS" && departmentCode != "DORMITORY") {
 			return DepartmentDefaultPermissions{}, ErrInvalidInput
 		}
 		seenInspectionRoles[key] = true
 	}
-	if len(seenInspectionRoles) != len(knownTypes)*3 {
+	if len(seenInspectionRoles) != len(knownTypes)*len(roleCodes) {
 		return DepartmentDefaultPermissions{}, ErrInvalidInput
 	}
 	seenRoles := map[string]bool{}
 	for _, role := range input.ReportRoles {
-		if seenRoles[role.RoleCode] ||
-			(role.RoleCode != "MEMBER" && role.RoleCode != "MINISTER" && role.RoleCode != "VICE_MINISTER") ||
-			(role.RoleCode == "MEMBER" && (role.CanReview || role.CanReturn || role.CanFinalize || role.CanPublish || role.CanOutputSettings)) {
+		if seenRoles[role.RoleCode] || !slices.Contains(roleCodes, role.RoleCode) {
 			return DepartmentDefaultPermissions{}, ErrInvalidInput
 		}
 		seenRoles[role.RoleCode] = true
 	}
-	if len(seenRoles) != 3 {
+	if len(seenRoles) != len(roleCodes) {
+		return DepartmentDefaultPermissions{}, ErrInvalidInput
+	}
+	seenPolicies := map[string]bool{}
+	for _, policy := range input.RolePolicies {
+		if !slices.Contains(roleCodes, policy.RoleCode) || seenPolicies[policy.RoleCode] || policy.ValidityYears < 0 || policy.ValidityYears > 100 {
+			return DepartmentDefaultPermissions{}, ErrInvalidInput
+		}
+		seenPolicies[policy.RoleCode] = true
+		modules := map[string]bool{}
+		for _, term := range policy.ModuleValidity {
+			if modules[term.ModuleKey] || term.ValidityYears < 0 || term.ValidityYears > 100 || (term.ModuleKey != "REPORT" && uuid.Validate(term.ModuleKey) != nil) || (term.EndsAt != nil && term.ValidityYears != 0) {
+				return DepartmentDefaultPermissions{}, ErrInvalidInput
+			}
+			if term.ModuleKey != "REPORT" && !slices.ContainsFunc(input.Scopes, func(scope DepartmentInspectionScope) bool { return scope.InspectionTypeID == term.ModuleKey }) {
+				return DepartmentDefaultPermissions{}, ErrInvalidInput
+			}
+			modules[term.ModuleKey] = true
+		}
+
+		for _, action := range policy.OperationRanges {
+			if !permission.SupportsOperationRange(action.Action) || !permission.ValidOperationRanges(action.Ranges) || action.InspectionTypeID == "" {
+				return DepartmentDefaultPermissions{}, ErrInvalidInput
+			}
+		}
+	}
+	if len(seenPolicies) != len(roleCodes) {
 		return DepartmentDefaultPermissions{}, ErrInvalidInput
 	}
 	repository, ok := s.repository.(defaultPermissionRepository)
@@ -347,7 +397,7 @@ func (s *Service) ListUsers(ctx context.Context) ([]UserAssignment, error) {
 }
 
 func (s *Service) AssignUserRole(ctx context.Context, assignment UserAssignment, metadata ...audit.Metadata) error {
-	if assignment.AccountID == "" || assignment.DepartmentID == "" || assignment.OrganizationRoleID == "" {
+	if assignment.AccountID == "" || len(assignment.DepartmentIDs) == 0 || assignment.OrganizationRoleID == "" {
 		return ErrInvalidInput
 	}
 	users, err := s.repository.ListUsers(ctx)
@@ -374,7 +424,12 @@ func (s *Service) AssignUserRole(ctx context.Context, assignment UserAssignment,
 	// must describe the stored account rather than untrusted client display values.
 	before.Version = before.SessionVersion + 1
 	after := *before
+	after.DepartmentIDs = append([]string(nil), assignment.DepartmentIDs...)
+	after.PersonalRuleDecisions = assignment.PersonalRuleDecisions
 	after.DepartmentID, after.OrganizationRoleID = assignment.DepartmentID, assignment.OrganizationRoleID
+	if !slices.Contains(after.DepartmentIDs, after.DepartmentID) {
+		after.DepartmentID = after.DepartmentIDs[0]
+	}
 	after.Version++
 	return s.repository.AssignUserRole(ctx, after, organizationMutation(metadata, "userAssignment", after.AccountID, *before, after))
 }
@@ -417,4 +472,17 @@ func filterInspectionTypes(values []InspectionType) []InspectionType {
 		}
 	}
 	return result
+}
+
+// InitialRolePolicies sets editable initial durations for newly configured departments.
+func InitialRolePolicies() []RolePolicy {
+	policies := make([]RolePolicy, 0, len(roleCodes))
+	for _, code := range roleCodes {
+		years := 1
+		if code == "TEACHER" {
+			years = 0
+		}
+		policies = append(policies, RolePolicy{RoleCode: code, ValidityYears: years, OperationRanges: []permission.GrantAction{}})
+	}
+	return policies
 }

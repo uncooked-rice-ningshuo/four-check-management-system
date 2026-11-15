@@ -209,7 +209,7 @@ func TestOrganizationAssignmentMissingConflictAndAuthorization(t *testing.T) {
 	}
 	organizationRepo := &assignmentHTTPRepository{users: []organization.UserAssignment{{AccountID: user.ID, Name: user.Name, Status: user.Status, SystemRole: user.SystemRole}}, writeErr: auth.ErrVersionConflict}
 	router := NewRouter(svc, false, AdminServices{Organization: organization.NewService(organizationRepo)})
-	body := map[string]any{"departmentId": "department", "organizationRoleId": "role", "version": 1}
+	body := map[string]any{"departmentIds": []string{"department"}, "organizationRoleId": "role", "version": 1}
 	for _, test := range []struct {
 		id, token, code string
 		status          int

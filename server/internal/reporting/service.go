@@ -835,10 +835,7 @@ func (s *Service) TransitionReport(ctx context.Context, accountID, reportID, act
 	if err != nil {
 		return ReportState{}, err
 	}
-	if action != ReportActionSubmit && effective.SystemRole != permission.SystemRoleSuperAdmin &&
-		(effective.OrganizationRoleCode != "MINISTER" && effective.OrganizationRoleCode != "VICE_MINISTER") {
-		return ReportState{}, ErrForbidden
-	}
+
 	actionRules := actionPermissions(effective.Permissions, permissionAction)
 	if !hasUsableReportGrant(actionRules) {
 		return ReportState{}, ErrForbidden
@@ -934,9 +931,7 @@ func (s *Service) AddReportAdjustment(ctx context.Context, accountID, reportID s
 }
 
 func canReviseFinalizedReport(effective permission.EffectiveResult) bool {
-	return effective.SystemRole == permission.SystemRoleSuperAdmin ||
-		((effective.SystemRole == permission.SystemRoleAdmin || effective.OrganizationRoleCode == "MINISTER" || effective.OrganizationRoleCode == "VICE_MINISTER") &&
-			effective.CanReviseFinalizedReport && effective.Allowed(permission.ActionReportCorrect, permission.Scope{}))
+	return effective.SystemRole == permission.SystemRoleSuperAdmin || effective.Allowed(permission.ActionReportCorrect, permission.Scope{})
 }
 
 // StartFinalizedRevision records a version-bound intent before a finalized report can be revised.

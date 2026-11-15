@@ -17,6 +17,7 @@ import (
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
+	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/storage"
 	"four-check-management-system/server/internal/store"
 	"github.com/google/uuid"
@@ -135,7 +136,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 		rows, rowErr := imports.ListRows(ctx, schoolBatch.ID, 1, 20, "")
 		t.Fatal("preview college import", schoolPreview.Status, schoolPreview.ValidRows, schoolPreview.InvalidRows, rows.Items, err, rowErr)
 	}
-	schoolConfirmed, err := imports.ConfirmBatch(ctx, importjob.ConfirmBatchInput{
+	schoolConfirmed, err := imports.ConfirmBatch(ctx, importjob.ConfirmBatchInput{Permissions: importFixturePermissions(),
 		BatchID: schoolPreview.ID, ExpectedVersion: schoolPreview.Version, IdempotencyKey: "college-" + uuid.NewString(),
 		Scope:         importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, ActorID: fixture.accountID},
 		AuditMetadata: metadata,
@@ -175,7 +176,7 @@ func TestAttendanceImportIntegrationAgainstPostgresAndMinIO(t *testing.T) {
 		t.Fatalf("source object info=%#v sha=%q error=%v", objectInfo, sourceFile.SHA256, err)
 	}
 
-	wrongScope := importjob.ConfirmBatchInput{
+	wrongScope := importjob.ConfirmBatchInput{Permissions: importFixturePermissions(),
 		BatchID: preview.ID, ExpectedVersion: preview.Version, IdempotencyKey: "wrong-scope-" + uuid.NewString(),
 		Scope:         importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: "10000000-0000-0000-0000-000000000003", ActorID: fixture.accountID},
 		AuditMetadata: metadata,
@@ -421,4 +422,9 @@ func assertConfirmedIntegrationState(t *testing.T, ctx context.Context, database
 	if records != 2 || details != 2 || linkedRows != 2 || audits != 1 {
 		t.Fatal(fmt.Sprintf("confirmed counts records=%d details=%d linkedRows=%d audits=%d", records, details, linkedRows, audits))
 	}
+}
+
+// The isolated import fixture explicitly grants entry; individual range tests replace it.
+func importFixturePermissions() permission.EffectiveResult {
+	return permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow}}}
 }

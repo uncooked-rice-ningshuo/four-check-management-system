@@ -24,7 +24,7 @@ vi.mock('../../../shared/api/academicWeekImportApi', () => ({
 }))
 
 const calendar: AcademicCalendar = {
-  academicYears: [{ id: 'year-1', name: '2026-2027 学年', startDate: '2026-09-01T00:00:00Z', endDate: '2027-08-31T00:00:00Z', enabled: false }],
+  academicYears: [{ version: 1, stageGrades: {}, id: 'year-1', name: '2026-2027 学年', startDate: '2026-09-01T00:00:00Z', endDate: '2027-08-31T00:00:00Z', enabled: false }],
   semesters: [{ id: 'semester-1', academicYearId: 'year-1', code: 'FIRST', name: '2026-2027 学年上学期', startDate: '2026-09-01T00:00:00Z', endDate: '2027-01-31T00:00:00Z', enabled: true }],
   weeks: [],
 }

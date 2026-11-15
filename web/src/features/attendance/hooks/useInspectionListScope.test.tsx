@@ -43,3 +43,12 @@ it('preserves grade and student keyword filters in the authorized list scope', (
   act(() => result.current.update({ semesterId: 'semester-current', weekId: 'week-current', grade: '2026', keyword: 'S001', page: 1, pageSize: 20 }))
   expect(result.current.resolve(weeks).filters).toMatchObject({ grade: '2026', keyword: 'S001' })
 })
+
+
+it('uses a representable operation default once and honors clearing it', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => <MemoryRouter>{children}</MemoryRouter>
+  const { result } = renderHook(() => useInspectionListScope(semesters), { wrapper })
+  expect(result.current.resolve(weeks, { grade: '2026' }).filters.grade).toBe('2026')
+  act(() => result.current.update({ semesterId: 'semester-current', weekId: 'week-current' }))
+  expect(result.current.resolve(weeks, { grade: '2026' }).filters.grade).toBeUndefined()
+})

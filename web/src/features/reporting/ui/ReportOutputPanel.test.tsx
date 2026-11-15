@@ -17,9 +17,9 @@ const version: ReportVersion = { id: 'v1', versionNo: 1, createdBy: 'actor', cre
   incompleteCells: [], corrections: [], generatedAt: '2026-01-08',
 } }
 
-function renderActions(canGenerate = true, reportVersion = version) {
+function renderActions(canOutput = true, reportVersion = version) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><ReportOutputPanel version={reportVersion} semesterId="semester" weekId="week" canGenerate={canGenerate} /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><ReportOutputPanel version={reportVersion} semesterId="semester" weekId="week" canOutput={canOutput} /></QueryClientProvider>)
 }
 
 describe('ReportOutputPanel', () => {

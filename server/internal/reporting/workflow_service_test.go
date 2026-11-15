@@ -234,7 +234,7 @@ func TestAddReportAdjustmentRequiresReasonAndCorrectionPermission(t *testing.T) 
 	result := ReportAdjustmentResult{AdjustmentID: "adjustment", Report: ReportState{ID: "report", Status: ReportStatusDraft, RowVersion: 3}}
 	repository := &reportWorkflowRepositoryStub{reportingRepositoryStub: &reportingRepositoryStub{}, adjustmentResult: result}
 	service := NewService(repository, reportingPermissionsStub{result: permission.EffectiveResult{Permissions: []permission.EffectivePermission{correction}}})
-	input := AddReportAdjustmentInput{RowVersion: 2, RecordID: "a0000000-0000-0000-0000-000000000014", Operation: "EXCLUDE", Reason: "本版排除重复记录"}
+	input := AddReportAdjustmentInput{RowVersion: 2, RecordID: "a0000000-0000-0000-0000-000000000014", Operation: "EXCLUDE", Reason: "本版排除重复记录", AllowFinalizedRevision: true}
 	actual, err := service.AddReportAdjustment(context.Background(), reportTestActor, "a0000000-0000-0000-0000-000000000009", input, audit.Metadata{})
 	if err != nil || actual.AdjustmentID != result.AdjustmentID || repository.adjustmentInput != input || len(repository.adjustmentRules) != 1 || repository.adjustmentRules[0].Action != permission.ActionReportCorrect {
 		t.Fatalf("authorized report adjustment = %+v, input=%+v rules=%+v err=%v", actual, repository.adjustmentInput, repository.adjustmentRules, err)

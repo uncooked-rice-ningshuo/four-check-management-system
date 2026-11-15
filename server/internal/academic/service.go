@@ -12,16 +12,19 @@ import (
 )
 
 var (
-	ErrInvalidInput = errors.New("invalid academic calendar input")
-	ErrDateOverlap  = errors.New("academic date range overlaps")
+	ErrInvalidInput    = errors.New("invalid academic calendar input")
+	ErrVersionConflict = errors.New("academic version conflict")
+	ErrDateOverlap     = errors.New("academic date range overlaps")
 )
 
 type AcademicYear struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	StartDate time.Time `json:"startDate"`
-	EndDate   time.Time `json:"endDate"`
-	Enabled   bool      `json:"enabled"`
+	Version     int            `json:"version"`
+	StageGrades map[int]string `json:"stageGrades"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	StartDate   time.Time      `json:"startDate"`
+	EndDate     time.Time      `json:"endDate"`
+	Enabled     bool           `json:"enabled"`
 }
 
 type Semester struct {
@@ -64,7 +67,7 @@ type Repository interface {
 }
 
 func (s *Service) UpdateYear(ctx context.Context, year AcademicYear, metadata ...audit.Metadata) (AcademicYear, error) {
-	if year.ID == "" || invalidAcademicYearRange(year.StartDate, year.EndDate) {
+	if year.ID == "" || year.Version < 1 || !validStageGrades(year.StageGrades) || invalidAcademicYearRange(year.StartDate, year.EndDate) {
 		return AcademicYear{}, ErrInvalidInput
 	}
 	year.Name = academicYearName(year.StartDate)
@@ -97,11 +100,11 @@ func (s *Service) List(ctx context.Context) (Calendar, error) {
 }
 
 func (s *Service) CreateYear(ctx context.Context, year AcademicYear, metadata ...audit.Metadata) (AcademicYear, error) {
-	if invalidAcademicYearRange(year.StartDate, year.EndDate) {
+	if !validStageGrades(year.StageGrades) || invalidAcademicYearRange(year.StartDate, year.EndDate) {
 		return AcademicYear{}, ErrInvalidInput
 	}
 	year.Name = academicYearName(year.StartDate)
-	year.ID, year.Enabled = uuid.NewString(), true
+	year.ID, year.Enabled, year.Version = uuid.NewString(), true, 1
 	return s.repository.CreateYear(ctx, year, calendarMutation(metadata, "academicYear", year.ID, nil, year))
 }
 
@@ -281,4 +284,16 @@ func findWeek(calendar Calendar, id string) any {
 		}
 	}
 	return nil
+}
+
+// Each stage refers to one entry grade within this academic year, shared by its semesters.
+func validStageGrades(mapping map[int]string) bool {
+	seen := make(map[string]bool)
+	for stage, grade := range mapping {
+		if stage < 1 || stage > 4 || uuid.Validate(grade) != nil || seen[grade] {
+			return false
+		}
+		seen[grade] = true
+	}
+	return true
 }

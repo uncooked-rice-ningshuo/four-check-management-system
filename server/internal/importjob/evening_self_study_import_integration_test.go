@@ -150,7 +150,7 @@ VALUES($1,'EVENING_SELF_STUDY_IMPORT','晚自习',$2,1,$3,'PUBLISHED',now(),$4)`
 		t.Fatalf("evening preview references missing: %+v", preview.Items[0].NormalizedInspection.References)
 	}
 	studentID := preview.Items[0].NormalizedInspection.References.Students[0].ID
-	confirm := importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(),
+	confirm := importjob.ConfirmBatchInput{Permissions: importFixturePermissions(), BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(),
 		Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID,
 			DepartmentID: integrationDepartmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
 	if _, err := db.Pool.Exec(ctx, `UPDATE students SET enabled=false WHERE id=$1`, studentID); err != nil {

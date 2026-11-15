@@ -7,11 +7,11 @@ import { reportOutputApi, type ReportOutputSelection } from '../../../shared/api
 
 const supported = new Set(['ATTENDANCE_RATE', 'UNATTENDED_CLASSROOM', 'MORNING_ATTENDANCE', 'EVENING_SELF_STUDY', 'DORMITORY_HYGIENE', 'PUBLIC_DORMITORY_HYGIENE', 'LATE_RETURN', 'CLASSROOM_HYGIENE'])
 
-export function ReportOutputPanel({ version, semesterId, weekId, canGenerate = false }: { version: ReportVersion; semesterId: string; weekId: string; canGenerate?: boolean }) {
+export function ReportOutputPanel({ version, semesterId, weekId, canOutput = false }: { version: ReportVersion; semesterId: string; weekId: string; canOutput?: boolean }) {
   const [messageApi, contextHolder] = message.useMessage()
   const [activeFormat, setActiveFormat] = useState<'WORD' | 'EXCEL' | null>(null)
   const [selection, setSelection] = useState<ReportOutputSelection | null>(null)
-  const mayGenerate = canGenerate && !version.content.scopeLimited
+  const mayGenerate = canOutput && !version.content.scopeLimited
   const settings = useQuery({ queryKey: ['report-output-settings'], queryFn: reportOutputApi.settings, enabled: activeFormat !== null && mayGenerate })
   const options = [...new Map<string, { value: string; label: string }>(version.content.rows.flatMap(row => row.inspectionTypeCode && supported.has(row.inspectionTypeCode)
     ? [[row.inspectionTypeCode, { value: row.inspectionTypeCode, label: row.inspectionType }] as const]

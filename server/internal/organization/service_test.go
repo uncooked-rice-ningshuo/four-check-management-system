@@ -116,14 +116,15 @@ func TestScopeAllowsConfiguredOfficeInspectionWorkButRejectsUndeliveredExport(t 
 	}
 }
 
-func TestDepartmentDefaultsKeepReportMemberBoundaryAndConfigureInspectionWork(t *testing.T) {
+func TestDepartmentDefaultsConfigureActionsForEveryRole(t *testing.T) {
 	repository := &memoryRepository{catalogs: Catalogs{
 		Departments: []Department{{ID: "office", Code: "OFFICE"}}, InspectionTypes: []InspectionType{{ID: "type"}},
 	}}
 	input := DepartmentDefaultPermissions{DepartmentID: "office", Version: 1,
 		Scopes:          []DepartmentInspectionScope{{DepartmentID: "office", InspectionTypeID: "type", CanView: true, Enabled: true}},
-		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER", CanView: true}, {InspectionTypeID: "type", RoleCode: "LEADERSHIP", CanView: true}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM", CanView: true}},
-		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanView: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}},
+		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER", CanView: true}, {InspectionTypeID: "type", RoleCode: "MINISTER", CanView: true}, {InspectionTypeID: "type", RoleCode: "VICE_MINISTER", CanView: true}, {InspectionTypeID: "type", RoleCode: "TEACHER", CanView: true}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM", CanView: true}},
+		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanView: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}, {RoleCode: "TEACHER"}, {RoleCode: "PRESIDIUM"}},
+		RolePolicies:    InitialRolePolicies(),
 	}
 	service := NewService(repository)
 	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
@@ -133,7 +134,7 @@ func TestDepartmentDefaultsKeepReportMemberBoundaryAndConfigureInspectionWork(t 
 		t.Fatalf("save result = %+v, mutations = %d", repository.defaults, len(repository.mutations))
 	}
 	input.ReportRoles[0].CanReview = true
-	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != ErrInvalidInput {
+	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
 		t.Fatalf("office member approval error = %v", err)
 	}
 	input.ReportRoles[0].CanReview = false
@@ -142,7 +143,7 @@ func TestDepartmentDefaultsKeepReportMemberBoundaryAndConfigureInspectionWork(t 
 	if _, err := service.SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
 		t.Fatalf("configured office inspection work error = %v", err)
 	}
-	if len(repository.mutations) != 2 {
+	if len(repository.mutations) != 3 {
 		t.Fatal("configured inspection work was not persisted")
 	}
 }
@@ -153,14 +154,15 @@ func TestDepartmentDefaultsAllowReportRolesForAnotherDepartment(t *testing.T) {
 	}}
 	input := DepartmentDefaultPermissions{DepartmentID: "other", Version: 1,
 		Scopes:          []DepartmentInspectionScope{{DepartmentID: "other", InspectionTypeID: "type"}},
-		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER"}, {InspectionTypeID: "type", RoleCode: "LEADERSHIP"}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM"}},
-		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanGenerate: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}},
+		InspectionRoles: []InspectionRoleDefaults{{InspectionTypeID: "type", RoleCode: "MEMBER"}, {InspectionTypeID: "type", RoleCode: "MINISTER"}, {InspectionTypeID: "type", RoleCode: "VICE_MINISTER"}, {InspectionTypeID: "type", RoleCode: "TEACHER"}, {InspectionTypeID: "type", RoleCode: "PRESIDIUM"}},
+		ReportRoles:     []ReportRoleDefaults{{RoleCode: "MEMBER", CanGenerate: true}, {RoleCode: "MINISTER", CanReview: true}, {RoleCode: "VICE_MINISTER", CanReview: true}, {RoleCode: "TEACHER"}, {RoleCode: "PRESIDIUM"}},
+		RolePolicies:    InitialRolePolicies(),
 	}
 	if _, err := NewService(repository).SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
 		t.Fatalf("non-office report defaults: %v", err)
 	}
 	input.ReportRoles[0].CanFinalize = true
-	if _, err := NewService(repository).SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != ErrInvalidInput {
+	if _, err := NewService(repository).SaveDepartmentDefaults(context.Background(), input, audit.Metadata{}); err != nil {
 		t.Fatalf("non-office member finalize error = %v", err)
 	}
 }
@@ -184,7 +186,7 @@ func TestAssignmentAuditUsesStoredAccountFieldsAndRejectsMissingTarget(t *testin
 	current := UserAssignment{SessionVersion: 12, AccountID: "user", LoginName: "real-login", StudentNo: "real-student", Name: "Real name", Status: "ACTIVE", SystemRole: "MEMBER"}
 	repo := &memoryRepository{users: []UserAssignment{current}}
 	svc := NewService(repo)
-	requested := UserAssignment{SessionVersion: 999, Version: 13, AccountID: "user", LoginName: "forged", Name: "Forged", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: "new-department", OrganizationRoleID: "new-role"}
+	requested := UserAssignment{SessionVersion: 999, Version: 13, AccountID: "user", LoginName: "forged", Name: "Forged", Status: "DISABLED", SystemRole: "SUPER_ADMIN", IsSuperAdmin: true, DepartmentID: "new-department", DepartmentIDs: []string{"new-department"}, OrganizationRoleID: "new-role"}
 	if err := svc.AssignUserRole(context.Background(), requested); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +227,7 @@ func TestAssignmentRejectsVersionFromStaleEditor(t *testing.T) {
 	current := UserAssignment{SessionVersion: 12, AccountID: "user", Name: "Current name", DepartmentID: "old-department", OrganizationRoleID: "old-role"}
 	repo := &memoryRepository{users: []UserAssignment{current}}
 	var stale UserAssignment
-	if err := json.Unmarshal([]byte(`{"accountId":"user","departmentId":"new-department","organizationRoleId":"new-role","version":11}`), &stale); err != nil {
+	if err := json.Unmarshal([]byte(`{"accountId":"user","departmentId":"new-department","departmentIds":["new-department"],"organizationRoleId":"new-role","version":11}`), &stale); err != nil {
 		t.Fatal(err)
 	}
 	if err := NewService(repo).AssignUserRole(context.Background(), stale); err != auth.ErrVersionConflict {

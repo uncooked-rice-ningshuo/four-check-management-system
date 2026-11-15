@@ -17,8 +17,13 @@ var (
 
 // MutationAccess is compiled from server-side permissions, never request JSON.
 type MutationAccess struct {
+	EntryDepartmentIDs     []string
+	TargetDepartmentID     string
+	SubmissionView         bool
+	RouteOptions           bool
 	ConfirmedOnly          bool
 	CanRouteOwn            bool
+	CanRouteAdministrator  bool
 	ReadDepartmentID       string
 	RestrictReadDepartment bool
 	ActorID                string

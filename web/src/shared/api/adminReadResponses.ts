@@ -22,6 +22,7 @@ function user(value: unknown): value is UserAssignment {
     && typeof value.accountId === 'string' && value.accountId.trim() !== ''
     && typeof value.version === 'number' && Number.isSafeInteger(value.version) && value.version > 0
     && (value.systemRole === 'SUPER_ADMIN' || value.systemRole === 'ADMIN' || value.systemRole === 'MEMBER')
+    && Array.isArray(value.departmentIds) && value.departmentIds.every(id => typeof id === 'string')
     && typeof value.isSuperAdmin === 'boolean' && typeof value.mustChangePassword === 'boolean'
 }
 function invalidResponse(): never {

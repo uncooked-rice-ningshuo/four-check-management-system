@@ -6,6 +6,7 @@ import (
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/inspection"
+	"four-check-management-system/server/internal/permission"
 )
 
 const (
@@ -74,6 +75,7 @@ type Batch struct {
 }
 
 type SubmissionBatchQuery struct {
+	CanRouteAdministrator                              bool
 	CanRouteOwn, CanManage                             bool
 	SemesterID, WeekID, InspectionTypeID, DepartmentID string
 	Page, PageSize                                     int
@@ -149,6 +151,7 @@ type ConfirmScope struct {
 }
 
 type ConfirmBatchInput struct {
+	Permissions     permission.EffectiveResult
 	BatchID         string
 	ExpectedVersion int
 	IdempotencyKey  string

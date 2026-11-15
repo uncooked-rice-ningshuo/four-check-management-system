@@ -84,7 +84,7 @@ func (h *handler) inspectionActor(c *gin.Context) (inspection.ManualActor, bool)
 		writeError(c, 503, "SERVICE_UNAVAILABLE", "检查记录服务尚未就绪")
 		return inspection.ManualActor{}, false
 	}
-	return inspection.ManualActor{IsAdmin: a.SystemRole == auth.SystemRoleAdmin, ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}, true
+	return inspection.ManualActor{IsAdmin: a.SystemRole == auth.SystemRoleAdmin, ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID, DepartmentIDs: a.DepartmentIDs}, true
 }
 func bindInspection(c *gin.Context, v any) bool {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
@@ -162,7 +162,7 @@ func (h *handler) listSubmissionCandidates(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "请明确选择部门或管理员范围")
 		return
 	}
-	actor := inspection.ManualActor{IsAdmin: account.SystemRole == auth.SystemRoleAdmin, ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID}
+	actor := inspection.ManualActor{IsAdmin: account.SystemRole == auth.SystemRoleAdmin, ID: account.ID, IsSuperAdmin: account.IsSuperAdmin, IsMember: account.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: account.PrimaryDepartmentID, DepartmentIDs: account.DepartmentIDs}
 	var filter inspection.InspectionFilter
 	if c.ShouldBindQuery(&filter) != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "分页或筛选格式无效")
@@ -246,6 +246,8 @@ func writeInspectionError(c *gin.Context, err error) {
 		c.JSON(422, gin.H{"code": "VALIDATION_FAILED", "message": "请核对检查明细", "details": validation.Issues})
 	case errors.Is(err, inspection.ErrInspectionRequest):
 		writeError(c, 400, "INVALID_REQUEST", "请核对记录标识、版本、操作原因及筛选参数")
+	case errors.Is(err, permission.ErrGradeMappingMissing):
+		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "该记录所属学年尚未配置所需年级阶段映射，请联系管理员完善学年配置")
 	case errors.Is(err, inspection.ErrScopeMismatch):
 		writeError(c, 403, "FORBIDDEN_SCOPE", "无权操作所选范围")
 	case errors.Is(err, inspection.ErrRecordNotFound):

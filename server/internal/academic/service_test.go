@@ -193,3 +193,29 @@ func date(value string) time.Time {
 	parsed, _ := time.Parse("2006-01-02", value)
 	return parsed
 }
+
+func TestYearStageMappingRejectsDuplicatesAndInvalidStages(t *testing.T) {
+	for _, mapping := range []map[int]string{
+		{0: "00000000-0000-0000-0000-000000000001"},
+		{5: "00000000-0000-0000-0000-000000000001"},
+		{1: "00000000-0000-0000-0000-000000000001", 2: "00000000-0000-0000-0000-000000000001"},
+		{1: "not-a-grade"},
+	} {
+		repo := &memoryRepository{}
+		_, err := NewService(repo).CreateYear(context.Background(), AcademicYear{StartDate: date("2026-09-01"), EndDate: date("2027-08-31"), StageGrades: mapping})
+		if err != ErrInvalidInput || len(repo.mutations) != 0 {
+			t.Fatalf("invalid mapping accepted: %v, %v", mapping, err)
+		}
+	}
+}
+func TestYearStageMappingPreservedInAudit(t *testing.T) {
+	repo := &memoryRepository{}
+	grade := "00000000-0000-0000-0000-000000000001"
+	year, err := NewService(repo).CreateYear(context.Background(), AcademicYear{StartDate: date("2026-09-01"), EndDate: date("2027-08-31"), StageGrades: map[int]string{1: grade}})
+	if err != nil || year.StageGrades[1] != grade || year.Version != 1 {
+		t.Fatalf("year=%+v err=%v", year, err)
+	}
+	if repo.mutations[0].Entry.After.(AcademicYear).StageGrades[1] != grade {
+		t.Fatal("mapping missing from audit")
+	}
+}

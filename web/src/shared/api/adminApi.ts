@@ -69,7 +69,7 @@ export const createDictionaryItem = (typeId: string, input: Omit<DictionaryItem,
 export const updateDictionaryItem = (input: DictionaryItem) => apiRequest<DictionaryItem>(`/admin/dictionaries/types/${input.typeId}/items/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const getAcademicCalendar = () => apiRequest<AcademicCalendar>('/admin/academic/calendar')
 export const getMorningScheduleCalendar = () => apiRequest<AcademicCalendar>('/academic/morning-schedule-calendar')
-export const createAcademicYear = (input: Omit<AcademicYear, 'id' | 'enabled'>) => apiRequest<AcademicYear>('/admin/academic/years', { method: 'POST', body: JSON.stringify(input) })
+export const createAcademicYear = (input: Omit<AcademicYear, 'id' | 'enabled' | 'version'>) => apiRequest<AcademicYear>('/admin/academic/years', { method: 'POST', body: JSON.stringify(input) })
 export const updateAcademicYear = (input: AcademicYear) => apiRequest<AcademicYear>(`/admin/academic/years/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
 export const createSemester = (input: Omit<Semester, 'id' | 'enabled'>) => apiRequest<Semester>('/admin/academic/semesters', { method: 'POST', body: JSON.stringify(input) })
 export const updateSemester = (input: Semester) => apiRequest<Semester>(`/admin/academic/semesters/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })
@@ -79,5 +79,4 @@ export const updateWeek = (input: SemesterWeek) => apiRequest<SemesterWeek>(`/ad
 export type SemesterReportGrades = { semesterId: string; gradeIds: string[]; version: number }
 export type SemesterReportGradePreview = { grades: { gradeId: string; gradeName: string; classCount: number; studentCount: number; unassignedCount: number }[]; classCount: number; studentCount: number; unassignedCount: number }
 export const getSemesterReportGrades = (semesterId: string) => apiRequest<SemesterReportGrades>(`/admin/academic/semesters/${encodeURIComponent(semesterId)}/report-grades`)
-export const previewSemesterReportGrades = (semesterId: string, gradeIds: string[]) => apiRequest<SemesterReportGradePreview>(`/admin/academic/semesters/${encodeURIComponent(semesterId)}/report-grades/preview?${new URLSearchParams(gradeIds.map(id => ['gradeId', id]))}`)
-export const replaceSemesterReportGrades = (input: SemesterReportGrades) => apiRequest<SemesterReportGrades>(`/admin/academic/semesters/${encodeURIComponent(input.semesterId)}/report-grades`, { method: 'PUT', body: JSON.stringify(input) })
+export const previewReportGrades = (gradeIds: string[]) => apiRequest<SemesterReportGradePreview>(`/admin/academic/report-grades/preview?${new URLSearchParams(gradeIds.map(id => ['gradeId', id]))}`)

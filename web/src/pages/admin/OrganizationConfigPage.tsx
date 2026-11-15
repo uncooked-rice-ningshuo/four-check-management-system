@@ -27,7 +27,7 @@ export function OrganizationConfigPage() {
   }
   const confirmReportParticipation = (record: InspectionType, participatesInReport: boolean) => modal.confirm({ title: `修改“${record.name}”通报范围？`, content: participatesInReport ? '启用后，该检查类型的数据将参与后续通报。' : '关闭后，该检查类型的新数据将不再默认参与通报。', okText: '确认修改', cancelText: '取消', onOk: () => toggleInspection.mutateAsync({ ...record, participatesInReport }) })
   return <section className="admin-page organization-config-page">{modalContextHolder}
-    <div className="page-heading"><div><Typography.Title level={2}>部门与默认权限</Typography.Title><Typography.Paragraph>按部门配置日常检查、周通报及岗位默认动作；个人授权在“用户与角色”中维护。</Typography.Paragraph></div></div>
+    <div className="page-heading"><div><Typography.Title level={2}>部门与默认权限</Typography.Title><Typography.Paragraph>按部门配置日常检查、周通报及角色默认动作；个人授权在“用户与角色”中维护。</Typography.Paragraph></div></div>
     {catalogs.isError && <Alert type="error" showIcon title="部门目录加载失败" action={<Button onClick={() => void catalogs.refetch()}>重试</Button>} />}
     {catalogs.isPending && <div role="status">正在加载部门目录</div>}
     {catalogs.data && <Tabs defaultActiveKey="defaults" items={[

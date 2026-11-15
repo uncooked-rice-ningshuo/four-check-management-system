@@ -15,6 +15,7 @@ vi.mock('./providers/authContext', () => ({
   }),
 }))
 vi.mock('../features/attendance/hooks/useAttendancePermissions', () => ({
+ useAttendanceSuggestedFilters: () => ({ data: undefined }),
   useAttendancePermissions: () => permissionsQuery(),
 }))
 vi.mock('../features/phase-two-dashboard/model/usePhaseTwoDashboard', () => ({

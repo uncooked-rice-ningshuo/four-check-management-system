@@ -61,7 +61,7 @@ func TestImportRollbackPostgres(t *testing.T) {
 	if batch.ValidRows != 2 {
 		t.Fatalf("valid rows %d", batch.ValidRows)
 	}
-	confirmed, err := imports.ConfirmBatch(ctx, importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}})
+	confirmed, err := imports.ConfirmBatch(ctx, importjob.ConfirmBatchInput{Permissions: importFixturePermissions(), BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}})
 	if err != nil {
 		t.Fatal(err)
 	}

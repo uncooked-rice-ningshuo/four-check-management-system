@@ -56,7 +56,7 @@
   .department-defaults-controls .ant-select { flex: 1 1 180px; width: auto; }
   .department-defaults-controls .ant-btn { margin-inline-start: auto; }
   .department-defaults-section-heading { align-items: flex-start; }
-  .department-defaults-table-scroll { overflow-x: visible; }
+  .department-defaults-table-scroll { overflow-x: auto; }
   .department-defaults-list, .department-defaults-list tbody, .department-defaults-list tr, .department-defaults-list th, .department-defaults-list td { display: block; min-width: 0; width: 100%; }
   .department-defaults-list thead { display: none; }
   .department-defaults-list tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px; border-bottom: 1px solid #e6ecf2; }
@@ -67,7 +67,7 @@
   .department-defaults-list td:nth-child(3), .department-defaults-list td:nth-child(4), .department-defaults-list td:nth-child(5) { grid-column: 1 / -1; }
   .department-defaults-list td:nth-child(3)::before, .department-defaults-list td:nth-child(4)::before { display: inline-block; width: 72px; margin-inline-end: 8px; color: #61758a; font-size: 12px; }
   .department-defaults-list td:nth-child(3)::before { content: '部门功能'; }
-  .department-defaults-list td:nth-child(4)::before { content: '岗位信息'; }
+  .department-defaults-list td:nth-child(4)::before { content: '角色信息'; }
   .department-defaults-list td:nth-child(4) { display: grid; grid-template-columns: 1fr; gap: 2px; }
   .department-defaults-list td:nth-child(4)::before { display: none; }
   .department-defaults-role-line { grid-template-columns: 100px minmax(0, 1fr); gap: 8px; min-width: 0; }
@@ -75,3 +75,15 @@
   .department-defaults-list td:nth-child(5) { margin-top: 4px; }
   .department-defaults-row-actions { justify-content: flex-start; }
 }
+
+.department-defaults-matrix td .ant-btn { display: block; margin-inline: auto; min-height: 24px; }
+.department-defaults-table-scroll { max-inline-size: 100%; overscroll-behavior-inline: contain; }
+.department-defaults-table-scroll:focus-visible { outline: 2px solid #155eef; outline-offset: 2px; }
+
+/* Keep the action and department context visible when the role matrix scrolls. */
+.department-defaults-matrix th:first-child, .department-defaults-matrix td:first-child { position: sticky; inset-inline-start: 0; z-index: 1; background: #fff; min-width: 128px; }
+.department-defaults-matrix thead th:first-child { z-index: 2; background: #f6f8fb; }
+.department-defaults-matrix th:nth-child(2), .department-defaults-matrix td:nth-child(2) { position: sticky; inset-inline-start: 128px; z-index: 1; background: #fff; min-width: 80px; }
+.department-defaults-matrix thead th:nth-child(2) { z-index: 2; background: #f6f8fb; }
+.department-defaults-editor .ant-drawer-body { padding: 24px; }
+@media (max-width: 640px) { .department-defaults-editor .ant-drawer-body { padding: 16px; } }

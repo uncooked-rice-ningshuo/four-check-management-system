@@ -4,7 +4,7 @@ import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
-import { getAcademicCalendar, getMorningScheduleCalendar, getSemesterReportGrades, previewSemesterReportGrades, replaceSemesterReportGrades, updateAcademicYear } from '../../shared/api/adminApi'
+import { getAcademicCalendar, getMorningScheduleCalendar, previewReportGrades, updateAcademicYear } from '../../shared/api/adminApi'
 import { AcademicCalendarPage } from './AcademicCalendarPage'
 
 const accessState = vi.hoisted(() => ({
@@ -14,18 +14,16 @@ const accessState = vi.hoisted(() => ({
 
 vi.mock('../../shared/api/adminApi', () => ({
   getAcademicCalendar: vi.fn().mockResolvedValue({
-    academicYears: [{ id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
+    academicYears: [{ version: 1, stageGrades: {}, id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
     semesters: [{ id: 's1', academicYearId: 'y1', code: 'FIRST', name: '2025-2026学年上学期', startDate: '2025-09-03T00:00:00Z', endDate: '2026-01-30T00:00:00Z', enabled: true }],
     weeks: [{ id: 'w1', semesterId: 's1', weekNo: 2, startDate: '2025-09-08T00:00:00Z', endDate: '2025-09-14T00:00:00Z', note: '校历备注', enabled: true, attendancePenaltyMultiplier: 2 }],
   }),
   createAcademicYear: vi.fn(), createSemester: vi.fn(), createWeek: vi.fn(),
   updateAcademicYear: vi.fn(), updateSemester: vi.fn(), updateWeek: vi.fn(),
   getMasterData: vi.fn().mockResolvedValue({ items: [{ id: 'g1', kind: 'grades', name: '2025级', enabled: true }], total: 1, page: 1, pageSize: 100 }),
-  getSemesterReportGrades: vi.fn().mockResolvedValue({ semesterId: 's1', gradeIds: ['g1'], version: 3 }),
-  previewSemesterReportGrades: vi.fn().mockResolvedValue({ grades: [{ gradeId: 'g1', gradeName: '2025级', classCount: 2, studentCount: 20, unassignedCount: 1 }], classCount: 2, studentCount: 20, unassignedCount: 1 }),
-  replaceSemesterReportGrades: vi.fn().mockResolvedValue({ semesterId: 's1', gradeIds: ['g1'], version: 4 }),
+  previewReportGrades: vi.fn().mockResolvedValue({ grades: [{ gradeId: 'g1', gradeName: '2025级', classCount: 2, studentCount: 20, unassignedCount: 1 }], classCount: 2, studentCount: 20, unassignedCount: 1 }),
   getMorningScheduleCalendar: vi.fn().mockResolvedValue({
-    academicYears: [{ id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
+    academicYears: [{ version: 1, stageGrades: {}, id: 'y1', name: '2025-2026学年', startDate: '2025-09-02T00:00:00Z', endDate: '2026-08-30T00:00:00Z', enabled: true }],
     semesters: [{ id: 's1', academicYearId: 'y1', code: 'FIRST', name: '2025-2026学年上学期', startDate: '2025-09-03T00:00:00Z', endDate: '2026-01-30T00:00:00Z', enabled: true }],
     weeks: [{ id: 'w1', semesterId: 's1', weekNo: 2, startDate: '2025-09-08T00:00:00Z', endDate: '2025-09-14T00:00:00Z', note: '', enabled: true, attendancePenaltyMultiplier: 1 }],
   }),
@@ -50,17 +48,20 @@ describe('学期周次交互', () => {
     expect(screen.queryByText('FIRST')).not.toBeInTheDocument()
   })
 
-  it('学期适用年级使用已保存集合和版本提交', async () => {
+  it('通报覆盖统一在学年映射维护，学期不再出现第二个入口', async () => {
     setup()
     fireEvent.click(await screen.findByRole('tab', { name: '学期' }))
-    fireEvent.click(screen.getByRole('button', { name: '通报适用年级' }))
-    const dialog = await screen.findByRole('dialog', { name: /通报适用年级/ })
-    await waitFor(() => expect(getSemesterReportGrades).toHaveBeenCalledWith('s1'))
-    await waitFor(() => expect(previewSemesterReportGrades).toHaveBeenCalledWith('s1', ['g1']))
-    expect(await within(dialog).findByText(/当前启用班级 2 个，在籍学生 20 人/)).toBeVisible()
-    await waitFor(() => expect(within(dialog).getByText('2025级')).toBeVisible())
-    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
-    await waitFor(() => expect(replaceSemesterReportGrades).toHaveBeenCalledWith({ semesterId: 's1', gradeIds: ['g1'], version: 3 }))
+    expect(screen.queryByRole('button', { name: '通报适用年级' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '学年' }))
+    fireEvent.click(screen.getByRole('button', { name: '年级映射与通报覆盖' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑学年' })
+    await waitFor(() => expect(within(dialog).getByText(/共同组成通报覆盖年级/)).toBeVisible())
+    fireEvent.mouseDown(within(dialog).getByLabelText('大一'))
+    fireEvent.click(await screen.findByText('2025级', { selector: '.ant-select-item-option-content' }))
+    await waitFor(() => expect(previewReportGrades).toHaveBeenCalledWith(['g1']))
+    expect(await within(dialog).findByText(/在籍学生 20 人/)).toBeVisible()
+    fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }))
+    await waitFor(() => expect(updateAcademicYear).toHaveBeenCalledWith(expect.objectContaining({ id: 'y1', version: 1, stageGrades: { '1': 'g1' } })))
   }, 30_000)
   it('校历加载失败时提供重试，不显示未配置空状态', async () => {
     vi.mocked(getAcademicCalendar).mockRejectedValueOnce(new Error('network unavailable'))

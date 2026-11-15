@@ -1,0 +1,13 @@
+.operation-range-editor { min-inline-size: 0; }
+.operation-range-editor > .ant-typography { margin-bottom: 12px; }
+.operation-range-group { min-inline-size: 0; margin: 0 0 16px; padding: 0; border: 0; }
+.operation-range-group + .operation-range-group { padding-top: 12px; border-top: 1px solid var(--ant-color-border-secondary, #e6ecf2); }
+.operation-range-group legend { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 8px; padding: 0; border: 0; font-size: 14px; font-weight: 500; }
+.operation-range-fields { display: grid; gap: 12px; }
+.operation-range-fields label { display: grid; gap: 4px; min-width: 0; }
+.operation-range-fields .ant-select { min-width: 0; }
+.operation-range-fields .ant-select-selection-item { max-width: 100%; }
+.operation-range-fields .ant-select-multiple .ant-select-selection-item-content { white-space: normal; overflow-wrap: anywhere; }
+.operation-range-summary { overflow-wrap: anywhere; font-size: 12px; }
+.permission-range-modal .ant-modal-body { max-height: calc(100dvh - 200px); overflow-y: auto; overscroll-behavior: contain; padding-block: 8px; }
+@media (max-width: 640px) { .permission-range-modal { top: 20px; } }

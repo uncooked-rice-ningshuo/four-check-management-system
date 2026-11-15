@@ -325,7 +325,7 @@ const accountSelect = `SELECT id,login_name,COALESCE(student_no,''),name,passwor
 	COALESCE((SELECT d.name FROM departments d WHERE d.id=accounts.primary_department_id AND d.enabled),''),
 	COALESCE((SELECT r.name FROM user_org_roles u JOIN organization_roles r ON r.id=u.organization_role_id
 		WHERE u.account_id=accounts.id AND u.department_id=accounts.primary_department_id AND r.enabled
-		ORDER BY r.sort_order,r.id LIMIT 1),'') FROM accounts`
+		ORDER BY r.sort_order,r.id LIMIT 1),''),ARRAY(SELECT department_id::text FROM user_org_roles WHERE account_id=accounts.id ORDER BY department_id) FROM accounts`
 
 type row interface{ Scan(...any) error }
 
@@ -333,7 +333,7 @@ func scanAccount(r row) (auth.Account, error) {
 	var a auth.Account
 	err := r.Scan(&a.ID, &a.LoginName, &a.StudentNo, &a.Name, &a.PasswordHash, &a.Status, &a.AccountKind,
 		&a.IsSuperAdmin, &a.SystemRole, &a.MustChangePassword, &a.SessionVersion, &a.PrimaryDepartmentID, &a.RequestedDepartmentID,
-		&a.RequestedOrgRoleID, &a.CreatedAt, &a.PrimaryDepartmentName, &a.OrganizationRoleName)
+		&a.RequestedOrgRoleID, &a.CreatedAt, &a.PrimaryDepartmentName, &a.OrganizationRoleName, &a.DepartmentIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, auth.ErrAccountNotFound
 	}
@@ -447,10 +447,13 @@ func (p *Postgres) ReviewRegistration(ctx context.Context, accountID, reviewerID
 			return execErr
 		}
 		if decision == auth.ReviewApprove {
-			_, execErr := tx.Exec(ctx, `INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) VALUES($1,$2,$3,$4)
-				ON CONFLICT(account_id,department_id,organization_role_id) DO NOTHING`, uuid.NewString(), accountID, departmentID, roleID)
-			return execErr
+			var roleCode string
+			if err := tx.QueryRow(ctx, `SELECT code FROM organization_roles WHERE id=$1 AND enabled`, roleID).Scan(&roleCode); err != nil {
+				return err
+			}
+			return assignDepartmentSnapshot(ctx, tx, accountID, departmentID, roleID, roleCode, reviewedAt)
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -748,8 +751,8 @@ func (p *Postgres) UpsertScope(ctx context.Context, value organization.Departmen
 
 func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment, error) {
 	rows, err := p.Pool.Query(ctx, `SELECT a.id,a.login_name,COALESCE(a.student_no,''),a.name,a.status,a.system_role,a.is_super_admin,a.must_change_password,
-		COALESCE(a.primary_department_id::text,''),COALESCE(u.organization_role_id::text,''),a.session_version
-		FROM accounts a LEFT JOIN user_org_roles u ON u.account_id=a.id ORDER BY a.created_at`)
+		COALESCE(a.primary_department_id::text,''),COALESCE(u.organization_role_id::text,''),a.session_version,ARRAY(SELECT department_id::text FROM user_org_roles WHERE account_id=a.id ORDER BY department_id)
+ FROM accounts a LEFT JOIN LATERAL (SELECT organization_role_id FROM user_org_roles WHERE account_id=a.id LIMIT 1) u ON true ORDER BY a.created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -758,142 +761,12 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment
 	for rows.Next() {
 		var value organization.UserAssignment
 		if err := rows.Scan(&value.AccountID, &value.LoginName, &value.StudentNo, &value.Name, &value.Status, &value.SystemRole,
-			&value.IsSuperAdmin, &value.MustChangePassword, &value.DepartmentID, &value.OrganizationRoleID, &value.SessionVersion); err != nil {
+			&value.IsSuperAdmin, &value.MustChangePassword, &value.DepartmentID, &value.OrganizationRoleID, &value.SessionVersion, &value.DepartmentIDs); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
 	}
 	return result, rows.Err()
-}
-
-func (p *Postgres) AssignUserRole(ctx context.Context, value organization.UserAssignment, mutation audit.Mutation) error {
-	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		// Hold reference locks through assignment commit so concurrent disabling
-		// cannot invalidate a reference between validation and the account write.
-		var referenceID string
-		for _, reference := range []struct{ query, id string }{
-			{`SELECT id FROM departments WHERE id=$1 AND enabled FOR SHARE`, value.DepartmentID},
-			{`SELECT id FROM organization_roles WHERE id=$1 AND enabled FOR SHARE`, value.OrganizationRoleID},
-		} {
-			if _, err := uuid.Parse(reference.id); err != nil {
-				return organization.ErrInvalidInput
-			}
-			err := tx.QueryRow(ctx, reference.query, reference.id).Scan(&referenceID)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return organization.ErrInvalidInput
-			}
-			if err != nil {
-				return err
-			}
-		}
-		tag, err := tx.Exec(ctx, `UPDATE accounts SET primary_department_id=$2,session_version=session_version+1,updated_at=now() WHERE id=$1 AND session_version=$3`, value.AccountID, value.DepartmentID, value.SessionVersion)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return auth.ErrVersionConflict
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM user_org_roles WHERE account_id=$1`, value.AccountID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) VALUES($1,$2,$3,$4)`, uuid.NewString(), value.AccountID, value.DepartmentID, value.OrganizationRoleID); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE account_id=$1 AND revoked_at IS NULL`, value.AccountID)
-		return err
-	})
-}
-
-func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (permission.AccessProfile, error) {
-	var profile permission.AccessProfile
-	err := p.Pool.QueryRow(ctx, `SELECT a.id,a.system_role,COALESCE(a.primary_department_id::text,''),
-		COALESCE(d.code,''),COALESCE(r.code,'') FROM accounts a
-		LEFT JOIN departments d ON d.id=a.primary_department_id
-		LEFT JOIN user_org_roles ur ON ur.account_id=a.id AND ur.department_id=a.primary_department_id
-			AND (ur.start_at IS NULL OR ur.start_at<=CURRENT_DATE) AND (ur.end_at IS NULL OR ur.end_at>=CURRENT_DATE)
-		LEFT JOIN organization_roles r ON r.id=ur.organization_role_id
-		WHERE a.id=$1`, accountID).Scan(&profile.AccountID, &profile.SystemRole, &profile.DepartmentID, &profile.DepartmentCode, &profile.OrganizationRoleCode)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return profile, auth.ErrAccountNotFound
-	}
-	if err != nil {
-		return profile, err
-	}
-	if profile.DepartmentID != "" {
-		scope := &permission.ReportScope{}
-		err = p.Pool.QueryRow(ctx, `SELECT enabled,can_view,can_generate,can_correct,can_review,can_return,
-			can_finalize,can_publish,can_output_settings,can_archive FROM department_report_scopes WHERE department_id=$1::uuid AND EXISTS (SELECT 1 FROM departments WHERE id=$1::uuid AND enabled)`, profile.DepartmentID).
-			Scan(&scope.Enabled, &scope.CanView, &scope.CanGenerate, &scope.CanCorrect, &scope.CanReview,
-				&scope.CanReturn, &scope.CanFinalize, &scope.CanPublish, &scope.CanOutputSettings, &scope.CanArchive)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return profile, err
-		}
-		if err == nil {
-			profile.ReportScope = scope
-		}
-	}
-	if profile.DepartmentID != "" && (profile.OrganizationRoleCode == "MEMBER" || profile.OrganizationRoleCode == "MINISTER" || profile.OrganizationRoleCode == "VICE_MINISTER") {
-		defaults := &permission.ReportRoleDefaults{}
-		err = p.Pool.QueryRow(ctx, `SELECT can_view,can_generate,can_correct,can_review,can_return,can_finalize,
-			can_publish,can_output_settings,can_archive FROM department_report_role_defaults
-			WHERE department_id=$1::uuid AND role_code=$2`, profile.DepartmentID, profile.OrganizationRoleCode).
-			Scan(&defaults.CanView, &defaults.CanGenerate, &defaults.CanCorrect, &defaults.CanReview, &defaults.CanReturn,
-				&defaults.CanFinalize, &defaults.CanPublish, &defaults.CanOutputSettings, &defaults.CanArchive)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return profile, err
-		}
-		if err == nil {
-			profile.ReportDefaults = defaults
-		}
-	}
-	inspectionRole := profile.OrganizationRoleCode
-	if inspectionRole == "MINISTER" || inspectionRole == "VICE_MINISTER" {
-		inspectionRole = "LEADERSHIP"
-	}
-	if profile.DepartmentID != "" && (inspectionRole == "MEMBER" || inspectionRole == "LEADERSHIP" || inspectionRole == "PRESIDIUM") {
-		rows, queryErr := p.Pool.Query(ctx, `SELECT inspection_type_id::text,can_view,can_enter,can_manage,can_review,can_export
-			FROM department_inspection_role_defaults WHERE department_id=$1::uuid AND role_code=$2`, profile.DepartmentID, inspectionRole)
-		if queryErr != nil {
-			return profile, queryErr
-		}
-		profile.InspectionDefaults = make(map[string]*permission.InspectionRoleDefaults)
-		for rows.Next() {
-			var inspectionTypeID string
-			defaults := &permission.InspectionRoleDefaults{}
-			if scanErr := rows.Scan(&inspectionTypeID, &defaults.CanView, &defaults.CanEnter, &defaults.CanManage, &defaults.CanReview, &defaults.CanExport); scanErr != nil {
-				rows.Close()
-				return profile, scanErr
-			}
-			profile.InspectionDefaults[inspectionTypeID] = defaults
-		}
-		if rowsErr := rows.Err(); rowsErr != nil {
-			rows.Close()
-			return profile, rowsErr
-		}
-		rows.Close()
-	}
-	if profile.DepartmentID != "" {
-		rows, err := p.Pool.Query(ctx, `SELECT department_id,inspection_type_id,can_enter,can_view,can_manage,can_review,can_export,enabled
-			FROM department_inspection_scopes WHERE department_id=$1::uuid`, profile.DepartmentID)
-		if err != nil {
-			return profile, err
-		}
-		for rows.Next() {
-			var value permission.DepartmentScope
-			if err := rows.Scan(&value.DepartmentID, &value.InspectionTypeID, &value.CanEnter, &value.CanView, &value.CanManage, &value.CanReview, &value.CanExport, &value.Enabled); err != nil {
-				rows.Close()
-				return profile, err
-			}
-			profile.DepartmentScopes = append(profile.DepartmentScopes, value)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return profile, err
-		}
-		rows.Close()
-	}
-	profile.Rules, err = p.ListRules(ctx, accountID)
-	return profile, err
 }
 
 func (p *Postgres) ListRules(ctx context.Context, accountID string) ([]permission.Rule, error) {
@@ -913,47 +786,36 @@ func (p *Postgres) ListRules(ctx context.Context, accountID string) ([]permissio
 	return result, rows.Err()
 }
 
-const permissionRuleSelect = `SELECT id,account_id,action,effect,source_type,
-	COALESCE(academic_year_id::text,''),COALESCE(semester_id::text,''),COALESCE(week_id::text,''),
-	COALESCE(inspection_type_id::text,''),COALESCE(department_id::text,''),COALESCE(class_id::text,''),
-	COALESCE(grade,''),note,enabled,COALESCE(created_by::text,'') FROM user_permission_rules`
+const permissionRuleSelect = `SELECT id,account_id,action,effect,source_type,COALESCE(inspection_type_id::text,''),COALESCE(source_department_id::text,''),mode,operation_ranges,starts_at,ends_at,note,enabled,COALESCE(created_by::text,'') FROM user_permission_rules`
 
-func scanPermissionRule(r row) (permission.Rule, error) {
+func scanPermissionRule(row interface{ Scan(...any) error }) (permission.Rule, error) {
 	var value permission.Rule
-	err := r.Scan(&value.ID, &value.AccountID, &value.Action, &value.Effect, &value.SourceType,
-		&value.Scope.AcademicYearID, &value.Scope.SemesterID, &value.Scope.WeekID, &value.Scope.InspectionTypeID,
-		&value.Scope.DepartmentID, &value.Scope.ClassID, &value.Scope.Grade, &value.Note, &value.Enabled, &value.CreatedBy)
+	err := row.Scan(&value.ID, &value.AccountID, &value.Action, &value.Effect, &value.SourceType, &value.Scope.InspectionTypeID, &value.SourceDepartmentID, &value.Mode, &value.Ranges, &value.StartsAt, &value.EndsAt, &value.Note, &value.Enabled, &value.CreatedBy)
 	return value, err
 }
-
 func (p *Postgres) CreateRule(ctx context.Context, value permission.Rule, mutation audit.Mutation) (permission.Rule, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		_, execErr := tx.Exec(ctx, `INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,academic_year_id,semester_id,week_id,
-			inspection_type_id,department_id,class_id,grade,note,enabled,created_by) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,
-			NULLIF($7,'')::uuid,NULLIF($8,'')::uuid,NULLIF($9,'')::uuid,NULLIF($10,'')::uuid,NULLIF($11,'')::uuid,NULLIF($12,''),$13,$14,NULLIF($15,'')::uuid)`,
-			value.ID, value.AccountID, value.Action, value.Effect, value.SourceType, value.Scope.AcademicYearID, value.Scope.SemesterID,
-			value.Scope.WeekID, value.Scope.InspectionTypeID, value.Scope.DepartmentID, value.Scope.ClassID, value.Scope.Grade,
-			value.Note, value.Enabled, value.CreatedBy)
-		if execErr != nil {
-			return execErr
+		if err := validateRangeClasses(ctx, tx, value.Ranges); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,inspection_type_id,source_department_id,mode,operation_ranges,starts_at,ends_at,note,enabled,created_by) VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid,$8,$9,$10,$11,$12,$13,$14)`, value.ID, value.AccountID, value.Action, value.Effect, value.SourceType, value.Scope.InspectionTypeID, value.SourceDepartmentID, value.Mode, value.Ranges, value.StartsAt, value.EndsAt, value.Note, value.Enabled, value.CreatedBy)
+		if err != nil {
+			return err
 		}
 		return invalidatePermissionSessions(ctx, tx, value.AccountID)
 	})
 	return value, err
 }
-
 func (p *Postgres) UpdateRule(ctx context.Context, value permission.Rule, mutation audit.Mutation) (permission.Rule, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		tag, execErr := tx.Exec(ctx, `UPDATE user_permission_rules SET action=$3,effect=$4,academic_year_id=NULLIF($5,'')::uuid,
-			semester_id=NULLIF($6,'')::uuid,week_id=NULLIF($7,'')::uuid,inspection_type_id=NULLIF($8,'')::uuid,
-			department_id=NULLIF($9,'')::uuid,class_id=NULLIF($10,'')::uuid,grade=NULLIF($11,''),note=$12,enabled=$13,updated_at=now()
-			WHERE id=$1 AND account_id=$2`, value.ID, value.AccountID, value.Action, value.Effect, value.Scope.AcademicYearID,
-			value.Scope.SemesterID, value.Scope.WeekID, value.Scope.InspectionTypeID, value.Scope.DepartmentID, value.Scope.ClassID,
-			value.Scope.Grade, value.Note, value.Enabled)
-		if execErr != nil {
-			return execErr
+		if err := validateRangeClasses(ctx, tx, value.Ranges); err != nil {
+			return err
 		}
-		if tag.RowsAffected() == 0 {
+		tag, err := tx.Exec(ctx, `UPDATE user_permission_rules SET action=$3,effect=$4,inspection_type_id=NULLIF($5,'')::uuid,source_department_id=NULLIF($6,'')::uuid,mode=$7,operation_ranges=$8,starts_at=$9,ends_at=$10,note=$11,enabled=$12,updated_at=now() WHERE id=$1 AND account_id=$2`, value.ID, value.AccountID, value.Action, value.Effect, value.Scope.InspectionTypeID, value.SourceDepartmentID, value.Mode, value.Ranges, value.StartsAt, value.EndsAt, value.Note, value.Enabled)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
 			return permission.ErrInvalidRule
 		}
 		return invalidatePermissionSessions(ctx, tx, value.AccountID)
@@ -1389,19 +1251,47 @@ func dictionaryError(err error) error {
 
 func (p *Postgres) List(ctx context.Context) (academic.Calendar, error) {
 	var result academic.Calendar
-	yearRows, err := p.Pool.Query(ctx, `SELECT id,name,start_date,end_date,enabled FROM academic_years ORDER BY start_date DESC`)
+	yearRows, err := p.Pool.Query(ctx, `SELECT id,name,start_date,end_date,enabled,version FROM academic_years ORDER BY start_date DESC`)
 	if err != nil {
 		return result, err
 	}
 	for yearRows.Next() {
 		var value academic.AcademicYear
-		if err := yearRows.Scan(&value.ID, &value.Name, &value.StartDate, &value.EndDate, &value.Enabled); err != nil {
+		if err := yearRows.Scan(&value.ID, &value.Name, &value.StartDate, &value.EndDate, &value.Enabled, &value.Version); err != nil {
 			yearRows.Close()
 			return result, err
 		}
+		value.StageGrades = make(map[int]string)
 		result.AcademicYears = append(result.AcademicYears, value)
 	}
+	if err := yearRows.Err(); err != nil {
+		yearRows.Close()
+		return result, err
+	}
 	yearRows.Close()
+	stages, err := p.Pool.Query(ctx, `SELECT academic_year_id,stage,grade_id FROM academic_year_grade_stages`)
+	if err != nil {
+		return result, err
+	}
+	for stages.Next() {
+		var yearID, gradeID string
+		var stage int
+		if err := stages.Scan(&yearID, &stage, &gradeID); err != nil {
+			stages.Close()
+			return result, err
+		}
+		for i := range result.AcademicYears {
+			if result.AcademicYears[i].ID == yearID {
+				result.AcademicYears[i].StageGrades[stage] = gradeID
+				break
+			}
+		}
+	}
+	if err := stages.Err(); err != nil {
+		stages.Close()
+		return result, err
+	}
+	stages.Close()
 	semesterRows, err := p.Pool.Query(ctx, `SELECT id,academic_year_id,code,name,start_date,end_date,enabled FROM semesters ORDER BY start_date DESC`)
 	if err != nil {
 		return result, err
@@ -1433,17 +1323,45 @@ func (p *Postgres) List(ctx context.Context) (academic.Calendar, error) {
 func (p *Postgres) CreateYear(ctx context.Context, value academic.AcademicYear, mutation audit.Mutation) (academic.AcademicYear, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		_, execErr := tx.Exec(ctx, `INSERT INTO academic_years(id,name,start_date,end_date,enabled) VALUES($1,$2,$3,$4,$5)`, value.ID, value.Name, value.StartDate, value.EndDate, value.Enabled)
-		return execErr
+		if execErr != nil {
+			return execErr
+		}
+		return saveYearStages(ctx, tx, value)
 	})
 	return value, err
 }
 
 func (p *Postgres) UpdateYear(ctx context.Context, value academic.AcademicYear, mutation audit.Mutation) (academic.AcademicYear, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		_, execErr := tx.Exec(ctx, `UPDATE academic_years SET name=$2,start_date=$3,end_date=$4,enabled=$5 WHERE id=$1`, value.ID, value.Name, value.StartDate, value.EndDate, value.Enabled)
-		return execErr
+		tag, err := tx.Exec(ctx, `UPDATE academic_years SET name=$2,start_date=$3,end_date=$4,enabled=$5,version=version+1 WHERE id=$1 AND version=$6`, value.ID, value.Name, value.StartDate, value.EndDate, value.Enabled, value.Version)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return academic.ErrVersionConflict
+		}
+		return saveYearStages(ctx, tx, value)
 	})
+	if err == nil {
+		value.Version++
+	}
 	return value, err
+}
+
+func saveYearStages(ctx context.Context, tx pgx.Tx, value academic.AcademicYear) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM academic_year_grade_stages WHERE academic_year_id=$1`, value.ID); err != nil {
+		return err
+	}
+	for stage, gradeID := range value.StageGrades {
+		tag, err := tx.Exec(ctx, `INSERT INTO academic_year_grade_stages(academic_year_id,stage,grade_id) SELECT $1,$2,id FROM grades WHERE id=$3 AND enabled`, value.ID, stage, gradeID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return academic.ErrInvalidInput
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) CreateSemester(ctx context.Context, value academic.Semester, mutation audit.Mutation) (academic.Semester, error) {
@@ -1738,6 +1656,9 @@ func (p *Postgres) ListSubmissionBatches(ctx context.Context, actorID string, q 
 	from := ` FROM import_batches b JOIN files f ON f.id=b.original_file_id LEFT JOIN accounts batch_creator ON batch_creator.id=b.created_by LEFT JOIN inspection_records ir ON ir.import_batch_id=b.id AND ir.deleted_at IS NULL`
 	where := ` WHERE b.status='CONFIRMED' AND b.semester_id=$1 AND b.week_id=$2 AND b.inspection_type_id=$3 AND ((b.attribution_mode<>'ADMINISTRATOR' AND COALESCE(b.department_id::text,'')=$4) OR (b.created_by=$5 AND $6::boolean))`
 	where += ` AND ($7::boolean OR b.created_by=$5) AND ($4='' OR EXISTS(SELECT 1 FROM department_inspection_scopes mapping JOIN departments d ON d.id=mapping.department_id WHERE d.id=NULLIF($4,'')::uuid AND d.enabled AND mapping.inspection_type_id=b.inspection_type_id AND mapping.enabled AND mapping.can_enter))`
+	if !q.CanRouteAdministrator {
+		where += " AND b.attribution_mode<>'ADMINISTRATOR'"
+	}
 	args := []any{q.SemesterID, q.WeekID, q.InspectionTypeID, q.DepartmentID, actorID, q.CanRouteOwn, q.CanManage}
 	if err := p.Pool.QueryRow(ctx, `SELECT count(DISTINCT b.id)`+from+where, args...).Scan(&page.Total); err != nil {
 		return page, err
@@ -2049,8 +1970,13 @@ func (p *Postgres) ConfirmAttendanceImport(ctx context.Context, input importjob.
 			if err != nil {
 				return importjob.ConfirmResult{}, err
 			}
-		} else if err := lockCourseImportReferences(ctx, tx, lockedContext, row.record); err != nil {
-			return importjob.ConfirmResult{}, err
+		} else {
+			if err := lockCourseImportReferences(ctx, tx, lockedContext, row.record); err != nil {
+				return importjob.ConfirmResult{}, err
+			}
+			if err := authorizeImportedClass(ctx, tx, input, row.record.ClassID); err != nil {
+				return importjob.ConfirmResult{}, err
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE import_batches SET status='CONFIRMING',updated_at=now() WHERE id=$1`, input.BatchID); err != nil {

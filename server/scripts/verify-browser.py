@@ -224,8 +224,8 @@ INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES(
         fixture_sql = f"""
 INSERT INTO faculties(id,name) VALUES('{ids['faculty']}','E2E faculty');
 INSERT INTO grades(id,name) VALUES('{ids['grade']}','2026级');
-INSERT INTO semester_report_grade_scopes(semester_id,version) VALUES('b0000000-0000-0000-0000-000000000002',1);
-INSERT INTO semester_report_grades(semester_id,grade_id) VALUES('b0000000-0000-0000-0000-000000000002','{ids['grade']}');
+
+INSERT INTO academic_year_grade_stages(academic_year_id,stage,grade_id) VALUES('b0000000-0000-0000-0000-000000000001',1,'{ids['grade']}') ON CONFLICT (academic_year_id,stage) DO UPDATE SET grade_id=EXCLUDED.grade_id;
 INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}',2);
 INSERT INTO teaching_buildings(id,name) VALUES('{ids['building']}','E2E building');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['room']}','{ids['building']}','101');
@@ -329,6 +329,22 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         cli('run-code', '--filename', str(login))
         report['cases'].append('真实登录、首次改密、重新登录')
         print('PASS: login and password change', flush=True)
+        if ENV.get('BROWSER_SUITE') == 'teacher-adaptation':
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input="INSERT INTO grades(id,name) VALUES('d0000000-0000-0000-0000-000000000096','2024级');".encode())
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('d0000000-0000-0000-0000-000000000097','验收二班','{ids['grade']}','{ids['faculty']}',2);".encode())
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input="INSERT INTO accounts(id,student_no,login_name,name,password_hash,status,system_role) VALUES('d0000000-0000-0000-0000-000000000099','pending-browser','pending-browser','验收待授予账号','test-only','ACTIVE','MEMBER'); INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id) SELECT 'd0000000-0000-0000-0000-000000000098','d0000000-0000-0000-0000-000000000099',d.id,r.id FROM departments d CROSS JOIN organization_roles r WHERE d.code='STUDY' AND r.code='TEACHER';".encode())
+            teacher_fixture = dict(fixture, authPassword=changed_password, outputDir=str(OUTPUT))
+            script = temp / 'teacher-adaptation.js'
+            script.write_text((ROOT / 'web/e2e/teacher-adaptation.js').read_text().replace('__FIXTURE__', json.dumps(teacher_fixture, ensure_ascii=False)))
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(script)))
+            (OUTPUT / 'teacher-adaptation.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            report['suites'] = {'teacher-adaptation': payload}
+            report['cases'] += payload['cases']
+            report['browserVersion'] = payload['browserVersion']
+            report['browserErrors'] = payload['browserErrors']
+            report['faultInjection'] = payload['faultInjection']
+            report['status'] = 'passed'
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'academic-week-import':
             fixture['malformedAcademicWeekImportFile'] = str(temp / 'academic-week-corrupt.xlsx')
             fixture['invalidAcademicWeekImportFile'] = str(temp / 'academic-week-invalid.xlsx')

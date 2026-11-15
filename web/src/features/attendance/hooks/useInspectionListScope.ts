@@ -15,7 +15,7 @@ export function useInspectionListScope(semesters?: InspectionOption[]) {
   const semesterId = semesters?.some(item => item.id === candidateSemester) ? candidateSemester : undefined
   const page = Number(search.get('page'))
   const pageSize = Number(search.get('pageSize'))
-  const resolve = (weeks?: InspectionOption[]) => {
+  const resolve = (weeks?: InspectionOption[], defaults?: { classId?: string; grade?: string }) => {
     const weekForSemester = currentWeek.data?.week && currentWeek.data.week.semesterId === semesterId ? currentWeek.data.week.id : undefined
     const candidateWeek = search.get('weekId') ?? weekForSemester
     const weekId = weeks?.some(item => item.id === candidateWeek) ? candidateWeek : undefined
@@ -26,12 +26,14 @@ export function useInspectionListScope(semesters?: InspectionOption[]) {
       pageSize: Number.isInteger(pageSize) && pageSize > 0 ? pageSize : 20,
     }
     for (const key of filterKeys) filters[key] = search.get(key) ?? undefined
+    if (!search.has('filtersApplied') && !filterKeys.some(key => search.has(key))) Object.assign(filters, defaults)
     if (filters.sort === undefined) filters.sort = 'occurredAtDesc'
     return { weekId, filters, ready: !!semesterId && !!weekId, invalidSelection }
   }
   const update = (values: InspectionQuery) => {
     const next = new URLSearchParams()
     for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== '') next.set(key, String(value))
+    next.set('filtersApplied', '1')
     setSearch(next)
     setDraftSemester(undefined)
   }

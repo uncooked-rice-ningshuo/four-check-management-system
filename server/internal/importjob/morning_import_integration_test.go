@@ -85,7 +85,7 @@ func TestMorningImportPostgres(t *testing.T) {
 		t.Fatal("typed preview was lost", rows, err)
 	}
 	studentID := rows.Items[0].NormalizedInspection.References.Students[0].ID
-	input := importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID, DepartmentID: departmentID, AttributionMode: inspection.AttributionModeDepartment, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
+	input := importjob.ConfirmBatchInput{Permissions: importFixturePermissions(), BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: typeID, DepartmentID: departmentID, AttributionMode: inspection.AttributionModeDepartment, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
 	if _, err = db.Pool.Exec(ctx, `UPDATE students SET enabled=false WHERE id=$1`, studentID); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestMorningImportPostgres(t *testing.T) {
 	if err != nil || collegeBatch.ValidRows != 2 {
 		t.Fatal("college morning preview", collegeBatch, err)
 	}
-	collegeConfirmed, err := service.ConfirmBatch(ctx, importjob.ConfirmBatchInput{BatchID: collegeBatch.ID, ExpectedVersion: collegeBatch.Version,
+	collegeConfirmed, err := service.ConfirmBatch(ctx, importjob.ConfirmBatchInput{Permissions: importFixturePermissions(), BatchID: collegeBatch.ID, ExpectedVersion: collegeBatch.Version,
 		IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID,
 			InspectionTypeID: typeID, DepartmentID: "", AttributionMode: inspection.AttributionModeCollege, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}})
 	if err != nil || collegeConfirmed.ImportedRows != 2 {

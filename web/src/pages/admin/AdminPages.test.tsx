@@ -123,7 +123,7 @@ describe('超级管理员页面', () => {
 
   it('新增学期时只能选择上下学期并填入默认日期', async () => {
     vi.mocked(getAcademicCalendar).mockResolvedValue({
-      academicYears: [{ id: 'year-1', name: '2025-2026 学年', startDate: '2025-09-01T00:00:00Z', endDate: '2026-08-31T00:00:00Z', enabled: true }],
+      academicYears: [{ version: 1, stageGrades: {}, id: 'year-1', name: '2025-2026 学年', startDate: '2025-09-01T00:00:00Z', endDate: '2026-08-31T00:00:00Z', enabled: true }],
       semesters: [],
       weeks: [],
     })

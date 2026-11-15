@@ -1,6 +1,9 @@
 package inspection
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // CollegeDepartmentOptionID is a transport-only selection value. Persistence
 // stores college ownership as SQL NULL, never as a synthetic department row.
@@ -22,9 +25,10 @@ func ResolveEntryDepartment(actor ManualActor, requested string) (string, error)
 	}
 	if requested != "" {
 		provided, valid := canonicalDetailID(requested)
-		if !valid || provided != primary {
+		if !valid || !slices.Contains(actor.DepartmentIDs, provided) {
 			return "", ErrScopeMismatch
 		}
+		return provided, nil
 	}
 	return primary, nil
 }

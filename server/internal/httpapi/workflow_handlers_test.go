@@ -9,6 +9,7 @@ import (
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
+	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/google/uuid"
 )
@@ -57,6 +58,7 @@ func TestDepartmentSubmitHTTPContracts(t *testing.T) {
 	}
 	account := repo.values["workflow-member"]
 	account.PrimaryDepartmentID = uuid.NewString()
+	account.DepartmentIDs = []string{account.PrimaryDepartmentID}
 	account.Status = auth.StatusActive
 	repo.values[account.LoginName] = account
 	tokens, err := service.Login(context.Background(), account.LoginName, "Password123")
@@ -88,6 +90,7 @@ func TestDepartmentSubmitHTTPContracts(t *testing.T) {
 	}{
 		{workflow.ErrInvalidSubmit, 400, "INVALID_REQUEST"},
 		{workflow.ErrSubmissionScope, 403, "FORBIDDEN_SCOPE"},
+		{permission.ErrGradeMappingMissing, 409, "ACADEMIC_GRADE_MAPPING_MISSING"},
 		{workflow.ErrRecordUnavailable, 404, "INSPECTION_NOT_FOUND"},
 		{workflow.ErrVersionConflict, 409, "VERSION_CONFLICT"},
 		{workflow.ErrIdempotencyReuse, 409, "IDEMPOTENCY_CONFLICT"},
@@ -148,6 +151,7 @@ func TestDepartmentDecisionHTTPContracts(t *testing.T) {
 			{workflow.ErrInvalidDecision, 400, "INVALID_REQUEST"},
 			{workflow.ErrSubmissionMissing, 404, "SUBMISSION_NOT_FOUND"},
 			{workflow.ErrSubmissionScope, 403, "FORBIDDEN_SCOPE"},
+			{permission.ErrGradeMappingMissing, 409, "ACADEMIC_GRADE_MAPPING_MISSING"},
 			{workflow.ErrVersionConflict, 409, "VERSION_CONFLICT"},
 			{workflow.ErrInvalidTransition, 409, "INVALID_SUBMISSION_STATE"},
 			{errors.New("private SQL failure"), 500, "SUBMISSION_FAILED"},
@@ -196,6 +200,7 @@ func TestDepartmentResubmitHTTPContracts(t *testing.T) {
 		{workflow.ErrInvalidSubmit, 400, "INVALID_REQUEST"},
 		{workflow.ErrSubmissionMissing, 404, "SUBMISSION_NOT_FOUND"},
 		{workflow.ErrSubmissionScope, 403, "FORBIDDEN_SCOPE"},
+		{permission.ErrGradeMappingMissing, 409, "ACADEMIC_GRADE_MAPPING_MISSING"},
 		{workflow.ErrVersionConflict, 409, "VERSION_CONFLICT"},
 		{workflow.ErrInvalidTransition, 409, "INVALID_SUBMISSION_STATE"},
 		{errors.New("private SQL failure"), 500, "SUBMISSION_FAILED"},

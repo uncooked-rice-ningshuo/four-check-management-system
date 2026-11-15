@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"four-check-management-system/server/internal/audit"
 	"github.com/google/uuid"
 )
 
@@ -14,7 +13,7 @@ var (
 	ErrReportGradeUnavailable = errors.New("report grade unavailable")
 )
 
-// ReportGradeScope is the explicit set inherited by every week in a semester.
+// ReportGradeScope is the academic-year mapping inherited by every week in its semesters.
 type ReportGradeScope struct {
 	SemesterID string   `json:"semesterId"`
 	GradeIDs   []string `json:"gradeIds"`
@@ -39,7 +38,6 @@ type ReportGradePreviewRow struct {
 
 type ReportGradeRepository interface {
 	GetReportGrades(context.Context, string) (ReportGradeScope, error)
-	ReplaceReportGrades(context.Context, ReportGradeScope, audit.Metadata) (ReportGradeScope, error)
 	PreviewReportGrades(context.Context, []string) (ReportGradePreview, error)
 }
 
@@ -54,26 +52,6 @@ func (s *ReportGradeService) Get(ctx context.Context, semesterID string) (Report
 		return ReportGradeScope{}, ErrInvalidInput
 	}
 	return s.repository.GetReportGrades(ctx, semesterID)
-}
-
-func (s *ReportGradeService) Replace(ctx context.Context, scope ReportGradeScope, metadata audit.Metadata) (ReportGradeScope, error) {
-	if _, err := uuid.Parse(scope.SemesterID); err != nil {
-		return ReportGradeScope{}, ErrInvalidInput
-	}
-	if scope.Version < 0 || len(scope.GradeIDs) == 0 {
-		return ReportGradeScope{}, ErrInvalidInput
-	}
-	seen := make(map[string]struct{}, len(scope.GradeIDs))
-	for _, id := range scope.GradeIDs {
-		if _, err := uuid.Parse(id); err != nil {
-			return ReportGradeScope{}, ErrInvalidInput
-		}
-		if _, exists := seen[id]; exists {
-			return ReportGradeScope{}, ErrInvalidInput
-		}
-		seen[id] = struct{}{}
-	}
-	return s.repository.ReplaceReportGrades(ctx, scope, metadata)
 }
 
 func (s *ReportGradeService) Preview(ctx context.Context, gradeIDs []string) (ReportGradePreview, error) {

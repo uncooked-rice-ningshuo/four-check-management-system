@@ -235,8 +235,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.POST("/academic/semesters", h.createSemester)
 	admin.PUT("/academic/semesters/:id", h.updateSemester)
 	admin.GET("/academic/semesters/:id/report-grades", h.getReportGrades)
-	admin.GET("/academic/semesters/:id/report-grades/preview", h.previewReportGrades)
-	admin.PUT("/academic/semesters/:id/report-grades", h.replaceReportGrades)
+	admin.GET("/academic/report-grades/preview", h.previewReportGrades)
 	admin.PUT("/report-output/settings", h.updateReportOutputSettings)
 	admin.POST("/academic/weeks", h.createWeek)
 	admin.PUT("/academic/weeks/:id", h.updateWeek)
@@ -288,7 +287,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.GET("/reports/periods", h.reportPeriods)
 	v1.GET("/reports/summary", h.reportSummary)
 	v1.GET("/reports/workflow", h.reportWorkflow)
-	v1.GET("/reports/output-settings", h.requireAnyAction(permission.ActionReportGenerate), h.getReportOutputSettings)
+	v1.GET("/reports/output-settings", h.requireAnyAction(permission.ActionReportFileOutput), h.getReportOutputSettings)
 	v1.GET("/reports/output-settings/editor", h.requireAction(permission.ActionReportOutputSettingsManage), h.getReportOutputEditorSettings)
 	v1.GET("/reports/output-settings/week-dates", h.requireAction(permission.ActionReportOutputSettingsManage), h.listReportOutputWeekDates)
 	v1.PUT("/reports/output-settings/week-dates/:semesterId/:weekId", h.requireAction(permission.ActionReportOutputSettingsManage), h.saveReportOutputWeekDate)
@@ -1111,18 +1110,7 @@ func (h *handler) authorizeAttendanceList(c *gin.Context) (auth.Account, permiss
 		writeInspectionForbidden(c, false)
 		return auth.Account{}, permission.Scope{}, nil, false
 	}
-	if effective.OrganizationRoleCode == "PRESIDIUM" {
-		if effective.PrimaryDepartmentID == "" || (scope.DepartmentID != "" && scope.DepartmentID != effective.PrimaryDepartmentID) {
-			writeInspectionForbidden(c, false)
-			return auth.Account{}, permission.Scope{}, nil, false
-		}
-		scope.DepartmentID = effective.PrimaryDepartmentID
-		if !effective.Allowed(permission.ActionInspectionView, scope) {
-			writeInspectionForbidden(c, false)
-			return auth.Account{}, permission.Scope{}, nil, false
-		}
-		return account, scope, []string{effective.PrimaryDepartmentID}, true
-	}
+
 	if scope.DepartmentID != "" {
 		requested := scope
 		if requested.DepartmentID == inspection.CollegeDepartmentOptionID {
@@ -1247,7 +1235,7 @@ func (h *handler) uploadAttendanceImport(c *gin.Context) {
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "管理员独立记录仅可由系统超级管理员录入，且不能选择部门归属")
 		return
 	}
-	departmentID, err := inspection.ResolveEntryDepartment(inspection.ManualActor{ID: requester.ID, IsSuperAdmin: requester.IsSuperAdmin, IsMember: requester.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: requester.PrimaryDepartmentID}, scope.DepartmentID)
+	departmentID, err := inspection.ResolveEntryDepartment(inspection.ManualActor{ID: requester.ID, IsSuperAdmin: requester.IsSuperAdmin, IsMember: requester.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: requester.PrimaryDepartmentID, DepartmentIDs: requester.DepartmentIDs}, scope.DepartmentID)
 	if err != nil {
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "当前账号无有效录入部门或不能选择其他部门")
 		return
@@ -1343,8 +1331,14 @@ func (h *handler) confirmImportBatch(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
+	effective, err := h.permission.Effective(c, account.ID)
+	if err != nil {
+		writeImportError(c, err)
+		return
+	}
 	result, err := h.importJobs.ConfirmBatch(c, importjob.ConfirmBatchInput{
-		BatchID: batch.ID, ExpectedVersion: input.Version, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		Permissions: effective,
+		BatchID:     batch.ID, ExpectedVersion: input.Version, IdempotencyKey: c.GetHeader("Idempotency-Key"),
 		Scope: importjob.ConfirmScope{SemesterID: batch.SemesterID, WeekID: batch.WeekID, InspectionTypeID: batch.InspectionTypeID,
 			DepartmentID: batch.DepartmentID, AttributionMode: batch.AttributionMode, ClassID: batch.ClassID, Grade: batch.Grade, ActorID: account.ID},
 		AuditMetadata: requestMetadata(c, ""),
@@ -1534,6 +1528,11 @@ func multipartRequestLimit(fileLimit int64) int64 {
 }
 
 func writeImportError(c *gin.Context, err error) {
+	if errors.Is(err, permission.ErrGradeMappingMissing) {
+		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选记录或周次所属学年缺少年级阶段映射，请在学年配置中完善对应的大一至大四映射")
+		return
+	}
+
 	switch {
 	case err == nil:
 		writeError(c, http.StatusNotFound, "IMPORT_TEMPLATE_NOT_FOUND", "导入模板不存在")
@@ -1689,7 +1688,7 @@ func (h *handler) clearCookie(c *gin.Context) {
 	c.SetCookie("refresh_token", "", -1, "/api/v1/auth", "", h.secureCookie, true)
 }
 func publicAccount(a auth.Account) gin.H {
-	return gin.H{"id": a.ID, "loginName": a.LoginName, "studentNo": a.StudentNo, "name": a.Name, "status": a.Status, "accountKind": a.AccountKind, "systemRole": a.SystemRole, "isSuperAdmin": a.IsSuperAdmin, "mustChangePassword": a.MustChangePassword, "primaryDepartmentId": a.PrimaryDepartmentID, "primaryDepartmentName": a.PrimaryDepartmentName, "organizationRoleName": a.OrganizationRoleName, "requestedDepartmentId": a.RequestedDepartmentID, "requestedOrgRoleId": a.RequestedOrgRoleID}
+	return gin.H{"id": a.ID, "loginName": a.LoginName, "studentNo": a.StudentNo, "name": a.Name, "status": a.Status, "accountKind": a.AccountKind, "systemRole": a.SystemRole, "isSuperAdmin": a.IsSuperAdmin, "mustChangePassword": a.MustChangePassword, "primaryDepartmentId": a.PrimaryDepartmentID, "departmentIds": a.DepartmentIDs, "primaryDepartmentName": a.PrimaryDepartmentName, "organizationRoleName": a.OrganizationRoleName, "requestedDepartmentId": a.RequestedDepartmentID, "requestedOrgRoleId": a.RequestedOrgRoleID}
 }
 func bind(c *gin.Context, target any) bool {
 	if c.ShouldBindJSON(target) != nil {
@@ -1737,17 +1736,14 @@ func writeDomainError(c *gin.Context, err error) {
 		return
 	}
 	if errors.Is(err, permission.ErrForceGenerateRoleRequired) {
-		writeError(c, http.StatusBadRequest, "REPORT_FORCE_GENERATE_ROLE_REQUIRED", "该权限仅可单独授予学生会办公室部长或副部长")
+		writeError(c, http.StatusBadRequest, "REPORT_FORCE_GENERATE_ROLE_REQUIRED", "该账号尚未归属通报维护部门，不能授予强制生成权限")
 		return
 	}
 	if errors.Is(err, permission.ErrReportObligationRoleRequired) {
-		writeError(c, http.StatusBadRequest, "REPORT_OBLIGATION_MANAGER_ROLE_REQUIRED", "逐周应交范围管理权限仅可单独授予学生会办公室部长或副部长")
+		writeError(c, http.StatusBadRequest, "REPORT_OBLIGATION_MANAGER_ROLE_REQUIRED", "该账号尚未归属通报维护部门，不能授予逐周应交范围管理权限")
 		return
 	}
-	if errors.Is(err, permission.ErrReportLeadershipRequired) {
-		writeError(c, http.StatusBadRequest, "REPORT_LEADERSHIP_REQUIRED", "该通报权限仅可授予学生会办公室主任或副主任")
-		return
-	}
+
 	switch {
 	case errors.Is(err, masterdata.ErrNotFound), errors.Is(err, dictionary.ErrNotFound), errors.Is(err, auth.ErrAccountNotFound), errors.Is(err, organization.ErrUserNotFound):
 		writeError(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "记录不存在或已被删除")
@@ -1767,6 +1763,8 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "DEPARTMENT_PERMISSIONS_VERSION_CONFLICT", "部门权限配置已变化，请刷新后重新核对")
 	case errors.Is(err, academic.ErrReportGradeUnavailable):
 		writeError(c, http.StatusBadRequest, "REPORT_GRADE_UNAVAILABLE", "所选年级不存在或已停用")
+	case errors.Is(err, academic.ErrVersionConflict):
+		writeError(c, http.StatusConflict, "ACADEMIC_VERSION_CONFLICT", "学年配置已变化，请刷新后重新核对")
 	case errors.Is(err, academic.ErrDateOverlap):
 		writeError(c, http.StatusConflict, "ACADEMIC_DATE_OVERLAP", "日期范围重叠，请核对校历")
 	case errors.Is(err, dictionary.ErrDuplicateValue):
@@ -1775,6 +1773,8 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "DICTIONARY_TYPE_PROTECTED", "系统字典类型不能修改")
 	case errors.Is(err, auth.ErrLoginNameExists):
 		writeError(c, http.StatusConflict, "ACCOUNT_IDENTIFIER_EXISTS", "登录账号已存在")
+	case errors.Is(err, permission.ErrOperationRangeConflict):
+		writeError(c, http.StatusBadRequest, "OPERATION_RANGE_CONFLICT", "所选班级与年级或专业不匹配，请重新选择班级")
 	case errors.Is(err, academic.ErrInvalidInput), errors.Is(err, masterdata.ErrInvalidRecord), errors.Is(err, masterdata.ErrInvalidRelation), errors.Is(err, masterdata.ErrInvalidKind), errors.Is(err, masterdata.ErrImmutableCode), errors.Is(err, dictionary.ErrInvalidDictionary), errors.Is(err, organization.ErrInvalidInput), errors.Is(err, permission.ErrInvalidRule), errors.Is(err, auth.ErrInvalidInput):
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "提交信息不符合要求")
 	default:

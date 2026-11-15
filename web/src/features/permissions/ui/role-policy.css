@@ -1,0 +1,5 @@
+.role-policy-form { display: grid; gap: 12px; width: min(288px, calc(100vw - 64px)); padding-block: 4px; }
+.role-policy-form > .ant-typography { font-size: 12px; }
+.role-policy-field { display: grid; gap: 4px; min-width: 0; }
+
+.role-policy-actions { display: flex; justify-content: flex-end; gap: 8px; }

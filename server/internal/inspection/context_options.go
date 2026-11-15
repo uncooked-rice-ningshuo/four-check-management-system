@@ -23,6 +23,7 @@ type ContextOptionQuery struct {
 
 // ContextOptionPage also resolves the configured inspection type identifier.
 type ContextOptionPage struct {
+	DefaultFilters map[string]string `json:"defaultFilters,omitempty"`
 	EntryOptionPage
 	InspectionTypeID string `json:"inspectionTypeId"`
 }
@@ -65,13 +66,14 @@ func (s *ContextOptionService) ContextOptions(ctx context.Context, a ManualActor
 		q.DepartmentID = ""
 		q.CollegeOnly = true
 	}
-	if a.IsMember && q.Purpose != "view" {
-		primary, ok := canonicalDetailID(a.PrimaryDepartmentID)
-		if !ok || (q.DepartmentID != "" && q.DepartmentID != primary) {
-			return ContextOptionPage{}, ErrScopeMismatch
+	if a.IsMember && q.Purpose != "view" && q.Kind != "departments" {
+		department, err := ResolveEntryDepartment(a, q.DepartmentID)
+		if err != nil {
+			return ContextOptionPage{}, err
 		}
-		q.DepartmentID = primary
+		q.DepartmentID = department
 	}
+
 	if q.RecordID != "" && q.Purpose != "entry" {
 		return ContextOptionPage{}, ErrInspectionRequest
 	}

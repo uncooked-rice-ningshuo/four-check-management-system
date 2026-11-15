@@ -36,13 +36,31 @@ func inspectionAccessSQL(a inspection.MutationAccess, mode string, args *[]any) 
 func inspectionPermissionSQL(a inspection.MutationAccess, mode string, args *[]any) string {
 	one := func(class, grade string) string {
 		action := func(name string) string {
-			rules := func(effect string) string {
+			rules := func(effect, source string) string {
 				var ors []string
 				for _, r := range a.Permissions {
-					if r.Action != name || r.Effect != effect {
+					if r.Action != name || r.Effect != effect || (effect == permission.EffectAllow && r.SourceDepartmentID != source) || (effect == permission.EffectDeny && r.SourceDepartmentID != "" && r.SourceDepartmentID != source) {
 						continue
 					}
 					var ands []string
+					if a.RouteOptions && r.SourceDepartmentID != "" {
+						*args = append(*args, r.SourceDepartmentID)
+						ands = append(ands, fmt.Sprintf("ir.department_id=$%d::uuid", len(*args)))
+					}
+					if a.TargetDepartmentID != "" && r.SourceDepartmentID != "" && a.TargetDepartmentID != r.SourceDepartmentID {
+						continue
+					}
+					if r.ConfirmedOnly && mode == "read" {
+						ands = append(ands, confirmedInspectionSQL)
+					}
+					if a.SubmissionView && r.SourceDepartmentID != "" && !r.ConfirmedOnly {
+						*args = append(*args, r.SourceDepartmentID)
+						ands = append(ands, fmt.Sprintf("ds.department_id=$%d::uuid", len(*args)))
+					}
+					if mode != "read" && len(r.Ranges) > 0 {
+						ands = append(ands, operationRangeSQL(r.Ranges, class, args))
+					}
+
 					for _, d := range []struct{ col, value string }{{"sem.academic_year_id", r.Scope.AcademicYearID}, {"ir.semester_id", r.Scope.SemesterID}, {"ir.week_id", r.Scope.WeekID}, {"ir.inspection_type_id", r.Scope.InspectionTypeID}, {"ir.department_id", r.Scope.DepartmentID}, {class, r.Scope.ClassID}, {grade, r.Scope.Grade}} {
 						if d.value != "" {
 							*args = append(*args, d.value)
@@ -73,8 +91,18 @@ func inspectionPermissionSQL(a inspection.MutationAccess, mode string, args *[]a
 				}
 				return "(" + strings.Join(ors, " OR ") + ")"
 			}
-			allow, deny := rules(permission.EffectAllow), rules(permission.EffectDeny)
-			return "(" + allow + " AND NOT " + deny + ")"
+			sources := map[string]bool{}
+			var alternatives []string
+			for _, entry := range a.Permissions {
+				if entry.Action == name && entry.Effect == permission.EffectAllow && !sources[entry.SourceDepartmentID] {
+					sources[entry.SourceDepartmentID] = true
+					alternatives = append(alternatives, "("+rules(permission.EffectAllow, entry.SourceDepartmentID)+" AND NOT "+rules(permission.EffectDeny, entry.SourceDepartmentID)+")")
+				}
+			}
+			if len(alternatives) == 0 {
+				return "FALSE"
+			}
+			return "(" + strings.Join(alternatives, " OR ") + ")"
 		}
 		if mode == "read" {
 			return action(permission.ActionInspectionView)
@@ -177,12 +205,46 @@ FROM semester_weeks w LEFT JOIN morning_attendance_week_schedules s ON s.week_id
 	return result, nil
 }
 func (t *inspectionTx) References(ctx context.Context, r inspection.InspectionRecord, c inspection.InspectionContext, a inspection.MutationAccess, owner string) (inspection.InspectionReferences, error) {
-	return t.lockReferences(ctx, r, c, func(scope permission.Scope) bool { return inspection.AllowsInspectionScope(a, scope, owner) })
+	missing := false
+	refs, err := t.lockReferences(ctx, r, c, func(scope permission.Scope) bool {
+		allowed := inspection.AllowsInspectionScope(a, scope, owner)
+		if !allowed && permission.MissingStageMapping(a.Permissions, scope) {
+			missing = true
+		}
+		return allowed
+	})
+	if missing && errors.Is(err, inspection.ErrScopeMismatch) {
+		return refs, permission.ErrGradeMappingMissing
+	}
+	return refs, err
 }
 
 // lockReferences separates reference integrity from the caller's already compiled scope.
 func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.InspectionRecord, c inspection.InspectionContext, allowed func(permission.Scope) bool) (inspection.InspectionReferences, error) {
 	var refs inspection.InspectionReferences
+	var lockedYear string
+	if err := t.tx.QueryRow(ctx, `SELECT id FROM academic_years WHERE id=$1 FOR SHARE`, c.AcademicYearID).Scan(&lockedYear); err != nil {
+		return refs, err
+	}
+	stageGrades := map[int]string{}
+	stageRows, err := t.tx.Query(ctx, `SELECT stage,grade_id FROM academic_year_grade_stages WHERE academic_year_id=$1`, c.AcademicYearID)
+	if err != nil {
+		return refs, err
+	}
+	for stageRows.Next() {
+		var stage int
+		var id string
+		if err := stageRows.Scan(&stage, &id); err != nil {
+			stageRows.Close()
+			return refs, err
+		}
+		stageGrades[stage] = id
+	}
+	err = stageRows.Err()
+	stageRows.Close()
+	if err != nil {
+		return refs, err
+	}
 	student, class, course, classroom, dorm, area, h, rooms := inspection.InspectionDetailReferences(r.Details)
 	classes := []string{class}
 	students := []string{student}
@@ -194,11 +256,12 @@ func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.Inspecti
 	sort.Strings(students)
 	for _, id := range classes {
 		var v inspection.ClassReference
-		err := t.tx.QueryRow(ctx, `SELECT c.id,c.name,g.name FROM classes c JOIN grades g ON g.id=c.grade_id WHERE c.id=$1 AND c.enabled AND g.enabled FOR SHARE OF c,g`, id).Scan(&v.ID, &v.Name, &v.Grade)
+		var gradeID, majorID string
+		err := t.tx.QueryRow(ctx, `SELECT c.id,c.name,g.name,c.grade_id,COALESCE(c.major_id::text,'') FROM classes c JOIN grades g ON g.id=c.grade_id WHERE c.id=$1 AND c.enabled AND g.enabled FOR SHARE OF c,g`, id).Scan(&v.ID, &v.Name, &v.Grade, &gradeID, &majorID)
 		if err != nil {
 			return refs, referenceError(err)
 		}
-		scope := permission.Scope{AcademicYearID: c.AcademicYearID, SemesterID: r.SemesterID, WeekID: r.WeekID, InspectionTypeID: r.InspectionTypeID, DepartmentID: r.DepartmentID, ClassID: v.ID, Grade: v.Grade}
+		scope := permission.Scope{GradeID: gradeID, MajorID: majorID, StageGrades: stageGrades, AcademicYearID: c.AcademicYearID, SemesterID: r.SemesterID, WeekID: r.WeekID, InspectionTypeID: r.InspectionTypeID, DepartmentID: r.DepartmentID, ClassID: v.ID, Grade: v.Grade}
 		if !allowed(scope) {
 			return refs, inspection.ErrScopeMismatch
 		}
@@ -337,9 +400,16 @@ func (p *Postgres) GetInspection(ctx context.Context, id string, a inspection.Mu
 	return r, tx.Commit(ctx)
 }
 func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionFilter, a inspection.MutationAccess) (inspection.InspectionPage, error) {
+	if f.SubmissionCandidatesOnly {
+		a.TargetDepartmentID = f.DepartmentID
+	}
 	result := inspection.InspectionPage{Items: []inspection.InspectionRecord{}, Page: f.Page, PageSize: f.PageSize}
 	args := []any{}
 	where := ` WHERE ir.deleted_at IS NULL AND ` + inspectionAccessSQL(a, "read", &args)
+	if f.IDs != "" {
+		args = append(args, strings.Split(f.IDs, ","))
+		where += fmt.Sprintf(" AND ir.id::text=ANY($%d::text[])", len(args))
+	}
 	for _, filter := range []struct{ column, value string }{{"ir.semester_id", f.SemesterID}, {"ir.week_id", f.WeekID}, {"ir.inspection_type_id", f.InspectionTypeID}, {"ir.status", f.Status}, {"ir.source", f.Source}} {
 		if filter.value != "" {
 			args = append(args, filter.value)
@@ -385,7 +455,7 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 			where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM department_inspection_scopes mapping JOIN departments d ON d.id=mapping.department_id WHERE d.id=$%d::uuid AND d.enabled AND mapping.inspection_type_id=ir.inspection_type_id AND mapping.enabled AND mapping.can_enter)", len(args))
 		}
 		where += " AND ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL"
-		if !(a.CanRouteOwn || a.Unrestricted) {
+		if !(a.CanRouteAdministrator || a.Unrestricted) {
 			where += " AND ir.attribution_mode<>'ADMINISTRATOR'"
 		}
 		where += " AND " + inspectionAccessSQL(a, "mutate", &args)
@@ -802,4 +872,27 @@ func (t *inspectionTx) responsibilityLabels(ctx context.Context, r *inspection.I
  WHERE dt.code=$1 AND di.value=$2),'')`, r.TypeCode+"_REASON", hygiene.ReasonCode).Scan(&r.CurrentReasonLabel)
 	}
 	return nil
+}
+
+// operationRangeSQL keeps AND dimensions inside each OR group and resolves stages from the record year.
+func operationRangeSQL(ranges []permission.OperationRange, class string, args *[]any) string {
+	var groups []string
+	for _, scope := range ranges {
+		conditions := []string{"scope_class.id=" + class}
+		for _, dimension := range []struct{ column, value string }{{"scope_class.grade_id", scope.GradeID}, {"scope_class.major_id", scope.MajorID}, {"scope_class.id", scope.ClassID}} {
+			if dimension.value != "" {
+				*args = append(*args, dimension.value)
+				conditions = append(conditions, fmt.Sprintf("%s=$%d::uuid", dimension.column, len(*args)))
+			}
+		}
+		if scope.GradeStage != 0 {
+			*args = append(*args, scope.GradeStage)
+			conditions = append(conditions, fmt.Sprintf("EXISTS(SELECT 1 FROM academic_year_grade_stages gs WHERE gs.academic_year_id=sem.academic_year_id AND gs.stage=$%d AND gs.grade_id=scope_class.grade_id)", len(*args)))
+		}
+		groups = append(groups, "EXISTS(SELECT 1 FROM classes scope_class WHERE "+strings.Join(conditions, " AND ")+")")
+	}
+	if len(groups) == 0 {
+		return "TRUE"
+	}
+	return "(" + strings.Join(groups, " OR ") + ")"
 }

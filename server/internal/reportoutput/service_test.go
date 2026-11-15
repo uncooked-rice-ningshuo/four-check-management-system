@@ -43,7 +43,7 @@ func TestGenerateRequiresAndFreezesConfiguredIssueDate(t *testing.T) {
 	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "NO_CONFIRMED_DATA"}}}}
 	repo := &outputRepositoryStub{settings: Settings{Version: 1, IntroductionDocument: json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)}}
 	files := &outputFilesStub{}
-	service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
 	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
 	if _, err := service.Generate(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, ErrIssueDateMissing) || repo.starts != 0 {
 		t.Fatalf("missing issue date persisted output: err=%v starts=%d", err, repo.starts)
@@ -130,7 +130,7 @@ func TestGenerateDownloadDoesNotStoreFiles(t *testing.T) {
 	if _, _, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, reporting.ErrForbidden) || repo.transientOutputs != 0 {
 		t.Fatalf("unauthorized output: %v", err)
 	}
-	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, workflow)
+	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, workflow)
 	output, data, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{})
 	if err != nil || output.Status != "AVAILABLE" || ValidateGeneratedFile("WORD", data) != nil || repo.starts != 0 || len(files.content) != 0 || repo.transientOutputs != 1 {
 		t.Fatalf("transient output=%+v bytes=%d starts=%d stores=%d audits=%d err=%v", output, len(data), repo.starts, len(files.content), repo.transientOutputs, err)
@@ -141,7 +141,7 @@ func TestGenerateDownloadDoesNotStoreFiles(t *testing.T) {
 		t.Fatalf("transient Excel output=%+v bytes=%d starts=%d stores=%d audits=%d err=%v", output, len(data), repo.starts, len(files.content), repo.transientOutputs, err)
 	}
 	version.Content.Rows[0].RecordCount = 1
-	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
 	if _, _, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); !errors.Is(err, ErrInvalidGeneratedFile) || repo.transientOutputs != 2 || repo.starts != 0 {
 		t.Fatalf("inconsistent source generated or audited output: err=%v audits=%d starts=%d", err, repo.transientOutputs, repo.starts)
 	}
@@ -151,7 +151,7 @@ func TestGenerateDownloadResolvesConfiguredWeekDateInCover(t *testing.T) {
 	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002", SemesterName: "示例学期", WeekNo: 8}
 	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeID: "type", InspectionTypeCode: "LATE_RETURN", DepartmentID: "department", DataStatus: "NO_CONFIRMED_DATA"}}}}
 	repo := &outputRepositoryStub{settings: Settings{Version: 1, IntroductionDocument: json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"date","textAlign":"right"},"content":[{"type":"text","text":"{reportDate}"}]}]}`)}, weekDate: WeekDate{IssueDate: "2026-11-14", Version: 1}}
-	service := NewService(repo, &outputFilesStub{}, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+	service := NewService(repo, &outputFilesStub{}, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
 	_, data, err := service.GenerateDownload(context.Background(), "actor", GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, audit.Metadata{})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func (p officeOutputPermissionsStub) Effective(context.Context, string) (permiss
 	return permission.EffectiveResult{DepartmentCode: "OFFICE", OrganizationRoleCode: "MEMBER", Permissions: p.permissions}, nil
 }
 
-func TestOfficeMemberCannotGenerateFinalizedReportFile(t *testing.T) {
+func TestDraftPermissionDoesNotGrantFinalizedFileOutput(t *testing.T) {
 	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002"}
 	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeCode: "LATE_RETURN"}}}}
 	workflow := reporting.ReportWorkflow{Report: &reporting.ReportState{Status: reporting.ReportStatusFinalized, VersionNo: 1}, Versions: []reporting.ReportVersion{version}}
@@ -296,7 +296,7 @@ func TestGenerateAndDownloadUseFrozenVersion(t *testing.T) {
 	if repo.starts != 0 {
 		t.Fatal("unauthorized attempt persisted")
 	}
-	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, workflow)
+	service = NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, workflow)
 	stale := input
 	stale.SettingsVersion = 2
 	if _, err := service.Generate(context.Background(), "actor", stale, audit.Metadata{}); !errors.Is(err, ErrConfigConflict) || repo.starts != 0 {
@@ -337,12 +337,27 @@ func TestGenerateFromEmptyFrozenVersion(t *testing.T) {
 			t.Run(source.name+"/"+format, func(t *testing.T) {
 				repo := &outputRepositoryStub{settings: Settings{Introduction: "说明", Version: 1}, weekDate: WeekDate{IssueDate: "2025-06-01", Version: 1}}
 				files := &outputFilesStub{}
-				service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportGenerate, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
+				service := NewService(repo, files, outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}, outputWorkflowStub{reporting.ReportWorkflow{Versions: []reporting.ReportVersion{version}}})
 				output, err := service.Generate(context.Background(), "actor", GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: format, TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, audit.Metadata{})
 				if err != nil || output.Status != "AVAILABLE" || len(files.content) == 0 {
 					t.Fatalf("%s %s output=%+v bytes=%d err=%v", source.name, format, output, len(files.content), err)
 				}
 			})
 		}
+	}
+}
+
+func TestOfficeMemberCanDownloadFinalizedFileWithOutputPermission(t *testing.T) {
+	period := reporting.PeriodOption{SemesterID: "10000000-0000-0000-0000-000000000001", WeekID: "10000000-0000-0000-0000-000000000002"}
+	version := reporting.ReportVersion{ID: "version", VersionNo: 1, Content: reporting.ReportVersionContent{Period: period, Rows: []reporting.ReportCountRow{{InspectionTypeCode: "LATE_RETURN"}}}}
+	workflow := reporting.ReportWorkflow{Report: &reporting.ReportState{Status: reporting.ReportStatusFinalized, VersionNo: 1}, Versions: []reporting.ReportVersion{version}}
+	repo := &outputRepositoryStub{settings: Settings{Version: 1}, weekDate: WeekDate{IssueDate: "2026-11-15"}}
+	service := NewService(repo, &outputFilesStub{}, officeOutputPermissionsStub{outputPermissionsStub{[]permission.EffectivePermission{{Action: permission.ActionReportFileOutput, Effect: permission.EffectAllow}}}}, outputWorkflowStub{workflow})
+	input := GenerateInput{SemesterID: period.SemesterID, WeekID: period.WeekID, VersionNo: 1, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}
+	if _, content, err := service.GenerateDownload(context.Background(), "actor", input, audit.Metadata{}); err != nil || len(content) == 0 || repo.transientOutputs != 1 || repo.starts != 0 {
+		t.Fatalf("authorized finalized output failed: %v, audit=%d", err, repo.transientOutputs)
+	}
+	if workflow.Report.Status != reporting.ReportStatusFinalized {
+		t.Fatal("file output changed report status")
 	}
 }

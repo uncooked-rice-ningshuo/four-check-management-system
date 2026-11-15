@@ -422,7 +422,7 @@ func TestConfirmAttendanceImportRollsBackAllWritesWhenDetailInsertFails(t *testi
 }
 
 func TestConfirmationAuditEntryContainsOnlySafeBatchSummary(t *testing.T) {
-	input := importjob.ConfirmBatchInput{
+	input := importjob.ConfirmBatchInput{Permissions: permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow}}},
 		BatchID: "batch-1",
 		Scope:   importjob.ConfirmScope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ActorID: "actor-1"},
 	}
@@ -445,7 +445,7 @@ func TestConfirmationAuditEntryContainsOnlySafeBatchSummary(t *testing.T) {
 }
 
 func TestConfirmationRecordMustRemainInsideClassAndGradeScope(t *testing.T) {
-	input := importjob.ConfirmBatchInput{BatchID: "batch-1", Scope: importjob.ConfirmScope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ClassID: "class-1", Grade: "2026", ActorID: "actor-1"}}
+	input := importjob.ConfirmBatchInput{Permissions: permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow}}}, BatchID: "batch-1", Scope: importjob.ConfirmScope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ClassID: "class-1", Grade: "2026", ActorID: "actor-1"}}
 	record := inspection.AttendanceRecord{ID: "record-1", SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-1", DepartmentID: "department-1", ClassID: "class-2", GradeSnapshot: "2026", ImportBatchID: "batch-1", CreatedBy: "actor-1", Source: inspection.RecordSourceExcel, Status: inspection.RecordStatusDraft, DedupKey: "dedup", RowVersion: 1}
 	if confirmationRecordMatches(record, input) {
 		t.Fatal("record from another class matched narrowed confirmation scope")
@@ -541,7 +541,7 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 		recordClassroomID = uuid.NewString()
 	}
 	record := inspection.AttendanceRecord{
-		ID: recordID, InspectionTypeID: inspectionTypeID, SemesterID: semesterID, WeekID: weekID, DepartmentID: departmentID,
+		AttributionMode: inspection.AttributionModeDepartment, ID: recordID, InspectionTypeID: inspectionTypeID, SemesterID: semesterID, WeekID: weekID, DepartmentID: departmentID,
 		StudentID: studentID, StudentNoSnapshot: "student-" + unique, StudentNameSnapshot: "虚构学生", ClassID: classID,
 		ClassNameSnapshot: "班级-" + unique, GradeSnapshot: gradeName, CourseID: courseID, ClassroomID: recordClassroomID,
 		OccurredAt: time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC), AbsenceHours: 2, PeriodText: "第1-2节", Remark: "测试数据",
@@ -575,9 +575,9 @@ func seedAttendanceConfirmation(t *testing.T, database *Postgres, invalidClassro
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM academic_years WHERE id=$1`, yearID)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM accounts WHERE id=$1`, accountID)
 	})
-	return attendanceConfirmationFixture{input: importjob.ConfirmBatchInput{
+	return attendanceConfirmationFixture{input: importjob.ConfirmBatchInput{Permissions: permission.EffectiveResult{Permissions: []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow}}},
 		BatchID: batchID, ExpectedVersion: 1, IdempotencyKey: "confirm-" + unique,
-		Scope:         importjob.ConfirmScope{SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID, DepartmentID: departmentID, ActorID: accountID},
+		Scope:         importjob.ConfirmScope{AttributionMode: inspection.AttributionModeDepartment, SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID, DepartmentID: departmentID, ActorID: accountID},
 		AuditMetadata: audit.Metadata{ActorID: accountID, RequestID: "request-" + unique},
 	}}
 }

@@ -61,7 +61,7 @@ func (h *handler) updateAttendance(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
-	actor := inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID}
+	actor := inspection.ManualActor{ID: a.ID, IsSuperAdmin: a.IsSuperAdmin, IsMember: a.SystemRole == auth.SystemRoleMember, PrimaryDepartmentID: a.PrimaryDepartmentID, DepartmentIDs: a.DepartmentIDs}
 	departmentID, err := inspection.ResolveEntryDepartment(actor, input.Record.DepartmentID)
 	if err != nil {
 		writeError(c, 403, "FORBIDDEN_SCOPE", "当前账号无有效录入部门或不能选择其他部门")

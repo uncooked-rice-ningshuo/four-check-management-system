@@ -236,9 +236,9 @@ FROM semester_weeks w WHERE w.id=$1::uuid AND w.semester_id=$2::uuid AND w.enabl
 	}
 	scopeLock := ""
 	if lockRows {
-		scopeLock = " FOR SHARE"
+		scopeLock = " FOR SHARE OF year"
 	}
-	err = queryer.QueryRow(ctx, `SELECT version FROM semester_report_grade_scopes WHERE semester_id=$1::uuid`+scopeLock, semesterID).Scan(&inputs.ReportGradeScopeVersion)
+	err = queryer.QueryRow(ctx, `SELECT year.version FROM academic_years year JOIN semesters sem ON sem.academic_year_id=year.id WHERE sem.id=$1::uuid`+scopeLock, semesterID).Scan(&inputs.ReportGradeScopeVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
 	}
@@ -247,8 +247,8 @@ FROM semester_weeks w WHERE w.id=$1::uuid AND w.semester_id=$2::uuid AND w.enabl
 	}
 	var configuredGradeCount, enabledGradeCount int
 	if err := queryer.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE grade.enabled)
-FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
-WHERE scope.semester_id=$1::uuid`, semesterID).Scan(&configuredGradeCount, &enabledGradeCount); err != nil {
+FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id
+WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid)`, semesterID).Scan(&configuredGradeCount, &enabledGradeCount); err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}
 	if configuredGradeCount == 0 || configuredGradeCount != enabledGradeCount {
@@ -259,12 +259,12 @@ WHERE scope.semester_id=$1::uuid`, semesterID).Scan(&configuredGradeCount, &enab
 		classLock = " FOR SHARE OF class,grade"
 	}
 	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name,COALESCE(faculty.name,''),COALESCE(major.name,''),COALESCE(teacher.name,'')
-FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
+FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id
 JOIN classes class ON class.grade_id=grade.id
 LEFT JOIN faculties faculty ON faculty.id=class.faculty_id
 LEFT JOIN majors major ON major.id=class.major_id
 LEFT JOIN staff teacher ON teacher.id=class.head_teacher_id
-WHERE scope.semester_id=$1::uuid AND class.enabled AND grade.enabled
+WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND class.enabled AND grade.enabled
 ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
@@ -293,11 +293,11 @@ ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 		studentLock = " FOR SHARE OF student,grade"
 	}
 	rosterRows, err := queryer.Query(ctx, `SELECT grade.id::text,COALESCE(class.id::text,'')
-FROM semester_report_grades scope
+FROM academic_year_grade_stages scope
 JOIN grades grade ON grade.id=scope.grade_id AND grade.enabled
 JOIN students student ON student.grade_id=grade.id
 LEFT JOIN classes class ON class.id=student.class_id AND class.grade_id=grade.id AND class.enabled
-WHERE scope.semester_id=$1::uuid AND student.enabled AND student.enrollment_status='ENROLLED'
+WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND student.enabled AND student.enrollment_status='ENROLLED'
 ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
@@ -321,7 +321,7 @@ ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
 	}
 	rosterRows.Close()
 
-	gradeRows, err := queryer.Query(ctx, `SELECT grade.id::text,grade.name FROM semester_report_grades scope JOIN grades grade ON grade.id=scope.grade_id WHERE scope.semester_id=$1::uuid AND grade.enabled ORDER BY grade.name,grade.id`, semesterID)
+	gradeRows, err := queryer.Query(ctx, `SELECT grade.id::text,grade.name FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND grade.enabled ORDER BY grade.name,grade.id`, semesterID)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}

@@ -426,7 +426,7 @@ export function WeeklyReportSummaryPage() {
                 { title: '状态', key: 'state', render: (_value, row) => requiredCellState(row) },
                 { title: '操作', key: 'receipt', render: (_, row) => {
                   if (!selectedPeriod || !user || row.submissionCount > 0) return null
-                  if (user.systemRole === 'MEMBER' && user.primaryDepartmentId !== row.departmentId) return null
+                  if (user.systemRole === 'MEMBER' && !permissionQuery.data?.departmentIds?.includes(row.departmentId)) return null
                   const scope = { semesterId: selectedPeriod.semesterId, weekId: selectedPeriod.weekId, inspectionTypeId: row.inspectionTypeId, departmentId: row.departmentId }
                   const context = { ...scope, academicYearId: selectedPeriod.academicYearId }
                   if (!user.isSuperAdmin && !canInspectionAction(permissionQuery.data?.permissions, 'INSPECTION_ENTER', context)) return null

@@ -52,7 +52,7 @@ func TestImportConfirmationRevalidatesPostgres(t *testing.T) {
 	if batch.ValidRows != 2 {
 		t.Fatalf("valid rows %d", batch.ValidRows)
 	}
-	input := importjob.ConfirmBatchInput{BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
+	input := importjob.ConfirmBatchInput{Permissions: importFixturePermissions(), BatchID: batch.ID, ExpectedVersion: batch.Version, IdempotencyKey: uuid.NewString(), Scope: importjob.ConfirmScope{SemesterID: fixture.semesterID, WeekID: fixture.weekID, InspectionTypeID: integrationInspectionTypeID, DepartmentID: integrationDepartmentID, ActorID: fixture.accountID}, AuditMetadata: audit.Metadata{ActorID: fixture.accountID}}
 	rows, err := db.ListImportRows(ctx, batch.ID, 1, 20, "")
 	if err != nil || len(rows.Items) != 2 {
 		t.Fatal("preview rows", err)

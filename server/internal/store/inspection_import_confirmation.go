@@ -68,13 +68,21 @@ func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.I
 	}
 	// The API reauthorizes the whole batch before confirmation. Every reference
 	// must remain inside that exact scope; do not manufacture a permission grant.
+	missingMapping := false
 	current, err := (&inspectionTx{tx: tx}).lockReferences(ctx, record, locked, func(scope permission.Scope) bool {
-		return scope.SemesterID == input.Scope.SemesterID && scope.WeekID == input.Scope.WeekID && scope.InspectionTypeID == input.Scope.InspectionTypeID && scope.DepartmentID == input.Scope.DepartmentID && (input.Scope.ClassID == "" || scope.ClassID == input.Scope.ClassID) && (input.Scope.Grade == "" || scope.Grade == input.Scope.Grade)
+		allowed := input.Permissions.Allowed(permission.ActionInspectionEnter, scope)
+		if !allowed && permission.MissingStageMapping(input.Permissions.Permissions, scope) {
+			missingMapping = true
+		}
+		return allowed && scope.SemesterID == input.Scope.SemesterID && scope.WeekID == input.Scope.WeekID && scope.InspectionTypeID == input.Scope.InspectionTypeID && scope.DepartmentID == input.Scope.DepartmentID && (input.Scope.ClassID == "" || scope.ClassID == input.Scope.ClassID) && (input.Scope.Grade == "" || scope.Grade == input.Scope.Grade)
 	})
 	if errors.Is(err, inspection.ErrInvalidAttendanceRecord) {
 		return record, importjob.ErrPreviewStale
 	}
 	if errors.Is(err, inspection.ErrScopeMismatch) {
+		if missingMapping {
+			return record, permission.ErrGradeMappingMissing
+		}
 		return record, importjob.ErrBatchScopeMismatch
 	}
 	if err != nil {

@@ -49,6 +49,7 @@ var (
 
 // Account 是认证与管理端使用的安全账号领域模型。PasswordHash 只能在服务端参与校验。
 type Account struct {
+	DepartmentIDs         []string
 	ID                    string
 	LoginName             string
 	StudentNo             string
@@ -413,7 +414,7 @@ func accountAuditState(account Account) map[string]any {
 	return map[string]any{
 		"id": account.ID, "loginName": account.LoginName, "studentNo": account.StudentNo, "name": account.Name,
 		"status": account.Status, "accountKind": account.AccountKind, "systemRole": account.SystemRole,
-		"mustChangePassword": account.MustChangePassword, "primaryDepartmentId": account.PrimaryDepartmentID,
+		"mustChangePassword": account.MustChangePassword, "primaryDepartmentId": account.PrimaryDepartmentID, "departmentIds": account.DepartmentIDs,
 	}
 }
 

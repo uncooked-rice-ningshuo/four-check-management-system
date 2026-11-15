@@ -1,0 +1,16 @@
+.permission-detail-drawer .ant-drawer-body { padding: 20px 24px; }
+.permission-detail-drawer .ant-pro-card { box-shadow: none; border: 0; }
+.permission-detail-drawer .ant-pro-card-body { padding: 0; }
+.permission-detail-drawer .ant-pro-table-list-toolbar-container { padding-block: 12px; }
+.permission-detail-drawer .ant-pro-table-list-toolbar-title { font-size: 16px; }
+.permission-detail-drawer .ant-table { font-size: 13px; }
+.permission-detail-drawer .ant-empty { margin-block: 20px; }
+.permission-detail-drawer .ant-pro-table + .ant-pro-table { margin-top: 24px; }
+.permission-rule-modal .ant-modal-body { max-height: calc(100dvh - 180px); overflow-y: auto; padding-block: 8px; }
+.permission-rule-modal .ant-form-item { margin-bottom: 18px; }
+.permission-rule-modal .ant-form-item-extra { font-size: 12px; }
+@media (max-width: 640px) {
+  .permission-detail-drawer .ant-drawer-body { padding: 16px; }
+  .permission-rule-modal { top: 20px; }
+  .permission-rule-modal .ant-modal-body { max-height: calc(100dvh - 160px); }
+}

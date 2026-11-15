@@ -91,7 +91,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 	svc := inspection.NewRecordService(db, perms)
 	admin := inspection.ManualActor{ID: rf("01"), IsSuperAdmin: true}
 	member := inspection.ManualActor{ID: rf("01")}
-	departmentActor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
+	departmentActor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002", DepartmentIDs: []string{"10000000-0000-0000-0000-000000000002"}}
 	departmentSvc := inspection.NewRecordService(db, &recordPermissions{rules: []permission.EffectivePermission{
 		{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}},
 		{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: departmentActor.PrimaryDepartmentID}},
@@ -189,13 +189,18 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		}
 		perms.rules[0].Action = permission.ActionInspectionEnter
 		page, err = service.ContextOptions(ctx, member, q)
-		if err != nil || page.Total != 2 {
+		if err != nil || page.Total != 6 {
 			t.Fatal("entry departments", page, err)
 		}
 		for _, scope := range []permission.Scope{{AcademicYearID: rf("02")}, {SemesterID: rf("03")}, {WeekID: rf("04")}, {InspectionTypeID: types[q.TypeCode]}, {DepartmentID: "10000000-0000-0000-0000-000000000002"}, {ClassID: rf("06")}, {Grade: "2026"}} {
 			perms.rules = append(perms.rules[:1], permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Scope: scope})
 			page, err = service.ContextOptions(ctx, member, q)
-			if err != nil || page.Total != 0 {
+			want := 0
+			if scope.DepartmentID != "" {
+				// A department denial leaves the four newly configured grade departments available.
+				want = 4
+			}
+			if err != nil || page.Total != want {
 				t.Fatal("context deny", scope, page, err)
 			}
 		}
@@ -727,7 +732,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 		defer func() { perms.rules = nil }()
 		const primary = "10000000-0000-0000-0000-000000000002"
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{DepartmentID: primary, InspectionTypeID: types[inspection.InspectionTypeAttendance], ClassID: rf("06")}}}
-		actor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: primary}
+		actor := inspection.ManualActor{ID: rf("01"), IsMember: true, PrimaryDepartmentID: primary, DepartmentIDs: []string{primary}}
 		input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"remark": "member attribution"})
 		input.DepartmentID = "10000000-0000-0000-0000-000000000003"
 		if _, err := svc.Create(ctx, actor, input, audit.Metadata{}); !errors.Is(err, inspection.ErrScopeMismatch) {
@@ -1045,7 +1050,7 @@ func TestInspectionPostgresCRUD(t *testing.T) {
 			listedAdminRecord.SubmittedAt != nil || !listedAdminRecord.CanDelete {
 			t.Fatalf("attendance provenance or draft deletion capability: %+v", listedAdminRecord)
 		}
-		memberActor := inspection.ManualActor{ID: rf("24"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002"}
+		memberActor := inspection.ManualActor{ID: rf("24"), IsMember: true, PrimaryDepartmentID: "10000000-0000-0000-0000-000000000002", DepartmentIDs: []string{"10000000-0000-0000-0000-000000000002"}}
 		perms.rules = []permission.EffectivePermission{{Action: permission.ActionInspectionView, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}, {Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Scope: permission.Scope{InspectionTypeID: adminRecord.InspectionTypeID, ClassID: rf("06")}}}
 		visible, detailErr := svc.Detail(ctx, memberActor, adminRecord.ID)
 		if detailErr != nil || visible.CanEdit || visible.CanDelete || visible.CreatedByName != "Schema fixture" || visible.SubmitterName != "Schema fixture" || visible.SubmittedByName != "" {
@@ -1386,4 +1391,65 @@ VALUES($1,$2,$3,$4,$4)`, reportLockID, own.SemesterID, own.WeekID, admin.ID); er
 		assertRelativeOrder(inspection.SortStudentNoDescending, second.ID, first.ID)
 		assertRelativeOrder(inspection.SortOccurredAtDescending, second.ID, first.ID)
 	})
+	t.Run("teacher multi-department submission routes", func(t *testing.T) {
+		study := departmentActor.PrimaryDepartmentID
+		var yearOne string
+		if err := pool.QueryRow(ctx, "SELECT id FROM departments WHERE code='GRADE_ONE'").Scan(&yearOne); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO grades(id,name) VALUES($1,'2027')", rf("70")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO academic_year_grade_stages(academic_year_id,stage,grade_id) VALUES($1,1,$2)", rf("02"), rf("70")); err != nil {
+			t.Fatal(err)
+		}
+		result := permission.EffectiveResult{SystemRole: permission.SystemRoleMember, DepartmentIDs: []string{study, yearOne}}
+		for _, action := range []string{permission.ActionInspectionEnter, permission.ActionInspectionReview} {
+			result.Permissions = append(result.Permissions,
+				permission.EffectivePermission{Action: action, Effect: permission.EffectAllow, SourceDepartmentID: study, Scope: permission.Scope{InspectionTypeID: types[inspection.InspectionTypeAttendance]}},
+				permission.EffectivePermission{Action: action, Effect: permission.EffectAllow, SourceDepartmentID: yearOne, Scope: permission.Scope{InspectionTypeID: types[inspection.InspectionTypeAttendance]}, Ranges: []permission.OperationRange{{GradeStage: 1}}})
+		}
+		provider := teacherWorkflowPermissions{result: result}
+		creator := inspection.ManualActor{ID: rf("24"), IsMember: true, PrimaryDepartmentID: study, DepartmentIDs: result.DepartmentIDs}
+		creationOptions, err := inspection.NewContextOptionService(db, provider).ContextOptions(ctx, creator, inspection.ContextOptionQuery{TypeCode: inspection.InspectionTypeAttendance, Purpose: "entry", Kind: "classes", SemesterID: rf("03"), WeekID: rf("04"), DepartmentID: yearOne, Page: 1, PageSize: 100})
+		if err != nil || !containsOption(creationOptions.Items, rf("06")) {
+			t.Fatal("creation source incorrectly constrained record range", err)
+		}
+		create := inspection.NewRecordService(db, provider)
+		flows := workflow.NewService(db, provider)
+		for index, route := range []string{study, yearOne} {
+			input := makeInput(inspection.InspectionTypeAttendance, map[string]any{"date": "2026-09-07", "period": []string{"5-6", "7-8"}[index]})
+			input.DepartmentID = yearOne // Creation provenance does not constrain the selected submission path.
+			record, err := create.Create(ctx, creator, input, audit.Metadata{})
+			if err != nil {
+				t.Fatal("create teacher record", err)
+			}
+			submit := workflow.SubmitInput{Scope: workflow.Scope{SemesterID: record.SemesterID, WeekID: record.WeekID, DepartmentID: yearOne, InspectionTypeID: record.InspectionTypeID}, Records: []workflow.VersionedRecord{{ID: record.ID, Version: record.RowVersion}}, IdempotencyKey: "teacher-route-" + route}
+			if index == 0 {
+				if _, err := flows.Submit(ctx, workflow.Actor{ID: creator.ID}, submit, audit.Metadata{}); err == nil {
+					t.Fatal("second-year record accepted through year-one")
+				}
+				submit.Scope.DepartmentID = study
+			} else {
+				if _, err := pool.Exec(ctx, "UPDATE academic_year_grade_stages SET grade_id=$1 WHERE academic_year_id=$2 AND stage=1", rf("05"), rf("02")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			batch, err := flows.Submit(ctx, workflow.Actor{ID: creator.ID}, submit, audit.Metadata{})
+			if err != nil || batch.Scope.DepartmentID != route {
+				t.Fatalf("submit chosen path: %+v %v", batch, err)
+			}
+			if _, err := flows.Decide(ctx, workflow.Actor{ID: creator.ID}, batch.ID, workflow.Confirm, workflow.DecisionInput{Version: batch.RowVersion}, audit.Metadata{}); err != nil {
+				t.Fatal("review selected path", err)
+			}
+		}
+	})
+
+}
+
+// Supplies the same trusted membership and per-source grants used by production services.
+type teacherWorkflowPermissions struct{ result permission.EffectiveResult }
+
+func (p teacherWorkflowPermissions) Effective(context.Context, string) (permission.EffectiveResult, error) {
+	return p.result, nil
 }

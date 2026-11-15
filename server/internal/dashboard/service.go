@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"four-check-management-system/server/internal/academic"
@@ -183,7 +184,7 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 	authorized := make([]Scope, 0)
 	capabilities := make(map[Scope]DepartmentStatus)
 	for _, mapping := range mappings {
-		if !actor.IsSuperAdmin && effective.SystemRole == permission.SystemRoleMember && mapping.DepartmentID != effective.PrimaryDepartmentID {
+		if !actor.IsSuperAdmin && effective.SystemRole == permission.SystemRoleMember && !slices.Contains(effective.DepartmentIDs, mapping.DepartmentID) {
 			continue
 		}
 		department, departmentExists := departments[mapping.DepartmentID]
@@ -191,8 +192,9 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 		if !mapping.Enabled || !mapping.CanView || !departmentExists || !typeExists {
 			continue
 		}
+		routePermissions := effective.ForDepartment(mapping.DepartmentID)
 		requested := permission.Scope{AcademicYearID: result.Context.AcademicYearID, SemesterID: week.SemesterID, WeekID: week.ID, DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
-		if !actor.IsSuperAdmin && !effective.Allowed(permission.ActionInspectionView, requested) {
+		if !actor.IsSuperAdmin && !routePermissions.Allowed(permission.ActionInspectionView, requested) {
 			continue
 		}
 		scope := Scope{DepartmentID: mapping.DepartmentID, InspectionTypeID: mapping.InspectionTypeID}
@@ -200,8 +202,8 @@ func (s *Service) Workbench(ctx context.Context, actor Actor, at time.Time) (Wor
 		capabilities[scope] = DepartmentStatus{
 			DepartmentID: mapping.DepartmentID, DepartmentName: department.Name,
 			InspectionTypeID: mapping.InspectionTypeID, InspectionTypeCode: inspectionType.Code, InspectionTypeName: inspectionType.Name,
-			CanEnter:  actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionEnter, requested),
-			CanReview: actor.IsSuperAdmin || effective.Allowed(permission.ActionInspectionReview, requested),
+			CanEnter:  actor.IsSuperAdmin || routePermissions.Allowed(permission.ActionInspectionEnter, requested),
+			CanReview: actor.IsSuperAdmin || routePermissions.Allowed(permission.ActionInspectionReview, requested),
 		}
 	}
 	// College records and batches are a separate scope, visible only under an

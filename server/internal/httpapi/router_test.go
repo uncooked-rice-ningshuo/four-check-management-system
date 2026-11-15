@@ -142,7 +142,28 @@ type sessions struct {
 type permissionRepository struct{ profile permission.AccessProfile }
 
 func (r *permissionRepository) LoadAccessProfile(context.Context, string) (permission.AccessProfile, error) {
-	return r.profile, nil
+	profile := r.profile
+	// HTTP fixtures model assigned departmental sources explicitly, like the SQL repository.
+	if profile.SystemRole == permission.SystemRoleMember && profile.DepartmentID != "" && len(profile.Departments) == 0 {
+		department := profile
+		department.Rules = nil
+		for _, rule := range profile.Rules {
+			if rule.Scope.InspectionTypeID != "" {
+				department.DepartmentScopes = append(department.DepartmentScopes, permission.DepartmentScope{DepartmentID: profile.DepartmentID, InspectionTypeID: rule.Scope.InspectionTypeID, CanView: true, CanEnter: true, CanManage: true, CanReview: true, Enabled: true})
+			}
+		}
+		profile.Rules = append([]permission.Rule(nil), profile.Rules...)
+		for i := range profile.Rules {
+			if profile.Rules[i].Effect == permission.EffectAllow {
+				profile.Rules[i].SourceDepartmentID = profile.DepartmentID
+			}
+		}
+		profile.Departments = []permission.AccessProfile{department}
+		profile.InspectionDefaults = nil
+		profile.ReportDefaults = nil
+		profile.DepartmentScopes = nil
+	}
+	return profile, nil
 }
 func (r *permissionRepository) ListRules(context.Context, string) ([]permission.Rule, error) {
 	return r.profile.Rules, nil
@@ -421,7 +442,7 @@ func TestSuperAdminCanReadEffectivePermissionSourcesAndCreateRule(t *testing.T) 
 	permissionRepo := &permissionRepository{profile: permission.AccessProfile{AccountID: "user-1", SystemRole: permission.SystemRoleMember}}
 	router := NewRouter(svc, false, AdminServices{Permission: permission.NewService(permissionRepo)})
 
-	created := performJSON(router, http.MethodPost, "/api/v1/admin/users/user-1/permission-rules", map[string]any{"action": permission.ActionInspectionView, "effect": permission.EffectAllow, "scope": map[string]string{"semesterId": "semester-1"}}, tokens.AccessToken)
+	created := performJSON(router, http.MethodPost, "/api/v1/admin/users/user-1/permission-rules", map[string]any{"action": permission.ActionConfigurationView, "effect": permission.EffectAllow, "startsAt": "2026-01-01T00:00:00Z"}, tokens.AccessToken)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create rule status=%d body=%s", created.Code, created.Body.String())
 	}

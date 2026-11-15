@@ -229,6 +229,7 @@ func attendanceRouterWithProfileRole(t *testing.T, allowed, superAdmin, mustChan
 	account := accountsRepository.values["24010088"]
 	account.Status = auth.StatusActive
 	account.PrimaryDepartmentID = "10000000-0000-0000-0000-000000000002"
+	account.DepartmentIDs = []string{account.PrimaryDepartmentID}
 	account.IsSuperAdmin = superAdmin
 	account.MustChangePassword = mustChangePassword
 	if superAdmin {
@@ -241,13 +242,17 @@ func attendanceRouterWithProfileRole(t *testing.T, allowed, superAdmin, mustChan
 		effect = permission.EffectAllow
 	}
 	permissionRepository := &permissionRepository{profile: permission.AccessProfile{AccountID: account.ID, DepartmentID: account.PrimaryDepartmentID, OrganizationRoleCode: orgRole, SystemRole: permission.SystemRoleMember, Rules: []permission.Rule{
-		{Action: permission.ActionInspectionView, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002"}},
-		{Action: permission.ActionInspectionEnter, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002"}},
-		{Action: permission.ActionInspectionView, Effect: permission.EffectDeny, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002", ClassID: "blocked-class"}},
-		{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance", DepartmentID: "10000000-0000-0000-0000-000000000002", ClassID: "blocked-class"}},
+		{Action: permission.ActionInspectionView, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance"}},
+		{Action: permission.ActionInspectionEnter, Effect: effect, Enabled: true, Scope: permission.Scope{SemesterID: "semester-1", WeekID: "week-1", InspectionTypeID: "type-attendance"}},
 	}}}
+
 	if len(customRules) > 0 {
-		permissionRepository.profile.Rules = customRules[0]
+		permissionRepository.profile.Rules = append([]permission.Rule(nil), customRules[0]...)
+		for i := range permissionRepository.profile.Rules {
+			if permissionRepository.profile.Rules[i].Scope.InspectionTypeID == "" {
+				permissionRepository.profile.Rules[i].Scope.InspectionTypeID = "type-attendance"
+			}
+		}
 	}
 	imports := &importHTTPStub{
 		batch:    importjob.Batch{ID: "batch-1", InspectionTypeID: "type-attendance", SemesterID: "semester-1", WeekID: "week-1", DepartmentID: "10000000-0000-0000-0000-000000000002", ClassID: "allowed-class", Status: importjob.BatchStatusPreviewReady, Version: 3, CreatedBy: account.ID},
@@ -317,13 +322,13 @@ func TestAttendanceListUsesTypeWideDepartmentOptionsWhenFilterIsEmpty(t *testing
 	}
 }
 
-func TestPresidiumAttendanceListUsesOnlyPrimaryDepartment(t *testing.T) {
+func TestPresidiumAttendanceListUsesConfiguredViewWithoutRoleFilter(t *testing.T) {
 	router, token, _, attendance := attendanceRouterWithProfileRole(t, true, false, false, "PRESIDIUM")
 	base := "/api/v1/inspections/attendance?semesterId=semester-1&weekId=week-1&inspectionTypeId=type-attendance&page=1&pageSize=20"
-	if response := performJSON(router, http.MethodGet, base, nil, token); response.Code != http.StatusOK || attendance.scope.DepartmentID != "10000000-0000-0000-0000-000000000002" {
-		t.Fatalf("primary department scope: response=%d scope=%+v", response.Code, attendance.scope)
+	if response := performJSON(router, http.MethodGet, base, nil, token); response.Code != http.StatusOK || len(attendance.scope.DepartmentIDs) != 4 {
+		t.Fatalf("assigned department scope: response=%d scope=%+v", response.Code, attendance.scope)
 	}
-	if response := performJSON(router, http.MethodGet, base+"&departmentId=other-department", nil, token); response.Code != http.StatusForbidden {
+	if response := performJSON(router, http.MethodGet, base+"&departmentId=other-department", nil, token); response.Code != http.StatusOK {
 		t.Fatalf("cross department response=%d %s", response.Code, response.Body.String())
 	}
 }

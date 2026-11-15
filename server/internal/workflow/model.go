@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -125,17 +126,18 @@ type Actor struct {
 // SubmitCommand carries validated input and the actor's effective rules to the
 // repository, which applies them inside SQL before locking each record.
 type SubmitCommand struct {
-	CanRouteOwn    bool
-	ActorID        string
-	Unrestricted   bool
-	Permissions    []permission.EffectivePermission
-	Scope          Scope
-	Kind           SubmissionKind
-	Records        []VersionedRecord
-	IdempotencyKey string
-	Fingerprint    string
-	Explanation    string
-	Metadata       audit.Metadata
+	CanRouteOwn           bool
+	CanRouteAdministrator bool
+	ActorID               string
+	Unrestricted          bool
+	Permissions           []permission.EffectivePermission
+	Scope                 Scope
+	Kind                  SubmissionKind
+	Records               []VersionedRecord
+	IdempotencyKey        string
+	Fingerprint           string
+	Explanation           string
+	Metadata              audit.Metadata
 }
 
 type Repository interface {
@@ -154,16 +156,17 @@ type ResubmitInput struct {
 }
 
 type ResubmitCommand struct {
-	MemberDepartmentID *string
-	ActorID            string
-	Unrestricted       bool
-	Permissions        []permission.EffectivePermission
-	SubmissionID       string
-	Version            int
-	Kind               SubmissionKind
-	Records            []VersionedRecord
-	Explanation        string
-	Metadata           audit.Metadata
+	MemberDepartmentIDs []string
+	MemberDepartmentID  *string
+	ActorID             string
+	Unrestricted        bool
+	Permissions         []permission.EffectivePermission
+	SubmissionID        string
+	Version             int
+	Kind                SubmissionKind
+	Records             []VersionedRecord
+	Explanation         string
+	Metadata            audit.Metadata
 }
 
 type DecisionInput struct {
@@ -172,16 +175,17 @@ type DecisionInput struct {
 }
 
 type DecisionCommand struct {
-	ActorID            string
-	Unrestricted       bool
-	IsMember           bool
-	MemberDepartmentID string
-	Permissions        []permission.EffectivePermission
-	SubmissionID       string
-	Version            int
-	Action             Action
-	Reason             string
-	Metadata           audit.Metadata
+	MemberDepartmentIDs []string
+	ActorID             string
+	Unrestricted        bool
+	IsMember            bool
+	MemberDepartmentID  string
+	Permissions         []permission.EffectivePermission
+	SubmissionID        string
+	Version             int
+	Action              Action
+	Reason              string
+	Metadata            audit.Metadata
 }
 
 type permissionService interface {
@@ -248,6 +252,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 		}
 	}
 	canRouteOwn := actor.IsSuperAdmin
+	canRouteAdministrator := actor.IsSuperAdmin
 	permissions := []permission.EffectivePermission(nil)
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
@@ -257,11 +262,12 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 		if err != nil {
 			return Submission{}, err
 		}
-		if effective.SystemRole == permission.SystemRoleMember && (effective.PrimaryDepartmentID == "" || effective.PrimaryDepartmentID != input.Scope.DepartmentID) {
+		if effective.SystemRole == permission.SystemRoleMember && !slices.Contains(effective.DepartmentIDs, input.Scope.DepartmentID) {
 			return Submission{}, ErrSubmissionScope
 		}
-		canRouteOwn = effective.SystemRole == permission.SystemRoleAdmin
-		permissions = effective.Permissions
+		canRouteAdministrator = effective.SystemRole == permission.SystemRoleAdmin
+		canRouteOwn = effective.SystemRole == permission.SystemRoleAdmin || slices.Contains(effective.DepartmentIDs, input.Scope.DepartmentID)
+		permissions = effective.ForDepartment(input.Scope.DepartmentID).Permissions
 	}
 	hash := sha256.New()
 	fmt.Fprintf(hash, "%s/%s/%s/%s/%s/%s", input.Kind, input.Scope.SemesterID, input.Scope.WeekID,
@@ -271,7 +277,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, input SubmitInput, me
 	}
 	metadata.ActorID = actor.ID
 	metadata.Reason = input.Explanation
-	return s.repository.SubmitDepartmentBatch(ctx, SubmitCommand{CanRouteOwn: canRouteOwn, ActorID: actor.ID, Unrestricted: actor.IsSuperAdmin,
+	return s.repository.SubmitDepartmentBatch(ctx, SubmitCommand{CanRouteAdministrator: canRouteAdministrator, CanRouteOwn: canRouteOwn, ActorID: actor.ID, Unrestricted: actor.IsSuperAdmin,
 		Permissions: permissions, Scope: input.Scope, Kind: input.Kind, Records: records, IdempotencyKey: input.IdempotencyKey,
 		Explanation: input.Explanation,
 		Fingerprint: hex.EncodeToString(hash.Sum(nil)), Metadata: metadata})
@@ -288,6 +294,7 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 	}
 	permissions := []permission.EffectivePermission(nil)
 	memberDepartmentID := ""
+	var memberDepartmentIDs []string
 	isMember := false
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
@@ -301,10 +308,11 @@ func (s *Service) Decide(ctx context.Context, actor Actor, id string, action Act
 		if effective.SystemRole == permission.SystemRoleMember {
 			isMember = true
 			memberDepartmentID = effective.PrimaryDepartmentID
+			memberDepartmentIDs = effective.DepartmentIDs
 		}
 	}
 	metadata.ActorID, metadata.Reason = actorID.String(), reason
-	return s.repository.DecideDepartmentBatch(ctx, DecisionCommand{ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin, IsMember: isMember, MemberDepartmentID: memberDepartmentID,
+	return s.repository.DecideDepartmentBatch(ctx, DecisionCommand{MemberDepartmentIDs: memberDepartmentIDs, ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin, IsMember: isMember, MemberDepartmentID: memberDepartmentID,
 		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Action: action,
 		Reason: reason, Metadata: metadata})
 }
@@ -339,6 +347,7 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input Re
 		}
 	}
 	var memberDepartmentID *string
+	var memberDepartmentIDs []string
 	permissions := []permission.EffectivePermission(nil)
 	if !actor.IsSuperAdmin {
 		if s.permissions == nil {
@@ -350,11 +359,12 @@ func (s *Service) Resubmit(ctx context.Context, actor Actor, id string, input Re
 		}
 		if effective.SystemRole == permission.SystemRoleMember {
 			memberDepartmentID = &effective.PrimaryDepartmentID
+			memberDepartmentIDs = effective.DepartmentIDs
 		}
 		permissions = effective.Permissions
 	}
 	metadata.ActorID, metadata.Reason = actorID.String(), input.Explanation
-	return s.repository.ResubmitDepartmentBatch(ctx, ResubmitCommand{MemberDepartmentID: memberDepartmentID, ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
+	return s.repository.ResubmitDepartmentBatch(ctx, ResubmitCommand{MemberDepartmentIDs: memberDepartmentIDs, MemberDepartmentID: memberDepartmentID, ActorID: actorID.String(), Unrestricted: actor.IsSuperAdmin,
 		Permissions: permissions, SubmissionID: submissionID.String(), Version: input.Version, Kind: input.Kind,
 		Records: records, Explanation: input.Explanation, Metadata: metadata})
 }

@@ -11,13 +11,13 @@ import type { AcademicYear, Semester, SemesterWeek } from '../../entities/academ
 import { academicYearOptions, buildAcademicYearDefaults, buildSemesterDefaults, currentAcademicYearStart, semesterTypeOptions, type SemesterCode } from '../../features/academic/model/academicCalendarRules'
 import { createAcademicYear, createSemester, createWeek, getAcademicCalendar, getMorningScheduleCalendar, updateAcademicYear, updateSemester, updateWeek } from '../../shared/api/adminApi'
 import { AcademicWeekImportDrawer } from '../../features/academic/ui/AcademicWeekImportDrawer'
-import { SemesterReportGradesDialog } from '../../features/academic/ui/SemesterReportGradesDialog'
+import { AcademicYearStageFields } from '../../features/academic/ui/AcademicYearStageFields'
 
 type WeekFilters = { academicYearId?: string; semesterId?: string; dateRange?: [string, string] }
 
 type ModalKind = 'year' | 'semester' | 'week' | null
 const toISO = (value: string) => `${value}T00:00:00Z`
-type CalendarFormValues = { startYear?: number; academicYearId?: string; semesterCode?: SemesterCode; semesterId?: string; weekNo?: number; note?: string; attendancePenaltyMultiplier?: 1 | 2; dateRange: [string, string] }
+type CalendarFormValues = { stageGrades?: AcademicYear['stageGrades']; startYear?: number; academicYearId?: string; semesterCode?: SemesterCode; semesterId?: string; weekNo?: number; note?: string; attendancePenaltyMultiplier?: 1 | 2; dateRange: [string, string] }
 
 const calendarFormDates = (dates: { startDate: string; endDate: string }) => ({ ...dates, dateRange: [dates.startDate.slice(0, 10), dates.endDate.slice(0, 10)] })
 const displayDate = (value: string) => value.slice(0, 10)
@@ -33,7 +33,7 @@ export function AcademicCalendarPage() {
   const [weekPage, setWeekPage] = useState(1)
   const [importOpen, setImportOpen] = useState(false)
   const [scheduleWeekId, setScheduleWeekId] = useState<string>()
-  const [reportGradeSemester, setReportGradeSemester] = useState<Semester | null>(null)
+  const [formDirty, setFormDirty] = useState(false)
   const [form] = Form.useForm()
   const [messageApi, messageContextHolder] = message.useMessage()
   const client = useQueryClient()
@@ -43,7 +43,7 @@ export function AcademicCalendarPage() {
     enabled: canManageMorningSchedule,
   })
   const save = useMutation({ mutationFn: async (values: CalendarFormValues) => {
-    if (modal === 'year') { const defaults = buildAcademicYearDefaults(Number(values.startYear)); const input = { name: defaults.name, startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]) }; return editing ? updateAcademicYear({ ...input, id: editing.id, enabled: editing.enabled }) : createAcademicYear(input) }
+    if (modal === 'year') { const defaults = buildAcademicYearDefaults(Number(values.startYear)); const input = { stageGrades: values.stageGrades ?? {}, name: defaults.name, startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]) }; return editing ? updateAcademicYear({ ...input, id: editing.id, enabled: editing.enabled, version: 'version' in editing ? editing.version : 0 }) : createAcademicYear(input) }
     if (modal === 'semester') { const year = data.academicYears.find(item => item.id === values.academicYearId); const defaults = buildSemesterDefaults(Number(displayDate(year?.startDate ?? '').slice(0, 4)), String(values.semesterCode) as SemesterCode); const input = { academicYearId: String(values.academicYearId), code: defaults.code, name: defaults.name, startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]) }; return editing ? updateSemester({ ...input, id: editing.id, enabled: editing.enabled }) : createSemester(input) }
     const input = { semesterId: String(values.semesterId), weekNo: Number(values.weekNo), startDate: toISO(values.dateRange[0]), endDate: toISO(values.dateRange[1]), note: String(values.note ?? ''), attendancePenaltyMultiplier: values.attendancePenaltyMultiplier ?? 1 }; return editing ? updateWeek({ ...input, id: editing.id, enabled: editing.enabled }) : createWeek(input)
   }, onSuccess: async () => {
@@ -126,16 +126,17 @@ export function AcademicCalendarPage() {
     {!calendar.isLoading && !calendar.isError && data.academicYears.length === 0 && <Card><Empty description="尚未配置学年和学期"><Button type="primary" onClick={() => openCreate('year')}>新增学年</Button></Empty></Card>}
     {calendar.isError && <Alert type="error" showIcon title="学期周次加载失败，请重试" action={<Button onClick={() => void calendar.refetch()}>重试</Button>} />}
     {data.academicYears.length > 0 && <Tabs items={[
-      { key: 'years', label: '学年', children: <ProTable<AcademicYear> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.academicYears} scroll={{ x: 'max-content' }} columns={[{ title: '学年', dataIndex: 'name' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '状态', dataIndex: 'enabled', render: (_, record) => <Tag color={record.enabled ? 'green' : 'default'}>{record.enabled ? '启用' : '停用'}</Tag> }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('year', record)}>编辑</Button> }]} /> },
-      { key: 'semesters', label: '学期', children: <ProTable<Semester> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.semesters} scroll={{ x: 'max-content' }} columns={[{ title: '名称', dataIndex: 'name' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openEdit('semester', record)}>编辑</Button><Button type="link" onClick={() => setReportGradeSemester(record)}>通报适用年级</Button></Space> }]} /> },
+      { key: 'years', label: '学年', children: <ProTable<AcademicYear> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.academicYears} scroll={{ x: 'max-content' }} columns={[{ title: '学年', dataIndex: 'name' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '状态', dataIndex: 'enabled', render: (_, record) => <Tag color={record.enabled ? 'green' : 'default'}>{record.enabled ? '启用' : '停用'}</Tag> }, { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openEdit('year', record)}>编辑</Button><Button type="link" onClick={() => openEdit('year', record)}>年级映射与通报覆盖</Button></Space> }]} /> },
+      { key: 'semesters', label: '学期', children: <ProTable<Semester> rowKey="id" loading={calendar.isLoading} search={false} options={false} pagination={false} dataSource={data.semesters} scroll={{ x: 'max-content' }} columns={[{ title: '名称', dataIndex: 'name' }, { title: '开始日期', dataIndex: 'startDate', renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', renderText: displayDate }, { title: '操作', valueType: 'option', render: (_, record) => <Space><Button type="link" onClick={() => openEdit('semester', record)}>编辑</Button></Space> }]} /> },
       { key: 'weeks', label: '周次', children: <ProTable<SemesterWeek, WeekFilters> rowKey="id" loading={calendar.isLoading} search={{ labelWidth: 'auto', defaultCollapsed: false, collapseRender: false }} onSubmit={values => { setWeekFilters(values); setWeekPage(1) }} onReset={() => { setWeekFilters({}); setWeekPage(1) }} options={{ density: true, setting: true }} pagination={{ pageSize: 20, current: weekPage, onChange: setWeekPage }} dataSource={weekRows} scroll={{ x: 'max-content' }} columns={[
         { title: '学年', dataIndex: 'academicYearId', valueType: 'select', fieldProps: { options: data.academicYears.map(year => ({ value: year.id, label: year.name })), allowClear: true }, render: (_, week) => data.academicYears.find(year => year.id === data.semesters.find(semester => semester.id === week.semesterId)?.academicYearId)?.name ?? '—' },
         { title: '学期', dataIndex: 'semesterId', valueType: 'select', fieldProps: { options: data.semesters.map(semester => ({ value: semester.id, label: semester.name })), allowClear: true }, render: (_, week) => data.semesters.find(semester => semester.id === week.semesterId)?.name ?? '—' },
         { title: '时间范围', dataIndex: 'dateRange', valueType: 'dateRange', fieldProps: { placeholder: ['开始日期', '结束日期'] }, hideInTable: true, tooltip: '显示与所选时间范围有交集的周次' },{ title: '周次', dataIndex: 'weekNo', search: false, renderText: value => `第 ${value} 周` }, { title: '开始日期', dataIndex: 'startDate', search: false, renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', search: false, renderText: displayDate }, { title: '到课率违纪计入', dataIndex: 'attendancePenaltyMultiplier', search: false, render: (_, week) => <Tag color={week.attendancePenaltyMultiplier === 2 ? 'orange' : 'blue'}>{week.attendancePenaltyMultiplier === 2 ? 2 : 1} 倍</Tag> }, { title: '备注', dataIndex: 'note', search: false }, { title: '早签计划', search: false, render: (_, week) => <Button type="link" onClick={() => setScheduleWeekId(week.id)}>配置日期</Button> }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('week', record)}>编辑</Button> }]} /> },
     ]} /> }
-    <Modal title={`${editing ? '编辑' : '新增'}${modal === 'year' ? '学年' : modal === 'semester' ? '学期' : '周次'}`} open={modal !== null} afterOpenChange={open => { if (open && modal) { if (editing) initializeEditForm(modal, editing); else initializeCreateForm(modal) } }} onCancel={() => { setModal(null); setEditing(null) }} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden>
-      <Form form={form} layout="vertical" onFinish={values => save.mutate(values)} onValuesChange={onFormValuesChange} preserve={false}>
+    <Modal title={`${editing ? '编辑' : '新增'}${modal === 'year' ? '学年' : modal === 'semester' ? '学期' : '周次'}`} open={modal !== null} afterOpenChange={open => { if (open && modal) { setFormDirty(false); if (editing) initializeEditForm(modal, editing); else initializeCreateForm(modal) } }} onCancel={() => { const close = () => { setModal(null); setEditing(null) }; if (formDirty) Modal.confirm({ title: '放弃未保存的配置？', okText: '放弃修改', cancelText: '继续编辑', onOk: close }); else close() }} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden>
+      <Form form={form} layout="vertical" onFinish={values => save.mutate(values)} onValuesChange={changed => { setFormDirty(true); onFormValuesChange(changed) }} preserve={false}>
         {modal === 'year' && <Form.Item name="startYear" label="学年" rules={[{ required: true, message: '请选择学年' }]} extra="结束年份由系统自动按起始年份 +1 生成。"><Select showSearch disabled={Boolean(editing)} options={yearChoices} placeholder="请选择学年…" /></Form.Item>}
+        {modal === 'year' && <AcademicYearStageFields />}
         {modal === 'semester' && <Form.Item name="academicYearId" label="所属学年" rules={[{ required: true, message: '请选择所属学年' }]}><Select disabled={Boolean(editing)} options={data.academicYears.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>}
         {modal === 'semester' && <Form.Item noStyle shouldUpdate={(previous, current) => previous.academicYearId !== current.academicYearId}>{({ getFieldValue }) => <Form.Item name="semesterCode" label="学期" rules={[{ required: true, message: '请选择上学期或下学期' }]}><Select disabled={Boolean(editing)} options={semesterTypeOptions.map(option => ({ ...option, disabled: !editing && data.semesters.some(item => item.academicYearId === getFieldValue('academicYearId') && item.code === option.value) }))} /></Form.Item>}</Form.Item>}
         {modal === 'week' && <Form.Item name="semesterId" label="所属学期" rules={[{ required: true }]}><Select options={data.semesters.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>}
@@ -149,7 +150,6 @@ export function AcademicCalendarPage() {
         {modal === 'week' && <Form.Item name="note" label="备注"><Input /></Form.Item>}
       </Form>
     </Modal>
-    {reportGradeSemester && <SemesterReportGradesDialog semester={reportGradeSemester} onClose={() => setReportGradeSemester(null)} />}
     <AcademicWeekImportDrawer open={importOpen} calendar={data} onClose={() => setImportOpen(false)} />
     {scheduleWeekId && <MorningScheduleDialog weekId={scheduleWeekId} onClose={() => setScheduleWeekId(undefined)} />}
   </section>

@@ -87,7 +87,7 @@ describe('WeeklyReportArchivePage', () => {
     renderPage()
     fireEvent.click(screen.getByRole('button', { name: '基于定稿修正' }))
     fireEvent.click(await screen.findByRole('button', { name: '确认发起' }))
-    expect(await screen.findByText('配置版本已变化')).toBeVisible()
+    await waitFor(() => expect(screen.getByText('配置版本已变化')).toBeVisible())
     expect(screen.getByRole('button', { name: '确认发起' })).toBeVisible()
   })
   it('shows correction history and returns to the snapshot', async () => {

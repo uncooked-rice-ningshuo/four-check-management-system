@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"four-check-management-system/server/internal/academic"
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/reporting"
@@ -173,13 +172,6 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	gradeScope, err := database.GetReportGrades(ctx, semesterID)
 	if err != nil || gradeScope.Version != 1 || len(gradeScope.GradeIDs) != 1 {
 		t.Fatalf("seeded grade scope = %+v, err=%v", gradeScope, err)
-	}
-	updatedScope, err := database.ReplaceReportGrades(ctx, gradeScope, audit.Metadata{ActorID: actorID, Reason: "Verify semester report scope"})
-	if err != nil || updatedScope.Version != 2 {
-		t.Fatalf("replace grade scope = %+v, err=%v", updatedScope, err)
-	}
-	if _, err := database.ReplaceReportGrades(ctx, gradeScope, audit.Metadata{ActorID: actorID}); !errors.Is(err, academic.ErrReportGradesConflict) {
-		t.Fatalf("stale grade scope write = %v, want version conflict", err)
 	}
 	preview, err := database.PreviewReportGrades(ctx, gradeScope.GradeIDs)
 	if err != nil || len(preview.Grades) != 1 || preview.ClassCount != 2 || preview.StudentCount != 2 || preview.UnassignedCount != 1 {

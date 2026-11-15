@@ -35,14 +35,7 @@ const submissionTables = ` FROM department_submissions ds JOIN department_submis
 const submissionSelect = submissionColumns + submissionTables
 
 func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
-	department := ""
-	// Office members may read confirmed submissions only through their effective
-	// inspection-view grant; ConfirmedOnly keeps unconfirmed source batches hidden.
-	if access.IsMember && !access.ConfirmedOnly {
-		*args = append(*args, access.MemberDepartmentID)
-		department = fmt.Sprintf("ds.department_id=NULLIF($%d,'')::uuid AND ", len(*args))
-	}
-	a := inspection.MutationAccess{ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
+	a := inspection.MutationAccess{SubmissionView: access.IsMember, ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
 	view := inspectionAccessSQL(a, "read", args)
 	mutate := inspectionAccessSQL(a, "mutate", args)
 	review := inspectionAccessSQL(a, "review", args)
@@ -51,7 +44,7 @@ func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
 	if access.ConfirmedOnly {
 		prefix = "ds.status='CONFIRMED' AND "
 	}
-	return department + prefix + `CASE WHEN ds.submission_kind='ZERO_RECORD' THEN cardinality(rev.record_ids)=0 AND ` + cell + `
+	return prefix + `CASE WHEN ds.submission_kind='ZERO_RECORD' THEN cardinality(rev.record_ids)=0 AND ` + cell + `
 	ELSE cardinality(rev.record_ids)=(SELECT count(*) FROM inspection_records existing
 	 WHERE existing.submission_id=ds.id AND existing.deleted_at IS NULL)
 	 AND NOT EXISTS(SELECT 1 FROM inspection_records ir JOIN semesters sem ON sem.id=ir.semester_id
@@ -76,15 +69,48 @@ func zeroReceiptVisibilitySQL(access inspection.MutationAccess, args *[]any) str
 // wholeCellActionSQL compiles current effective rules against the batch's
 // entire academic cell. Scoped class/grade allows are intentionally excluded.
 func wholeCellActionSQL(access inspection.MutationAccess, action string, args *[]any) string {
+	seen := map[string]bool{}
+	alternatives := []string{}
+	for _, rule := range access.Permissions {
+		if rule.Action != action || rule.Effect != permission.EffectAllow || seen[rule.SourceDepartmentID] {
+			continue
+		}
+		seen[rule.SourceDepartmentID] = true
+		scoped := access
+		scoped.Permissions = nil
+		for _, candidate := range access.Permissions {
+			if candidate.SourceDepartmentID == rule.SourceDepartmentID || (candidate.SourceDepartmentID == "" && candidate.Effect == permission.EffectDeny) {
+				scoped.Permissions = append(scoped.Permissions, candidate)
+			}
+		}
+		alternatives = append(alternatives, wholeCellSourceSQL(scoped, action, args))
+	}
+	if len(alternatives) == 0 {
+		return "FALSE"
+	}
+	return "(" + strings.Join(alternatives, " OR ") + ")"
+}
+
+func wholeCellSourceSQL(access inspection.MutationAccess, action string, args *[]any) string {
 	var allows, denies []string
 	for _, rule := range access.Permissions {
 		if rule.Action != action {
 			continue
 		}
-		if rule.Effect == permission.EffectAllow && (rule.Scope.ClassID != "" || rule.Scope.Grade != "") {
+		if rule.Effect == permission.EffectAllow && (rule.Scope.ClassID != "" || rule.Scope.Grade != "" || len(rule.Ranges) != 0) {
 			continue
 		}
 		var conditions []string
+		if access.TargetDepartmentID != "" && rule.SourceDepartmentID != "" && rule.SourceDepartmentID != access.TargetDepartmentID {
+			continue
+		}
+		if access.SubmissionView && rule.SourceDepartmentID != "" && !rule.ConfirmedOnly {
+			*args = append(*args, rule.SourceDepartmentID)
+			conditions = append(conditions, fmt.Sprintf("ds.department_id=$%d::uuid", len(*args)))
+		}
+		if rule.ConfirmedOnly && action == permission.ActionInspectionView {
+			conditions = append(conditions, "ds.status='CONFIRMED'")
+		}
 		for _, dimension := range []struct {
 			column string
 			value  string

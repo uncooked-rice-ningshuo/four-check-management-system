@@ -276,7 +276,7 @@ export function WeeklyReportWorkflowPanel({
 
   const finalized = report !== null && ['FINALIZED', 'PUBLISHED', 'ARCHIVED'].includes(report.status)
   const correctionValidation = correctionRecord ? correctionChangesFor(correctionRecord, correctionValues) : { changes: [], invalidFields: [] }
-  const outputControls = () => currentVersion && <ReportOutputPanel key={currentVersion.id} version={currentVersion} semesterId={period.semesterId} weekId={period.weekId} canGenerate={canGenerate} />
+  const outputControls = () => currentVersion && <ReportOutputPanel key={currentVersion.id} version={currentVersion} semesterId={period.semesterId} weekId={period.weekId} canOutput={permissionCoversReportTypes(permissions, 'REPORT_FILE_OUTPUT', period, currentVersion.content.rows)} />
 
   return <section className="weekly-report-workflow-panel" aria-label={stage === 'source' ? '来源核对操作' : undefined} aria-labelledby={stage === 'source' ? undefined : 'weekly-report-workflow-title'}>
     {stage !== 'source' && <div className="weekly-report-workflow-heading">

@@ -63,6 +63,7 @@ func (p *Postgres) Ready(ctx context.Context) error {
 		AND to_regclass('public.weekly_report_version_records') IS NOT NULL
 		AND to_regclass('public.weekly_report_version_zero_receipts') IS NOT NULL
 		AND to_regclass('public.weekly_report_version_adjustments') IS NOT NULL
+		AND to_regclass('public.discipline_rule_versions') IS NOT NULL
 		AND to_regclass('public.master_data_import_batches') IS NOT NULL
 		AND to_regclass('public.academic_week_import_batches') IS NOT NULL
 		AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.department_submission_revisions')

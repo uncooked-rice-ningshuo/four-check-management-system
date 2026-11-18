@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AcademicCalendarPage } from '../pages/admin/AcademicCalendarPage'
 import { AccountProfilePage } from '../pages/admin/AccountProfilePage'
 import { AccountSecurityPage } from '../pages/admin/AccountSecurityPage'
+import { DisciplineConfigPage } from '../pages/admin/DisciplineConfigPage'
 import { OrganizationConfigPage } from '../pages/admin/OrganizationConfigPage'
 import { RegistrationReviewPage } from '../pages/admin/RegistrationReviewPage'
 import { UserManagementPage } from '../pages/admin/UserManagementPage'
@@ -49,6 +50,8 @@ export default function App() {
 				<Route path="organization" element={superAdminOnly(<OrganizationConfigPage />)} />
 				<Route path="academic" element={<EffectivePermissionRoute action="MORNING_SCHEDULE_MANAGE"><AcademicCalendarPage /></EffectivePermissionRoute>} />
 				<Route path="master-data" element={adminOrSystemAdmin(<MasterDataPage />)} />
+					<Route path="discipline" element={adminOrSystemAdmin(<DisciplineConfigPage mode="view" />)} />
+					<Route path="discipline/edit" element={adminOrSystemAdmin(<DisciplineConfigPage mode="edit" />)} />
 				<Route path="dictionaries" element={adminOrSystemAdmin(<DictionaryPage />)} />
 				<Route path="profile" element={adminOrSystemAdmin(<AccountProfilePage />)} />
 				<Route path="security" element={adminOrSystemAdmin(<AccountSecurityPage />)} />

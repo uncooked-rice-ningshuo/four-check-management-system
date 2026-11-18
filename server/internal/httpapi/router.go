@@ -18,6 +18,7 @@ import (
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dashboard"
 	"four-check-management-system/server/internal/dictionary"
+	"four-check-management-system/server/internal/disciplineconfig"
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/masterdata"
@@ -57,6 +58,7 @@ type AdminServices struct {
 	Workflow                 workflowHTTPService
 	Reporting                reportingHTTPService
 	ReportOutput             *reportoutput.Service
+	DisciplineConfig         *disciplineconfig.Service
 	ImportFiles              importFileHTTPService
 	ImportMaxUploadBytes     int64
 }
@@ -159,6 +161,7 @@ type handler struct {
 	workflow                   workflowHTTPService
 	reporting                  reportingHTTPService
 	reportOutput               *reportoutput.Service
+	disciplineConfig           *disciplineconfig.Service
 	reportingObligationService reportingObligationHTTPService
 	importFiles                importFileHTTPService
 	importMaxUploadBytes       int64
@@ -185,6 +188,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.workflow = dependencies[0].Workflow
 		h.reporting = dependencies[0].Reporting
 		h.reportOutput = dependencies[0].ReportOutput
+		h.disciplineConfig = dependencies[0].DisciplineConfig
 		h.reportingObligationService, _ = dependencies[0].Reporting.(reportingObligationHTTPService)
 		h.manualAttendance = dependencies[0].ManualAttendance
 		h.inspections = dependencies[0].Inspections
@@ -212,6 +216,14 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.GET("/registration-requests", h.listRegistrationRequests)
 	admin.POST("/registration-requests/:id/review", h.reviewRegistration)
 	admin.GET("/catalogs", h.listCatalogs)
+	configAdmin := v1.Group("/admin", h.requireSystemAdmin())
+	configAdmin.GET("/discipline/rule-versions/current", h.currentDisciplineRules)
+	configAdmin.GET("/discipline/rule-versions", h.listDisciplineRuleVersions)
+	configAdmin.GET("/discipline/rule-versions/:id", h.getDisciplineRuleVersion)
+	configAdmin.POST("/discipline/rule-versions", h.createDisciplineRuleDraft)
+	configAdmin.PUT("/discipline/rule-versions/:id", h.saveDisciplineRuleDraft)
+	configAdmin.POST("/discipline/rule-versions/:id/validate", h.validateDisciplineRuleDraft)
+	configAdmin.POST("/discipline/rule-versions/:id/publish", h.publishDisciplineRuleDraft)
 	admin.POST("/departments", h.createDepartment)
 	admin.PUT("/departments/:id", h.updateDepartment)
 	admin.PUT("/inspection-types/:id", h.updateInspectionType)

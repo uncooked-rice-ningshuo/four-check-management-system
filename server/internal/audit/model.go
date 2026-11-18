@@ -47,6 +47,8 @@ const (
 	ActionReportAdjustmentAdded   Action = "REPORT_ADJUSTMENT_ADDED"
 	ActionReportOutputChanged     Action = "REPORT_OUTPUT_CHANGED"
 	ActionReportOutputPreviewed   Action = "REPORT_OUTPUT_PREVIEWED"
+	ActionDisciplineRuleChanged   Action = "DISCIPLINE_RULE_CHANGED"
+	ActionDisciplineRulePublished Action = "DISCIPLINE_RULE_PUBLISHED"
 )
 
 var (

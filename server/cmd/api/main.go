@@ -14,6 +14,7 @@ import (
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/dashboard"
 	"four-check-management-system/server/internal/dictionary"
+	"four-check-management-system/server/internal/disciplineconfig"
 	"four-check-management-system/server/internal/httpapi"
 	"four-check-management-system/server/internal/importjob"
 	"four-check-management-system/server/internal/inspection"
@@ -97,6 +98,7 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 		Workflow:                 workflow.NewService(db, permissionService),
 		Reporting:                reportService,
 		ReportOutput:             reportoutput.NewService(db, storageService, permissionService, reportService),
+		DisciplineConfig:         disciplineconfig.NewService(db),
 	}
 }
 

@@ -1,0 +1,351 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"four-check-management-system/server/internal/audit"
+	"four-check-management-system/server/internal/disciplineconfig"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+func (p *Postgres) ListInspectionTypes(ctx context.Context) ([]disciplineconfig.InspectionType, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT id::text,code,name,enabled FROM inspection_types ORDER BY sort_order,name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []disciplineconfig.InspectionType{}
+	for rows.Next() {
+		var item disciplineconfig.InspectionType
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.Enabled); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (p *Postgres) ListDisciplineTierDefinitions(ctx context.Context) ([]disciplineconfig.TierDefinition, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT i.value,i.label,i.sort_order FROM dictionary_items i JOIN dictionary_types t ON t.id=i.type_id WHERE t.code='DISCIPLINE_LEVEL' AND t.enabled AND i.enabled ORDER BY i.sort_order,i.value`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []disciplineconfig.TierDefinition{}
+	for rows.Next() {
+		var item disciplineconfig.TierDefinition
+		if err := rows.Scan(&item.Code, &item.Name, &item.SortOrder); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (p *Postgres) Current(ctx context.Context) (disciplineconfig.Version, bool, error) {
+	var id string
+	err := p.Pool.QueryRow(ctx, `SELECT version_id::text FROM discipline_rule_current WHERE singleton=true`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return disciplineconfig.Version{}, false, nil
+	}
+	if err != nil {
+		return disciplineconfig.Version{}, false, err
+	}
+	v, err := p.GetVersion(ctx, id)
+	return v, err == nil, err
+}
+func (p *Postgres) ListVersions(ctx context.Context) ([]disciplineconfig.Version, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT v.id::text,v.version,v.status,v.row_version,v.created_by::text,v.created_at,creator.name,v.published_by::text,v.published_at,publisher.name FROM discipline_rule_versions v JOIN accounts creator ON creator.id=v.created_by LEFT JOIN accounts publisher ON publisher.id=v.published_by ORDER BY v.version DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []disciplineconfig.Version{}
+	for rows.Next() {
+		v, err := scanDisciplineVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Groups, err = p.readDisciplineGroups(ctx, items[i].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+func (p *Postgres) GetVersion(ctx context.Context, id string) (disciplineconfig.Version, error) {
+	row := p.Pool.QueryRow(ctx, `SELECT v.id::text,v.version,v.status,v.row_version,v.created_by::text,v.created_at,creator.name,v.published_by::text,v.published_at,publisher.name FROM discipline_rule_versions v JOIN accounts creator ON creator.id=v.created_by LEFT JOIN accounts publisher ON publisher.id=v.published_by WHERE v.id=$1`, id)
+	v, err := scanDisciplineVersion(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, disciplineconfig.ErrNotFound
+	}
+	if err != nil {
+		return v, err
+	}
+	v.Groups, err = p.readDisciplineGroups(ctx, id)
+	return v, err
+}
+
+type rowScanner interface{ Scan(...any) error }
+
+func scanDisciplineVersion(row rowScanner) (disciplineconfig.Version, error) {
+	var v disciplineconfig.Version
+	var created time.Time
+	var publisher *string
+	var published *time.Time
+	var publisherName *string
+	err := row.Scan(&v.ID, &v.Version, &v.Status, &v.RowVersion, &v.CreatedBy, &created, &v.CreatedByName, &publisher, &published, &publisherName)
+	if err != nil {
+		return v, err
+	}
+	v.CreatedAt = created.UTC().Format(time.RFC3339)
+	if publisher != nil {
+		v.PublishedBy = *publisher
+	}
+	if publisherName != nil {
+		v.PublishedByName = *publisherName
+	}
+	if published != nil {
+		v.PublishedAt = published.UTC().Format(time.RFC3339)
+	}
+	return v, nil
+}
+func (p *Postgres) readDisciplineGroups(ctx context.Context, versionID string) ([]disciplineconfig.Group, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT id::text,group_key,name,result_unit FROM discipline_rule_groups WHERE version_id=$1 ORDER BY sort_order,id`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	groups := []disciplineconfig.Group{}
+	ids := []string{}
+	for rows.Next() {
+		var g disciplineconfig.Group
+		var id string
+		if err := rows.Scan(&id, &g.Key, &g.Name, &g.Unit); err != nil {
+			return nil, err
+		}
+		g.Terms = []disciplineconfig.Term{}
+		g.Tiers = []disciplineconfig.Tier{}
+		groups = append(groups, g)
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, id := range ids {
+		tr, err := p.Pool.Query(ctx, `SELECT inspection_type_id::text,inspection_type_name,source_unit,operator,conversion_factor FROM discipline_rule_group_terms WHERE group_id=$1 ORDER BY sort_order,id`, id)
+		if err != nil {
+			return nil, err
+		}
+		for tr.Next() {
+			var t disciplineconfig.Term
+			if err := tr.Scan(&t.InspectionTypeID, &t.InspectionTypeName, &t.SourceUnit, &t.Operator, &t.Factor); err != nil {
+				tr.Close()
+				return nil, err
+			}
+			groups[i].Terms = append(groups[i].Terms, t)
+		}
+		if err := tr.Err(); err != nil {
+			tr.Close()
+			return nil, err
+		}
+		tr.Close()
+		r, err := p.Pool.Query(ctx, `SELECT code,name,lower_bound,upper_bound,clause,teacher_confirmation_required FROM discipline_rule_tiers WHERE group_id=$1 ORDER BY sort_order,id`, id)
+		if err != nil {
+			return nil, err
+		}
+		for r.Next() {
+			var t disciplineconfig.Tier
+			if err := r.Scan(&t.Code, &t.Name, &t.Lower, &t.Upper, &t.Clause, &t.TeacherConfirmationRequired); err != nil {
+				r.Close()
+				return nil, err
+			}
+			groups[i].Tiers = append(groups[i].Tiers, t)
+		}
+		if err := r.Err(); err != nil {
+			r.Close()
+			return nil, err
+		}
+		r.Close()
+	}
+	return groups, nil
+}
+func (p *Postgres) CreateDraft(ctx context.Context, actor string) (disciplineconfig.Version, error) {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return disciplineconfig.Version{}, err
+	}
+	defer tx.Rollback(ctx)
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM discipline_rule_versions WHERE status='DRAFT')`).Scan(&exists); err != nil {
+		return disciplineconfig.Version{}, err
+	}
+	if exists {
+		return disciplineconfig.Version{}, disciplineconfig.ErrConflict
+	}
+	var base disciplineconfig.Version
+	var has bool
+	var current string
+	err = tx.QueryRow(ctx, `SELECT version_id::text FROM discipline_rule_current WHERE singleton=true FOR UPDATE`).Scan(&current)
+	if err == nil {
+		base, err = p.GetVersion(ctx, current)
+		if err != nil {
+			return base, err
+		}
+		has = true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return base, err
+	}
+	var version int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM discipline_rule_versions`).Scan(&version); err != nil {
+		return base, err
+	}
+	id := uuid.NewString()
+	_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_versions(id,version,status,created_by) VALUES($1,$2,'DRAFT',$3)`, id, version, actor)
+	if err != nil {
+		return base, err
+	}
+	if has {
+		for groupIndex, g := range base.Groups {
+			gid := uuid.NewString()
+			_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order) VALUES($1,$2,$3,$4,$5,$6)`, gid, id, g.Key, g.Name, g.Unit, groupIndex)
+			if err != nil {
+				return base, err
+			}
+			for i, t := range g.Terms {
+				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,source_unit,operator,conversion_factor,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, id, t.InspectionTypeID, t.InspectionTypeName, t.SourceUnit, t.Operator, t.Factor, i)
+				if err != nil {
+					return base, err
+				}
+			}
+			for i, t := range g.Tiers {
+				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i)
+				if err != nil {
+					return base, err
+				}
+			}
+		}
+	}
+	if err := insertAuditTx(ctx, tx, audit.Metadata{ActorID: actor}, audit.Entry{Action: audit.ActionDisciplineRuleChanged, ResourceType: "disciplineRuleVersion", ResourceID: id, After: map[string]any{"version": version, "status": disciplineconfig.StatusDraft}}); err != nil {
+		return base, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return base, err
+	}
+	return p.GetVersion(ctx, id)
+}
+
+func (p *Postgres) SaveDraft(ctx context.Context, v disciplineconfig.Version, expected int, actor string) (disciplineconfig.Version, error) {
+	tx, err := p.Pool.Begin(ctx)
+	if err != nil {
+		return v, err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	var current int
+	err = tx.QueryRow(ctx, `SELECT status,row_version FROM discipline_rule_versions WHERE id=$1 FOR UPDATE`, v.ID).Scan(&status, &current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, disciplineconfig.ErrNotFound
+	}
+	if err != nil {
+		return v, err
+	}
+	if status != "DRAFT" {
+		return v, disciplineconfig.ErrImmutable
+	}
+	if current != expected {
+		return v, disciplineconfig.ErrConflict
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM discipline_rule_groups WHERE version_id=$1`, v.ID)
+	if err != nil {
+		return v, err
+	}
+	for gi, g := range v.Groups {
+		gid := uuid.NewString()
+		if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order) VALUES($1,$2,$3,$4,$5,$6)`, gid, v.ID, g.Key, g.Name, g.Unit, gi); err != nil {
+			return v, err
+		}
+		for i, t := range g.Terms {
+			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,source_unit,operator,conversion_factor,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, v.ID, t.InspectionTypeID, t.InspectionTypeName, t.SourceUnit, t.Operator, t.Factor, i); err != nil {
+				return v, err
+			}
+		}
+		for i, t := range g.Tiers {
+			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i); err != nil {
+				return v, err
+			}
+		}
+	}
+	if _, err = tx.Exec(ctx, `UPDATE discipline_rule_versions SET row_version=row_version+1 WHERE id=$1 AND row_version=$2`, v.ID, expected); err != nil {
+		return v, err
+	}
+	before, _ := p.GetVersion(ctx, v.ID)
+	if err := insertAuditTx(ctx, tx, audit.Metadata{ActorID: actor}, audit.Entry{Action: audit.ActionDisciplineRuleChanged, ResourceType: "disciplineRuleVersion", ResourceID: v.ID, Before: map[string]any{"rowVersion": expected, "groups": before.Groups}, After: map[string]any{"rowVersion": expected + 1, "groups": v.Groups}}); err != nil {
+		return v, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return v, err
+	}
+	return p.GetVersion(ctx, v.ID)
+}
+
+func (p *Postgres) Publish(ctx context.Context, id string, expected int, actor string) (disciplineconfig.Version, error) {
+	var current disciplineconfig.Version
+	v, err := p.GetVersion(ctx, id)
+	if err != nil {
+		return current, err
+	}
+	current = v
+	previous, hasPrevious, _ := p.Current(ctx)
+	var before any
+	if hasPrevious {
+		before = map[string]any{"currentVersion": previous.Version, "versionId": previous.ID}
+	}
+	entry := audit.Entry{Action: audit.ActionDisciplineRulePublished, ResourceType: "disciplineRuleVersion", ResourceID: id, Before: before, After: map[string]any{"version": v.Version, "status": "PUBLISHED"}}
+	err = p.withAudit(ctx, audit.Metadata{ActorID: actor}, entry, func(tx pgx.Tx) error {
+		var status string
+		var rowVersion int
+		if err := tx.QueryRow(ctx, `SELECT status,row_version FROM discipline_rule_versions WHERE id=$1 FOR UPDATE`, id).Scan(&status, &rowVersion); errors.Is(err, pgx.ErrNoRows) {
+			return disciplineconfig.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if status != "DRAFT" {
+			return disciplineconfig.ErrImmutable
+		}
+		if rowVersion != expected {
+			return disciplineconfig.ErrConflict
+		}
+		var old string
+		err := tx.QueryRow(ctx, `SELECT version_id::text FROM discipline_rule_current WHERE singleton=true FOR UPDATE`).Scan(&old)
+		if err == nil {
+			if _, err = tx.Exec(ctx, `UPDATE discipline_rule_versions SET status='SUPERSEDED' WHERE id=$1`, old); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE discipline_rule_current SET version_id=$1,row_version=row_version+1 WHERE singleton=true`, id); err != nil {
+				return err
+			}
+		} else if errors.Is(err, pgx.ErrNoRows) {
+			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_current(singleton,version_id) VALUES(true,$1)`, id); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE discipline_rule_versions SET status='PUBLISHED',published_by=$2,published_at=now() WHERE id=$1`, id, actor)
+		return err
+	})
+	if err != nil {
+		return current, err
+	}
+	return p.GetVersion(ctx, id)
+}

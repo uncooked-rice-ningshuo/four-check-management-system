@@ -44,6 +44,7 @@ const allAdminItems = [
   { key: '/admin/organization', icon: <ApartmentOutlined />, label: <Link to="/admin/organization">组织与业务</Link> },
   { key: '/admin/academic', icon: <CalendarOutlined />, label: <Link to="/admin/academic">学期与周次</Link> },
   { key: '/admin/master-data', icon: <DatabaseOutlined />, label: <Link to="/admin/master-data">基础数据</Link> },
+  { key: '/admin/discipline', icon: <SafetyCertificateOutlined />, label: <Link to="/admin/discipline">处分配置</Link> },
   { key: '/admin/dictionaries', icon: <BookOutlined />, label: <Link to="/admin/dictionaries">字典管理</Link> },
 ]
 
@@ -74,7 +75,7 @@ export function AppLayout() {
   const adminItems = user?.isSuperAdmin
     ? allAdminItems
     : user?.systemRole === 'ADMIN'
-      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries'].includes(item.key) || (item.key === '/admin/academic' && canManageMorningSchedule))
+      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries', '/admin/discipline'].includes(item.key) || (item.key === '/admin/academic' && canManageMorningSchedule))
       : canManageMorningSchedule ? allAdminItems.filter(item => item.key === '/admin/academic') : []
   const basicItems = adminItems.filter(item => ['/admin/registrations', '/admin/users'].includes(item.key))
   const configurationItems = [

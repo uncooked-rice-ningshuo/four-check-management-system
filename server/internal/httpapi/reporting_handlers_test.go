@@ -137,10 +137,30 @@ func TestReportingEndpointsRequireAuthenticationAndReturnContracts(t *testing.T)
 			t.Fatalf("unauthenticated %s response = %d %s", path, response.Code, response.Body.String())
 		}
 	}
+	for _, path := range []string{"/api/v1/discipline/ledger/search?page=0", "/api/v1/discipline/ledger/export?semesterId=invalid"} {
+		response := performJSON(router, http.MethodPost, path, reporting.LedgerFilter{}, tokens.AccessToken)
+		if response.Code != 400 || !strings.Contains(response.Body.String(), "INVALID_REQUEST") {
+			t.Fatal("ledger accepts invalid query", response.Code)
+		}
+	}
+	ordinary := admin
+	ordinary.IsSuperAdmin = false
+	ordinary.SystemRole = auth.SystemRoleMember
+	repository.values[admin.LoginName] = ordinary
+	for _, path := range []string{"/api/v1/discipline/ledger/search", "/api/v1/discipline/ledger/export"} {
+		response := performJSON(router, http.MethodPost, path, reporting.LedgerFilter{}, tokens.AccessToken)
+		if response.Code != 403 || !strings.Contains(response.Body.String(), "FORBIDDEN") {
+			t.Fatal("ledger missing permission boundary", response.Code)
+		}
+	}
+	repository.values[admin.LoginName] = admin
+
 	for _, route := range []struct {
 		path string
 		body any
 	}{
+		{path: "/api/v1/discipline/ledger/search", body: reporting.LedgerFilter{}},
+		{path: "/api/v1/discipline/ledger/export", body: reporting.LedgerFilter{}},
 		{path: "/api/v1/reports/weekly-report/finalize", body: reporting.ReportTransitionInput{RowVersion: 1}},
 		{path: "/api/v1/reports/weekly-report/corrections", body: reporting.AddReportCorrectionInput{RowVersion: 1}},
 	} {

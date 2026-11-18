@@ -25,6 +25,8 @@ const (
 
 	ActionUserManage                 = "USER_MANAGE"
 	ActionPermissionManage           = "PERMISSION_MANAGE"
+	ActionLedgerExport               = "DISCIPLINE_LEDGER_EXPORT"
+	ActionLedgerView                 = "DISCIPLINE_LEDGER_VIEW"
 	ActionMasterDataManage           = "MASTER_DATA_MANAGE"
 	ActionDictionaryManage           = "DICTIONARY_MANAGE"
 	ActionConfigurationView          = "CONFIGURATION_VIEW"
@@ -54,7 +56,7 @@ var ErrReportObligationRoleRequired = errors.New("weekly obligation permission r
 var ErrReportMaintenanceRequired = errors.New("report maintenance department required")
 
 var allActions = []string{
-	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
+	ActionUserManage, ActionPermissionManage, ActionLedgerView, ActionLedgerExport, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
 	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionMorningScheduleManage,
 	ActionReportView, ActionReportGenerate, ActionReportFileOutput, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
 }

@@ -50,10 +50,10 @@ const makeVersion = (id: string, version: number, status: 'DRAFT' | 'PUBLISHED' 
   }],
 })
 
-function renderPage(path = '/admin/discipline/edit', mode: 'view' | 'edit' = 'edit') {
+function renderPage(path = '/discipline/config/edit', mode: 'view' | 'edit' = 'edit') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const routeElement = mode === 'edit'
-    ? <Routes><Route path="/admin/discipline/edit" element={<DisciplineConfigPage mode="edit" />} /><Route path="/admin/discipline" element={<DisciplineConfigPage mode="view" />} /></Routes>
+    ? <Routes><Route path="/discipline/config/edit" element={<DisciplineConfigPage mode="edit" />} /><Route path="/discipline/config" element={<DisciplineConfigPage mode="view" />} /></Routes>
     : <DisciplineConfigPage mode="view" />
   return render(<MemoryRouter initialEntries={[path]}><QueryClientProvider client={client}><LocationProbe />{routeElement}</QueryClientProvider></MemoryRouter>)
 }
@@ -90,7 +90,7 @@ describe('DisciplineConfigPage', () => {
     const published = makeVersion('published-1', 1, 'PUBLISHED')
     vi.mocked(getCurrentDisciplineRule).mockResolvedValue({ current: published })
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [published] })
-    renderPage('/admin/discipline', 'view')
+    renderPage('/discipline/config', 'view')
 
     expect(await screen.findByText(/当前生效配置 · 2026年11月16日/)).toBeInTheDocument()
     expect(screen.getByText('v1 · 当前生效')).toBeInTheDocument()
@@ -112,7 +112,7 @@ describe('DisciplineConfigPage', () => {
     const current = { ...makeVersion('published-2', 2, 'PUBLISHED'), groups: [initial.groups[1], initial.groups[0]] }
     vi.mocked(getCurrentDisciplineRule).mockResolvedValue({ current })
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [current, initial] })
-    renderPage('/admin/discipline', 'view')
+    renderPage('/discipline/config', 'view')
 
     await screen.findByText('先配置的累计项')
     expect([...document.querySelectorAll('.discipline-view-group-title > .ant-typography')].map((item) => item.textContent)).toEqual(['先配置的累计项', '后配置的累计项'])
@@ -122,7 +122,7 @@ describe('DisciplineConfigPage', () => {
     const published = makeVersion('published-1', 1, 'PUBLISHED')
     vi.mocked(getCurrentDisciplineRule).mockResolvedValue({ current: published })
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [published] })
-    renderPage('/admin/discipline', 'view')
+    renderPage('/discipline/config', 'view')
 
     fireEvent.click(await screen.findByRole('button', { name: '版本历史' }))
     expect(await screen.findByRole('region', { name: '处分规则版本历史' })).toBeInTheDocument()
@@ -144,7 +144,7 @@ describe('DisciplineConfigPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验并发布' }))
     fireEvent.click(await screen.findByRole('button', { name: '确认发布' }))
 
-    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/admin/discipline'))
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/discipline/config'))
     expect(await screen.findByText(/当前生效配置 · 2026年11月16日/)).toBeInTheDocument()
     expect(document.querySelector('.discipline-step-footer')).not.toBeInTheDocument()
     expect(publishDisciplineRuleDraft).toHaveBeenCalledWith('draft-1', 1)

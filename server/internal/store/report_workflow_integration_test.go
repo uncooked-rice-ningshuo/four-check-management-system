@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"four-check-management-system/server/internal/reporting"
 	"four-check-management-system/server/internal/reportoutput"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/xuri/excelize/v2"
 )
 
 type reportWorkflowPermissionStub struct {
@@ -499,6 +501,42 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 	if err != nil || finalized.Status != reporting.ReportStatusFinalized || finalized.RowVersion != 7 {
 		t.Fatalf("finalize structured data without output files = %+v, %v", finalized, err)
 	}
+	ledgerJSON, err := database.SemesterLedger(ctx, semesterID, reporting.LedgerFilter{Search: snapshotRecord.StudentNumber}, 1, 10)
+	var ledger struct {
+		Total int
+		Items []struct{ Number string }
+		Weeks []int
+	}
+	if err != nil {
+		t.Fatal("read semester ledger after finalization", err)
+	}
+	if err = json.Unmarshal(ledgerJSON, &ledger); err != nil || ledger.Total != 1 || len(ledger.Items) != 1 || ledger.Items[0].Number != snapshotRecord.StudentNumber || len(ledger.Weeks) != 1 {
+		t.Fatal("ledger missing finalized student or week", err)
+	}
+	outside, err := database.SemesterLedger(ctx, semesterID, reporting.LedgerFilter{Class: "unknown-class"}, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outsidePage struct {
+		Total int
+		Items []json.RawMessage
+	}
+	if err = json.Unmarshal(outside, &outsidePage); err != nil || outsidePage.Total != 0 || len(outsidePage.Items) != 0 {
+		t.Fatal("class selection returned a student from another class", err)
+	}
+	xlsx, err := service.ExportSemesterLedger(ctx, semesterID, reporting.LedgerFilter{Search: snapshotRecord.StudentNumber}, audit.Metadata{ActorID: actorID})
+	if err != nil {
+		t.Fatal("export ledger", err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(xlsx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+	number, err := book.GetCellValue("学期违纪台账", "B2")
+	if err != nil || number != snapshotRecord.StudentNumber {
+		t.Fatal("exported student does not match semester search", err)
+	}
 	var finalizer string
 	if err := pool.QueryRow(ctx, "SELECT finalized_by::text FROM weekly_reports WHERE id=$1", draft.ID).Scan(&finalizer); err != nil || finalizer != actorID {
 		t.Fatalf("finalizer metadata = %q, %v", finalizer, err)
@@ -594,4 +632,25 @@ VALUES('d0000000-0000-0000-0000-000000000001',$1,$2,$3,$4,$5,$5)`, semesterID, n
 	if _, err := service.GenerateDraft(ctx, actorID, reporting.GenerateDraftInput{SemesterID: semesterID, WeekID: nextWeekID}, audit.Metadata{}); !errors.Is(err, reporting.ErrReportIncomplete) {
 		t.Fatalf("uncompleted required cell generation error = %v", err)
 	}
+	// A configured grade remains selectable even when no student has a finalized finding.
+	if _, err := pool.Exec(ctx, `INSERT INTO academic_year_rosters(academic_year_id,version)
+	 SELECT academic_year_id,1 FROM semesters WHERE id=$1`, semesterID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO academic_year_roster_grades(academic_year_id,grade_id,sort_order)
+	 SELECT academic_year_id,'a0000000-0000-0000-0000-000000000025',1 FROM semesters WHERE id=$1`, semesterID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := database.SemesterLedger(ctx, semesterID, reporting.LedgerFilter{Search: "2025级"}, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var filtered struct {
+		Total         int
+		Organizations []struct{ Grade string }
+	}
+	if err := json.Unmarshal(raw, &filtered); err != nil || filtered.Total != 0 || len(filtered.Organizations) != 1 || filtered.Organizations[0].Grade != "2025级" {
+		t.Fatal("empty ledger must retain configured grade", err)
+	}
+
 }

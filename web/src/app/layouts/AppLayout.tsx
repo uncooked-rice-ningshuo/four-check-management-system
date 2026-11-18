@@ -44,7 +44,6 @@ const allAdminItems = [
   { key: '/admin/organization', icon: <ApartmentOutlined />, label: <Link to="/admin/organization">组织与业务</Link> },
   { key: '/admin/academic', icon: <CalendarOutlined />, label: <Link to="/admin/academic">学期与周次</Link> },
   { key: '/admin/master-data', icon: <DatabaseOutlined />, label: <Link to="/admin/master-data">基础数据</Link> },
-  { key: '/admin/discipline', icon: <SafetyCertificateOutlined />, label: <Link to="/admin/discipline">处分配置</Link> },
   { key: '/admin/dictionaries', icon: <BookOutlined />, label: <Link to="/admin/dictionaries">字典管理</Link> },
 ]
 
@@ -75,7 +74,7 @@ export function AppLayout() {
   const adminItems = user?.isSuperAdmin
     ? allAdminItems
     : user?.systemRole === 'ADMIN'
-      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries', '/admin/discipline'].includes(item.key) || (item.key === '/admin/academic' && canManageMorningSchedule))
+      ? allAdminItems.filter(item => ['/admin/master-data', '/admin/dictionaries'].includes(item.key) || (item.key === '/admin/academic' && canManageMorningSchedule))
       : canManageMorningSchedule ? allAdminItems.filter(item => item.key === '/admin/academic') : []
   const basicItems = adminItems.filter(item => ['/admin/registrations', '/admin/users'].includes(item.key))
   const configurationItems = [
@@ -102,7 +101,13 @@ export function AppLayout() {
       { key: '/reports/output-settings', icon: <Icon icon={fileCogIcon} />, label: <Link to="/reports/output-settings">通报文件设置</Link> },
     ] : []),
   ]
-  const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems]
+  const ledgerItems = user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_LEDGER_VIEW')
+    ? [{ key: '/discipline/ledger', icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/ledger">学期违纪台账</Link> }] : []
+  const disciplineItems = [...ledgerItems]
+  if (user?.isSuperAdmin || user?.systemRole === 'ADMIN') {
+    disciplineItems.push({ key: '/discipline/config', icon: <SettingOutlined />, label: <Link to="/discipline/config">处分配置</Link> })
+  }
+  const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems, ...disciplineItems]
   const menuItems: NonNullable<MenuProps['items']> = [workbenchItem]
   if (basicItems.length === 1) menuItems.push(basicItems[0])
   if (basicItems.length > 1) menuItems.push({ key: 'basic', icon: <AppstoreOutlined />, label: '基础功能', children: basicItems })
@@ -111,13 +116,14 @@ export function AppLayout() {
   if (visibleInspectionItems.length === 1) menuItems.push(visibleInspectionItems[0])
   if (visibleInspectionItems.length > 1) menuItems.push({ key: 'inspections', icon: <CheckSquareOutlined />, label: '日常检查', children: visibleInspectionItems })
   if (reportItems.length) menuItems.push({ key: 'reports', icon: <Icon icon={filesIcon} />, label: '通报管理', children: reportItems })
+  if (disciplineItems.length) menuItems.push({ key: 'discipline', icon: <SafetyCertificateOutlined />, label: '处分管理', children: disciplineItems })
   const selectedKey = location.pathname === '/'
     ? '/'
     : navItems.find(item => item.key !== '/' && location.pathname.startsWith(item.key))?.key
   const selectedParent = basicItems.length > 1 && basicItems.some(item => item.key === selectedKey) ? 'basic'
     : configurationItems.length > 1 && configurationItems.some(item => item.key === selectedKey) ? 'configuration'
       : visibleInspectionItems.length > 1 && visibleInspectionItems.some(item => item.key === selectedKey) ? 'inspections'
-        : reportItems.some(item => item.key === selectedKey) ? 'reports' : undefined
+        : reportItems.some(item => item.key === selectedKey) ? 'reports' : disciplineItems.some(item => item.key === selectedKey) ? 'discipline' : undefined
   const menuSignature = `${selectedKey ?? ''}:${selectedParent ?? ''}`
   const openKeys = openMenuState.signature === menuSignature ? openMenuState.keys : selectedParent ? [selectedParent] : []
   const accountItems = [

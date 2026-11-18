@@ -217,6 +217,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.POST("/registration-requests/:id/review", h.reviewRegistration)
 	admin.GET("/catalogs", h.listCatalogs)
 	configAdmin := v1.Group("/admin", h.requireSystemAdmin())
+	v1.POST("/discipline/ledger/export", h.requireAction(permission.ActionLedgerView), h.requireAction(permission.ActionLedgerExport), h.exportSemesterLedger)
+	v1.POST("/discipline/ledger/search", h.requireAction(permission.ActionLedgerView), h.semesterLedger)
 	configAdmin.GET("/discipline/rule-versions/current", h.currentDisciplineRules)
 	configAdmin.GET("/discipline/rule-versions", h.listDisciplineRuleVersions)
 	configAdmin.GET("/discipline/rule-versions/:id", h.getDisciplineRuleVersion)

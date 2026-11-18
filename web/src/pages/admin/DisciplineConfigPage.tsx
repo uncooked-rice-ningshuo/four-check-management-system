@@ -114,7 +114,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
       setStep(0)
       setEditing(undefined)
       await refresh()
-      navigate('/admin/discipline/edit')
+      navigate('/discipline/config/edit')
       messageApi.success('规则草稿已创建')
     },
     onError: () => messageApi.error('创建失败，请重试'),
@@ -142,7 +142,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
       setPublishConfirmOpen(false)
       await refresh()
       messageApi.success('默认规则版本已发布')
-      navigate('/admin/discipline', { replace: true })
+      navigate('/discipline/config', { replace: true })
     },
     onError: (error) => {
       if (error instanceof ApiError) setValidationIssues(error.details)
@@ -557,7 +557,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
 
   const noDraft = !draftVersion
   const startEditing = () => {
-    if (draftVersion) navigate('/admin/discipline/edit')
+    if (draftVersion) navigate('/discipline/config/edit')
     else createDraft.mutate()
   }
 
@@ -578,7 +578,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
         }}>返回规则配置</Button>
         : mode === 'view'
           ? <><Button type="primary" loading={createDraft.isPending} onClick={startEditing}>{draftVersion ? `继续修改草稿 v${draftVersion.version}` : current.data?.current ? '修改配置' : '开始配置'}</Button><Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>
-          : <>{!draftVersion && <Button type="primary" loading={createDraft.isPending} onClick={startEditing}>新建规则草稿</Button>}<Button onClick={() => transition({ kind: 'route', path: '/admin/discipline' })}>配置查看</Button><Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>}
+          : <>{!draftVersion && <Button type="primary" loading={createDraft.isPending} onClick={startEditing}>新建规则草稿</Button>}<Button onClick={() => transition({ kind: 'route', path: '/discipline/config' })}>配置查看</Button><Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>}
       </Space>
     </header>
 

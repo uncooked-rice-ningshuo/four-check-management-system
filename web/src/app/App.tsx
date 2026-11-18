@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AcademicCalendarPage } from '../pages/admin/AcademicCalendarPage'
 import { AccountProfilePage } from '../pages/admin/AccountProfilePage'
 import { AccountSecurityPage } from '../pages/admin/AccountSecurityPage'
+import { SemesterLedgerPage } from '../pages/discipline/SemesterLedgerPage'
 import { DisciplineConfigPage } from '../pages/admin/DisciplineConfigPage'
 import { OrganizationConfigPage } from '../pages/admin/OrganizationConfigPage'
 import { RegistrationReviewPage } from '../pages/admin/RegistrationReviewPage'
@@ -43,6 +44,9 @@ export default function App() {
 		<Route path="/change-password" element={protectedPage(<ChangePasswordPage />)} />
 		<Route element={protectedPage(<AppLayout />)}>
 			<Route index element={<HomePage />} />
+			<Route path="discipline/config" element={adminOrSystemAdmin(<DisciplineConfigPage mode="view" />)} />
+      <Route path="discipline/config/edit" element={adminOrSystemAdmin(<DisciplineConfigPage mode="edit" />)} />
+      <Route path="discipline/ledger" element={<EffectivePermissionRoute action="DISCIPLINE_LEDGER_VIEW"><SemesterLedgerPage /></EffectivePermissionRoute>} />
 			<Route path="admin" element={<Outlet />}>
 				<Route index element={adminOrSystemAdmin(<Navigate to="/" replace />)} />
 				<Route path="registrations" element={superAdminOnly(<RegistrationReviewPage />)} />
@@ -50,8 +54,8 @@ export default function App() {
 				<Route path="organization" element={superAdminOnly(<OrganizationConfigPage />)} />
 				<Route path="academic" element={<EffectivePermissionRoute action="MORNING_SCHEDULE_MANAGE"><AcademicCalendarPage /></EffectivePermissionRoute>} />
 				<Route path="master-data" element={adminOrSystemAdmin(<MasterDataPage />)} />
-					<Route path="discipline" element={adminOrSystemAdmin(<DisciplineConfigPage mode="view" />)} />
-					<Route path="discipline/edit" element={adminOrSystemAdmin(<DisciplineConfigPage mode="edit" />)} />
+					<Route path="discipline" element={<Navigate replace to="/discipline/config" />} />
+					<Route path="discipline/edit" element={<Navigate replace to="/discipline/config/edit" />} />
 				<Route path="dictionaries" element={adminOrSystemAdmin(<DictionaryPage />)} />
 				<Route path="profile" element={adminOrSystemAdmin(<AccountProfilePage />)} />
 				<Route path="security" element={adminOrSystemAdmin(<AccountSecurityPage />)} />

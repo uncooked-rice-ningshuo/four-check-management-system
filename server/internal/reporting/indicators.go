@@ -103,7 +103,7 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 		}
 		for index := range classes {
 			class := &classes[index]
-			if byClass[class.key] == nil {
+			if byClass[class.key] == nil && (!inputs.OrderedRoster || class.classID == "") {
 				if matching := legacyKeys[reportClassKey(class.grade, class.className)]; matching != "" {
 					class.key = matching
 				}
@@ -192,8 +192,12 @@ func CalculateReportIndicators(inputs ReportMetricInputs, rows []ReportCountRow,
 	for key := range byClass {
 		classKeys = append(classKeys, key)
 	}
+	order := inputs.ClassOrder()
 	sort.Slice(classKeys, func(i, j int) bool {
 		left, right := byClass[classKeys[i]], byClass[classKeys[j]]
+		if order[left.classID] != order[right.classID] {
+			return order[left.classID] < order[right.classID]
+		}
 		if left.grade != right.grade {
 			return left.grade < right.grade
 		}

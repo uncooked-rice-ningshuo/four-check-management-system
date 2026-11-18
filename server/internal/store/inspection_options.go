@@ -83,7 +83,7 @@ func (p *Postgres) ListEntryOptions(ctx context.Context, q inspection.EntryOptio
  CROSS JOIN LATERAL (SELECT c.id AS id,c.id AS class_id,g.name AS grade_snapshot,
  $1::uuid AS semester_id,$2::uuid AS week_id,$3::uuid AS inspection_type_id,NULLIF($4,'')::uuid AS department_id,
  CASE WHEN NULLIF($4,'') IS NULL THEN 'COLLEGE' ELSE 'DEPARTMENT' END AS attribution_mode,$5::uuid AS created_by) ir `
-	where := ` WHERE c.enabled AND g.enabled AND ` + guard
+	where := ` WHERE c.enabled AND g.enabled AND academic_roster_allows_class(sem.academic_year_id,c.id,c.grade_id,c.major_id) AND ` + guard
 	if q.ClassID != "" {
 		args = append(args, q.ClassID)
 		where += fmt.Sprintf(" AND c.id=$%d::uuid", len(args))

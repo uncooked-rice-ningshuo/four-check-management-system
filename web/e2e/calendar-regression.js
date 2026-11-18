@@ -29,8 +29,9 @@ async (page) => {
     while (await locator.inputValue() !== expected && Date.now() < deadline) await page.waitForTimeout(25)
     check(await locator.inputValue() === expected, `Expected input ${expected}, got ${await locator.inputValue()}`)
   }
-  const close = async dialog => {
+  const close = async (dialog, discard = false) => {
     await dialog.getByRole('button', { name: /取\s*消/ }).click()
+    if (discard) await page.getByRole('button', { name: '放弃修改' }).click()
     await dialog.waitFor({ state: 'hidden' })
   }
   const openWeek = async note => {
@@ -62,31 +63,79 @@ async (page) => {
   await page.getByRole('heading', { name: '学期与周次', exact: true }).waitFor()
   await page.locator('.work-context-week').filter({ hasText: '第 1 周' }).waitFor()
 
-  lifecycleStage = 'semester report grade scope'
-  await page.getByRole('tab', { name: '学期', exact: true }).click()
-  const semesterRow = page.getByRole('row').filter({ hasText: '浏览器回归学期' })
-  await semesterRow.getByRole('button', { name: '通报适用年级', exact: true }).click()
-  let gradeDialog = page.getByRole('dialog', { name: '浏览器回归学期 · 通报适用年级' })
-  await gradeDialog.getByLabel('当前名册预览').getByText(/当前启用班级 1 个，在籍学生 2 人/).waitFor()
-  check((await gradeDialog.innerText()).includes('2026级'), 'Saved report grade was not selected')
-  const [gradeSave] = await Promise.all([
-    page.waitForResponse(response => response.url().endsWith('/academic/semesters/b0000000-0000-0000-0000-000000000002/report-grades') && response.request().method() === 'PUT'),
-    gradeDialog.getByRole('button', { name: /保\s*存/ }).click(),
-  ])
-  check(gradeSave.status() === 200 && (await gradeSave.json()).version === 2,
-    `Report grade scope did not save with optimistic version: ${gradeSave.status()}`)
-  await gradeDialog.waitFor({ state: 'hidden' })
-  await semesterRow.getByRole('button', { name: '通报适用年级', exact: true }).click()
-  gradeDialog = page.getByRole('dialog', { name: '浏览器回归学期 · 通报适用年级' })
-  await gradeDialog.getByLabel('当前名册预览').getByText(/当前启用班级 1 个，在籍学生 2 人/).waitFor()
-  check((await gradeDialog.innerText()).includes('2026级'), 'Report grade scope did not survive dialog reopening')
-  await close(gradeDialog)
+  lifecycleStage = 'academic year roster'
+  await page.getByRole('tab', { name: '学年', exact: true }).click()
+  const openRoster = page.getByRole('button', { name: '配置学年名单' }).first()
+  await openRoster.click()
+  const rosterDialog = page.getByRole('dialog', { name: /学年名单/ })
+  const gradeSelect = rosterDialog.getByRole('combobox', { name: '学年添加年级' })
+  await gradeSelect.click()
+  await gradeSelect.fill('2026级')
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option-active').filter({ hasText: '2026级' }).waitFor()
+  await gradeSelect.press('Enter')
+  await page.locator('.ant-select-dropdown:visible').last().waitFor({ state: 'hidden' })
+  await rosterDialog.getByRole('checkbox', { name: 'E2E major' }).check()
+  const majorNode = rosterDialog.getByRole('treeitem', { name: /E2E major/ })
+  await majorNode.locator('.ant-tree-switcher').click()
+  await rosterDialog.getByRole('checkbox', { name: 'E2E class', checked: true }).waitFor()
+  const classCheck = rosterDialog.getByRole('checkbox', { name: 'E2E class' })
+  for (const row of [majorNode, rosterDialog.getByRole('treeitem', { name: /E2E class/ })]) {
+    const offset = await row.evaluate(node => {
+      const box = node.querySelector('[role="checkbox"]').getBoundingClientRect()
+      const label = node.querySelector('.roster-major-label > span, .ant-tree-title:not(:has(.roster-major-label))').getBoundingClientRect()
+      return Math.abs(box.y + box.height / 2 - label.y - label.height / 2)
+    })
+    check(offset <= 1, `Checkbox and label centers differ by ${offset}px`)
+  }
+  await classCheck.uncheck()
+  await majorNode.getByText('1 个班', { exact: true }).waitFor()
+  await classCheck.check()
+  await rosterDialog.screenshot({ animations: 'disabled', path: `${output}/academic-year-membership.png` })
+  await rosterDialog.getByRole('button', { name: '下一步：调整展示顺序' }).click()
+  await rosterDialog.getByRole('button', { name: '上一步' }).click()
+  await rosterDialog.getByRole('checkbox', { name: 'E2E major', checked: true }).waitFor()
+  await rosterDialog.getByRole('button', { name: '下一步：调整展示顺序' }).click()
+  const [rosterSave] = await Promise.all([page.waitForResponse(r => r.url().includes('/academic/years/') && r.request().method() === 'PUT'), rosterDialog.getByRole('button', { name: '保存配置' }).click()])
+  check(rosterSave.status() === 200, 'Roster save failed')
+  const savedYear = await rosterSave.json()
+  check(savedYear.roster.grades[0].majors[0].classIds[0] === fixture.class, 'Unexpected roster class')
+  await rosterDialog.waitFor({ state: 'hidden' })
+  await page.reload()
+  await page.getByRole('tab', { name: '学年', exact: true }).click()
+  await page.getByRole('button', { name: '查看顺序' }).first().click()
+  const orderView = page.getByRole('dialog', { name: /查看顺序/ })
+  const gradeHeading = orderView.locator('summary').filter({ hasText: '2026级' })
+  const majorHeading = orderView.locator('summary').filter({ hasText: 'E2E major' })
+  const savedClass = orderView.getByText('E2E class', { exact: true })
+  await majorHeading.waitFor()
+  check(!await savedClass.isVisible(), 'Classes should start collapsed')
+  await majorHeading.click()
+  await savedClass.waitFor()
+  await gradeHeading.click()
+  await savedClass.waitFor({ state: 'hidden' })
+  await gradeHeading.click()
+  await savedClass.waitFor()
+  await majorHeading.click()
+  await savedClass.waitFor({ state: 'hidden' })
+  check(await orderView.getByRole('checkbox').count() === 0 && await orderView.getByRole('button', { name: /保存|调序|上移|下移/ }).count() === 0, 'Read-only view contains editing controls')
+  await orderView.getByRole('button', { name: /关\s*闭/ }).click()
+  await openRoster.click()
+  await rosterDialog.getByRole('checkbox', { name: 'E2E major', checked: true }).waitFor()
+  await rosterDialog.getByRole('checkbox', { name: 'E2E class', checked: true }).waitFor()
+  await rosterDialog.getByRole('button', { name: '下一步：调整展示顺序' }).click()
+  await rosterDialog.getByText('E2E major', { exact: true }).click()
+  await rosterDialog.getByText('E2E class', { exact: true }).first().waitFor()
+  await page.screenshot({ path: `${output}/academic-year-roster.png` })
+  await close(rosterDialog)
 
   // Real browser lifecycle: create -> close -> first edit -> close -> reopen.
   for (const kind of ['学年', '学期', '周次']) {
     lifecycleStage = `create-close-edit ${kind}`
     await page.getByRole('button', { name: `新增${kind}`, exact: true }).click()
-    await close(page.getByRole('dialog', { name: `新增${kind}`, exact: true }))
+    const createDialog = page.getByRole('dialog', { name: `新增${kind}`, exact: true })
+    if (kind === '学年') await waitValue(createDialog.getByPlaceholder('开始日期'), fixture.yearStart)
+    if (kind === '学期') await waitValue(createDialog.getByPlaceholder('开始日期'), fixture.yearEnd.slice(0, 4) + '-02-01')
+    await close(createDialog)
     await page.getByRole('tab', { name: kind, exact: true }).click()
     for (let attempt = 0; attempt < 2; attempt++) {
       const row = kind === '周次' ? page.getByRole('row').filter({ hasText: '浏览器回归 A' }) : page
@@ -163,7 +212,7 @@ async (page) => {
     } finally {
       await page.unroute(pattern, handler)
     }
-    await close(dialog)
+    await close(dialog, true)
   }
   await page.reload()
   await page.locator('.work-context-week').filter({ hasText: '第 3 周' }).waitFor()
@@ -176,5 +225,10 @@ async (page) => {
   check(unexpectedConsoleErrors.length === 0, `Unexpected console errors: ${unexpectedConsoleErrors.join('; ')}`)
   check(errors.length === 0, `Uncaught browser errors: ${errors.join('; ')}`)
   await page.screenshot({ path: `${output}/calendar-passed.png`, fullPage: true })
+  await page.goto(await page.evaluate(() => new URL('/admin/users', location.origin).href))
+  await page.getByRole('button', { name: '旧阶段授权清单' }).click()
+  const grantDialog = page.getByRole('dialog', { name: '旧阶段授权清单' })
+  await grantDialog.getByRole('cell', { name: '部门模板', exact: true }).first().waitFor()
+  await grantDialog.getByText('在部门模板中调整', { exact: true }).first().waitFor()
   return { marker: 'CALENDAR_REGRESSION_PASSED', browserVersion: page.context().browser().version(), browserErrors: errors, knownWarnings: [...new Set(knownWarnings)], unexpectedConsoleErrors, faultInjection: ['HTTP 500', 'null error body'] }
 }

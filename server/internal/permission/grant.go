@@ -111,7 +111,7 @@ func (t GrantTemplate) Assign(departmentID string, startsAt time.Time) ([]Assign
 			return nil, errors.New("invalid grant action")
 		}
 		for _, scope := range action.Ranges {
-			if scope.GradeStage < 0 || scope.GradeStage > 4 {
+			if scope.GradeStage != 0 {
 				return nil, errors.New("invalid grade stage")
 			}
 		}
@@ -146,10 +146,10 @@ func (r EffectiveResult) ForDepartment(departmentID string) EffectiveResult {
 // ValidOperationRanges rejects malformed dimensions before they reach SQL casts.
 func ValidOperationRanges(ranges []OperationRange) bool {
 	for _, r := range ranges {
-		if r.GradeStage < 0 || r.GradeStage > 4 {
+		if r.GradeStage != 0 {
 			return false
 		}
-		if r.GradeStage == 0 && r.GradeID == "" && r.MajorID == "" && r.ClassID == "" {
+		if r.GradeID == "" && r.MajorID == "" && r.ClassID == "" {
 			return false
 		}
 		for _, id := range []string{r.GradeID, r.MajorID, r.ClassID} {

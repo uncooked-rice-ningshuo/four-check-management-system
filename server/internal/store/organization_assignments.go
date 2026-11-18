@@ -10,6 +10,7 @@ import (
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/organization"
+	"four-check-management-system/server/internal/permission"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -121,6 +122,14 @@ func assignDepartmentSnapshot(ctx context.Context, tx pgx.Tx, accountID, departm
 	found := false
 	for _, policy := range defaults.RolePolicies {
 		if policy.RoleCode == roleCode {
+			for _, action := range policy.OperationRanges {
+				if slices.ContainsFunc(action.Ranges, func(r permission.OperationRange) bool { return r.GradeStage != 0 }) {
+					return permission.ErrLegacyStageTemplate
+				}
+				if !permission.ValidOperationRanges(action.Ranges) {
+					return organization.ErrInvalidInput
+				}
+			}
 			found = true
 			end = policy.EndsAt
 			if end == nil && policy.ValidityYears > 0 {

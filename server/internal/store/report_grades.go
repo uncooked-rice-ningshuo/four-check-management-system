@@ -20,7 +20,7 @@ WHERE sem.id=$1::uuid`, semesterID).Scan(&result.Version)
 	if err != nil {
 		return academic.ReportGradeScope{}, err
 	}
-	rows, err := p.Pool.Query(ctx, `SELECT grade_id::text FROM academic_year_grade_stages WHERE academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) ORDER BY grade_id`, semesterID)
+	rows, err := p.Pool.Query(ctx, `SELECT grade_id::text FROM academic_report_grades WHERE academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) ORDER BY sort_order,grade_id`, semesterID)
 	if err != nil {
 		return academic.ReportGradeScope{}, err
 	}

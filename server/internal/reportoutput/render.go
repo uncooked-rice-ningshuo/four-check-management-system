@@ -217,6 +217,24 @@ func attendanceWordLines(content reporting.ReportVersionContent, records []repor
 	return lines
 }
 
+func versionClassOrder(content reporting.ReportVersionContent) map[string]int {
+	if content.Indicators == nil {
+		return nil
+	}
+	return content.Indicators.Inputs.ClassOrder()
+}
+
+// A multi-class inspection appears at its earliest configured responsibility class.
+func recordRosterPosition(record reporting.Record, order map[string]int) int {
+	position := order[record.ClassID]
+	for _, class := range record.ResponsibleClasses {
+		if rank := order[class.ID]; rank > 0 && (position == 0 || rank < position) {
+			position = rank
+		}
+	}
+	return position
+}
+
 func reportWordClasses(content reporting.ReportVersionContent, records []reporting.Record, code string) []reporting.ReportClassIndicators {
 	classes := make(map[string]reporting.ReportClassIndicators)
 	metricsAvailable := content.Indicators != nil && !outputSourceUnsubmitted(content, code)
@@ -237,8 +255,12 @@ func reportWordClasses(content reporting.ReportVersionContent, records []reporti
 	for key := range classes {
 		keys = append(keys, key)
 	}
+	order := versionClassOrder(content)
 	sort.Slice(keys, func(i, j int) bool {
 		left, right := classes[keys[i]], classes[keys[j]]
+		if order[left.ClassID] != order[right.ClassID] {
+			return order[left.ClassID] < order[right.ClassID]
+		}
 		if left.Grade != right.Grade {
 			return left.Grade < right.Grade
 		}
@@ -464,6 +486,12 @@ func RenderExcel(content reporting.ReportVersionContent, records []reporting.Rec
 	if err != nil {
 		return nil, err
 	}
+	if order := versionClassOrder(content); order != nil {
+		records = append([]reporting.Record(nil), records...)
+		sort.SliceStable(records, func(i, j int) bool {
+			return recordRosterPosition(records[i], order) < recordRosterPosition(records[j], order)
+		})
+	}
 	book := excelize.NewFile()
 	defer book.Close()
 	first := book.GetSheetName(0)
@@ -607,7 +635,7 @@ func row(values []string, widths []int, gradeMerge string, header bool, hygiene 
 	return b.String()
 }
 
-func sortedWordRecords(records []reporting.Record, code string) []reporting.Record {
+func sortedWordRecords(content reporting.ReportVersionContent, records []reporting.Record, code string) []reporting.Record {
 	selected := make([]reporting.Record, 0)
 	for _, record := range records {
 		if record.TypeCode == code {
@@ -617,6 +645,7 @@ func sortedWordRecords(records []reporting.Record, code string) []reporting.Reco
 			selected = append(selected, record)
 		}
 	}
+	order := versionClassOrder(content)
 	sort.SliceStable(selected, func(i, j int) bool {
 		left, right := selected[i], selected[j]
 		if code == "PUBLIC_DORMITORY_HYGIENE" {
@@ -633,6 +662,9 @@ func sortedWordRecords(records []reporting.Record, code string) []reporting.Reco
 			if resultOrder(left.Details.Result) != resultOrder(right.Details.Result) {
 				return resultOrder(left.Details.Result) < resultOrder(right.Details.Result)
 			}
+		}
+		if l, r := recordRosterPosition(left, order), recordRosterPosition(right, order); l != r {
+			return l < r
 		}
 		for index, value := range []string{left.Grade, left.ClassName, left.Details.Date, left.CurrentDormitoryName, left.StudentNumber, left.ID} {
 			other := []string{right.Grade, right.ClassName, right.Details.Date, right.CurrentDormitoryName, right.StudentNumber, right.ID}[index]
@@ -718,7 +750,7 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 		{inspection.HygieneExcellent, "优秀寝室", pairedExcellentColumns},
 		{inspection.HygieneUnqualified, "不合格寝室", wordRecordColumns(item, teachers)},
 	}
-	selected := sortedWordRecords(records, item.code)
+	selected := sortedWordRecords(content, records, item.code)
 	written := false
 	for _, group := range groups {
 		var members []reporting.Record
@@ -852,7 +884,7 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 			lines = eveningWordLines(content, records, teachers)
 			grouped = true
 		} else {
-			lines = wordRecordLines(sortedWordRecords(records, item.code), columns)
+			lines = wordRecordLines(sortedWordRecords(content, records, item.code), columns)
 		}
 		if len(lines) == 0 {
 			empty := make([]string, len(columns))

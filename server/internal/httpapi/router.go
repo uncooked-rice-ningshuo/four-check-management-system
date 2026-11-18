@@ -237,6 +237,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.POST("/users/:id/reset-password", h.resetUserPassword)
 	admin.PUT("/users/:id/assignment", h.assignUserRole)
 	admin.GET("/users/:id/permissions", h.effectivePermissions)
+	admin.GET("/legacy-stage-grants", h.legacyStageGrants)
 	admin.GET("/users/:id/permission-rules", h.listPermissionRules)
 	admin.POST("/users/:id/permission-rules", h.createPermissionRule)
 	admin.PUT("/users/:id/permission-rules/:ruleId", h.updatePermissionRule)
@@ -656,6 +657,20 @@ func (h *handler) effectivePermissions(c *gin.Context) {
 	}
 	result, err := h.permission.Effective(c, c.Param("id"))
 	writeResult(c, result, err)
+}
+func (h *handler) legacyStageGrants(c *gin.Context) {
+	if h.permission == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "权限服务尚未就绪")
+		return
+	}
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, sizeErr := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if err != nil || sizeErr != nil || page < 1 || page > 1000000 || size < 1 || size > 100 {
+		writeError(c, 400, "INVALID_REQUEST", "分页参数无效")
+		return
+	}
+	items, total, err := h.permission.LegacyStages(c, page, size)
+	writeResult(c, gin.H{"items": items, "total": total, "page": page, "pageSize": size}, err)
 }
 func (h *handler) listPermissionRules(c *gin.Context) {
 	if h.permission == nil {
@@ -1787,6 +1802,10 @@ func writeDomainError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "ACCOUNT_IDENTIFIER_EXISTS", "登录账号已存在")
 	case errors.Is(err, permission.ErrOperationRangeConflict):
 		writeError(c, http.StatusBadRequest, "OPERATION_RANGE_CONFLICT", "所选班级与年级或专业不匹配，请重新选择班级")
+	case errors.Is(err, permission.ErrLegacyStageTemplate):
+		writeError(c, http.StatusConflict, "LEGACY_STAGE_TEMPLATE", "该岗位模板仍有按阶段授权的范围，请先在部门模板中调整为具体年级")
+	case errors.Is(err, academic.ErrRosterInUse):
+		writeError(c, http.StatusConflict, "ACADEMIC_ROSTER_CLASS_IN_USE", "名单缺少本学年检查记录引用的班级，请补回班级后保存")
 	case errors.Is(err, academic.ErrInvalidInput), errors.Is(err, masterdata.ErrInvalidRecord), errors.Is(err, masterdata.ErrInvalidRelation), errors.Is(err, masterdata.ErrInvalidKind), errors.Is(err, masterdata.ErrImmutableCode), errors.Is(err, dictionary.ErrInvalidDictionary), errors.Is(err, organization.ErrInvalidInput), errors.Is(err, permission.ErrInvalidRule), errors.Is(err, auth.ErrInvalidInput):
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "提交信息不符合要求")
 	default:

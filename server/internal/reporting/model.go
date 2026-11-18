@@ -269,11 +269,20 @@ type ReportVersionContent struct {
 
 // ReportMetricInputs freezes the mutable values used to calculate one report version.
 type ReportMetricInputs struct {
-	WeekMultiplier          int                       `json:"weekMultiplier"`
-	MorningPlannedDates     []string                  `json:"morningPlannedDates"`
-	ReportGradeScopeVersion int                       `json:"reportGradeScopeVersion,omitempty"`
-	Grades                  []ReportGradeSizeSnapshot `json:"grades,omitempty"`
-	Classes                 []ReportClassSizeSnapshot `json:"classes"`
+	GradeMajors             []ReportGradeMajorSnapshot `json:"gradeMajors,omitempty"`
+	OrderedRoster           bool                       `json:"orderedRoster,omitempty"`
+	WeekMultiplier          int                        `json:"weekMultiplier"`
+	MorningPlannedDates     []string                   `json:"morningPlannedDates"`
+	ReportGradeScopeVersion int                        `json:"reportGradeScopeVersion,omitempty"`
+	Grades                  []ReportGradeSizeSnapshot  `json:"grades,omitempty"`
+	Classes                 []ReportClassSizeSnapshot  `json:"classes"`
+}
+
+// ReportGradeMajorSnapshot keeps a configured major visible even if its cohort has no classes.
+type ReportGradeMajorSnapshot struct {
+	GradeID   string `json:"gradeId"`
+	MajorID   string `json:"majorId"`
+	MajorName string `json:"majorName"`
 }
 
 // ReportGradeSizeSnapshot records the active enrolled student count for a grade at draft generation.
@@ -572,4 +581,16 @@ type ReportCorrectionLog struct {
 	AfterValue  json.RawMessage `json:"afterValue"`
 	CorrectedBy string          `json:"correctedBy"`
 	CorrectedAt time.Time       `json:"correctedAt"`
+}
+
+// ClassOrder returns one-based positions for versions with an explicit year roster.
+func (inputs ReportMetricInputs) ClassOrder() map[string]int {
+	if !inputs.OrderedRoster {
+		return nil
+	}
+	order := make(map[string]int, len(inputs.Classes))
+	for i, class := range inputs.Classes {
+		order[class.ClassID] = i + 1
+	}
+	return order
 }

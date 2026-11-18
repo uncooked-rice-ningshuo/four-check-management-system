@@ -66,6 +66,8 @@ export type ReportVersionContent = {
 export type ReportMetricInputs = {
   weekMultiplier: 1 | 2
   morningPlannedDates: string[]
+  gradeMajors?: { gradeId: string; majorId: string; majorName: string }[]
+  orderedRoster?: boolean
   reportGradeScopeVersion?: number
   grades?: ReportGradeSizeSnapshot[]
   classes: ReportClassSizeSnapshot[]

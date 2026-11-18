@@ -217,7 +217,7 @@ INSERT INTO semesters(id,academic_year_id,code,name,start_date,end_date) VALUES(
 {week_seed_sql}
 """
         run(sql_command('-v', 'ON_ERROR_STOP=1'), input=sql.encode())
-        ids = {key: str(uuid.uuid4()) for key in ('faculty', 'grade', 'class', 'building', 'room', 'roomB', 'course', 'studentA', 'studentB', 'dormArea', 'dormBuilding', 'dormA', 'dormB')}
+        ids = {key: str(uuid.uuid4()) for key in ('faculty', 'major', 'grade', 'class', 'building', 'room', 'roomB', 'course', 'studentA', 'studentB', 'dormArea', 'dormBuilding', 'dormA', 'dormB')}
         fixture.update(ids)
         fixture['date'] = str(monday)
         fixture['expiry'] = (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))) + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')
@@ -226,7 +226,8 @@ INSERT INTO faculties(id,name) VALUES('{ids['faculty']}','E2E faculty');
 INSERT INTO grades(id,name) VALUES('{ids['grade']}','2026级');
 
 INSERT INTO academic_year_grade_stages(academic_year_id,stage,grade_id) VALUES('b0000000-0000-0000-0000-000000000001',1,'{ids['grade']}') ON CONFLICT (academic_year_id,stage) DO UPDATE SET grade_id=EXCLUDED.grade_id;
-INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}',2);
+INSERT INTO majors(id,name,faculty_id) VALUES('{ids['major']}','E2E major','{ids['faculty']}');
+INSERT INTO classes(id,name,grade_id,faculty_id,major_id,enrolled_size) VALUES('{ids['class']}','E2E class','{ids['grade']}','{ids['faculty']}','{ids['major']}',2);
 INSERT INTO teaching_buildings(id,name) VALUES('{ids['building']}','E2E building');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['room']}','{ids['building']}','101');
 INSERT INTO classrooms(id,teaching_building_id,room_no) VALUES('{ids['roomB']}','{ids['building']}','102');
@@ -444,7 +445,7 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         report['knownWarnings'] = payload['knownWarnings']
         report['unexpectedConsoleErrors'] = payload['unexpectedConsoleErrors']
         report['status'] = 'passed'
-        report['cases'] += ['学期通报适用年级真实名册预览、乐观版本保存及重开回显', '学年/学期/周次新建关闭后首次编辑与重新打开', '周次 A/B 切换不串值', '真实 409 冲突保留输入并修正重试', '保存立即更新当前工作周及临时周选项', '注入 500/异常响应的安全提示与保留输入', '重载后真实数据库持久化结果']
+        report['cases'] += ['学年名单选择专业、年级和班级，保存及重开回显', '学年/学期/周次新建关闭后首次编辑与重新打开', '周次 A/B 切换不串值', '真实 409 冲突保留输入并修正重试', '保存立即更新当前工作周及临时周选项', '注入 500/异常响应的安全提示与保留输入', '重载后真实数据库持久化结果']
         (OUTPUT / 'final-snapshot.txt').write_text(cli('snapshot'))
         print('PASS: calendar browser regression', flush=True)
         def browser_suite(name):

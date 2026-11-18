@@ -611,3 +611,31 @@ func TestRenderRejectsInvalidSelection(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestYearRosterSnapshotOrdersOfficeFiles(t *testing.T) {
+	content := reporting.ReportVersionContent{Indicators: &reporting.ReportIndicators{Inputs: reporting.ReportMetricInputs{OrderedRoster: true, Classes: []reporting.ReportClassSizeSnapshot{{ClassID: "z"}, {ClassID: "a"}}}}}
+	records := []reporting.Record{{TypeCode: "ATTENDANCE_RATE", ClassID: "a", Grade: "2026", ClassName: "A班", StudentName: "甲"}, {TypeCode: "ATTENDANCE_RATE", ClassID: "z", Grade: "2026", ClassName: "Z班", StudentName: "乙"}}
+	codes := []string{"ATTENDANCE_RATE"}
+	xlsx, err := RenderExcel(content, records, codes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(xlsx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+	student, err := book.GetCellValue(book.GetSheetList()[0], "C3")
+	if err != nil || student != "乙" {
+		t.Fatalf("first student %q, %v", student, err)
+	}
+	doc, err := RenderWord(content, records, codes, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xml := wordDocumentForTest(t, doc)
+	first, second := strings.Index(xml, "Z班"), strings.Index(xml, "A班")
+	if first < 0 || second <= first {
+		t.Fatal("Word class rows ignore snapshot order")
+	}
+}

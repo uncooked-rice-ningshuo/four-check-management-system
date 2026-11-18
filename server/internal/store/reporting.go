@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+
 	"strings"
 	"time"
 
@@ -192,7 +192,13 @@ ORDER BY c.inspection_type_order,c.college_level,c.department_name`
 // ReportIndicatorInputs reads the live enrolled-student roster, week multiplier,
 // and morning plan that GenerateDraft snapshots into its immutable report version.
 func (p *Postgres) ReportIndicatorInputs(ctx context.Context, semesterID, weekID string) (reporting.ReportMetricInputs, error) {
-	return reportIndicatorInputs(ctx, p.Pool, semesterID, weekID, false)
+	var inputs reporting.ReportMetricInputs
+	err := pgx.BeginTxFunc(ctx, p.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		var err error
+		inputs, err = reportIndicatorInputs(ctx, tx, semesterID, weekID, false)
+		return err
+	})
+	return inputs, err
 }
 
 type reportIndicatorInputQueryer interface {
@@ -238,7 +244,7 @@ FROM semester_weeks w WHERE w.id=$1::uuid AND w.semester_id=$2::uuid AND w.enabl
 	if lockRows {
 		scopeLock = " FOR SHARE OF year"
 	}
-	err = queryer.QueryRow(ctx, `SELECT year.version FROM academic_years year JOIN semesters sem ON sem.academic_year_id=year.id WHERE sem.id=$1::uuid`+scopeLock, semesterID).Scan(&inputs.ReportGradeScopeVersion)
+	err = queryer.QueryRow(ctx, `SELECT year.version, EXISTS(SELECT 1 FROM academic_year_rosters r WHERE r.academic_year_id=year.id) FROM academic_years year JOIN semesters sem ON sem.academic_year_id=year.id WHERE sem.id=$1::uuid`+scopeLock, semesterID).Scan(&inputs.ReportGradeScopeVersion, &inputs.OrderedRoster)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
 	}
@@ -247,25 +253,53 @@ FROM semester_weeks w WHERE w.id=$1::uuid AND w.semester_id=$2::uuid AND w.enabl
 	}
 	var configuredGradeCount, enabledGradeCount int
 	if err := queryer.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE grade.enabled)
-FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id
+FROM academic_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
 WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid)`, semesterID).Scan(&configuredGradeCount, &enabledGradeCount); err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}
 	if configuredGradeCount == 0 || configuredGradeCount != enabledGradeCount {
 		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
 	}
+	if inputs.OrderedRoster {
+		var stale bool
+		err := queryer.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM academic_year_roster_classes rc
+ JOIN semesters sem ON sem.academic_year_id=rc.academic_year_id JOIN classes c ON c.id=rc.class_id
+ WHERE sem.id=$1 AND (NOT c.enabled OR c.grade_id IS DISTINCT FROM rc.grade_id OR c.major_id IS DISTINCT FROM rc.major_id))`, semesterID).Scan(&stale)
+		if err != nil {
+			return reporting.ReportMetricInputs{}, err
+		}
+		if stale {
+			return reporting.ReportMetricInputs{}, reporting.ErrReportMetricScopeInvalid
+		}
+	}
+	if inputs.OrderedRoster {
+		rows, err := queryer.Query(ctx, `SELECT gm.grade_id,gm.major_id,m.name FROM academic_year_roster_grade_majors gm
+ JOIN semesters sem ON sem.academic_year_id=gm.academic_year_id
+ JOIN academic_year_roster_grades g ON g.academic_year_id=gm.academic_year_id AND g.grade_id=gm.grade_id
+
+ JOIN majors m ON m.id=gm.major_id WHERE sem.id=$1 ORDER BY g.sort_order,gm.sort_order`, semesterID)
+		if err != nil {
+			return reporting.ReportMetricInputs{}, err
+		}
+		inputs.GradeMajors, err = pgx.CollectRows(rows, pgx.RowToStructByPos[reporting.ReportGradeMajorSnapshot])
+		if err != nil {
+			return reporting.ReportMetricInputs{}, err
+		}
+	}
+
 	classLock := ""
 	if lockRows {
 		classLock = " FOR SHARE OF class,grade"
 	}
 	rows, err := queryer.Query(ctx, `SELECT class.id::text,grade.id::text,grade.name,class.name,COALESCE(faculty.name,''),COALESCE(major.name,''),COALESCE(teacher.name,'')
-FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id
-JOIN classes class ON class.grade_id=grade.id
+FROM academic_report_grades scope JOIN grades grade ON grade.id=scope.grade_id
+JOIN academic_report_classes configured ON configured.academic_year_id=scope.academic_year_id AND configured.grade_id=scope.grade_id
+JOIN classes class ON class.id=configured.class_id AND class.grade_id=grade.id
 LEFT JOIN faculties faculty ON faculty.id=class.faculty_id
 LEFT JOIN majors major ON major.id=class.major_id
 LEFT JOIN staff teacher ON teacher.id=class.head_teacher_id
 WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND class.enabled AND grade.enabled
-ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
+ORDER BY scope.sort_order,grade.name,configured.major_order,configured.class_order,class.name,class.id`+classLock, semesterID)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}
@@ -293,12 +327,14 @@ ORDER BY grade.name,class.name,class.id`+classLock, semesterID)
 		studentLock = " FOR SHARE OF student,grade"
 	}
 	rosterRows, err := queryer.Query(ctx, `SELECT grade.id::text,COALESCE(class.id::text,'')
-FROM academic_year_grade_stages scope
+FROM academic_report_grades scope
 JOIN grades grade ON grade.id=scope.grade_id AND grade.enabled
 JOIN students student ON student.grade_id=grade.id
 LEFT JOIN classes class ON class.id=student.class_id AND class.grade_id=grade.id AND class.enabled
 WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND student.enabled AND student.enrollment_status='ENROLLED'
-ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
+AND (NOT $2 OR EXISTS (SELECT 1 FROM academic_year_roster_classes rc WHERE rc.academic_year_id=scope.academic_year_id AND rc.class_id=class.id)
+ OR (class.id IS NULL AND EXISTS (SELECT 1 FROM academic_year_roster_grade_majors gm WHERE gm.academic_year_id=scope.academic_year_id AND gm.grade_id=grade.id AND gm.major_id=student.major_id)))
+ORDER BY grade.name,class.name,student.id`+studentLock, semesterID, inputs.OrderedRoster)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}
@@ -321,7 +357,7 @@ ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
 	}
 	rosterRows.Close()
 
-	gradeRows, err := queryer.Query(ctx, `SELECT grade.id::text,grade.name FROM academic_year_grade_stages scope JOIN grades grade ON grade.id=scope.grade_id WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND grade.enabled ORDER BY grade.name,grade.id`, semesterID)
+	gradeRows, err := queryer.Query(ctx, `SELECT grade.id::text,grade.name FROM academic_report_grades scope JOIN grades grade ON grade.id=scope.grade_id WHERE scope.academic_year_id=(SELECT academic_year_id FROM semesters WHERE id=$1::uuid) AND grade.enabled ORDER BY scope.sort_order,grade.name,grade.id`, semesterID)
 	if err != nil {
 		return reporting.ReportMetricInputs{}, err
 	}
@@ -342,7 +378,7 @@ ORDER BY grade.name,class.name,student.id`+studentLock, semesterID)
 	if len(inputs.Grades) == 0 {
 		return reporting.ReportMetricInputs{}, reporting.ErrReportGradesUnconfigured
 	}
-	sort.Slice(inputs.Grades, func(i, j int) bool { return inputs.Grades[i].Grade < inputs.Grades[j].Grade })
+
 	for classID, position := range classPositions {
 		inputs.Classes[position].ExpectedStudentCount = classCounts[classID]
 	}

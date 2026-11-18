@@ -131,3 +131,31 @@ func TestDeniedRangesCoverAllGrantedClauses(t *testing.T) {
 		t.Fatal("global denial must cover stage grant")
 	}
 }
+
+func TestNewGrantRejectsLegacyStage(t *testing.T) {
+	ranges := []OperationRange{{GradeStage: 1}}
+	if ValidOperationRanges(ranges) {
+		t.Fatal("legacy stage accepted for a new rule")
+	}
+	template := GrantTemplate{Version: 1, Actions: []GrantAction{{Action: ActionInspectionEnter, Ranges: ranges}}}
+	if _, err := template.Assign("department", time.Now()); err == nil {
+		t.Fatal("legacy template assigned")
+	}
+}
+
+func TestLegacyRangeReplacementCannotBecomeUnrestricted(t *testing.T) {
+	previous := []OperationRange{{GradeStage: 2}}
+	rule := Rule{Enabled: true, Mode: "OVERRIDE"}
+	if !widensLegacyRange(previous, rule) {
+		t.Fatal("removing stage widened scope")
+	}
+	rule.Ranges = []OperationRange{{GradeID: "00000000-0000-0000-0000-000000000023"}}
+	if widensLegacyRange(previous, rule) {
+		t.Fatal("explicit replacement rejected")
+	}
+	rule.Ranges = nil
+	rule.Mode = "DISABLE"
+	if widensLegacyRange(previous, rule) {
+		t.Fatal("termination rejected")
+	}
+}

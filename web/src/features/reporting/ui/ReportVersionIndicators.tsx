@@ -250,11 +250,14 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
     : indicators.sourceStates?.[metricTypeCodes[card.key]] !== 'SOURCE_INCOMPLETE')
   const allClassRows = classMetricRows(indicators)
   const gradeOptions = [...new Set(allClassRows.map(row => row.grade).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
     .map(value => ({ value, label: value }))
   const classOptions = allClassRows.filter(row => !gradeFilter || row.grade === gradeFilter)
     .map(row => ({ value: row.key, label: row.displayName }))
-    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+
+  if (!indicators.inputs.orderedRoster) {
+    gradeOptions.sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+    classOptions.sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+  }
   const visibleClassRows = allClassRows.filter(row =>
     (!gradeFilter || row.grade === gradeFilter) && (!classFilter || row.key === classFilter))
   const tabs = indicatorTabs(indicators, mode === 'overview' || archiveTable ? visibleClassRows : allClassRows, {

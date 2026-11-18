@@ -4,7 +4,7 @@ import { ConfigProvider } from 'antd'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../shared/api/httpClient'
-import { getAcademicCalendar, getMorningScheduleCalendar, previewReportGrades, updateAcademicYear } from '../../shared/api/adminApi'
+import { getAcademicCalendar, getMorningScheduleCalendar, updateAcademicYear } from '../../shared/api/adminApi'
 import { AcademicCalendarPage } from './AcademicCalendarPage'
 
 const accessState = vi.hoisted(() => ({
@@ -53,15 +53,20 @@ describe('学期周次交互', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '学期' }))
     expect(screen.queryByRole('button', { name: '通报适用年级' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '学年' }))
-    fireEvent.click(screen.getByRole('button', { name: '年级映射与通报覆盖' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑学年' })
-    await waitFor(() => expect(within(dialog).getByText(/共同组成通报覆盖年级/)).toBeVisible())
-    fireEvent.mouseDown(within(dialog).getByLabelText('大一'))
+    fireEvent.click(screen.getByRole('button', { name: '配置学年名单' }))
+    const dialog = await screen.findByRole('dialog', { name: /学年名单/ })
+    fireEvent.mouseDown(await within(dialog).findByRole('combobox', { name: '学年添加年级' }))
     fireEvent.click(await screen.findByText('2025级', { selector: '.ant-select-item-option-content' }))
-    await waitFor(() => expect(previewReportGrades).toHaveBeenCalledWith(['g1']))
-    expect(await within(dialog).findByText(/在籍学生 20 人/)).toBeVisible()
-    fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }))
-    await waitFor(() => expect(updateAcademicYear).toHaveBeenCalledWith(expect.objectContaining({ id: 'y1', version: 1, stageGrades: { '1': 'g1' } })))
+    fireEvent.click(await within(dialog).findByRole('checkbox', { name: /2025级/ }))
+    const next = () => fireEvent.click(within(dialog).getByRole('button', { name: '下一步：调整展示顺序' }))
+    next()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '上一步' }))
+    expect(within(dialog).getByRole('checkbox', { name: /2025级/ })).toBeChecked()
+    next()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '保存配置' }))
+    await screen.findByText(/服务端未返回已保存的名单/)
+    expect(dialog).toBeVisible()
+    await waitFor(() => expect(updateAcademicYear).toHaveBeenCalledWith(expect.objectContaining({ id: 'y1', version: 1, roster: { majorIds: ['g1'], grades: [{ gradeId: 'g1', majors: [{ majorId: 'g1', classIds: [] }] }] } })))
   }, 30_000)
   it('校历加载失败时提供重试，不显示未配置空状态', async () => {
     vi.mocked(getAcademicCalendar).mockRejectedValueOnce(new Error('network unavailable'))
@@ -139,7 +144,7 @@ describe('学期周次交互', () => {
       if (tab === '周次') {
         expect(within(dialog).getByLabelText('周次')).toHaveValue('2')
         expect(within(dialog).getByLabelText('备注')).toHaveValue('校历备注')
-        expect(within(dialog).getByText('教学礼拜周（2 倍）')).toBeVisible()
+        await waitFor(() => expect(within(dialog).getByText('教学礼拜周（2 倍）')).toBeVisible())
       }
       fireEvent.change(within(dialog).getByPlaceholderText('开始日期'), { target: { value: '2025-10-01' } })
       fireEvent.click(within(dialog).getByRole('button', { name: /取\s*消/ }))
@@ -153,10 +158,13 @@ describe('学期周次交互', () => {
     if (!row) throw new Error('未找到周次行')
     expect(within(row).getByText('2025-2026学年')).toBeVisible()
     expect(within(row).getByText('2025-2026学年上学期')).toBeVisible()
-    expect(screen.getByRole('combobox', { name: '学年' })).toBeVisible()
-    expect(screen.getByRole('combobox', { name: '学期' })).toBeVisible()
-    const start = screen.getAllByPlaceholderText('开始日期').find(input => !input.closest('.ant-modal'))
-    const end = screen.getAllByPlaceholderText('结束日期').find(input => !input.closest('.ant-modal'))
+    const filterForm = screen.getByRole('combobox', { name: '学年' }).closest('form')
+    if (!filterForm) throw new Error('未找到周次筛选表单')
+    const filters = within(filterForm)
+    expect(filters.getByRole('combobox', { name: '学年' })).toBeVisible()
+    expect(filters.getByRole('combobox', { name: '学期' })).toBeVisible()
+    const start = filters.getByPlaceholderText('开始日期')
+    const end = filters.getByPlaceholderText('结束日期')
     if (!start || !end) throw new Error('未找到校历筛选范围输入框')
     fireEvent.focus(start)
     fireEvent.change(start, { target: { value: '2025-10-01' } })
@@ -166,9 +174,9 @@ describe('学期周次交互', () => {
     fireEvent.change(end, { target: { value: '2025-10-07' } })
     fireEvent.keyDown(end, { key: 'Enter', code: 'Enter' })
     fireEvent.blur(end)
-    fireEvent.click(screen.getByRole('button', { name: /查\s*询/ }))
-    await waitFor(() => expect(screen.queryByRole('cell', { name: '校历备注' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /重\s*置/ }))
+    fireEvent.click(filters.getByRole('button', { name: /查\s*询/ }))
+    await waitFor(() => expect(row).not.toBeInTheDocument())
+    fireEvent.click(filters.getByRole('button', { name: /重\s*置/ }))
     expect(await screen.findByRole('cell', { name: '校历备注' })).toBeVisible()
   }, 30_000)
 

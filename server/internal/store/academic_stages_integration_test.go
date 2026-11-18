@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -45,8 +46,12 @@ func TestAcademicYearStagesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := academic.NewService(database)
-	year, err := service.CreateYear(ctx, academic.AcademicYear{StartDate: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2027, 8, 31, 0, 0, 0, 0, time.UTC), StageGrades: map[int]string{1: grade}})
+	year, err := service.CreateYear(ctx, academic.AcademicYear{StartDate: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2027, 8, 31, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a mapping that already existed before migration 066.
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO academic_year_grade_stages VALUES($1,2,$2)`, year.ID, grade); err != nil {
 		t.Fatal(err)
 	}
 	stale := year
@@ -76,4 +81,62 @@ func TestAcademicYearStagesPostgres(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("audit count=%d, want create and successful update only", count)
 	}
+	major, faculty := uuid.NewString(), uuid.NewString()
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO faculties(id,name) VALUES($1,'名单测试学院')`, faculty); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO majors(id,name,faculty_id) VALUES($1,'名单测试专业',$2)`, major, faculty); err != nil {
+		t.Fatal(err)
+	}
+	configured := calendar.AcademicYears[0]
+	secondGrade, secondMajor := uuid.NewString(), uuid.NewString()
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO grades(id,name) VALUES($1,'27')`, secondGrade); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Pool.Exec(ctx, `INSERT INTO majors(id,name,faculty_id) VALUES($1,'名单测试第二专业',$2)`, secondMajor, faculty); err != nil {
+		t.Fatal(err)
+	}
+	first := academic.RosterMajor{MajorID: major, ClassIDs: []string{}}
+	second := academic.RosterMajor{MajorID: secondMajor, ClassIDs: []string{}}
+	configured.Roster = &academic.YearRoster{MajorIDs: []string{major, secondMajor}, Grades: []academic.RosterGrade{
+		{GradeID: grade, Majors: []academic.RosterMajor{second, first}},
+		{GradeID: secondGrade, Majors: []academic.RosterMajor{first, second}},
+	}}
+
+	if _, err := service.UpdateYear(ctx, configured); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := service.List(ctx)
+	if err != nil || !reflect.DeepEqual(reloaded.AcademicYears[0].Roster, configured.Roster) {
+		t.Fatalf("roster round trip: %+v %v", reloaded, err)
+	}
+
+	inventory, total, err := database.LegacyStages(ctx, 1, 20)
+	if err != nil || len(inventory) != min(total, 20) {
+		t.Fatalf("inventory: %d %v", total, err)
+	}
+	semester, err := service.CreateSemester(ctx, academic.Semester{AcademicYearID: year.ID, Code: "FIRST", StartDate: year.StartDate, EndDate: year.StartDate.AddDate(0, 4, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	week, err := service.CreateWeek(ctx, academic.Week{SemesterID: semester.ID, WeekNo: 1, StartDate: year.StartDate, EndDate: year.StartDate.AddDate(0, 0, 6)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := database.ReportIndicatorInputs(ctx, semester.ID, week.ID)
+	if err != nil || !inputs.OrderedRoster || len(inputs.GradeMajors) != 4 || inputs.GradeMajors[0].MajorID != secondMajor || inputs.GradeMajors[1].MajorID != major || inputs.GradeMajors[2].MajorID != major || inputs.GradeMajors[3].MajorID != secondMajor || len(inputs.Grades) != 2 || inputs.Grades[0].GradeID != grade {
+		t.Fatalf("report roster: %+v %v", inputs, err)
+	}
+
+	// A failed class assignment must preserve the saved roster and its version.
+	invalid := reloaded.AcademicYears[0]
+	invalid.Roster.Grades[0].Majors[0].ClassIDs = []string{uuid.NewString()}
+	if _, err := service.UpdateYear(ctx, invalid); !errors.Is(err, academic.ErrInvalidInput) {
+		t.Fatalf("unknown class: %v", err)
+	}
+	after, err := service.List(ctx)
+	if err != nil || after.AcademicYears[0].Version != invalid.Version || len(after.AcademicYears[0].Roster.Grades[0].Majors[0].ClassIDs) != 0 {
+		t.Fatalf("failed roster replacement was not rolled back: %v", err)
+	}
+
 }

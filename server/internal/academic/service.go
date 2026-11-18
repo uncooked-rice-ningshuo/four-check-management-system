@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -13,11 +14,13 @@ import (
 
 var (
 	ErrInvalidInput    = errors.New("invalid academic calendar input")
+	ErrRosterInUse     = errors.New("class with existing inspection missing from roster")
 	ErrVersionConflict = errors.New("academic version conflict")
 	ErrDateOverlap     = errors.New("academic date range overlaps")
 )
 
 type AcademicYear struct {
+	Roster      *YearRoster    `json:"roster,omitempty"`
 	Version     int            `json:"version"`
 	StageGrades map[int]string `json:"stageGrades"`
 	ID          string         `json:"id"`
@@ -67,7 +70,7 @@ type Repository interface {
 }
 
 func (s *Service) UpdateYear(ctx context.Context, year AcademicYear, metadata ...audit.Metadata) (AcademicYear, error) {
-	if year.ID == "" || year.Version < 1 || !validStageGrades(year.StageGrades) || invalidAcademicYearRange(year.StartDate, year.EndDate) {
+	if year.ID == "" || year.Version < 1 || !validRoster(year.Roster) || !validStageGrades(year.StageGrades) || invalidAcademicYearRange(year.StartDate, year.EndDate) {
 		return AcademicYear{}, ErrInvalidInput
 	}
 	year.Name = academicYearName(year.StartDate)
@@ -75,7 +78,17 @@ func (s *Service) UpdateYear(ctx context.Context, year AcademicYear, metadata ..
 	if err != nil {
 		return AcademicYear{}, err
 	}
-	return s.repository.UpdateYear(ctx, year, calendarMutation(metadata, "academicYear", year.ID, findYear(calendar, year.ID), year))
+	before := findYear(calendar, year.ID)
+	if old, ok := before.(AcademicYear); ok {
+		if year.StageGrades != nil && !maps.Equal(year.StageGrades, old.StageGrades) {
+			return AcademicYear{}, ErrInvalidInput
+		}
+		year.StageGrades = old.StageGrades
+		if year.Roster == nil {
+			year.Roster = old.Roster
+		}
+	}
+	return s.repository.UpdateYear(ctx, year, calendarMutation(metadata, "academicYear", year.ID, before, year))
 }
 
 type Service struct{ repository Repository }
@@ -100,7 +113,7 @@ func (s *Service) List(ctx context.Context) (Calendar, error) {
 }
 
 func (s *Service) CreateYear(ctx context.Context, year AcademicYear, metadata ...audit.Metadata) (AcademicYear, error) {
-	if !validStageGrades(year.StageGrades) || invalidAcademicYearRange(year.StartDate, year.EndDate) {
+	if !validRoster(year.Roster) || len(year.StageGrades) > 0 || invalidAcademicYearRange(year.StartDate, year.EndDate) {
 		return AcademicYear{}, ErrInvalidInput
 	}
 	year.Name = academicYearName(year.StartDate)

@@ -83,6 +83,17 @@ func authorizeImportedClass(ctx context.Context, tx pgx.Tx, input importjob.Conf
 	if err != nil {
 		return err
 	}
+	var lockedYear string
+	if err := tx.QueryRow(ctx, `SELECT id FROM academic_years WHERE id=$1 FOR SHARE`, scope.AcademicYearID).Scan(&lockedYear); err != nil {
+		return err
+	}
+	var listed bool
+	if err := tx.QueryRow(ctx, `SELECT academic_roster_allows_class($1,$2,$3,NULLIF($4,'')::uuid)`, scope.AcademicYearID, classID, scope.GradeID, scope.MajorID).Scan(&listed); err != nil {
+		return err
+	}
+	if !listed {
+		return importjob.ErrPreviewStale
+	}
 	rows, err := tx.Query(ctx, `SELECT stage,grade_id FROM academic_year_grade_stages WHERE academic_year_id=$1 FOR SHARE`, scope.AcademicYearID)
 	if err != nil {
 		return err

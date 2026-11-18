@@ -165,6 +165,10 @@ func (r *permissionRepository) LoadAccessProfile(context.Context, string) (permi
 	}
 	return profile, nil
 }
+func (r *permissionRepository) LegacyStages(context.Context, int, int) ([]permission.LegacyStageItem, int, error) {
+	return []permission.LegacyStageItem{{Source: "TEMPLATE", Stage: 1}}, 1, nil
+}
+
 func (r *permissionRepository) ListRules(context.Context, string) ([]permission.Rule, error) {
 	return r.profile.Rules, nil
 }
@@ -442,6 +446,15 @@ func TestSuperAdminCanReadEffectivePermissionSourcesAndCreateRule(t *testing.T) 
 	permissionRepo := &permissionRepository{profile: permission.AccessProfile{AccountID: "user-1", SystemRole: permission.SystemRoleMember}}
 	router := NewRouter(svc, false, AdminServices{Permission: permission.NewService(permissionRepo)})
 
+	inventory := performJSON(router, http.MethodGet, "/api/v1/admin/legacy-stage-grants?page=1&pageSize=20", nil, tokens.AccessToken)
+	if inventory.Code != http.StatusOK || !bytes.Contains(inventory.Body.Bytes(), []byte(`"source":"TEMPLATE"`)) {
+		t.Fatalf("inventory response: %d %s", inventory.Code, inventory.Body)
+	}
+	invalid := performJSON(router, http.MethodGet, "/api/v1/admin/legacy-stage-grants?pageSize=0", nil, tokens.AccessToken)
+	if invalid.Code != http.StatusBadRequest || !bytes.Contains(invalid.Body.Bytes(), []byte("INVALID_REQUEST")) {
+		t.Fatalf("invalid pagination: %d", invalid.Code)
+	}
+
 	created := performJSON(router, http.MethodPost, "/api/v1/admin/users/user-1/permission-rules", map[string]any{"action": permission.ActionConfigurationView, "effect": permission.EffectAllow, "startsAt": "2026-01-01T00:00:00Z"}, tokens.AccessToken)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create rule status=%d body=%s", created.Code, created.Body.String())
@@ -574,6 +587,13 @@ func TestSystemAdminCanManageMasterDataButMemberCannot(t *testing.T) {
 		Permission: permission.NewService(permissionRepo),
 		MasterData: masterdata.NewService(&masterRepository{records: map[string]masterdata.Record{}}),
 	})
+
+	for _, token := range []string{adminToken, memberToken} {
+		inventory := performJSON(router, http.MethodGet, "/api/v1/admin/legacy-stage-grants", nil, token)
+		if inventory.Code != http.StatusForbidden {
+			t.Fatalf("stage inventory visible outside super admin: %d", inventory.Code)
+		}
+	}
 
 	permissionRepo.profile = permission.AccessProfile{SystemRole: permission.SystemRoleAdmin}
 	allowed := performJSON(router, http.MethodGet, "/api/v1/admin/master-data/faculties?page=1&pageSize=20", nil, adminToken)

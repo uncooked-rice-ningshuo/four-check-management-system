@@ -521,6 +521,7 @@ func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, met
 	if rule.StartsAt.IsZero() {
 		rule.StartsAt = time.Now().UTC()
 	}
+	rule.Enabled = true
 	if !validRule(rule) {
 		return Rule{}, ErrInvalidRule
 	}
@@ -540,7 +541,6 @@ func (s *Service) CreateRule(ctx context.Context, actorID string, rule Rule, met
 	rule.Note = strings.TrimSpace(rule.Note)
 	rule.SourceType = SourceUserRule
 	rule.CreatedBy = actorID
-	rule.Enabled = true
 	return s.repository.CreateRule(ctx, rule, permissionMutation(metadata, actorID, rule.ID, nil, rule))
 }
 
@@ -578,6 +578,9 @@ func (s *Service) UpdateRule(ctx context.Context, rule Rule, metadata ...audit.M
 	var before any
 	for _, existing := range rules {
 		if existing.ID == rule.ID {
+			if widensLegacyRange(existing.Ranges, rule) {
+				return Rule{}, ErrInvalidRule
+			}
 			before = existing
 			break
 		}
@@ -817,6 +820,13 @@ func (s *Service) validateRuleSource(ctx context.Context, rule Rule) error {
 	}
 	for _, department := range profile.Departments {
 		if department.DepartmentID == rule.SourceDepartmentID && departmentSupports(department, rule.Action, rule.Scope.InspectionTypeID) {
+			if rule.Mode == "OVERRIDE" {
+				for _, action := range department.OperationRanges {
+					if action.Action == rule.Action && action.InspectionTypeID == rule.Scope.InspectionTypeID && widensLegacyRange(action.Ranges, rule) {
+						return ErrInvalidRule
+					}
+				}
+			}
 			return nil
 		}
 	}

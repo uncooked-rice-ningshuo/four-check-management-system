@@ -1252,13 +1252,13 @@ func dictionaryError(err error) error {
 
 func (p *Postgres) List(ctx context.Context) (academic.Calendar, error) {
 	var result academic.Calendar
-	yearRows, err := p.Pool.Query(ctx, `SELECT id,name,start_date,end_date,enabled,version FROM academic_years ORDER BY start_date DESC`)
+	yearRows, err := p.Pool.Query(ctx, calendarYearRows)
 	if err != nil {
 		return result, err
 	}
 	for yearRows.Next() {
 		var value academic.AcademicYear
-		if err := yearRows.Scan(&value.ID, &value.Name, &value.StartDate, &value.EndDate, &value.Enabled, &value.Version); err != nil {
+		if err := yearRows.Scan(&value.ID, &value.Name, &value.StartDate, &value.EndDate, &value.Enabled, &value.Version, &value.Roster); err != nil {
 			yearRows.Close()
 			return result, err
 		}
@@ -1327,7 +1327,7 @@ func (p *Postgres) CreateYear(ctx context.Context, value academic.AcademicYear, 
 		if execErr != nil {
 			return execErr
 		}
-		return saveYearStages(ctx, tx, value)
+		return saveYearRoster(ctx, tx, value)
 	})
 	return value, err
 }
@@ -1341,28 +1341,12 @@ func (p *Postgres) UpdateYear(ctx context.Context, value academic.AcademicYear, 
 		if tag.RowsAffected() != 1 {
 			return academic.ErrVersionConflict
 		}
-		return saveYearStages(ctx, tx, value)
+		return saveYearRoster(ctx, tx, value)
 	})
 	if err == nil {
 		value.Version++
 	}
 	return value, err
-}
-
-func saveYearStages(ctx context.Context, tx pgx.Tx, value academic.AcademicYear) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM academic_year_grade_stages WHERE academic_year_id=$1`, value.ID); err != nil {
-		return err
-	}
-	for stage, gradeID := range value.StageGrades {
-		tag, err := tx.Exec(ctx, `INSERT INTO academic_year_grade_stages(academic_year_id,stage,grade_id) SELECT $1,$2,id FROM grades WHERE id=$3 AND enabled`, value.ID, stage, gradeID)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return academic.ErrInvalidInput
-		}
-	}
-	return nil
 }
 
 func (p *Postgres) CreateSemester(ctx context.Context, value academic.Semester, mutation audit.Mutation) (academic.Semester, error) {
@@ -1541,7 +1525,7 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 	studentRows, err := p.Pool.Query(ctx, `SELECT s.id,s.student_no,s.name,s.class_id,c.name,g.name
 		FROM students s JOIN classes c ON c.id=s.class_id JOIN grades g ON g.id=c.grade_id
 		WHERE s.enabled AND c.enabled AND g.enabled AND s.student_no = ANY($1::text[])
-		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.StudentNos, lookup.ClassID, lookup.Grade)
+		  AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3) AND academic_roster_allows_class((SELECT academic_year_id FROM semesters WHERE id=NULLIF($4,'')::uuid),c.id,c.grade_id,c.major_id)`, lookup.StudentNos, lookup.ClassID, lookup.Grade, lookup.SemesterID)
 	if err != nil {
 		return result, err
 	}
@@ -1561,7 +1545,7 @@ func (p *Postgres) LoadAttendanceReferences(ctx context.Context, lookup importjo
 
 	classRows, err := p.Pool.Query(ctx, `SELECT c.id,c.name,g.name FROM classes c JOIN grades g ON g.id=c.grade_id
 		WHERE c.enabled AND g.enabled AND c.name = ANY($1::text[])
-		AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3)`, lookup.ClassNames, lookup.ClassID, lookup.Grade)
+		AND ($2='' OR c.id=NULLIF($2,'')::uuid) AND ($3='' OR g.name=$3) AND academic_roster_allows_class((SELECT academic_year_id FROM semesters WHERE id=NULLIF($4,'')::uuid),c.id,c.grade_id,c.major_id)`, lookup.ClassNames, lookup.ClassID, lookup.Grade, lookup.SemesterID)
 	if err != nil {
 		return result, err
 	}

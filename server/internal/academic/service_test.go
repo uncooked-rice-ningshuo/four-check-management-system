@@ -208,14 +208,10 @@ func TestYearStageMappingRejectsDuplicatesAndInvalidStages(t *testing.T) {
 		}
 	}
 }
-func TestYearStageMappingPreservedInAudit(t *testing.T) {
+func TestNewYearRejectsLegacyMapping(t *testing.T) {
 	repo := &memoryRepository{}
-	grade := "00000000-0000-0000-0000-000000000001"
-	year, err := NewService(repo).CreateYear(context.Background(), AcademicYear{StartDate: date("2026-09-01"), EndDate: date("2027-08-31"), StageGrades: map[int]string{1: grade}})
-	if err != nil || year.StageGrades[1] != grade || year.Version != 1 {
-		t.Fatalf("year=%+v err=%v", year, err)
-	}
-	if repo.mutations[0].Entry.After.(AcademicYear).StageGrades[1] != grade {
-		t.Fatal("mapping missing from audit")
+	_, err := NewService(repo).CreateYear(context.Background(), AcademicYear{StartDate: date("2026-09-01"), EndDate: date("2027-08-31"), StageGrades: map[int]string{1: "00000000-0000-0000-0000-000000000001"}})
+	if err != ErrInvalidInput || len(repo.mutations) != 0 {
+		t.Fatal("new stage mapping accepted")
 	}
 }

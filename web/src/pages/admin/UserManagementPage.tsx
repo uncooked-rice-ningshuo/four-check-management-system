@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 import type { UserAssignment } from '../../entities/organization/model/organization'
-import { assignUserRole, createUser, getCatalogs, getUsers, getPermissionRules, resetUserPassword, updateUser, updateUserStatus } from '../../shared/api/adminApi'
+import { assignUserRole, createUser, getCatalogs, getUsers, getLegacyStageGrants, getPermissionRules, resetUserPassword, updateUser, updateUserStatus } from '../../shared/api/adminApi'
 import { ApiError } from '../../shared/api/httpClient'
 import { PermissionDetailDrawer } from './PermissionDetailPage'
 
@@ -20,13 +20,15 @@ type UserFilterValues = {
 
 export function UserManagementPage() {
   const { message } = App.useApp()
+  const [legacyPage, setLegacyPage] = useState(0)
+  const legacy = useQuery({ queryKey: ['legacy-stage-grants', legacyPage], queryFn: () => getLegacyStageGrants(legacyPage), enabled: legacyPage > 0 })
   const [filters, setFilters] = useState<UserFilterValues>({})
   const [editing, setEditing] = useState<UserAssignment | null>(null)
   const [editVersionConflict, setEditVersionConflict] = useState(false)
   const [userModal, setUserModal] = useState(false)
   const [userDirty, setUserDirty] = useState(false)
   const [resetting, setResetting] = useState<UserAssignment | null>(null)
-  const [permissionUser, setPermissionUser] = useState<UserAssignment | null>(null)
+  const [permissionUser, setPermissionUser] = useState<Pick<UserAssignment, 'name' | 'accountId'> | null>(null)
   const [userForm] = Form.useForm<UserFormValues>()
   const [issuedPassword, setIssuedPassword] = useState<{ kind: 'created' | 'reset'; name: string; loginName: string; password: string } | null>(null)
   const client = useQueryClient()
@@ -98,7 +100,7 @@ export function UserManagementPage() {
       onSubmit={values => setFilters(values)}
       onReset={() => setFilters({})}
       options={{ reload: () => { void users.refetch(); void catalogs.refetch() }, density: true, setting: true }}
-      toolBarRender={() => [<Button key="create" type="primary" icon={<PlusOutlined aria-hidden />} onClick={openCreate}>新增用户</Button>]}
+      toolBarRender={() => [<Button key="legacy" onClick={() => setLegacyPage(1)}>旧阶段授权清单</Button>, <Button key="create" type="primary" icon={<PlusOutlined aria-hidden />} onClick={openCreate}>新增用户</Button>]}
       pagination={{ defaultPageSize: 10, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条` }}
       scroll={{ x: 1320 }}
       locale={{ emptyText: users.isError ? '用户列表暂不可用' : users.isPending ? '正在加载用户…' : filters.keyword || filters.systemRole || filters.status || filters.departmentId || filters.organizationRoleId ? '没有符合当前筛选条件的用户' : '暂无用户' }}
@@ -110,6 +112,15 @@ export function UserManagementPage() {
     </Modal>
     <Modal title={`重置 ${resetting?.name ?? ''} 的密码`} open={Boolean(resetting)} onCancel={() => setResetting(null)} onOk={() => resetMutation.mutate()} confirmLoading={resetMutation.isPending}><Typography.Paragraph>确认后系统会生成新初始密码，并在下一弹窗显示，供管理员复制并告知该用户。现有会话将失效；用户下次登录必须修改密码。</Typography.Paragraph></Modal>
     <Modal title={issuedPassword?.kind === 'reset' ? '密码重置成功' : '用户创建成功'} open={Boolean(issuedPassword)} onOk={closeIssuedPassword} onCancel={closeIssuedPassword} okText="我已记录并告知用户" cancelButtonProps={{ style: { display: 'none' } }} maskClosable={false} keyboard={false}><Alert type="success" showIcon title={`${issuedPassword?.name ?? ''}的初始密码如下`} description="请将账号和密码通过安全渠道告知本人。该密码仅在此处显示一次，首次登录须修改。" /><div className="issued-password-details"><Typography.Text type="secondary">登录账号</Typography.Text><Typography.Text copyable={{ text: issuedPassword?.loginName }}>{issuedPassword?.loginName}</Typography.Text><Typography.Text type="secondary">初始密码</Typography.Text><Typography.Text code copyable={{ text: issuedPassword?.password }}>{issuedPassword?.password}</Typography.Text></div></Modal>
+    <Modal title="旧阶段授权清单" open={legacyPage > 0} onCancel={() => setLegacyPage(0)} footer={null} width={800} destroyOnHidden>
+      {legacy.isError ? <Alert type="error" title="授权清单加载失败" action={<Button onClick={() => void legacy.refetch()}>重试</Button>} /> :
+        <ProTable headerTitle="待人工核对的授权来源" rowKey={(_, index) => String(index)} search={false} options={false} loading={legacy.isLoading} dataSource={legacy.data?.items}
+          pagination={{ current: legacyPage, pageSize: 20, total: legacy.data?.total, showSizeChanger: false, onChange: setLegacyPage }}
+          columns={[{ title: '来源', render: (_, row) => ({ TEMPLATE: '部门模板', ASSIGNMENT: '授予时快照', PERSONAL: '个人规则' })[row.source] },
+            { title: '部门', dataIndex: 'departmentName' }, { title: '岗位', dataIndex: 'roleName' }, { title: '检查业务', dataIndex: 'typeName' }, { title: '动作', dataIndex: 'action', renderText: permissionActionName },
+            { title: '阶段', render: (_, row) => [['大一','大二','大三','大四'][row.stage - 1], row.majorName, row.className].filter(Boolean).join(' · ') },
+            { title: '处理', render: (_, row) => row.accountId ? <Button type="link" onClick={() => { setLegacyPage(0); setPermissionUser({ accountId: String(row.accountId), name: row.accountName ?? '' }) }}>{row.accountName} · 调整权限</Button> : '在部门模板中调整' }]} />}
+    </Modal>
     {permissionUser && <PermissionDetailDrawer accountId={permissionUser.accountId} userName={permissionUser.name} onClose={() => setPermissionUser(null)} />}
   </section>
 }

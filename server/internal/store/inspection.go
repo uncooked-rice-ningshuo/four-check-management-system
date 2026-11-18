@@ -257,7 +257,7 @@ func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.Inspecti
 	for _, id := range classes {
 		var v inspection.ClassReference
 		var gradeID, majorID string
-		err := t.tx.QueryRow(ctx, `SELECT c.id,c.name,g.name,c.grade_id,COALESCE(c.major_id::text,'') FROM classes c JOIN grades g ON g.id=c.grade_id WHERE c.id=$1 AND c.enabled AND g.enabled FOR SHARE OF c,g`, id).Scan(&v.ID, &v.Name, &v.Grade, &gradeID, &majorID)
+		err := t.tx.QueryRow(ctx, `SELECT c.id,c.name,g.name,c.grade_id,COALESCE(c.major_id::text,'') FROM classes c JOIN grades g ON g.id=c.grade_id WHERE c.id=$1 AND c.enabled AND g.enabled AND academic_roster_allows_class($2,c.id,c.grade_id,c.major_id) FOR SHARE OF c,g`, id, c.AcademicYearID).Scan(&v.ID, &v.Name, &v.Grade, &gradeID, &majorID)
 		if err != nil {
 			return refs, referenceError(err)
 		}

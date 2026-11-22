@@ -205,18 +205,9 @@ FROM semester_weeks w LEFT JOIN morning_attendance_week_schedules s ON s.week_id
 	return result, nil
 }
 func (t *inspectionTx) References(ctx context.Context, r inspection.InspectionRecord, c inspection.InspectionContext, a inspection.MutationAccess, owner string) (inspection.InspectionReferences, error) {
-	missing := false
-	refs, err := t.lockReferences(ctx, r, c, func(scope permission.Scope) bool {
-		allowed := inspection.AllowsInspectionScope(a, scope, owner)
-		if !allowed && permission.MissingStageMapping(a.Permissions, scope) {
-			missing = true
-		}
-		return allowed
+	return t.lockReferences(ctx, r, c, func(scope permission.Scope) bool {
+		return inspection.AllowsInspectionScope(a, scope, owner)
 	})
-	if missing && errors.Is(err, inspection.ErrScopeMismatch) {
-		return refs, permission.ErrGradeMappingMissing
-	}
-	return refs, err
 }
 
 // lockReferences separates reference integrity from the caller's already compiled scope.
@@ -224,25 +215,6 @@ func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.Inspecti
 	var refs inspection.InspectionReferences
 	var lockedYear string
 	if err := t.tx.QueryRow(ctx, `SELECT id FROM academic_years WHERE id=$1 FOR SHARE`, c.AcademicYearID).Scan(&lockedYear); err != nil {
-		return refs, err
-	}
-	stageGrades := map[int]string{}
-	stageRows, err := t.tx.Query(ctx, `SELECT stage,grade_id FROM academic_year_grade_stages WHERE academic_year_id=$1`, c.AcademicYearID)
-	if err != nil {
-		return refs, err
-	}
-	for stageRows.Next() {
-		var stage int
-		var id string
-		if err := stageRows.Scan(&stage, &id); err != nil {
-			stageRows.Close()
-			return refs, err
-		}
-		stageGrades[stage] = id
-	}
-	err = stageRows.Err()
-	stageRows.Close()
-	if err != nil {
 		return refs, err
 	}
 	student, class, course, classroom, dorm, area, h, rooms := inspection.InspectionDetailReferences(r.Details)
@@ -261,7 +233,7 @@ func (t *inspectionTx) lockReferences(ctx context.Context, r inspection.Inspecti
 		if err != nil {
 			return refs, referenceError(err)
 		}
-		scope := permission.Scope{GradeID: gradeID, MajorID: majorID, StageGrades: stageGrades, AcademicYearID: c.AcademicYearID, SemesterID: r.SemesterID, WeekID: r.WeekID, InspectionTypeID: r.InspectionTypeID, DepartmentID: r.DepartmentID, ClassID: v.ID, Grade: v.Grade}
+		scope := permission.Scope{GradeID: gradeID, MajorID: majorID, AcademicYearID: c.AcademicYearID, SemesterID: r.SemesterID, WeekID: r.WeekID, InspectionTypeID: r.InspectionTypeID, DepartmentID: r.DepartmentID, ClassID: v.ID, Grade: v.Grade}
 		if !allowed(scope) {
 			return refs, inspection.ErrScopeMismatch
 		}
@@ -874,7 +846,7 @@ func (t *inspectionTx) responsibilityLabels(ctx context.Context, r *inspection.I
 	return nil
 }
 
-// operationRangeSQL keeps AND dimensions inside each OR group and resolves stages from the record year.
+// operationRangeSQL keeps AND dimensions inside each OR group and rejects retired stage clauses.
 func operationRangeSQL(ranges []permission.OperationRange, class string, args *[]any) string {
 	var groups []string
 	for _, scope := range ranges {
@@ -886,8 +858,7 @@ func operationRangeSQL(ranges []permission.OperationRange, class string, args *[
 			}
 		}
 		if scope.GradeStage != 0 {
-			*args = append(*args, scope.GradeStage)
-			conditions = append(conditions, fmt.Sprintf("EXISTS(SELECT 1 FROM academic_year_grade_stages gs WHERE gs.academic_year_id=sem.academic_year_id AND gs.stage=$%d AND gs.grade_id=scope_class.grade_id)", len(*args)))
+			conditions = append(conditions, "FALSE")
 		}
 		groups = append(groups, "EXISTS(SELECT 1 FROM classes scope_class WHERE "+strings.Join(conditions, " AND ")+")")
 	}

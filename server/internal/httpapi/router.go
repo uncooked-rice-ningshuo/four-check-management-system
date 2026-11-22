@@ -1557,10 +1557,6 @@ func multipartRequestLimit(fileLimit int64) int64 {
 }
 
 func writeImportError(c *gin.Context, err error) {
-	if errors.Is(err, permission.ErrGradeMappingMissing) {
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选记录或周次所属学年缺少年级阶段映射，请在学年配置中完善对应的大一至大四映射")
-		return
-	}
 
 	switch {
 	case err == nil:

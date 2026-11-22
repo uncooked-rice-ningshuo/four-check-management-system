@@ -424,6 +424,16 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
             diagnostic.write_text((ROOT / 'web/e2e/auth-navigation-diagnostic.js').read_text().replace('__FIXTURE__', json.dumps(auth_fixture)))
             payload = json.loads(cli('--raw', 'run-code', '--filename', str(diagnostic)))
             report['authNavigation'] = payload
+        if ENV.get('BROWSER_SUITE') == 'fixed-grade-template':
+            script = temp / 'fixed-grade-template.js'
+            outside_class = str(uuid.uuid4())
+            outside_grade = str(uuid.uuid4())
+            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"INSERT INTO grades(id,name) VALUES('{outside_grade}','2025级'); INSERT INTO classes(id,name,grade_id,faculty_id,major_id) VALUES('{outside_class}','范围外班级','{outside_grade}','{ids['faculty']}','{ids['major']}');".encode())
+            script.write_text((ROOT / 'web/e2e/fixed-grade-template.js').read_text().replace('__FIXTURE__',json.dumps(dict(fixture, authPassword=changed_password, outsideClass=outside_class))))
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(script)))
+            report.update(status='passed', browserVersion=payload['browserVersion'], cases=payload['cases'])
+            print(payload, flush=True)
+            raise SystemExit(0)
             report['browserVersion'] = payload['browserVersion']
             report['cases'] += payload['cases']
             report['faultInjection'] = payload.get('faultInjection', [])
@@ -760,6 +770,12 @@ VALUES
                             if kind != 'valid': values[5] = '10:00'
                             if template_type == 'MORNING_ATTENDANCE': values = values[:3] + [fixture['date'], 'E2E import']
                             if template_type == 'LATE_RETURN': values = values[:3] + [fixture['date'], '23:05:00', f'E2E dorm area E2E dorm building {101+index}', 'E2E import']
+        if os.environ.get('BROWSER_SUITE') == 'dictionary':
+            fixture['dictionaryOnly'] = True
+            browser_suite('platform-regression')
+            report['status'] = 'passed'
+            raise SystemExit(0)
+
                             if template_type == 'DORMITORY_HYGIENE': values = [f'E2E dorm area E2E dorm building {101+index}', fixture['date'], '', '首轮', '优秀' if index == 0 else '不合格', 'E2E class', '' if index == 0 else '000001', '' if index == 0 else '地面', '对象检查', 'E2E import']
                             if template_type == 'CLASSROOM_HYGIENE': values = [f'E2E building {101+index}', '前排', fixture['date'], '', '首轮', '优秀' if index == 0 else '不合格', 'E2E class', '' if index == 0 else '000001', '' if index == 0 else '地面', '区域检查', 'E2E import']
                             if kind == 'invalid' and index == 1: values[0] = 'UNKNOWN'

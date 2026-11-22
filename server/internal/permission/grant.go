@@ -9,8 +9,6 @@ import (
 
 var ErrOperationRangeConflict = errors.New("class does not match operation range")
 
-var ErrGradeMappingMissing = errors.New("academic year grade-stage mapping is missing")
-
 // OperationRange keeps conjunctive dimensions together; separate ranges are alternatives.
 type OperationRange struct {
 	GradeID    string `json:"gradeId,omitempty"`
@@ -42,10 +40,9 @@ func rangesCover(denied, allowed []OperationRange) bool {
 	return true
 }
 
-// OperationTarget uses the record's academic-year mapping, never today's semester.
+// OperationTarget carries the class dimensions of the requested record.
 type OperationTarget struct {
 	GradeID, MajorID, ClassID string
-	StageGrades               map[int]string
 }
 
 // MatchesOperationRanges checks whole clauses without mixing dimensions between grants.
@@ -54,14 +51,8 @@ func MatchesOperationRanges(ranges []OperationRange, target OperationTarget) boo
 		return true
 	}
 	for _, scope := range ranges {
-		if scope.GradeStage < 0 || scope.GradeStage > 4 {
-			continue
-		}
 		if scope.GradeStage != 0 {
-			grade, ok := target.StageGrades[scope.GradeStage]
-			if !ok || grade == "" || grade != target.GradeID {
-				continue
-			}
+			continue
 		}
 		if (scope.GradeID == "" || scope.GradeID == target.GradeID) &&
 			(scope.MajorID == "" || scope.MajorID == target.MajorID) &&
@@ -70,6 +61,16 @@ func MatchesOperationRanges(ranges []OperationRange, target OperationTarget) boo
 		}
 	}
 	return false
+}
+
+// retainFixedRanges removes retired alternatives from effective grants without
+// turning a formerly restricted grant into an unrestricted one.
+func retainFixedRanges(entry *EffectivePermission) bool {
+	if !slices.ContainsFunc(entry.Ranges, func(r OperationRange) bool { return r.GradeStage != 0 }) {
+		return true
+	}
+	entry.Ranges = slices.DeleteFunc(slices.Clone(entry.Ranges), func(r OperationRange) bool { return r.GradeStage != 0 })
+	return len(entry.Ranges) > 0
 }
 
 // GrantAction is an enabled template action with its own operation scope.
@@ -161,21 +162,6 @@ func ValidOperationRanges(ranges []OperationRange) bool {
 		}
 	}
 	return true
-}
-
-// MissingStageMapping identifies unresolved configured stages after an operation was denied.
-func MissingStageMapping(entries []EffectivePermission, target Scope) bool {
-	for _, entry := range entries {
-		if entry.Effect != EffectAllow || !SupportsOperationRange(entry.Action) || !scopeMatches(entry.Scope, target) {
-			continue
-		}
-		for _, r := range entry.Ranges {
-			if r.GradeStage > 0 && target.StageGrades[r.GradeStage] == "" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // ModuleValidity gives all default actions in one business module a shared term.

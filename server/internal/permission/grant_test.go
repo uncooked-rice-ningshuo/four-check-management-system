@@ -47,14 +47,11 @@ func TestAssignedScopeConjunction(t *testing.T) {
 		t.Fatal("dimensions mixed across grants")
 	}
 }
-func TestAssignedStageMapping(t *testing.T) {
+func TestAssignedStageNeverAuthorizesClass(t *testing.T) {
 	ranges := []OperationRange{{GradeStage: 1}}
-	if MatchesOperationRanges(ranges, OperationTarget{GradeID: "2026"}) {
-		t.Fatal("missing mapping widened access")
-	}
-	target := OperationTarget{GradeID: "2026", StageGrades: map[int]string{1: "2026"}}
-	if !MatchesOperationRanges(ranges, target) {
-		t.Fatal("valid mapping rejected")
+	target := OperationTarget{GradeID: "2026"}
+	if MatchesOperationRanges(ranges, target) {
+		t.Fatal("retired stage granted access")
 	}
 	target.GradeID = "2025"
 	if MatchesOperationRanges(ranges, target) {
@@ -103,20 +100,6 @@ func TestPartialRangeDenyKeepsActionAvailable(t *testing.T) {
 	}
 }
 
-func TestMissingStageMappingDiagnostic(t *testing.T) {
-	entries := []EffectivePermission{{Action: ActionInspectionEnter, Effect: EffectAllow, Ranges: []OperationRange{{GradeStage: 1}}}}
-	if !MissingStageMapping(entries, Scope{}) {
-		t.Fatal("missing configuration not identified")
-	}
-	if MissingStageMapping(entries, Scope{StageGrades: map[int]string{1: "grade"}}) {
-		t.Fatal("configured stage incorrectly reported missing")
-	}
-	entries[0].Effect = EffectDeny
-	if MissingStageMapping(entries, Scope{}) {
-		t.Fatal("deny rule should not require a mapping")
-	}
-}
-
 func TestDeniedRangesCoverAllGrantedClauses(t *testing.T) {
 	if !rangesCover([]OperationRange{{ClassID: "a"}}, []OperationRange{{ClassID: "a"}}) {
 		t.Fatal("same complete range must be disabled")
@@ -157,5 +140,27 @@ func TestLegacyRangeReplacementCannotBecomeUnrestricted(t *testing.T) {
 	rule.Mode = "DISABLE"
 	if widensLegacyRange(previous, rule) {
 		t.Fatal("termination rejected")
+	}
+}
+
+func TestFixedAlternativesPreserveSnapshotAndBoundaries(t *testing.T) {
+	original := []OperationRange{{GradeStage: 1}, {GradeID: "2026", MajorID: "cs"}}
+	entry := EffectivePermission{Ranges: original}
+	if !retainFixedRanges(&entry) || len(entry.Ranges) != 1 || original[0].GradeStage != 1 {
+		t.Fatal("fixed alternative or historical snapshot lost")
+	}
+	for _, tc := range []struct {
+		grade, major, class string
+		allowed             bool
+	}{
+		{"2026", "cs", "A", true}, {"2026", "cs", "B", true}, {"2025", "cs", "A", false}, {"2026", "other", "B", false},
+	} {
+		if MatchesOperationRanges(entry.Ranges, OperationTarget{GradeID: tc.grade, MajorID: tc.major, ClassID: tc.class}) != tc.allowed {
+			t.Fatalf("unexpected authorization for %+v", tc)
+		}
+	}
+	entry.Ranges = original[:1]
+	if retainFixedRanges(&entry) {
+		t.Fatal("retired-only grant became unrestricted")
 	}
 }

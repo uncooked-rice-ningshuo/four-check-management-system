@@ -52,6 +52,7 @@ type ManualValidationError struct{ Message string }
 func (e *ManualValidationError) Error() string { return e.Message }
 
 type manualRepository interface {
+	AttendanceClassScope(context.Context, string) (string, string, error)
 	SaveManualAttendance(context.Context, AttendanceRecord, audit.Mutation) (AttendanceRecord, error)
 }
 type manualValidator interface {
@@ -148,6 +149,10 @@ func (s *ManualService) prepare(ctx context.Context, actor ManualActor, input Ma
 		if err != nil {
 			return AttendanceRecord{}, err
 		}
+		scope.GradeID, scope.MajorID, err = s.repository.AttendanceClassScope(ctx, input.ClassID)
+		if err != nil {
+			return AttendanceRecord{}, err
+		}
 		if !canPrepareAttendance(actor, effective, scope, ownerID) {
 			return AttendanceRecord{}, ErrScopeMismatch
 		}
@@ -185,7 +190,11 @@ func (s *ManualService) prepare(ctx context.Context, actor ManualActor, input Ma
 		return AttendanceRecord{}, err
 	}
 	// Recheck authoritative student/class metadata rather than trusting requested grade.
-	scope.ClassID, scope.Grade = record.ClassID, record.GradeSnapshot
+	if record.ClassID != input.ClassID {
+		return AttendanceRecord{}, ErrScopeMismatch
+	}
+	record.AuthGradeID, record.AuthMajorID = scope.GradeID, scope.MajorID
+	scope.Grade = record.GradeSnapshot
 	if !actor.IsSuperAdmin && !canPrepareAttendance(actor, effective, scope, ownerID) {
 		return AttendanceRecord{}, ErrScopeMismatch
 	}

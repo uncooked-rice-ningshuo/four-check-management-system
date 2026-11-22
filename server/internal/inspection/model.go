@@ -70,6 +70,8 @@ type AttendanceInput struct {
 
 // AttendanceRecord combines the common inspection record with attendance-specific fields.
 type AttendanceRecord struct {
+	AuthGradeID         string    `json:"-"`
+	AuthMajorID         string    `json:"-"`
 	HasSubmission       bool      `json:"-"`
 	HasReportLock       bool      `json:"-"`
 	ID                  string    `json:"id"`

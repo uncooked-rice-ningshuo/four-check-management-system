@@ -39,7 +39,7 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     return () => window.clearTimeout(timer)
   }, [effective.data, rules.data, accountId, client])
 
-  const refresh = async () => { await Promise.all([client.invalidateQueries({ queryKey: ['legacy-stage-grants'] }), client.invalidateQueries({ queryKey: ['effective-permissions', accountId] }), client.invalidateQueries({ queryKey: ['permission-rules', accountId] })]) }
+  const refresh = async () => { await Promise.all([client.invalidateQueries({ queryKey: ['effective-permissions', accountId] }), client.invalidateQueries({ queryKey: ['permission-rules', accountId] })]) }
   const close = () => { if (dirty) modal.confirm({ title: '放弃未保存的权限修改？', onOk: () => { setModalOpen(false); setDirty(false) } }); else setModalOpen(false) }
   const save = useMutation({ mutationFn: ({ validity, ...fields }: PermissionFormValues) => {
     const values = { ...fields, startsAt: validity[0], endsAt: validity[1] }
@@ -59,7 +59,7 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     setModalOpen(true)
   }
   const departmentName = (id?: string) => id ? catalogs.data?.departments.find(item => item.id === id)?.name ?? '部门加载中' : '账号全局'
-  const scopeText = (entry: EffectivePermission | PermissionRule) => !supportsOperationRange(entry.action) ? '—' : !entry.ranges?.length ? '不限' : entry.ranges.map(range => [range.gradeStage && `待人工调整：${['大一', '大二', '大三', '大四'][range.gradeStage - 1]}`, range.gradeId && (rangeOptions.data?.gradeId.find(item => item.value === range.gradeId)?.label ?? '年级加载中'), range.majorId && (rangeOptions.data?.majorId.find(item => item.value === range.majorId)?.label ?? '专业加载中'), range.classId && (rangeOptions.data?.classId.find(item => item.value === range.classId)?.label ?? '班级加载中')].filter(Boolean).join('、')).join('；或 ')
+  const scopeText = (entry: EffectivePermission | PermissionRule) => !supportsOperationRange(entry.action) ? '—' : !entry.ranges?.length ? '不限' : entry.ranges.map(range => [range.gradeStage && `已失效的历史阶段：${['大一', '大二', '大三', '大四'][range.gradeStage - 1]}`, range.gradeId && (rangeOptions.data?.gradeId.find(item => item.value === range.gradeId)?.label ?? '年级加载中'), range.majorId && (rangeOptions.data?.majorId.find(item => item.value === range.majorId)?.label ?? '专业加载中'), range.classId && (rangeOptions.data?.classId.find(item => item.value === range.classId)?.label ?? '班级加载中')].filter(Boolean).join('、')).join('；或 ')
   const dates = (entry: EffectivePermission | PermissionRule) => `${entry.startsAt ? displayDate(entry.startsAt) : '立即生效'} 至 ${entry.endsAt ? displayDate(new Date(Date.parse(entry.endsAt) - 1).toISOString()) : '无截止日期'}`
   const permissionColumns: ProColumns<EffectivePermission>[] = [
     { title: '功能', dataIndex: 'action', renderText: actionName }, { title: '来源部门', render: (_, entry) => departmentName(entry.sourceDepartmentId) },

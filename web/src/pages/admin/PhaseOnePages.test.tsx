@@ -12,7 +12,7 @@ import { RegistrationReviewPage } from './RegistrationReviewPage'
 import { UserManagementPage } from './UserManagementPage'
 import type { MasterDataImportBatch, MasterDataKind, MasterDataRecord, MasterDataImportSpec } from '../../entities/masterdata/model/masterData'
 import type { DepartmentDefaultPermissions } from '../../entities/organization/model/organization'
-import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getCatalogs, getDepartmentDefaults, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, saveDepartmentDefaults, updateDepartment, updateDictionaryItem, updateInspectionType, updateUser, updateUserStatus } from '../../shared/api/adminApi'
+import { assignUserRole, confirmMasterDataImportBatch, createMasterData, getCatalogs, getDepartmentDefaults, getDictionaries, getEffectivePermissions, getMasterData, getMasterDataImportSpec, getPendingRegistrations, getPermissionRules, getUsers, previewMasterDataImport, resetUserPassword, reviewRegistration, saveDepartmentDefaults, updateDepartment, updateDictionaryType, updateDictionaryItem, updateInspectionType, updateUser, updateUserStatus } from '../../shared/api/adminApi'
 import { ApiError } from '../../shared/api/httpClient'
 
 vi.mock('../../shared/api/adminApi', () => ({
@@ -749,10 +749,25 @@ describe('阶段一管理页面', () => {
 		renderPage(<DictionaryPage />)
 
 		await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('type-1'))
-		expect(screen.getAllByRole('radio')[0]).toBeChecked()
+		expect(screen.getByRole('option', { name: '学籍状态' })).toHaveAttribute('aria-selected', 'true')
 		expect(await screen.findByText('字典选项 · 学籍状态')).toBeVisible()
 		expect(await screen.findByRole('cell', { name: '在籍' })).toBeVisible()
 	}, 10_000)
+
+	it('字典侧栏只展示中文名称并支持键盘选择、操作菜单和详情抽屉', async () => {
+		vi.mocked(getDictionaries).mockResolvedValue({
+			types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '学生当前状态', system: false, enabled: true }], items: [],
+		})
+		renderPage(<DictionaryPage />)
+		const option = await screen.findByRole('option', { name: '学籍状态' })
+		expect(screen.queryByText('STATUS')).not.toBeInTheDocument()
+		option.focus()
+		fireEvent.keyDown(option, { key: 'Enter' })
+		fireEvent.click(screen.getByRole('button', { name: '学籍状态操作' }))
+		fireEvent.click(await screen.findByText('查看详情'))
+		expect(await screen.findByText('学生当前状态')).toBeVisible()
+		expect(screen.getByText('STATUS')).toBeVisible()
+	})
 
 	it('字典类型的选中状态不提供取消选择操作', async () => {
 		vi.mocked(getDictionaries).mockResolvedValue({
@@ -761,37 +776,61 @@ describe('阶段一管理页面', () => {
 		})
 		renderPage(<DictionaryPage />)
 
-		fireEvent.click(await screen.findByRole('radio'))
+		fireEvent.click(await screen.findByRole('option', { name: '学籍状态' }))
 		expect(screen.queryByText('取消选择')).not.toBeInTheDocument()
 	})
 
-	it('字典类型表格在窄容器内使用内部横向滚动', async () => {
+	it('长字典编码不占用侧栏名称空间', async () => {
 		vi.mocked(getDictionaries).mockResolvedValue({
 			types: [{ id: 'type-1', code: 'A_VERY_LONG_DICTIONARY_TYPE_CODE', name: '很长的字典类型名称', description: '', system: false, enabled: true }],
 			items: [],
 		})
 		renderPage(<DictionaryPage />)
 
-		const typeCell = await screen.findByRole('cell', { name: 'A_VERY_LONG_DICTIONARY_TYPE_CODE' })
-		expect(typeCell.closest('table')).toHaveStyle({ width: 'max-content' })
+		expect(await screen.findByRole('option', { name: '很长的字典类型名称' })).toBeVisible()
+		expect(screen.queryByText('A_VERY_LONG_DICTIONARY_TYPE_CODE')).toBeNull()
 	})
 
 	it('编辑字典类型时回显原有信息', async () => {
 		vi.mocked(getDictionaries).mockResolvedValue({
-			types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '学生当前学籍状态', system: false, enabled: true }],
+			types: [{ id: 'type-1', code: 'STATUS', name: '学籍状态', description: '学生当前学籍状态', system: false, enabled: true },
+        { id: 'type-2', code: 'B', name: '第二项', description: '', system: false, enabled: true }],
 			items: [],
 		})
 		renderPage(<DictionaryPage />)
 
-		const typeRow = (await screen.findByRole('cell', { name: '学籍状态' })).closest('tr')
-		if (!typeRow) throw new Error('未找到字典类型行')
-		fireEvent.click(within(typeRow).getByRole('button', { name: '编辑' }))
+		fireEvent.click(await screen.findByRole('button', { name: '学籍状态操作' }))
+		fireEvent.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
 		const dialog = await screen.findByRole('dialog', { name: '编辑字典类型' })
 		expect(within(dialog).getByLabelText('类型编码')).toHaveValue('STATUS')
 		expect(within(dialog).getByLabelText('类型名称')).toHaveValue('学籍状态')
 		expect(within(dialog).getByLabelText('说明')).toHaveValue('学生当前学籍状态')
-	})
+		const description = within(dialog).getByLabelText('说明')
+		fireEvent.change(description, { target: { value: '待重试说明' } })
+		vi.mocked(updateDictionaryType).mockRejectedValueOnce(new Error('保存失败'))
+		fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }))
+		await screen.findByText('保存失败')
+		expect(description).toHaveValue('待重试说明')
+		async function cancel() {
+			const current = screen.getByRole('dialog')
+			await waitFor(() => expect(within(current).getByRole('button', { name: /确\s*定/ })).not.toHaveClass('ant-btn-loading'))
+			fireEvent.click(within(current).getByRole('button', { name: /取\s*消/ }))
+			await waitFor(() => expect(screen.queryByLabelText('类型编码')).toBeNull())
+		}
+		await cancel()
+		fireEvent.click(screen.getByRole('button', { name: '新增字典类型' }))
+		expect(await screen.findByLabelText('类型名称')).toHaveValue('')
+		await cancel()
+		for (const [name, code] of [['第二项', 'B'], ['学籍状态', 'STATUS']]) {
+			fireEvent.click(screen.getByRole('button', { name: name + '操作' }))
+			fireEvent.click(await screen.findByRole('menuitem', { name: '编辑' }))
+			expect(await screen.findByLabelText('类型名称')).toHaveValue(name)
+			expect(screen.getByLabelText('类型编码')).toHaveValue(code)
+			expect(screen.getByLabelText('说明')).toHaveValue(name === '第二项' ? '' : '学生当前学籍状态')
+			await cancel()
+		}
+	}, 20_000)
 
 	it('编辑字典项时回显原有信息', async () => {
 		vi.mocked(getDictionaries).mockImplementation(async typeId => typeId
@@ -919,7 +958,7 @@ describe('阶段一管理页面', () => {
 		vi.mocked(updateDictionaryItem).mockImplementation(async input => input)
 		renderPage(<DictionaryPage />)
 
-		fireEvent.click(await screen.findByRole('radio'))
+		fireEvent.click(await screen.findByRole('option', { name: '学籍状态' }))
 		fireEvent.click(await screen.findByRole('switch', { name: '停用字典值 在籍' }))
 		expect(updateDictionaryItem).not.toHaveBeenCalled()
 		const dialog = await screen.findByRole('dialog', { name: /停用“在籍”字典值/ })

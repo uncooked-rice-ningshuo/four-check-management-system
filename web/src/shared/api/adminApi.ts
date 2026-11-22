@@ -24,8 +24,6 @@ export const updateUserStatus = (id: string, status: 'ACTIVE' | 'DISABLED', vers
 export const resetUserPassword = (id: string, version: number) => apiRequest<{ temporaryPassword: string }>(`/admin/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ version }) })
 export const assignUserRole = (input: UserAssignment) => apiRequest<void>(`/admin/users/${input.accountId}/assignment`, { method: 'PUT', body: JSON.stringify(input) })
 export const getEffectivePermissions = (accountId: string) => apiRequest<EffectivePermissions>(`/admin/users/${accountId}/permissions`)
-export type LegacyStageGrant = { roleName?: string; majorName?: string; className?: string; source: 'TEMPLATE' | 'ASSIGNMENT' | 'PERSONAL'; accountId?: string; accountName?: string; departmentName?: string; action: string; typeName?: string; stage: number }
-export const getLegacyStageGrants = (page: number) => apiRequest<{items: LegacyStageGrant[]; total: number}>(`/admin/legacy-stage-grants?page=${page}&pageSize=20`)
 export const getPermissionRules = (accountId: string) => apiRequest<PermissionRule[]>(`/admin/users/${accountId}/permission-rules`)
 export const createPermissionRule = (accountId: string, input: Omit<PermissionRule, 'id' | 'accountId' | 'sourceType' | 'enabled'>) => apiRequest<PermissionRule>(`/admin/users/${accountId}/permission-rules`, { method: 'POST', body: JSON.stringify(input) })
 export const updatePermissionRule = (input: PermissionRule) => apiRequest<PermissionRule>(`/admin/users/${input.accountId}/permission-rules/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })

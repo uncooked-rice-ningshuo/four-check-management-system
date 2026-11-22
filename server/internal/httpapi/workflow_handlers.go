@@ -8,7 +8,6 @@ import (
 
 	"four-check-management-system/server/internal/auth"
 	"four-check-management-system/server/internal/inspection"
-	"four-check-management-system/server/internal/permission"
 	"four-check-management-system/server/internal/workflow"
 	"github.com/gin-gonic/gin"
 )
@@ -46,8 +45,6 @@ func (h *handler) submitDepartmentBatch(c *gin.Context) {
 		writeError(c, http.StatusConflict, "INVALID_SUBMISSION_STATE", "该应交项已有提交批次，请刷新后查看")
 	case errors.Is(err, workflow.ErrInvalidSubmit):
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "提交范围、记录或幂等键无效")
-	case errors.Is(err, permission.ErrGradeMappingMissing):
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选周次所属学年缺少年级阶段映射，请完善学年配置")
 	case errors.Is(err, workflow.ErrSubmissionScope):
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权提交该检查范围")
 	case errors.Is(err, workflow.ErrRecordUnavailable):
@@ -115,8 +112,6 @@ func writeWorkflowReadError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "提交筛选或标识无效")
 	case errors.Is(err, workflow.ErrSubmissionMissing):
 		writeError(c, http.StatusNotFound, "SUBMISSION_NOT_FOUND", "提交批次不存在")
-	case errors.Is(err, permission.ErrGradeMappingMissing):
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选周次所属学年缺少年级阶段映射，请完善学年配置")
 	case errors.Is(err, workflow.ErrSubmissionScope):
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权查看提交批次")
 	default:
@@ -158,8 +153,6 @@ func (h *handler) decideDepartmentBatch(c *gin.Context, action workflow.Action) 
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "审核版本或原因无效")
 	case errors.Is(err, workflow.ErrSubmissionMissing):
 		writeError(c, http.StatusNotFound, "SUBMISSION_NOT_FOUND", "提交批次不存在")
-	case errors.Is(err, permission.ErrGradeMappingMissing):
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选周次所属学年缺少年级阶段映射，请完善学年配置")
 	case errors.Is(err, workflow.ErrSubmissionScope):
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权审核该提交批次")
 	case errors.Is(err, workflow.ErrVersionConflict):
@@ -197,8 +190,6 @@ func (h *handler) resubmitDepartmentBatch(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "重提记录或版本无效")
 	case errors.Is(err, workflow.ErrSubmissionMissing):
 		writeError(c, http.StatusNotFound, "SUBMISSION_NOT_FOUND", "提交批次不存在")
-	case errors.Is(err, permission.ErrGradeMappingMissing):
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "所选周次所属学年缺少年级阶段映射，请完善学年配置")
 	case errors.Is(err, workflow.ErrSubmissionScope):
 		writeError(c, http.StatusForbidden, "FORBIDDEN_SCOPE", "无权重提该检查批次")
 	case errors.Is(err, workflow.ErrVersionConflict):

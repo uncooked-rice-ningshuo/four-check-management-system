@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// AttendanceClassScope resolves the class dimensions used by fixed-range authorization.
+func (p *Postgres) AttendanceClassScope(ctx context.Context, classID string) (string, string, error) {
+	var grade, major string
+	err := p.Pool.QueryRow(ctx, `SELECT grade_id,COALESCE(major_id::text,'') FROM classes WHERE id=$1 AND enabled`, classID).Scan(&grade, &major)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = inspection.ErrScopeMismatch
+	}
+	return grade, major, err
+}
+
 // SaveManualAttendance keeps reference snapshots, the draft and audit atomic.
 // Reference locks prevent edits between final validation and insertion; the
 // existing active dedup index arbitrates concurrent manual/import requests.
@@ -55,6 +65,17 @@ func (p *Postgres) SaveManualAttendance(ctx context.Context, r inspection.Attend
 }
 
 func lockAttendanceReferences(ctx context.Context, tx pgx.Tx, r inspection.AttendanceRecord) error {
+	// Hold the previously authorized class dimensions stable through persistence.
+	if r.AuthGradeID != "" {
+		var valid bool
+		err := tx.QueryRow(ctx, `SELECT true FROM classes WHERE id=$1 AND grade_id=$2 AND major_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid FOR SHARE`, r.ClassID, r.AuthGradeID, r.AuthMajorID).Scan(&valid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return inspection.ErrScopeMismatch
+		}
+		if err != nil {
+			return err
+		}
+	}
 	args := []any{r.StudentID, r.ClassID, r.GradeSnapshot, r.CourseID, r.ClassroomID, r.WeekID, r.SemesterID}
 	departmentJoin, departmentMapping, departmentWhere, departmentLocks := "", "", "", ""
 	if r.DepartmentID != "" {

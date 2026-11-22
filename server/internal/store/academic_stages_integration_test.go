@@ -112,7 +112,7 @@ func TestAcademicYearStagesPostgres(t *testing.T) {
 	}
 
 	inventory, total, err := database.LegacyStages(ctx, 1, 20)
-	if err != nil || len(inventory) != min(total, 20) {
+	if err != nil || total != 0 || len(inventory) != 0 {
 		t.Fatalf("inventory: %d %v", total, err)
 	}
 	semester, err := service.CreateSemester(ctx, academic.Semester{AcademicYearID: year.ID, Code: "FIRST", StartDate: year.StartDate, EndDate: year.StartDate.AddDate(0, 4, 0)})

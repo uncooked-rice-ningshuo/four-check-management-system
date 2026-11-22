@@ -226,9 +226,7 @@ async (page) => {
   check(errors.length === 0, `Uncaught browser errors: ${errors.join('; ')}`)
   await page.screenshot({ path: `${output}/calendar-passed.png`, fullPage: true })
   await page.goto(await page.evaluate(() => new URL('/admin/users', location.origin).href))
-  await page.getByRole('button', { name: '旧阶段授权清单' }).click()
-  const grantDialog = page.getByRole('dialog', { name: '旧阶段授权清单' })
-  await grantDialog.getByRole('cell', { name: '部门模板', exact: true }).first().waitFor()
-  await grantDialog.getByText('在部门模板中调整', { exact: true }).first().waitFor()
+  await page.getByRole('button', { name: '新增用户' }).waitFor()
+  check(await page.getByRole('button', { name: '旧阶段授权清单' }).count() === 0, 'Retired stage workflow still visible')
   return { marker: 'CALENDAR_REGRESSION_PASSED', browserVersion: page.context().browser().version(), browserErrors: errors, knownWarnings: [...new Set(knownWarnings)], unexpectedConsoleErrors, faultInjection: ['HTTP 500', 'null error body'] }
 }

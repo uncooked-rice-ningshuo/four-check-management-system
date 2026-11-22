@@ -12,13 +12,12 @@
 
 四查汇总表后续可复用同一有序名单。处分累计和汇总表的统计口径、审批流程及正式模板仍按各自需求验收。
 
-## 人工处理旧阶段授权
+## 固定年级授权（2026-11-22 修订）
 
-1. 在「用户与角色 → 旧阶段授权清单」按部门、岗位、动作和检查类型核对待处理项。清单包含仍启用且未到期的个人规则、部门模板和仍未到期的已授予快照，包括将来才开始的授权。
-2. 管理员先调整岗位模板，再进入账号权限详情，逐项确定具体年级或终止授权。选择具体年级时核对原专业、班级、部门和有效期。保存模板不会追溯更新已授予权限。
-3. 原始快照保留作追溯，个人覆盖和禁用规则有自己的有效期。取消覆盖或覆盖到期可能恢复原始范围，清单中的快照行须与有效权限一同核对。
-4. 目标环境逐项完成核对之后再彻底下线兼容鉴权。新学年已禁止建立阶段映射，已有学年的映射只读。
+迁移 070 从部门模板和个人规则中移除按阶段授权的条件组，保留独立的固定范围。模板动作如果失去最后一组条件则关闭；个人覆盖如果失去最后一组条件则禁用对应来源的动作，防止回退到更大的默认范围。历史快照保留，鉴权忽略其中的旧条件组。管理员按实际需要开启角色动作并选择具体年级；单选年级覆盖该年级全部专业和班级，增加专业后覆盖该年级该专业的全部班级。
 
 ## 验证
 
-真实 PostgreSQL 回归使用一次性空库及 `ACADEMIC_STAGES_TEST_DATABASE_URL`，运行 `go test -count=1 ./internal/store -run '^TestAcademicYearStagesPostgres$'`。输出顺序回归运行 `go test ./internal/reportoutput -run '^TestYearRosterSnapshotOrdersOfficeFiles$'`。校历浏览器回归核对配置保存重开、409 冲突、注入 500、失败重试和旧模板清单。
+真实 PostgreSQL 回归使用一次性空库及 `ACADEMIC_STAGES_TEST_DATABASE_URL`，运行 `go test -count=1 ./internal/store -run '^TestAcademicYearStagesPostgres$'`。输出顺序回归运行 `go test ./internal/reportoutput -run '^TestYearRosterSnapshotOrdersOfficeFiles$'`。校历浏览器回归核对配置保存重开、409 冲突、注入 500、失败重试。
+
+固定权限浏览器回归在 `web/` 运行 `BROWSER_DB_MODE=native BROWSER_SUITE=fixed-grade-template pnpm test:browser`，使用独立 PostgreSQL、MinIO 和合成账号。

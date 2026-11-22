@@ -26,6 +26,9 @@ func (f *manualFixture) SaveManualAttendance(_ context.Context, r AttendanceReco
 	}
 	return r, f.failure
 }
+func (f *manualFixture) AttendanceClassScope(context.Context, string) (string, string, error) {
+	return "grade", "major", nil
+}
 func (f *manualFixture) ValidateManualAttendance(context.Context, ManualAttendanceInput, academic.Week, string) (AttendanceRecord, error) {
 	return f.record, nil
 }
@@ -60,6 +63,15 @@ func TestManualAttendanceCreatesAuditedDraftAndRejectsDeniedScope(t *testing.T) 
 	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); err != nil {
 		t.Fatal(err)
 	}
+	f.rules.Permissions[0].Ranges = []permission.OperationRange{{GradeID: "grade", MajorID: "major"}}
+	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); err != nil {
+		t.Fatal(err)
+	}
+	f.rules.Permissions[0].Ranges = []permission.OperationRange{{GradeID: "other"}}
+	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); !errors.Is(err, ErrScopeMismatch) {
+		t.Fatal("outside grade", err)
+	}
+	f.rules.Permissions[0].Ranges = nil
 	f.record.GradeSnapshot = "2025"
 	f.rules.Permissions = append(f.rules.Permissions, permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectDeny, Scope: permission.Scope{Grade: "2025"}})
 	if _, err = s.Create(context.Background(), actor, input, audit.Metadata{}); !errors.Is(err, ErrScopeMismatch) {

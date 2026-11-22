@@ -78,7 +78,7 @@ func lockCourseImportReferences(ctx context.Context, tx pgx.Tx, scope inspection
 
 // authorizeImportedClass repeats current range checks inside the confirmation transaction.
 func authorizeImportedClass(ctx context.Context, tx pgx.Tx, input importjob.ConfirmBatchInput, classID string) error {
-	scope := permission.Scope{SemesterID: input.Scope.SemesterID, WeekID: input.Scope.WeekID, InspectionTypeID: input.Scope.InspectionTypeID, DepartmentID: input.Scope.DepartmentID, ClassID: classID, StageGrades: map[int]string{}}
+	scope := permission.Scope{SemesterID: input.Scope.SemesterID, WeekID: input.Scope.WeekID, InspectionTypeID: input.Scope.InspectionTypeID, DepartmentID: input.Scope.DepartmentID, ClassID: classID}
 	err := tx.QueryRow(ctx, `SELECT c.grade_id,COALESCE(c.major_id::text,''),s.academic_year_id FROM classes c CROSS JOIN semesters s WHERE c.id=$1 AND s.id=$2 FOR SHARE OF c,s`, classID, input.Scope.SemesterID).Scan(&scope.GradeID, &scope.MajorID, &scope.AcademicYearID)
 	if err != nil {
 		return err
@@ -94,28 +94,7 @@ func authorizeImportedClass(ctx context.Context, tx pgx.Tx, input importjob.Conf
 	if !listed {
 		return importjob.ErrPreviewStale
 	}
-	rows, err := tx.Query(ctx, `SELECT stage,grade_id FROM academic_year_grade_stages WHERE academic_year_id=$1 FOR SHARE`, scope.AcademicYearID)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var stage int
-		var grade string
-		if err := rows.Scan(&stage, &grade); err != nil {
-			rows.Close()
-			return err
-		}
-		scope.StageGrades[stage] = grade
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
 	if !input.Permissions.Allowed(permission.ActionInspectionEnter, scope) {
-		if permission.MissingStageMapping(input.Permissions.Permissions, scope) {
-			return permission.ErrGradeMappingMissing
-		}
 		return importjob.ErrBatchScopeMismatch
 	}
 	return nil

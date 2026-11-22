@@ -111,7 +111,6 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
     client.setQueryData(['department-defaults', result.departmentId], result)
     setDrafts(previous => { const next = { ...previous }; delete next[result.departmentId]; return next })
     void client.invalidateQueries({ queryKey: ['department-defaults'] })
-    void client.invalidateQueries({ queryKey: ['legacy-stage-grants'] })
     void client.invalidateQueries({ queryKey: ['effective-permissions'] })
     message.success('部门默认权限已保存')
   }, onError: error => {
@@ -149,7 +148,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
   const reportSummary = !reportEnabled ? '未承担' : reportActions.filter(([key]) => draft?.reportScope[key]).map(([key]) => reportShortNames[key]).join('、') || '未开放动作'
   const confirmSave = () => {
     if (!draft || !changeList.length) return
-    if (draft.rolePolicies.some(policy => policy.operationRanges.some(action => action.ranges?.some(range => range.gradeStage)))) { message.error('模板仍有按阶段授权的范围，请逐项选择具体年级后保存'); return }
+    if (draft.rolePolicies.some(policy => policy.operationRanges.some(action => action.ranges?.some(range => range.gradeStage)))) { message.error('服务器返回了已停用的阶段范围，请联系管理员核对数据库迁移 070 后重新加载'); return }
     if (draft.rolePolicies.some(policy => policy.operationRanges.some(action => (action.ranges ?? []).some(range => !range.gradeId && !range.majorId && !range.classId && !range.gradeStage)))) { message.error('每组操作范围至少选择一个条件，或删除空组'); return }
     modal.confirm({ title: `保存“${selectedDepartment?.name}”默认权限？`, width: 620, okText: '保存全部修改', cancelText: '继续编辑',
       content: <div><Typography.Paragraph>本次修改用于后续授予，已授予用户的角色默认权限保持不变。部门是否承担业务及部门功能开关实时生效；当前关联账号 {affectedUsers ?? "尚未读取"} 人。</Typography.Paragraph>
@@ -232,7 +231,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
       </Drawer>
       <Modal className="permission-range-modal" title={`${editingType?.name ?? ''} · ${rangeEditor?.label ?? ''} · 操作范围`} open={Boolean(rangeEditor && rangeEnabled)} width={600} onCancel={() => setRangeEditor(null)} okText="应用范围" cancelText="取消" destroyOnHidden onOk={() => {
         if (!rangeEditor) return
-        if (rangeDraft.some(range => range.gradeStage)) { message.error('请将旧阶段调整为具体年级'); return }
+        if (rangeDraft.some(range => range.gradeStage)) { message.error('该模板仍含已停用的阶段范围，请核对迁移 070 后重新加载'); return }
         if (rangeDraft.some(range => !range.gradeId && !range.gradeStage && !range.majorId && !range.classId)) { message.error('请选择范围条件，或删除空组'); return }
         if (hasConflictingClasses(rangeDraft, rangeChoices.data?.classId ?? [])) { message.error('所选班级与年级或专业不匹配，请重新选择班级'); return }
         update({ ...draft, rolePolicies: draft.rolePolicies.map(policy => policy.roleCode === rangeEditor.roleCode ? { ...policy, operationRanges: [...policy.operationRanges.filter(item => item.action !== rangeEditor.action || item.inspectionTypeId !== rangeEditor.inspectionTypeId), { action: rangeEditor.action, inspectionTypeId: rangeEditor.inspectionTypeId, ranges: rangeDraft }] } : policy) })

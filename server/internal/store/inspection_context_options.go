@@ -66,11 +66,6 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 		}
 		a.Permissions = rules
 	}
-	if q.Purpose != "view" && !a.Unrestricted {
-		if err := requireStageConfiguration(ctx, tx, q.SemesterID, result.InspectionTypeID, a.Permissions); err != nil {
-			return result, err
-		}
-	}
 	if q.Purpose == "view" && q.Kind == "weeks" && !a.Unrestricted {
 		result.DefaultFilters, err = suggestedInspectionFilters(ctx, tx, q.SemesterID, result.InspectionTypeID, a.Permissions)
 		if err != nil {

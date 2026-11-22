@@ -62,16 +62,15 @@ var allActions = []string{
 }
 
 type Scope struct {
-	GradeID          string         `json:"-"`
-	MajorID          string         `json:"-"`
-	StageGrades      map[int]string `json:"-"`
-	AcademicYearID   string         `json:"academicYearId,omitempty"`
-	SemesterID       string         `json:"semesterId,omitempty"`
-	WeekID           string         `json:"weekId,omitempty"`
-	InspectionTypeID string         `json:"inspectionTypeId,omitempty"`
-	DepartmentID     string         `json:"departmentId,omitempty"`
-	ClassID          string         `json:"classId,omitempty"`
-	Grade            string         `json:"grade,omitempty"`
+	GradeID          string `json:"-"`
+	MajorID          string `json:"-"`
+	AcademicYearID   string `json:"academicYearId,omitempty"`
+	SemesterID       string `json:"semesterId,omitempty"`
+	WeekID           string `json:"weekId,omitempty"`
+	InspectionTypeID string `json:"inspectionTypeId,omitempty"`
+	DepartmentID     string `json:"departmentId,omitempty"`
+	ClassID          string `json:"classId,omitempty"`
+	Grade            string `json:"grade,omitempty"`
 }
 
 type Source struct {
@@ -185,7 +184,7 @@ type EffectiveResult struct {
 // Record writes separately authorize every class in the repository transaction.
 func (r EffectiveResult) Allowed(action string, requested Scope) bool {
 	matchesRange := func(entry EffectivePermission) bool {
-		return requested.ClassID == "" || MatchesOperationRanges(entry.Ranges, OperationTarget{GradeID: requested.GradeID, MajorID: requested.MajorID, ClassID: requested.ClassID, StageGrades: requested.StageGrades})
+		return requested.ClassID == "" || MatchesOperationRanges(entry.Ranges, OperationTarget{GradeID: requested.GradeID, MajorID: requested.MajorID, ClassID: requested.ClassID})
 	}
 	for _, allow := range r.Permissions {
 		if allow.Action != action || allow.Effect != EffectAllow || !scopeMatches(allow.Scope, requested) || !matchesRange(allow) {
@@ -325,6 +324,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 				}
 			}
 			result.DefaultPermissions = append(result.DefaultPermissions, entry)
+			if !retainFixedRanges(&entry) {
+				continue
+			}
 			if !departmentSupports(department, entry.Action, entry.Scope.InspectionTypeID) || overridden || now.Before(department.StartsAt) || (entry.EndsAt != nil && !now.Before(*entry.EndsAt)) {
 				continue
 			}
@@ -340,6 +342,9 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 			continue
 		}
 		entry := userRulePermission(rule)
+		if !retainFixedRanges(&entry) {
+			continue
+		}
 		if rule.SourceDepartmentID != "" {
 			found := false
 			for _, department := range profile.Departments {

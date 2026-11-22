@@ -163,7 +163,7 @@ func TestTeacherRouteRangesPostgres(t *testing.T) {
 	study, yearOne, year, gradeOne, gradeTwo, major, class, record, actor, kind := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	rules := []permission.EffectivePermission{
 		{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow, SourceDepartmentID: study, Scope: permission.Scope{InspectionTypeID: kind}},
-		{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow, SourceDepartmentID: yearOne, Scope: permission.Scope{InspectionTypeID: kind}, Ranges: []permission.OperationRange{{GradeStage: 1}}},
+		{Action: permission.ActionInspectionReview, Effect: permission.EffectAllow, SourceDepartmentID: yearOne, Scope: permission.Scope{InspectionTypeID: kind}, Ranges: []permission.OperationRange{{GradeID: gradeOne}}},
 	}
 	// CTEs isolate reference data while executing the production permission SQL in PostgreSQL.
 	prefix := `WITH classes AS (SELECT $1::uuid id,$2::uuid grade_id,$3::uuid major_id),
@@ -282,19 +282,10 @@ func TestYearMappingConsumersPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	entries := []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Ranges: []permission.OperationRange{{GradeStage: 2}}}}
-	if err := requireStageConfiguration(ctx, tx, semester1, "", entries); err != permission.ErrGradeMappingMissing {
-		t.Fatalf("missing mapping: %v", err)
-	}
-	entries = append(entries, permission.EffectivePermission{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow})
-	if err := requireStageConfiguration(ctx, tx, semester1, "", entries); err != nil {
-		t.Fatal("valid alternative blocked", err)
-	}
-	entries = entries[:1]
-	entries[0].Ranges[0].GradeStage = 1
+	entries := []permission.EffectivePermission{{Action: permission.ActionInspectionEnter, Effect: permission.EffectAllow, Ranges: []permission.OperationRange{{GradeID: grade}}}}
 	suggested, err := suggestedInspectionFilters(ctx, tx, semester1, "", entries)
 	if err != nil || suggested["grade"] != "G-"+grade[:8] {
-		t.Fatalf("default mapped grade: %+v %v", suggested, err)
+		t.Fatalf("default fixed grade: %+v %v", suggested, err)
 	}
 	entries[0].Ranges = append(entries[0].Ranges, permission.OperationRange{ClassID: uuid.NewString()})
 	suggested, err = suggestedInspectionFilters(ctx, tx, semester1, "", entries)

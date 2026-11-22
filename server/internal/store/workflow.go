@@ -64,11 +64,6 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		return workflow.Submission{}, workflow.ErrSubmissionScope
 	}
 	access := inspection.MutationAccess{ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
-	if !command.Unrestricted {
-		if err := requireStageConfiguration(ctx, tx, command.Scope.SemesterID, command.Scope.InspectionTypeID, command.Permissions); err != nil {
-			return workflow.Submission{}, err
-		}
-	}
 	if command.Kind == workflow.SubmissionKindZeroRecord {
 		if err := requireZeroReceiptCell(ctx, tx, command.Scope, academicYearID, access, permission.ActionInspectionEnter); err != nil {
 			return workflow.Submission{}, err
@@ -286,11 +281,6 @@ func (p *Postgres) DecideDepartmentBatch(ctx context.Context, command workflow.D
 	}
 	access := inspection.MutationAccess{TargetDepartmentID: result.Scope.DepartmentID, ActorID: command.ActorID, Unrestricted: command.Unrestricted, Permissions: command.Permissions}
 	IDs := make([]string, 0, expected)
-	if !command.Unrestricted {
-		if err := requireStageConfiguration(ctx, tx, result.Scope.SemesterID, result.Scope.InspectionTypeID, command.Permissions); err != nil {
-			return workflow.Submission{}, err
-		}
-	}
 	if result.Kind == workflow.SubmissionKindZeroRecord {
 		if expected != 0 || (!access.Unrestricted && !permission.AllowsWholeScope(access.Permissions, permission.ActionInspectionReview, permission.Scope{
 			AcademicYearID: academicYearID, SemesterID: result.Scope.SemesterID, WeekID: result.Scope.WeekID,
@@ -394,11 +384,6 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 	}
 	if command.MemberDepartmentID != nil && !slices.Contains(command.MemberDepartmentIDs, result.Scope.DepartmentID) {
 		return workflow.Submission{}, workflow.ErrSubmissionScope
-	}
-	if !command.Unrestricted {
-		if err := requireStageConfiguration(ctx, tx, result.Scope.SemesterID, result.Scope.InspectionTypeID, command.Permissions); err != nil {
-			return workflow.Submission{}, err
-		}
 	}
 	if result.Kind != command.Kind {
 		return workflow.Submission{}, workflow.ErrInvalidSubmit

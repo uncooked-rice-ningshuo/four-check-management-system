@@ -246,8 +246,6 @@ func writeInspectionError(c *gin.Context, err error) {
 		c.JSON(422, gin.H{"code": "VALIDATION_FAILED", "message": "请核对检查明细", "details": validation.Issues})
 	case errors.Is(err, inspection.ErrInspectionRequest):
 		writeError(c, 400, "INVALID_REQUEST", "请核对记录标识、版本、操作原因及筛选参数")
-	case errors.Is(err, permission.ErrGradeMappingMissing):
-		writeError(c, http.StatusConflict, "ACADEMIC_GRADE_MAPPING_MISSING", "该记录所属学年尚未配置所需年级阶段映射，请联系管理员完善学年配置")
 	case errors.Is(err, inspection.ErrScopeMismatch):
 		writeError(c, 403, "FORBIDDEN_SCOPE", "无权操作所选范围")
 	case errors.Is(err, inspection.ErrRecordNotFound):

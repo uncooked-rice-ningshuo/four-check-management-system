@@ -20,7 +20,7 @@ interface RecordFixture {
 
 const records: RecordFixture[] = [
   { id: '2', category: 'organization', body: '部门与角色已更新，即时生效。当前主部门：学习部；学习部（老师）', read: false, createdAt: '2026-11-22T02:00:00Z' },
-  { id: '1', category: 'permission', action: 'DISCIPLINE_LEDGER_VIEW', body: '个人授权规则已启用。动作 检查查看，开始日期 2026-11-23。', read: false, createdAt: '2026-11-22T01:00:00Z' },
+  { id: '1', category: 'permission', action: 'DISCIPLINE_LEDGER_VIEW', body: '个人授权已修改。生效时间（北京时间）：2026-11-22 → 2026-11-23。', read: false, createdAt: '2026-11-22T01:00:00Z' },
 ]
 
 function response(query: InboxQuery) {
@@ -38,7 +38,7 @@ function response(query: InboxQuery) {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
-  const view = render(<QueryClientProvider client={client}><InboxPage /></QueryClientProvider>)
+  const view = render(<QueryClientProvider client={client}><InboxPage recipientName="张同学" /></QueryClientProvider>)
   return { client, ...view }
 }
 
@@ -216,7 +216,7 @@ describe('InboxPage', () => {
     await screen.findByRole('cell', { name: /部门与角色变更/ })
     await submitSearch({ category: '个人授权' })
     await waitFor(() => expect(getInbox).toHaveBeenCalledWith(query({ category: 'permission' })))
-    await screen.findByRole('cell', { name: /个人授权变更/ })
+    await screen.findByRole('cell', { name: /个人授权已修改/ })
 
     fireEvent.click(screen.getByRole('button', { name: '全部标为已读' }))
     const dialog = await screen.findByRole('dialog')
@@ -271,10 +271,11 @@ describe('InboxPage', () => {
 
     const messageTime = document.querySelector('time[dateTime="2026-11-22T02:00:00Z"]')
     expect(messageTime).toHaveAttribute('dateTime', '2026-11-22T02:00:00Z')
-    const effective = screen.getByText('授权生效')
-    const chip = effective.parentElement
-    expect(chip).toHaveTextContent('2026-11-23')
-    expect(chip?.querySelector('time')).toHaveAttribute('dateTime', '2026-11-23')
+    fireEvent.click(screen.getByRole('button', { name: /学期违纪台账查看.*个人授权已修改/ }))
+    const letter = screen.getByRole('region', { name: '消息详情' })
+    expect(letter).toHaveTextContent('张同学，您好！')
+    expect(letter).toHaveTextContent('生效时间（北京时间）')
+    expect(letter).toHaveTextContent('2026-11-22 → 2026-11-23')
   })
 
   it('selects rows and marks only the selected messages read', async () => {
@@ -365,10 +366,10 @@ describe('InboxPage', () => {
     let detail = await screen.findByRole('region', { name: '消息详情' })
     expect(detail).toHaveTextContent('部门与角色已更新')
 
-    const secondTitle = screen.getByRole('button', { name: '个人授权变更' })
+    const secondTitle = screen.getByRole('button', { name: /个人授权已修改/ })
     fireEvent.click(secondTitle)
     detail = await screen.findByRole('region', { name: '消息详情' })
-    expect(detail).toHaveTextContent('个人授权规则已启用')
+    expect(detail).toHaveTextContent('个人授权已修改')
     expect(detail).not.toHaveTextContent('部门与角色已更新')
 
     fireEvent.keyDown(document, { key: 'Escape' })

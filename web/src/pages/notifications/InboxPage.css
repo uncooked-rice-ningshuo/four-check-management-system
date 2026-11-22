@@ -408,3 +408,5 @@
     box-shadow: inset 3px 0 0 Highlight;
   }
 }
+
+.inbox-letter-signature { margin-block-start: 24px; text-align: end; color: var(--ant-color-text-secondary); }

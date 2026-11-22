@@ -820,8 +820,11 @@ func (p *Postgres) CreateRule(ctx context.Context, value permission.Rule, mutati
 		if err := invalidatePermissionSessions(ctx, tx, value.AccountID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission',$2,$3)`, value.AccountID, permissionMessage(value), value.Action)
-		return err
+		after, err := readRuleNotice(ctx, tx, value.ID, value.AccountID)
+		if err != nil {
+			return err
+		}
+		return writeRuleNotice(ctx, tx, value.AccountID, value.Action, nil, after)
 	})
 	return value, err
 }
@@ -831,9 +834,8 @@ func (p *Postgres) UpdateRule(ctx context.Context, value permission.Rule, mutati
 			return err
 		}
 		// Compare the stored values under the rule lock so a repeated save creates no new message.
-		const ruleState = `SELECT (to_jsonb(r)-'updated_at'-'note')::text FROM user_permission_rules r WHERE id=$1 AND account_id=$2 FOR UPDATE`
-		var before, after string
-		if err := tx.QueryRow(ctx, ruleState, value.ID, value.AccountID).Scan(&before); err != nil {
+		before, err := readRuleNotice(ctx, tx, value.ID, value.AccountID)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return permission.ErrInvalidRule
 			}
@@ -849,22 +851,26 @@ func (p *Postgres) UpdateRule(ctx context.Context, value permission.Rule, mutati
 		if err := invalidatePermissionSessions(ctx, tx, value.AccountID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, ruleState, value.ID, value.AccountID).Scan(&after); err != nil {
+		after, err := readRuleNotice(ctx, tx, value.ID, value.AccountID)
+		if err != nil {
 			return err
 		}
-		if before == after {
-			return nil
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission',$2,$3)`, value.AccountID, permissionMessage(value), value.Action)
-		return err
+		return writeRuleNotice(ctx, tx, value.AccountID, value.Action, before, after)
 	})
 	return value, err
 }
 
 func (p *Postgres) DeleteRule(ctx context.Context, accountID, ruleID string, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		before, err := readRuleNotice(ctx, tx, ruleID, accountID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		var action string
-		err := tx.QueryRow(ctx, `DELETE FROM user_permission_rules WHERE id=$1 AND account_id=$2 RETURNING action`, ruleID, accountID).Scan(&action)
+		err = tx.QueryRow(ctx, `DELETE FROM user_permission_rules WHERE id=$1 AND account_id=$2 RETURNING action`, ruleID, accountID).Scan(&action)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -874,25 +880,61 @@ func (p *Postgres) DeleteRule(ctx context.Context, accountID, ruleID string, mut
 		if err := invalidatePermissionSessions(ctx, tx, accountID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission','个人授权规则已撤销，即时生效。',$2)`, accountID, action)
-		return err
+		return writeRuleNotice(ctx, tx, accountID, action, before, nil)
 	})
 }
 
-func permissionMessage(rule permission.Rule) string {
-	description := "允许"
-	if rule.Effect == "DENY" || rule.Mode == "DISABLE" {
-		description = "限制"
+// Read labels in the mutation transaction so historical messages retain their original meaning.
+func readRuleNotice(ctx context.Context, tx pgx.Tx, id, account string) ([]string, error) {
+	var fields []string
+	err := tx.QueryRow(ctx, `SELECT ARRAY[r.action,
+ CASE r.effect WHEN 'ALLOW' THEN '允许' ELSE '禁止' END,
+ CASE r.mode WHEN 'DISABLE' THEN '禁用默认权限' WHEN 'OVERRIDE' THEN '调整默认权限' ELSE '个人追加' END,
+ CASE WHEN r.enabled THEN '启用' ELSE '停用' END,
+ coalesce(d.name,'账号全局'),coalesce(i.name,'不限'),
+ coalesce((SELECT string_agg(nullif(concat_ws('、',g.name,m.name,c.name,CASE WHEN x ? 'gradeStage' THEN '历史年级阶段 '||(x->>'gradeStage') END),''),' 或 ' ORDER BY n)
+ FROM jsonb_array_elements(nullif(r.operation_ranges,'null'::jsonb)) WITH ORDINALITY t(x,n)
+ LEFT JOIN grades g ON g.id::text=x->>'gradeId' LEFT JOIN majors m ON m.id::text=x->>'majorId'
+ LEFT JOIN classes c ON c.id::text=x->>'classId'),'不限'),
+ coalesce(to_char(r.starts_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS'),'立即'),
+ coalesce(to_char(r.ends_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD HH24:MI:SS'),'长期有效')]
+ FROM user_permission_rules r LEFT JOIN departments d ON d.id=r.source_department_id
+ LEFT JOIN inspection_types i ON i.id=r.inspection_type_id WHERE r.id=$1 AND r.account_id=$2 FOR UPDATE OF r`, id, account).Scan(&fields)
+	return fields, err
+}
+
+func ruleNoticeBody(before, after []string) string {
+	labels := []string{"权限动作", "权限设置", "授权方式", "规则状态", "来源部门", "检查业务", "操作范围", "生效时间（北京时间）", "截止时间（北京时间）"}
+	var changes []string
+	title := "个人授权已修改"
+	for i, label := range labels {
+		switch {
+		case before == nil:
+			title = "已新增个人授权"
+			if i != 0 {
+				changes = append(changes, label+"："+after[i])
+			}
+		case after == nil:
+			title = "已撤销个人授权"
+			if i != 0 {
+				changes = append(changes, label+"："+before[i])
+			}
+		case before[i] != after[i]:
+			changes = append(changes, label+"："+before[i]+" → "+after[i])
+		}
 	}
-	if !rule.Enabled {
-		description = "停用"
+	if len(changes) == 0 {
+		return ""
 	}
-	zone := time.FixedZone("UTC+8", 8*60*60)
-	message := fmt.Sprintf("个人授权规则已更新（%s）。起始时间 %s", description, rule.StartsAt.In(zone).Format("2006-01-02 15:04"))
-	if rule.EndsAt != nil {
-		message += "，截止时间 " + rule.EndsAt.In(zone).Format("2006-01-02 15:04")
+	return title + "。" + strings.Join(changes, "；") + "。"
+}
+func writeRuleNotice(ctx context.Context, tx pgx.Tx, account, action string, before, after []string) error {
+	body := ruleNoticeBody(before, after)
+	if body == "" {
+		return nil
 	}
-	return message + "（北京时间）。"
+	_, err := tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission',$2,$3)`, account, body, action)
+	return err
 }
 func invalidatePermissionSessions(ctx context.Context, tx pgx.Tx, accountID string) error {
 	if _, err := tx.Exec(ctx, `UPDATE accounts SET session_version=session_version+1,updated_at=now() WHERE id=$1`, accountID); err != nil {

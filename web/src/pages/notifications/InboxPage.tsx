@@ -1,8 +1,8 @@
 import { permissionActionName } from '../../entities/permission/model/actions'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { Alert, Button, Modal, Select, Space, Tag, Typography } from 'antd'
-import { ApartmentOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CheckOutlined, ApartmentOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useInbox, useMarkInboxRead } from '../../features/notifications/useInbox'
 import type { InboxItem, InboxSort } from '../../shared/api/inboxApi'
 import './InboxPage.css'
@@ -44,44 +44,31 @@ function categoryIcon(category: string) {
     : <ApartmentOutlined aria-hidden="true" />
 }
 
-function renderPermissionBody(body: string): ReactNode {
-  // 授权通知用正文真实字段组织为段落；不解析或改写未知内容。
-  const fields = body.split(/(?=\b(?:部门|角色|动作|检查类型|操作范围|起始时间|开始日期|截止时间)\s*[：:])/g)
-    .map(part => part.trim()).filter(Boolean)
-  if (fields.length < 2) return renderRuleDates(body)
-  return <dl className="inbox-detail__fields">{fields.map((field, index) => {
-    const match = field.match(/^(部门|角色|动作|检查类型|操作范围|起始时间|开始日期|截止时间)\s*[：:]\s*(.*)$/s)
-    if (!match) return <div className="inbox-detail__field inbox-detail__field--wide" key={index}><dd>{renderRuleDates(field)}</dd></div>
-    const label = match[1] === '起始时间' || match[1] === '开始日期' ? '授权生效' : match[1] === '截止时间' ? '授权截止' : match[1]
-    return <div className="inbox-detail__field" key={index}><dt>{label}</dt><dd>{renderRuleDates(match[2])}</dd></div>
-  })}</dl>
+function noticeSubject(item: InboxItem) {
+  const action = item.action ? permissionActionName(item.action) : ''
+  return action ? `${action} · ${item.body.split('。', 1)[0]}` : categoryTitle[item.category] ?? '账号变更'
+}
+
+function NoticeLetter({ item, recipientName }: { item: InboxItem; recipientName?: string }) {
+  const [opening, ...paragraphs] = item.body.split('。').filter(Boolean)
+  const fields = paragraphs.join('。').split('；').filter(Boolean)
+  return <>
+    <p>{recipientName ? `${recipientName}，您好！` : '您好！'}</p>
+    <p>{item.action ? `您账号中「${permissionActionName(item.action)}」的` : '您的'}{opening}。</p>
+    {fields.length > 0 && <dl className="inbox-detail__fields">{fields.map((field, index) => {
+      const split = field.indexOf('：')
+      return split < 0 ? <div key={index}><dd>{field}</dd></div> : <div key={index} className="inbox-detail__field">
+        <dt>{field.slice(0, split)}</dt><dd>{field.slice(split + 1)}</dd>
+      </div>
+    })}</dl>}
+    <p className="inbox-letter-signature">学生日常管理系统</p>
+  </>
 }
 
 // 全部标为已读的提交边界在弹窗打开时冻结；轮询期间新到的消息不属于用户确认时看到的未读集合。
 interface ReadAllBoundary {
   through: string
   unread: number
-}
-
-// 授权正文里的日期是规则生效/截止时间，与消息生成时间是两个不同语义，渲染时分别标注。
-const ruleDatePattern = /(起始时间|开始日期|截止时间)\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)/g
-
-function renderRuleDates(body: string): ReactNode[] {
-  const parts: ReactNode[] = []
-  let cursor = 0
-  for (const match of body.matchAll(ruleDatePattern)) {
-    const at = match.index ?? 0
-    if (at > cursor) parts.push(body.slice(cursor, at))
-    const label = match[1] === '截止时间' ? '授权截止' : '授权生效'
-    const date = match[2]
-    parts.push(<span className="inbox-item__effective" key={`${at}-${label}`}>
-      <span className="inbox-item__effective-label">{label}</span>
-      <time dateTime={date.replace(' ', 'T')}>{date}</time>
-    </span>)
-    cursor = at + match[0].length
-  }
-  if (cursor < body.length) parts.push(body.slice(cursor))
-  return parts
 }
 
 function messageTime(iso: string): string {
@@ -93,7 +80,7 @@ function shortMessageTime(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-export function InboxPage() {
+export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState<InboxFilters>(emptyFilters)
   const [sort, setSort] = useState<InboxSort>('newest')
@@ -229,7 +216,7 @@ export function InboxPage() {
       // 分栏时列表只保留摘要列，类别仍在查询表单与详情中完整呈现。
       hideInTable: compact,
       render: (_, record) => <Tag variant="filled" color={record.read ? undefined : 'blue'}>
-        {categoryTitle[record.category] ?? '消息变更'}
+        {noticeSubject(record)}
       </Tag>,
       responsive: ['sm'],
     },
@@ -243,10 +230,10 @@ export function InboxPage() {
           className="inbox-cell-title inbox-cell-open"
           onClick={event => { event.stopPropagation(); openDetail(record.id, event.currentTarget) }}
         >
-          {categoryTitle[record.category] ?? '消息变更'}
+          {noticeSubject(record)}
         </button>
-        {record.action && <strong className="inbox-cell-action">{permissionActionName(record.action)}</strong>}
-        {renderRuleDates(record.body)}
+
+        {record.body.split('。').filter(Boolean)[1]?.split('；')[0] ?? record.body}
         <span className="inbox-cell-status-mobile" aria-hidden="true">
           <Tag color={record.read ? 'default' : 'blue'}>{record.read ? '已读' : '未读'}</Tag>
         </span>
@@ -344,20 +331,20 @@ export function InboxPage() {
         >
           <div className="inbox-detail__head">
             <span className="inbox-detail__caption">阅读消息</span>
-            <Button type="text" size="small" onClick={closeDetail}>返回列表</Button>
+            <Button type="link" icon={<ArrowLeftOutlined aria-hidden />} onClick={closeDetail}>返回列表</Button>
           </div>
           <article className="inbox-detail__content">
             {detailItem && <div key={detailItem.id} className="inbox-detail__message">
-            <h3 className="inbox-detail__title">{categoryTitle[detailItem.category] ?? '消息变更'}</h3>
+            <h3 className="inbox-detail__title">{noticeSubject(detailItem)}</h3>
             <div className="inbox-detail__meta">
               <span className="inbox-detail__category-icon">{categoryIcon(detailItem.category)}<span>{detailItem.category === 'permission' ? '个人授权' : '组织变更'}</span></span>
               {detailItem.action && <span>{permissionActionName(detailItem.action)}</span>}
               <time dateTime={detailItem.createdAt}>{messageTime(detailItem.createdAt)}</time>
               <span className={`inbox-detail__read-state${detailItem.read ? '' : ' inbox-detail__read-state--unread'}`}>{detailItem.read ? '已读' : '未读'}</span>
             </div>
-            <div className="inbox-detail__body">{detailItem.category === 'permission' ? renderPermissionBody(detailItem.body) : renderRuleDates(detailItem.body)}</div>
+            <div className="inbox-detail__body"><NoticeLetter item={detailItem} recipientName={recipientName} /></div>
             <div className="inbox-detail__foot">
-              {!detailItem.read && <Button size="small" disabled={read.isPending} onClick={() => void markOne(detailItem.id)}>标为已读</Button>}
+              {!detailItem.read && <Button type="primary" icon={<CheckOutlined aria-hidden />} loading={read.isPending} onClick={() => void markOne(detailItem.id)}>标为已读</Button>}
             </div>
             </div>}
           </article>

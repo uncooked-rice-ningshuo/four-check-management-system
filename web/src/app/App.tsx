@@ -39,6 +39,11 @@ import { useAuth } from './providers/authContext'
 import { useAttendancePermissions } from '../features/attendance/hooks/useAttendancePermissions'
 import { hasNavigableInspectionAction } from '../features/attendance/hooks/hasNavigableInspectionAction'
 
+function AccountInbox() {
+  const { user } = useAuth()
+  return <InboxPage recipientName={user?.name} />
+}
+
 function RuleConfig({mode}: {mode:'view'|'edit'}) {
   const {user} = useAuth()
   const grants = useAttendancePermissions()
@@ -60,7 +65,7 @@ export default function App() {
 			<Route index element={<HomePage />} />
 			<Route path="discipline/config" element={<EffectivePermissionRoute action={['DISCIPLINE_RULE_VIEW','DISCIPLINE_RULE_EDIT','DISCIPLINE_RULE_PUBLISH']}><RuleConfig mode="view" /></EffectivePermissionRoute>} />
       <Route path="discipline/config/edit" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_EDIT"><RuleConfig mode="edit" /></EffectivePermissionRoute>} />
-      <Route path="notifications" element={<InboxPage />} />
+      <Route path="notifications" element={<AccountInbox />} />
       <Route path="discipline/archive" element={<EffectivePermissionRoute action="DISCIPLINE_ARCHIVE_VIEW"><DisciplineArchivePage /></EffectivePermissionRoute>} />
       <Route path="discipline/ledger" element={<EffectivePermissionRoute action="DISCIPLINE_LEDGER_VIEW"><SemesterLedgerPage /></EffectivePermissionRoute>} />
       <Route path="discipline/review" element={<EffectivePermissionRoute action={['DISCIPLINE_CASE_CONFIRM', 'DISCIPLINE_CASE_VIEW']}><DisciplineReviewPage /></EffectivePermissionRoute>} />

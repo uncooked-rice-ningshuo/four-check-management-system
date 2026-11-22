@@ -400,9 +400,9 @@ export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { m
     setGroups(previous.groups, ['groups'])
     messageApi.success('已撤销最近一次归组调整')
   }
-  const setGroupField = (group: DisciplineGroup, field: keyof DisciplineGroup, value: string) => {
+  const setGroupField = (group: DisciplineGroup, field: 'name'|'unit'|'violationName', value: string) => {
     const groupIndex = groups.findIndex((item) => item.key === group.key)
-    const patch = field === 'name' ? { name: value } : { unit: value }
+    const patch = { [field]:value }
     setUndoGroups([])
     updateGroup(group.key, patch, [`groups[${groupIndex}].${field}`])
     if (field === 'unit') {
@@ -410,7 +410,7 @@ export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { m
       setTierNeedsReview((current) => new Set(current).add(group.key))
     }
   }
-  const setTierField = (group: DisciplineGroup, tierIndex: number, patch: Partial<DisciplineTier>, changed: 'name' | 'lower' | 'upper' | 'clause' | 'teacherConfirmationRequired') => {
+  const setTierField = (group: DisciplineGroup, tierIndex: number, patch: Partial<DisciplineTier>, changed: 'authorityNumber'|'clauseReference'|'name' | 'lower' | 'upper' | 'clause' | 'teacherConfirmationRequired') => {
     const groupIndex = groups.findIndex((item) => item.key === group.key)
     const prefix = `groups[${groupIndex}].tiers[${tierIndex}]`
     const related = [`${prefix}.${changed}`]
@@ -671,7 +671,7 @@ export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { m
           <div className="discipline-formula-layout">
             <nav className="discipline-group-nav" aria-label="选择累计项">{groups.map((group) => <Button key={group.key} block type={group.key === selectedGroup?.key ? 'primary' : 'default'} onClick={() => setSelectedGroupKey(group.key)}><span className="discipline-group-nav-label">{group.name}</span><span className="discipline-group-nav-meta">包含 {group.terms.length} 项检查 · {formulaNeedsReview.has(group.key) ? '需重审公式' : '公式已确认'}</span></Button>)}</nav>
             {selectedGroup && <Card title={`累计项：${selectedGroup.name}`} className="discipline-formula-editor">
-              <Form layout="vertical"><Form.Item label="统一计量单位" {...fieldError(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].unit`)}><Input id={fieldControlId(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].unit`)} disabled={!editable} value={selectedGroup.unit} placeholder="例如：次、学时" onChange={(event) => setGroupField(selectedGroup, 'unit', event.target.value)} /></Form.Item></Form>
+              <Form layout="vertical"><Form.Item label="文书违纪事实名称"><Input disabled={!editable} maxLength={120} value={selectedGroup.violationName} onChange={event=>setGroupField(selectedGroup,'violationName',event.target.value)}/></Form.Item><Form.Item label="统一计量单位" {...fieldError(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].unit`)}><Input id={fieldControlId(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].unit`)} disabled={!editable} value={selectedGroup.unit} placeholder="例如：次、学时" onChange={(event) => setGroupField(selectedGroup, 'unit', event.target.value)} /></Form.Item></Form>
               {selectedGroup.terms.map((term, termIndex) => <div className="discipline-term-row" key={term.inspectionTypeId}>
                 <Typography.Text strong>{termIndex ? (term.operator === '+' ? '加' : '减') : '首项'} · {term.inspectionTypeName}</Typography.Text>
                 <Form layout="vertical" className="discipline-term-fields">
@@ -717,6 +717,10 @@ export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { m
                   const isEditing = tierTextEdit?.groupKey === selectedGroup.key && tierTextEdit.code === tier.code && tierTextEdit.field === 'clause'
                   return <Form.Item {...fieldError(path)}><div className="discipline-tier-text-cell">{isEditing ? <><Input.TextArea id={fieldControlId(path)} aria-label={`${tier.name}依据条款`} autoSize={{ minRows: 2, maxRows: 4 }} value={tierTextEdit.value} onChange={(event) => setTierTextEdit({ ...tierTextEdit, value: event.target.value })} /><Space size={4}><Button size="small" type="primary" onClick={() => saveTierText(selectedGroup, index)}>保存</Button><Button size="small" onClick={() => setTierTextEdit(undefined)}>取消</Button></Space></> : <Button className="discipline-tier-read-field discipline-tier-clause-field" type="text" disabled={!editable} onClick={() => setTierTextEdit({ groupKey: selectedGroup.key, code: tier.code, field: 'clause', value: tier.clause })}>{tier.clause || '点击填写处分依据'}</Button>}</div></Form.Item>
                 } },
+                { title:'文书依据',width:208,render:(_:unknown,tier:DisciplineTier,index:number)=><Space orientation="vertical" size={4}>
+                  <Input disabled={!editable} aria-label={tier.name+'依据文件文号'} placeholder="依据文件文号" maxLength={120} value={tier.authorityNumber} onChange={event=>setTierField(selectedGroup,index,{authorityNumber:event.target.value},'authorityNumber')}/>
+                  <Input disabled={!editable} aria-label={tier.name+'章条款定位'} placeholder="章条款定位" maxLength={120} value={tier.clauseReference} onChange={event=>setTierField(selectedGroup,index,{clauseReference:event.target.value},'clauseReference')}/>
+                </Space> },
                 { title: '需要人工确认', width: 145, render: (_: unknown, tier: DisciplineTier, index: number) => <div className="discipline-confirm-switch"><Switch checkedChildren="是" unCheckedChildren="否" aria-label={`${tier.name}需要人工确认`} disabled={!editable} checked={tier.teacherConfirmationRequired} onChange={(teacherConfirmationRequired) => setTierField(selectedGroup, index, { teacherConfirmationRequired }, 'teacherConfirmationRequired')} /></div> },
                 { title: '操作', width: 82, render: (_: unknown, _tier: DisciplineTier, index: number) => <Button danger type="link" disabled={!editable || selectedGroup.tiers.length === 1} onClick={() => removeTier(selectedGroup, index)}>移除</Button> },
               ]} /></div>

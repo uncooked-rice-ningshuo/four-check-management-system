@@ -44,31 +44,41 @@ describe('ReportOutputSettingsPanel', () => {
     })))
   })
 
+  it('converts the old layout and saves its table, title and section as separate blocks', async () => {
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', {name:'编辑模板'}))
+    expect(await screen.findByRole('toolbar',{name:'模板编辑工具'})).toBeVisible()
+    fireEvent.click(screen.getByRole('button',{name:'保存并完成'}))
+    await waitFor(()=>expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      introductionDocument:expect.objectContaining({schemaVersion:2,content:expect.arrayContaining([
+        {type:'sectionBreak',attrs:{orientation:'landscape'}},
+        {type:'reportTable',attrs:{key:'LATE_RETURN'}},
+        expect.objectContaining({type:'paragraph',content:[{type:'text',text:'晚归检查'}]}),
+      ])}),
+    })))
+  })
+
   it('opens the Word introduction editor', async () => {
     renderSettings()
-    expect(await screen.findByText('通报首页')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: '编辑首页' }))
+    expect(await screen.findByText('通报模板')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '编辑模板' }))
     expect((await screen.findAllByText('原说明'))[0]).toBeVisible()
-    expect(document.querySelector('.report-intro-content .tiptap')).toHaveTextContent('第9周日常管理检查通报')
-    expect(document.querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('{semesterName}')
-    expect(document.querySelector('.report-intro-content .tiptap')).toHaveTextContent('附件1：晚归检查')
-    expect(document.querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('附件：1.')
-    expect(document.querySelector('.report-intro-content .tiptap p[data-style="body"]')).toHaveAttribute('data-indent', '0')
-    expect(document.querySelector('.report-intro-content .tiptap p[data-style="body"]')).toHaveAttribute('data-line-spacing', '25')
-    expect(screen.getByRole('button', { name: '插入附件文本' })).toHaveClass('report-intro-tool')
-    expect(screen.getByRole('button', { name: '插入变量' })).toHaveClass('report-intro-tool')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).toHaveTextContent('第9周日常管理检查通报')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('{semesterName}')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).toHaveTextContent('附件1：晚归检查')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('附件：1.')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap p[data-style="body"]')).toHaveAttribute('data-indent', '0')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap p[data-style="body"]')).toHaveAttribute('data-line-spacing', '25')
+    expect(screen.getByRole('button', { name: '插入通报表' })).toHaveClass('report-intro-tool')
+    expect(screen.getByRole('button', { name: '插入字段' })).toHaveClass('report-intro-tool')
     fireEvent.click(screen.getByRole('button', { name: '段落间距' }))
     expect(await screen.findByRole('spinbutton', { name: '段前间距' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '行距方式' })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '编辑页首' }), { target: { value: '学院页首' } })
     expect(screen.getByRole('textbox', { name: '编辑页首' })).toHaveValue('学院页首')
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }))
-    expect(screen.getByRole('textbox', { name: '编辑页首' })).toHaveValue('')
-    fireEvent.click(screen.getByRole('button', { name: '重做' }))
-    expect(screen.getByRole('textbox', { name: '编辑页首' })).toHaveValue('学院页首')
     expect(screen.getAllByText('计算机科学与工程学院').length).toBeGreaterThan(0)
-    fireEvent.focus(document.querySelector('.report-intro-footer-content .tiptap')!)
-    expect(screen.getByRole('toolbar', { name: '页脚工具' })).toBeVisible()
+    fireEvent.focus(screen.getByRole('dialog').querySelector('.report-intro-footer-content .tiptap')!)
+    expect(screen.getByRole('toolbar', { name: '页脚快捷工具' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '参考页脚版式' }))
     fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
     await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
@@ -78,26 +88,21 @@ describe('ReportOutputSettingsPanel', () => {
 
   it('previews the selected Word attachments', async () => {
     vi.mocked(reportOutputApi.editorSettings).mockResolvedValue({ ...savedSettings, introductionDocument: { type: 'doc', content: [{ type: 'paragraph', attrs: { style: 'date', textAlign: 'right' }, content: [{ type: 'text', text: '{reportDate}' }] }] } })
-    const view = renderSettings()
-    expect(await screen.findByRole('menuitem', { name: /Word 配置/ })).toBeVisible()
-    const preview = view.container.querySelector<HTMLButtonElement>('.report-output-settings-header button:first-child')
-    expect(preview).not.toBeNull()
-    fireEvent.click(preview!)
-    expect(await screen.findByLabelText('晚归附件预览')).toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '预览通报周次' })).toBeInTheDocument()
-    await waitFor(() => expect(screen.getAllByText('2026年5月1日').length).toBeGreaterThan(0))
+    renderSettings()
+    expect((await screen.findAllByLabelText('模板内容预览')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('combobox', { name: '预览通报周次' })).toBeNull()
+    await waitFor(() => expect(screen.getAllByText('2025年6月1日').length).toBeGreaterThan(0))
   })
 
-  it('downloads the Word preview for the configured week date', async () => {
+  it('downloads the Word preview without configured dates', async () => {
+    vi.mocked(reportOutputApi.weekDates).mockResolvedValue({ items: [] })
     vi.mocked(reportOutputApi.previewWord).mockResolvedValue(new Blob(['preview']))
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     const createObjectURL = vi.fn(() => 'blob:preview')
     Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true })
-    const view = renderSettings()
-    expect(await screen.findByRole('menuitem', { name: /Word 配置/ })).toBeVisible()
-    fireEvent.click(view.container.querySelector<HTMLButtonElement>('.report-output-settings-header button:first-child')!)
-    fireEvent.click(await screen.findByRole('button', { name: '下载预览 Word' }))
-    await waitFor(() => expect(reportOutputApi.previewWord).toHaveBeenCalledWith(expect.any(Object), ['LATE_RETURN'], { semesterId: 'semester-1', weekId: 'week-2' }))
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: '下载 Word 模板' }))
+    await waitFor(() => expect(reportOutputApi.previewWord).toHaveBeenCalledWith(expect.any(Object), ['LATE_RETURN']))
     click.mockRestore()
   })
 
@@ -124,36 +129,36 @@ describe('ReportOutputSettingsPanel', () => {
       ],
     } })
     renderSettings()
-    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
-    const dateVariable = document.querySelector('.report-intro-content .report-template-variable[data-template-variable="reportDate"]')
-    expect(dateVariable).toHaveTextContent('文件日期')
-    expect(dateVariable).toHaveAttribute('title', '通报文件设置中的每周文件日期')
+    fireEvent.click(await screen.findByRole('button', { name: '编辑模板' }))
+    const dateVariable = screen.getByRole('dialog').querySelector('.report-intro-content .report-template-variable[data-word-value="report.reportDate"]')
+    expect(dateVariable).toHaveTextContent('通报日期')
+    expect(dateVariable).toHaveAttribute('title', '通报日期')
   })
 
   it('saves an inserted weekly file date token in the Word introduction', async () => {
     renderSettings()
-    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
-    fireEvent.click(screen.getByRole('button', { name: '插入变量' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: '每周文件日期' }))
-    expect(document.querySelector('.report-intro-content .report-template-variable[data-template-variable="reportDate"]')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '编辑模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '插入字段' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '通报日期' }))
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .report-template-variable[data-word-value="report.reportDate"]')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
     await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       introductionDocument: expect.objectContaining({ content: expect.arrayContaining([expect.objectContaining({
-        content: expect.arrayContaining([expect.objectContaining({ text: '{reportDate}' })]),
+        content: expect.arrayContaining([expect.objectContaining({ type:'templateField',attrs:{key:'report.reportDate'} })]),
       })]) }),
     })))
   })
 
   it('saves Chinese week and page number formats', async () => {
     renderSettings()
-    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
-    fireEvent.click(screen.getByRole('button', { name: '插入变量' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '插入字段' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: '周次汉字' }))
-    expect(document.querySelector('.report-intro-content .report-template-variable[data-template-variable="weekNoChinese"]')).toBeInTheDocument()
-    fireEvent.focus(document.querySelector('.report-intro-footer-content .tiptap')!)
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .report-template-variable[data-word-value="report.weekNoChinese"]')).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('dialog').querySelector('.report-intro-footer-content .tiptap')!)
     fireEvent.click(screen.getByRole('button', { name: '页码样式' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: '第一页，共N页（汉字）' }))
-    expect(document.querySelector('.report-intro-footer-content')).toHaveTextContent('总页数（汉字）')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-footer-content')).toHaveTextContent('总页数（汉字）')
     fireEvent.click(screen.getByRole('button', { name: '保存并完成' }))
     await waitFor(() => expect(reportOutputApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ introductionDocument: expect.objectContaining({ footerText: '第{pageChinese}页，共{totalPagesChinese}页' }) })))
   })
@@ -166,9 +171,9 @@ describe('ReportOutputSettingsPanel', () => {
       ],
     } })
     renderSettings()
-    fireEvent.click(await screen.findByRole('button', { name: '编辑首页' }))
-    expect(document.querySelector('.report-intro-content .tiptap')).toHaveTextContent('附件1：晚归检查')
-    expect(document.querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('附件：1.')
+    fireEvent.click(await screen.findByRole('button', { name: '编辑模板' }))
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).toHaveTextContent('附件1：晚归检查')
+    expect(screen.getByRole('dialog').querySelector('.report-intro-content .tiptap')).not.toHaveTextContent('附件：1.')
   })
 
   it('shows Excel settings without a Word introduction editor', async () => {
@@ -176,8 +181,8 @@ describe('ReportOutputSettingsPanel', () => {
     expect(await screen.findByRole('menuitem', { name: /Excel 配置/ })).toBeVisible()
     fireEvent.click(screen.getByRole('menuitem', { name: /Excel 配置/ }))
     expect(screen.getByText('工作表顺序')).toBeVisible()
-    expect(screen.queryByRole('button', { name: '编辑首页' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /预\s*览/ }))
+    expect(screen.queryByRole('button', { name: '编辑模板' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^预\s*览$/ })).toBeNull()
     expect(screen.getByRole('region', { name: '到课率工作表' })).toHaveTextContent('本周旷课学时')
   })
 
@@ -185,10 +190,12 @@ describe('ReportOutputSettingsPanel', () => {
     vi.mocked(reportOutputApi.editorSettings).mockResolvedValue({ ...savedSettings, excelTypeCodes: ['ATTENDANCE_RATE', 'LATE_RETURN'] })
     renderSettings()
     fireEvent.click(await screen.findByRole('menuitem', { name: /Excel 配置/ }))
-    fireEvent.click(screen.getByRole('button', { name: /预\s*览/ }))
+    expect(screen.queryByRole('button', { name: /^预\s*览$/ })).toBeNull()
     expect(screen.getByRole('tablist', { name: '工作表' })).toBeVisible()
     expect(screen.getAllByRole('region', { name: /工作表$/ })).toHaveLength(1)
     expect(screen.getByRole('tab', { name: '到课率' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '上移 晚归' }))
+    expect(screen.getAllByRole('tab')[0]).toHaveTextContent('晚归')
     fireEvent.click(screen.getByRole('tab', { name: '晚归' }))
     expect(screen.getByRole('region', { name: '晚归工作表' })).toHaveTextContent('时间')
     expect(screen.getByRole('tab', { name: '晚归' })).toHaveAttribute('aria-selected', 'true')

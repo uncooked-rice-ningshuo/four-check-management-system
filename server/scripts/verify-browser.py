@@ -278,6 +278,13 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         PRIVATE_VALUES.extend([password, changed_password])
         database_url = f"postgres://postgres:{ENV['POSTGRES_PASSWORD']}@127.0.0.1:{pg_port}/browser?sslmode=disable" if DB_MODE == 'docker' else f"postgres://{os.environ['USER']}@127.0.0.1:{pg_port}/browser?sslmode=disable"
         phase4_roles = ENV.get('BROWSER_SUITE') == 'phase4-roles'
+        template_suite = ENV.get('BROWSER_SUITE') == 'document-templates'
+        if template_suite:
+            run(sql_command('-v', 'ON_ERROR_STOP=1', '-c', 'CREATE DATABASE document_templates'))
+            database_url = database_url.replace('/browser?', '/document_templates?')
+            subprocess.run(['go', 'test', './internal/store', '-run', '^TestReportOutputSettingsPostgresMigrationAndVersion$', '-count=1'],
+                           cwd=ROOT / 'server', env=dict(ENV, REPORT_OUTPUT_TEST_DATABASE_URL=database_url,
+                           DISCIPLINE_WORD_SAMPLE_PATH=str(OUTPUT / 'discipline-example.docx')), check=True)
         if phase4_roles:
             # Run finalization, replacement, correction and delivery through the real store.
             # The browser then signs in against precisely the database verified by that test.
@@ -296,6 +303,27 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         vite.write_text('import { createServer } from ' + json.dumps((ROOT / 'web/node_modules/vite/dist/node/index.js').as_uri()) + ';\nconst server=await createServer(' + json.dumps({'configFile': str(ROOT / 'web/vite.config.ts'), 'root': str(ROOT / 'web'), 'server': {'host': '127.0.0.1', 'port': web_port, 'strictPort': True, 'proxy': {'/api': f'http://127.0.0.1:{api_port}'}}}) + '); await server.listen();\n')
         start(['node', str(vite)], 'vite', ROOT / 'web')
         wait_url(f'http://127.0.0.1:{web_port}/login')
+        if template_suite:
+            cmd = sql_command('-v', 'ON_ERROR_STOP=1')
+            cmd[cmd.index('browser')] = 'document_templates'
+            run(cmd, input=b"""UPDATE accounts SET must_change_password=false WHERE login_name='browser-admin';
+            UPDATE departments SET discipline_scope=discipline_scope||ARRAY['DISCIPLINE_DOCUMENT_TEMPLATE_EDIT','DISCIPLINE_DOCUMENT_EXPORT'] WHERE code='OFFICE';
+            INSERT INTO accounts(id,login_name,name,password_hash,status,system_role,account_kind,primary_department_id)
+            SELECT gen_random_uuid(),'doc-'||kind,kind,a.password_hash,'ACTIVE','MEMBER','SYSTEM',d.id FROM accounts a
+            CROSS JOIN departments d CROSS JOIN unnest(ARRAY['edit','export','excel']) kind WHERE a.login_name='browser-admin' AND d.code='OFFICE';
+            INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id,start_at,default_permissions)
+            SELECT gen_random_uuid(),a.id,a.primary_department_id,r.id,now(),jsonb_build_object('version',1,'rolePolicies',
+              jsonb_build_array(jsonb_build_object('roleCode',r.code,'disciplineActions',CASE a.login_name
+              WHEN 'doc-edit' THEN ARRAY['DISCIPLINE_DOCUMENT_TEMPLATE_EDIT']
+              WHEN 'doc-export' THEN ARRAY['DISCIPLINE_ARCHIVE_VIEW','DISCIPLINE_DOCUMENT_EXPORT']
+              ELSE ARRAY['DISCIPLINE_ARCHIVE_VIEW','DISCIPLINE_ARCHIVE_EXPORT'] END)))
+            FROM accounts a JOIN organization_roles r ON r.code='MEMBER' WHERE a.login_name IN ('doc-edit','doc-export','doc-excel');""")
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'document-template-live.spec.ts', '--workers=1', '--trace=off', '--output', '../output/midscene/document-template-live'],
+                           cwd=ROOT / 'web', env=dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                           TEMPLATE_GUI_PASSWORD=password), check=True)
+            report.update(status='passed', cases=['真实服务逐档模板读取、示例预览、编辑保存与重新加载'])
+            raise SystemExit(0)
         if phase4_roles:
             cmd = sql_command('-v', 'ON_ERROR_STOP=1')
             cmd[cmd.index('browser')] = 'phase4_roles'
@@ -512,6 +540,16 @@ AND action IN ('INSPECTION_MANAGE','INSPECTION_ENTER');
             report['cases'] += payload['cases']
             report.update(status='passed', browserVersion=payload['browserVersion'])
             raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'fixed-grade-template':
+            script = temp / 'fixed-grade-template.js'
+            outside_class = str(uuid.uuid4())
+            outside_grade = str(uuid.uuid4())
+            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"INSERT INTO grades(id,name) VALUES('{outside_grade}','2025级'); INSERT INTO classes(id,name,grade_id,faculty_id,major_id) VALUES('{outside_class}','范围外班级','{outside_grade}','{ids['faculty']}','{ids['major']}');".encode())
+            script.write_text((ROOT / 'web/e2e/fixed-grade-template.js').read_text().replace('__FIXTURE__',json.dumps(dict(fixture, authPassword=changed_password, outsideClass=outside_class))))
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(script)))
+            report.update(status='passed', browserVersion=payload['browserVersion'], cases=payload['cases'])
+            print(payload, flush=True)
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'teacher-adaptation':
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input="INSERT INTO grades(id,name) VALUES('d0000000-0000-0000-0000-000000000096','2024级');".encode())
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('d0000000-0000-0000-0000-000000000097','验收二班','{ids['grade']}','{ids['faculty']}',2);".encode())
@@ -606,16 +644,6 @@ AND action IN ('INSPECTION_MANAGE','INSPECTION_ENTER');
             diagnostic.write_text((ROOT / 'web/e2e/auth-navigation-diagnostic.js').read_text().replace('__FIXTURE__', json.dumps(auth_fixture)))
             payload = json.loads(cli('--raw', 'run-code', '--filename', str(diagnostic)))
             report['authNavigation'] = payload
-        if ENV.get('BROWSER_SUITE') == 'fixed-grade-template':
-            script = temp / 'fixed-grade-template.js'
-            outside_class = str(uuid.uuid4())
-            outside_grade = str(uuid.uuid4())
-            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"INSERT INTO grades(id,name) VALUES('{outside_grade}','2025级'); INSERT INTO classes(id,name,grade_id,faculty_id,major_id) VALUES('{outside_class}','范围外班级','{outside_grade}','{ids['faculty']}','{ids['major']}');".encode())
-            script.write_text((ROOT / 'web/e2e/fixed-grade-template.js').read_text().replace('__FIXTURE__',json.dumps(dict(fixture, authPassword=changed_password, outsideClass=outside_class))))
-            payload = json.loads(cli('--raw', 'run-code', '--filename', str(script)))
-            report.update(status='passed', browserVersion=payload['browserVersion'], cases=payload['cases'])
-            print(payload, flush=True)
-            raise SystemExit(0)
             report['browserVersion'] = payload['browserVersion']
             report['cases'] += payload['cases']
             report['faultInjection'] = payload.get('faultInjection', [])

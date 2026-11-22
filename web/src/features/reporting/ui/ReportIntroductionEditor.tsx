@@ -23,7 +23,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { Button, Dropdown, InputNumber, Popover, Select } from 'antd'
+import { Button, Dropdown, InputNumber, Popover, Select, Tooltip } from 'antd'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { IntroductionDocument, IntroductionLineSpacingMode } from '../../../shared/api/reportOutputApi'
 import { ReportFooterEditor, type ReportFooterEditorHandle } from './ReportFooterEditor'
@@ -32,7 +32,7 @@ const fonts = ['仿宋', '宋体', '黑体', '楷体', '微软雅黑', '华文�
 const fontStacks: Record<string, string> = { 仿宋: "FangSong, '仿宋', serif", 宋体: "SimSun, '宋体', serif", 黑体: "SimHei, '黑体', sans-serif", 楷体: "KaiTi, '楷体', serif", 微软雅黑: "'Microsoft YaHei', '微软雅黑', sans-serif", 华文新魏: "STXinwei, '华文新魏', serif" }
 const defaultFont = (style?: string) => style === 'title' ? '华文新魏' : ['subtitle', 'heading', 'heading1', 'heading2', 'heading3'].includes(style ?? '') ? '黑体' : '仿宋'
 const defaultSize = (style?: string) => style === 'title' ? '30pt' : style === 'subtitle' ? '20pt' : '15pt'
-const sizes = ['14pt', '15pt', '16pt', '20pt', '30pt']
+const sizes = ['9pt', '10.5pt', '12pt', '14pt', '15pt', '16pt', '20pt', '30pt']
 const paragraphStyles = [
   { value: 'body', label: '正文' },
   { value: 'title', label: '通报主标题' },
@@ -63,6 +63,7 @@ const IntroductionParagraph = Paragraph.extend({
         },
         renderHTML: attributes => ({ 'data-style': attributes.style }),
       },
+      border: { default: null, parseHTML: element => element.dataset.paragraphBorder, renderHTML: attrs => attrs.border ? { 'data-paragraph-border': attrs.border } : {} },
       indent: {
         default: 0,
         parseHTML: element => Number(element.getAttribute('data-indent') || 0),
@@ -113,7 +114,7 @@ const RestrictedFontSize = FontSize.extend({
   },
 })
 
-const extensions = [
+export const introductionExtensions = [
   StarterKit.configure({
     paragraph: false, blockquote: false, bulletList: false, code: false,
     codeBlock: false, dropcursor: false, gapcursor: false, hardBreak: false,
@@ -152,6 +153,7 @@ function introductionFromEditor(document: JSONContent): IntroductionDocument {
         attrs: {
           style: paragraphStyles.some(option => option.value === style) ? style as string : 'body',
           textAlign: alignments.some(option => option.value === textAlign) ? textAlign as string : 'left',
+          ...(paragraph.attrs?.border ? {border:paragraph.attrs.border} : {}),
           indent,
           spaceBefore: Number(paragraph.attrs?.spaceBefore) || 0,
           spaceAfter: Number(paragraph.attrs?.spaceAfter) || 0,
@@ -172,23 +174,23 @@ type ToolButtonProps = {
   onClick: () => void
 }
 
-function ToolButton({ label, icon, active = false, disabled = false, onClick }: ToolButtonProps) {
-  return <Button
+export function ToolButton({ label, icon, active, disabled = false, onClick }: ToolButtonProps) {
+  return <Tooltip title={label} trigger={['hover', 'focus']}><Button
     type="text"
     className="report-intro-tool"
     icon={icon}
     aria-label={label}
     aria-pressed={active}
-    title={label}
     disabled={disabled}
     data-active={active || undefined}
     onMouseDown={event => event.preventDefault()}
     onClick={onClick}
-  />
+  /></Tooltip>
 }
 
 function selectionFormatting(editor: Editor) {
   return {
+    border: editor.getAttributes('paragraph').border as string | undefined,
     paragraphStyle: editor.getAttributes('paragraph').style as string | undefined,
     indent: Number(editor.getAttributes('paragraph').indent) || 0,
     spaceBefore: Number(editor.getAttributes('paragraph').spaceBefore) || 0,
@@ -228,7 +230,7 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
   }
 
   const editor = useEditor({
-    extensions,
+    extensions: introductionExtensions,
     content: editorContent(value),
     immediatelyRender: false,
     onUpdate: ({ editor: updatedEditor }) => {
@@ -271,11 +273,6 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
     measure()
     return () => { observer?.disconnect(); editor.off('transaction', measure); cancelAnimationFrame(frame) }
   }, [editor])
-  const state = useEditorState({
-    editor,
-    selector: ({ editor: currentEditor }) => currentEditor ? selectionFormatting(currentEditor) : null,
-  })
-  const active = state ?? (editor ? selectionFormatting(editor) : null)
   const restore = (direction: 'undo' | 'redo') => {
     const source = direction === 'undo' ? history.current.past : history.current.future
     const target = direction === 'undo' ? history.current.future : history.current.past
@@ -314,31 +311,13 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       </div>
       <span className="report-intro-page-count" role="status">共 {pageCount} 页{pageCount > 1 ? '，正文已续到下一页' : ''}</span>
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
-      <Select aria-label="段落样式" variant="borderless" className="report-intro-select report-intro-style-select" value={active?.paragraphStyle || 'body'} options={paragraphStyles} disabled={!editor} onChange={style => editor?.chain().focus().updateAttributes('paragraph', { style }).setTextAlign(style === 'signature' || style === 'date' ? 'right' : style === 'title' || style === 'subtitle' ? 'center' : 'left').run()} />
-      <Select aria-label="字体" variant="borderless" className="report-intro-select report-intro-font-select" value={active?.fontFamily || defaultFont(active?.paragraphStyle)} options={fonts.map(font => ({ value: font, label: font }))} disabled={!editor} onChange={font => editor?.chain().focus().setFontFamily(font).run()} />
-      <Select aria-label="字号" variant="borderless" className="report-intro-select report-intro-size-select" value={active?.fontSize || defaultSize(active?.paragraphStyle)} options={sizes.map(size => ({ value: size, label: size.replace('pt', '') }))} disabled={!editor} onChange={size => editor?.chain().focus().setFontSize(size).run()} />
-      <span className="report-intro-toolbar-divider" aria-hidden="true" />
-      <ToolButton label="加粗" icon={<Icon icon={bold} />} active={active?.bold} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()} />
-      <ToolButton label="斜体" icon={<Icon icon={italic} />} active={active?.italic} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()} />
-      <ToolButton label="下划线" icon={<Icon icon={underline} />} active={active?.underline} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()} />
-      <ToolButton label="删除线" icon={<Icon icon={strike} />} active={active?.strike} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()} />
-      <ToolButton label="清除文字格式" icon={<Icon icon={clearFormat} />} disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().run()} />
-      <span className="report-intro-toolbar-divider" aria-hidden="true" />
-      {alignments.map(item => <ToolButton key={item.value} label={item.label} icon={item.icon} active={active?.textAlign === item.value} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign(item.value).run()} />)}
-      <ToolButton label="减少缩进" icon={<Icon icon={indentDecrease} />} disabled={!editor || !active?.indent} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.max(0, (active?.indent ?? 0) - 1) }).run()} />
-      <ToolButton label="增加缩进" icon={<Icon icon={indentIncrease} />} disabled={!editor || (active?.indent ?? 0) >= 4} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.min(4, (active?.indent ?? 0) + 1) }).run()} />
-      <Popover trigger="click" content={<div className="report-intro-spacing">
-        <label>段前（磅） <InputNumber aria-label="段前间距" min={0} max={72} value={active?.spaceBefore ?? 0} onChange={spaceBefore => { if (spaceBefore !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceBefore }).run() }} /></label>
-        <label>段后（磅） <InputNumber aria-label="段后间距" min={0} max={72} value={active?.spaceAfter ?? 0} onChange={spaceAfter => { if (spaceAfter !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceAfter }).run() }} /></label>
-        <label>行距 <Select aria-label="行距方式" value={active?.lineSpacingMode || 'fixed'} options={[{ value: 'single', label: '单倍行距' }, { value: 'oneHalf', label: '1.5 倍行距' }, { value: 'double', label: '双倍行距' }, { value: 'fixed', label: '固定值' }]} onChange={lineSpacingMode => editor?.chain().focus().updateAttributes('paragraph', { lineSpacingMode }).run()} /></label>
-        {(active?.lineSpacingMode || 'fixed') === 'fixed' && <label>固定值（磅） <InputNumber aria-label="固定行距" min={18} max={48} value={active?.lineSpacing || 27} onChange={lineSpacing => { if (lineSpacing !== null) editor?.chain().focus().updateAttributes('paragraph', { lineSpacing }).run() }} /></label>}
-      </div>}><Button type="text" className="report-intro-tool" icon={<Icon icon={spacingIcon} />} aria-label="段落间距" title="段落间距" /></Popover>
+      <WordFormattingControls editor={editor}/>
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
       <ToolButton label="撤销" icon={<Icon icon={undoIcon} />} disabled={!historyState.canUndo} onClick={() => restore('undo')} />
       <ToolButton label="重做" icon={<Icon icon={redoIcon} />} disabled={!historyState.canRedo} onClick={() => restore('redo')} />
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
       {!footerActive && <div className="report-intro-inserts"><ToolButton label="插入附件文本" icon={<Icon icon={listTree} />} disabled={!editor || attachmentNames.length === 0} onClick={insertDirectory} />
-        <Dropdown menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }, { key: 'weekChinese', label: '周次汉字' }, { key: 'date', label: '每周文件日期' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : key === 'week' ? '{weekNo}' : key === 'weekChinese' ? '{weekNoChinese}' : '{reportDate}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
+        <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [{ key: 'semester', label: '学期名称' }, { key: 'week', label: '周次数字' }, { key: 'weekChinese', label: '周次汉字' }, { key: 'date', label: '每周文件日期' }], onClick: ({ key }) => insertTitleVariable(key === 'semester' ? '{semesterName}' : key === 'week' ? '{weekNo}' : key === 'weekChinese' ? '{weekNoChinese}' : '{reportDate}') }} trigger={['click']}><Button type="text" className="report-intro-tool" icon={<Icon icon={bracesIcon} />} aria-label="插入变量" title="插入变量" disabled={!editor} /></Dropdown></div>
       }
       {footerActive && <div className="report-intro-footer-tools" role="toolbar" aria-label="页脚工具">
         <span>页脚</span>
@@ -346,7 +325,7 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
         <ToolButton label="页脚居中对齐" icon={<Icon icon={alignCenter} />} onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'center' })} />
         <ToolButton label="页脚右对齐" icon={<Icon icon={alignRight} />} onClick={() => updateDocument({ ...documentRef.current, footerLayout: 'custom', footerAlign: 'right' })} />
         <Button type="text" size="small" onClick={() => footerRef.current?.insertTab()}>插入分区</Button>
-        <Dropdown menu={{ items: [
+        <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [
           { key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' },
           { key: 'pageChinese', label: '当前页码（汉字）' }, { key: 'totalPagesChinese', label: '总页数（汉字）' },
           { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }, { key: 'weekNoChinese', label: '周次汉字' },
@@ -373,4 +352,34 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
       </div>
     </div>
   </div>
+}
+
+export function WordFormattingControls({editor}:{editor:Editor | null}) {
+  const state = useEditorState({
+    editor,
+    selector: ({ editor: currentEditor }) => currentEditor ? selectionFormatting(currentEditor) : null,
+  })
+  const active = state ?? (editor ? selectionFormatting(editor) : null)
+  return <>
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="段落样式" variant="borderless" className="report-intro-select report-intro-style-select" value={active?.paragraphStyle || 'body'} options={paragraphStyles} disabled={!editor} onChange={style => editor?.chain().focus().updateAttributes('paragraph', { style }).setTextAlign(style === 'signature' || style === 'date' ? 'right' : style === 'title' || style === 'subtitle' ? 'center' : 'left').run()} />
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="段落边框" className="report-intro-select word-border-select" variant="borderless" value={active?.border || ''} options={[{value:'',label:'无边框'},{value:'topBottom',label:'上下单线'},{value:'bottomDouble',label:'下方双线'}]} onChange={border=>editor?.chain().focus().updateAttributes('paragraph',{border:border||null}).run()}/>
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="字体" variant="borderless" className="report-intro-select report-intro-font-select" value={active?.fontFamily || defaultFont(active?.paragraphStyle)} options={fonts.map(font => ({ value: font, label: font }))} disabled={!editor} onChange={font => editor?.chain().focus().setFontFamily(font).run()} />
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="字号" variant="borderless" className="report-intro-select report-intro-size-select" value={active?.fontSize || defaultSize(active?.paragraphStyle)} options={sizes.map(size => ({ value: size, label: size.replace('pt', '') }))} disabled={!editor} onChange={size => editor?.chain().focus().setFontSize(size).run()} />
+      <span className="report-intro-toolbar-divider" aria-hidden="true" />
+      <ToolButton label="加粗" icon={<Icon icon={bold} />} active={active?.bold} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()} />
+      <ToolButton label="斜体" icon={<Icon icon={italic} />} active={active?.italic} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()} />
+      <ToolButton label="下划线" icon={<Icon icon={underline} />} active={active?.underline} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()} />
+      <ToolButton label="删除线" icon={<Icon icon={strike} />} active={active?.strike} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()} />
+      <ToolButton label="清除文字格式" icon={<Icon icon={clearFormat} />} disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().run()} />
+      <span className="report-intro-toolbar-divider" aria-hidden="true" />
+      {alignments.map(item => <ToolButton key={item.value} label={item.label} icon={item.icon} active={active?.textAlign === item.value} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign(item.value).run()} />)}
+      <ToolButton label="减少缩进" icon={<Icon icon={indentDecrease} />} disabled={!editor || !active?.indent} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.max(0, (active?.indent ?? 0) - 1) }).run()} />
+      <ToolButton label="增加缩进" icon={<Icon icon={indentIncrease} />} disabled={!editor || (active?.indent ?? 0) >= 4} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.min(4, (active?.indent ?? 0) + 1) }).run()} />
+      <Popover trigger="click" content={<div className="report-intro-spacing">
+        <label>段前（磅） <InputNumber aria-label="段前间距" min={0} max={72} value={active?.spaceBefore ?? 0} onChange={spaceBefore => { if (spaceBefore !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceBefore }).run() }} /></label>
+        <label>段后（磅） <InputNumber aria-label="段后间距" min={0} max={72} value={active?.spaceAfter ?? 0} onChange={spaceAfter => { if (spaceAfter !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceAfter }).run() }} /></label>
+        <label>行距 <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} aria-label="行距方式" value={active?.lineSpacingMode || 'fixed'} options={[{ value: 'single', label: '单倍行距' }, { value: 'oneHalf', label: '1.5 倍行距' }, { value: 'double', label: '双倍行距' }, { value: 'fixed', label: '固定值' }]} onChange={lineSpacingMode => editor?.chain().focus().updateAttributes('paragraph', { lineSpacingMode }).run()} /></label>
+        {(active?.lineSpacingMode || 'fixed') === 'fixed' && <label>固定值（磅） <InputNumber aria-label="固定行距" min={18} max={48} value={active?.lineSpacing || 27} onChange={lineSpacing => { if (lineSpacing !== null) editor?.chain().focus().updateAttributes('paragraph', { lineSpacing }).run() }} /></label>}
+      </div>}><Button type="text" className="report-intro-tool" icon={<Icon icon={spacingIcon} />} aria-label="段落间距" title="段落间距" /></Popover>
+  </>
 }

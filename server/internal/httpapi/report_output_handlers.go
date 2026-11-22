@@ -179,6 +179,8 @@ func (h *handler) writeOutputError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "INVALID_REPORT_OUTPUT_DATE", "文件日期无效，请填写有效日期")
 	case errors.Is(err, reportoutput.ErrWeekNotFound):
 		writeError(c, http.StatusNotFound, "REPORT_OUTPUT_WEEK_NOT_FOUND", "所选通报周次不存在")
+	case errors.Is(err, reportoutput.ErrTemplateUnchanged):
+		writeError(c, http.StatusUnprocessableEntity, "TEMPLATE_EDIT_REQUIRED", "请先修改来源模板的正文、字段或版式，再启用")
 	case errors.Is(err, reportoutput.ErrConfigConflict):
 		writeError(c, http.StatusConflict, "REPORT_OUTPUT_CONFIG_CONFLICT", "输出设置已更新，请刷新后重试")
 	case errors.Is(err, reportoutput.ErrIssueDateMissing):
@@ -198,4 +200,62 @@ func (h *handler) writeOutputError(c *gin.Context, err error) {
 		log.Printf("report output request failed: route=%s %s", c.FullPath(), reportErrorLogFields(err))
 		writeError(c, http.StatusInternalServerError, "REPORT_OUTPUT_FAILED", "通报文件设置或生成暂时不可用，请稍后重试")
 	}
+}
+
+func (h *handler) documentTemplates(c *gin.Context) {
+	if h.reportOutput == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "文书服务尚未就绪")
+		return
+	}
+	items, err := h.reportOutput.DocumentTemplates(c)
+	if err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	sources, err := h.reportOutput.DocumentTemplateSources(c)
+	if err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"items": items, "sources": sources})
+}
+func (h *handler) saveDocumentTemplate(c *gin.Context) {
+	if h.reportOutput == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "文书服务尚未就绪")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 70<<10)
+	var input reportoutput.DisciplineTemplate
+	if !bind(c, &input) {
+		return
+	}
+	if err := h.reportOutput.SaveDocumentTemplate(c, input, requestMetadata(c, "")); err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"saved": true})
+}
+func (h *handler) downloadDisciplineDocument(c *gin.Context) { h.processDisciplineDocument(c, true) }
+func (h *handler) previewDisciplineDocument(c *gin.Context)  { h.processDisciplineDocument(c, false) }
+func (h *handler) processDisciplineDocument(c *gin.Context, export bool) {
+	if h.reportOutput == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "文书服务尚未就绪")
+		return
+	}
+	var input reportoutput.DocumentRequest
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	if c.Request.ContentLength != 0 && !bind(c, &input) {
+		return
+	}
+	preview, data, err := h.reportOutput.DisciplineDocument(c, c.Param("id"), input, requestMetadata(c, ""), export)
+	if err != nil {
+		h.writeOutputError(c, err)
+		return
+	}
+	if !export {
+		c.JSON(200, preview)
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=discipline.docx")
+	c.Data(200, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data)
 }

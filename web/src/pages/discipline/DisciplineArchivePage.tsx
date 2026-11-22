@@ -1,3 +1,4 @@
+import { ArchiveDocumentDrawer } from './ArchiveDocumentDrawer'
 import { useLocation } from 'react-router-dom'
 import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useState } from 'react'
@@ -19,6 +20,8 @@ export function DisciplineArchivePage() {
   const [filter, setFilter] = useState<DisciplineArchiveFilter>({ page: 1, pageSize: 20 })
   const [selected, select] = useState<string | undefined>(linkedCase)
   const permissions = useAttendancePermissions()
+  const canGenerate=hasNavigableInspectionAction(permissions.data?.permissions,'DISCIPLINE_DOCUMENT_EXPORT')
+  const [documentId,setDocumentId]=useState<string>()
   const canExport = hasNavigableInspectionAction(permissions.data?.permissions, 'DISCIPLINE_ARCHIVE_EXPORT')
   const download = useMutation({mutationFn: () => exportArchivedDecisions(filter), onSuccess: blob => {
     const url = URL.createObjectURL(blob)
@@ -37,6 +40,7 @@ export function DisciplineArchivePage() {
   })
   return <section className="attendance-page" aria-labelledby="discipline-archive-title">
     <div className="attendance-page-heading"><Typography.Title id="discipline-archive-title" level={2}>处分归档</Typography.Title></div>
+    {documentId && <ArchiveDocumentDrawer key={documentId} id={documentId} onClose={()=>setDocumentId(undefined)}/>}
     {download.isError && <Alert type="error" title="导出失败，请重试" />}
     {query.isError
       ? <Alert type="error" title="处分归档读取失败" action={<Button onClick={() => void query.refetch()}>重试</Button>} />
@@ -60,7 +64,7 @@ export function DisciplineArchivePage() {
             { title: '确定方式', search: false, render: (_, row) => decisionSources[row.decisionSource ?? ''] ?? '—' },
             { title: '确定时间', search: false, render: (_, row) => row.decidedAt
               ? new Date(row.decidedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '—' },
-            { title:'操作',valueType:'option',render:(_,row) => <Button type="link" onClick={() => select(row.id)}>详情</Button> },
+            { title:'操作',valueType:'option',render:(_,row) => <Space><Button type="link" onClick={() => select(row.id)}>详情</Button>{canGenerate && row.status==="APPROVED" && <Button type="link" onClick={()=>setDocumentId(row.id)}>生成文书</Button>}</Space> },
           ]}
         />}
     <ExpandableDrawer open={!!selected} title="处分归档详情" onClose={() => select(undefined)} loading={detail.isLoading}>

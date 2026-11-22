@@ -110,6 +110,9 @@ export function AppLayout() {
   if (user?.isSuperAdmin || ['DISCIPLINE_RULE_VIEW','DISCIPLINE_RULE_EDIT','DISCIPLINE_RULE_PUBLISH'].some(action => hasNavigableInspectionAction(effectivePermissions.data?.permissions, action))) {
     disciplineItems.unshift({ key: '/discipline/config', icon: <SettingOutlined />, label: <Link to="/discipline/config">处分配置</Link> })
   }
+  if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions,'DISCIPLINE_DOCUMENT_TEMPLATE_EDIT')) {
+    disciplineItems.push({key:'/discipline/documents',icon:<Icon icon={fileCogIcon}/>,label:<Link to="/discipline/documents">处分文件配置</Link>})
+  }
   if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_ARCHIVE_VIEW')) {
     disciplineItems.push({ key: '/discipline/archive', icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/archive">处分归档</Link> })
   }

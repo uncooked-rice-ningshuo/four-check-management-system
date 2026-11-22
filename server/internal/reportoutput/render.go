@@ -693,19 +693,29 @@ func wordRecordLines(records []reporting.Record, columns []column) [][]string {
 	return lines
 }
 
-func renderWordTablePages(document *strings.Builder, title, code string, columns []column, lines [][]string, grouped bool) {
+func renderWordTablePages(document *strings.Builder, title, code string, columns []column, lines [][]string, grouped bool, tableWidth int) {
 	widths := wordColumnWidths(columns)
+	if tableWidth != 15000 {
+		remaining := tableWidth
+		for i, w := range widths {
+			widths[i] = w * tableWidth / 15000
+			remaining -= widths[i]
+		}
+		widths[len(widths)-1] += remaining
+	}
 	pages := paginateWordRows(lines, widths)
 	for pageIndex, page := range pages {
 		if pageIndex > 0 {
 			document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
-			document.WriteString(attachmentTitle(title+"（续）", code))
+			if title != "" {
+				document.WriteString(attachmentTitle(title+"（续）", code))
+			}
 		}
 		var grid strings.Builder
 		for _, width := range widths {
 			grid.WriteString(fmt.Sprintf(`<w:gridCol w:w="%d"/>`, width))
 		}
-		document.WriteString(fmt.Sprintf(`<w:tbl><w:tblPr><w:tblW w:w="15000" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single"/><w:left w:val="single"/><w:bottom w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr><w:tblGrid>%s</w:tblGrid>`, grid.String()))
+		document.WriteString(fmt.Sprintf(`<w:tbl><w:tblPr><w:tblW w:w="%d" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single"/><w:left w:val="single"/><w:bottom w:val="single"/><w:right w:val="single"/><w:insideH w:val="single"/><w:insideV w:val="single"/></w:tblBorders></w:tblPr><w:tblGrid>%s</w:tblGrid>`, tableWidth, grid.String()))
 		headings := make([]string, 0, len(columns))
 		for _, item := range columns {
 			headings = append(headings, item.title)
@@ -734,7 +744,11 @@ func renderWordTablePages(document *strings.Builder, title, code string, columns
 	}
 }
 
-func dormitoryWordTables(document *strings.Builder, content reporting.ReportVersionContent, records []reporting.Record, item reportType, teachers map[string]string) {
+func dormitoryWordTables(document *strings.Builder, content reporting.ReportVersionContent, records []reporting.Record, item reportType, teachers map[string]string, templateWidth int) {
+	width := templateWidth
+	if width == 0 {
+		width = 15000
+	}
 	field := func(title string, value func(reporting.Record) string) column { return column{title, value} }
 	excellentColumns := []column{
 		field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }),
@@ -762,7 +776,12 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 		if len(members) == 0 {
 			continue
 		}
-		document.WriteString(attachmentTitle(group.title, item.code))
+		title := group.title
+		if templateWidth == 0 {
+			document.WriteString(attachmentTitle(title, item.code))
+		} else {
+			title = ""
+		}
 		lines := wordRecordLines(members, group.columns)
 		if group.result == inspection.HygieneExcellent {
 			lines = nil
@@ -776,7 +795,7 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 				lines = append(lines, line)
 			}
 		}
-		renderWordTablePages(document, group.title, item.code, group.columns, lines, false)
+		renderWordTablePages(document, title, item.code, group.columns, lines, false, width)
 		written = true
 	}
 	var other []reporting.Record
@@ -787,16 +806,52 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 	}
 	if len(other) > 0 {
 		columns := wordRecordColumns(item, teachers)
-		document.WriteString(attachmentTitle("其他宿舍检查记录", item.code))
-		renderWordTablePages(document, "其他宿舍检查记录", item.code, columns, wordRecordLines(other, columns), false)
+		title := "其他宿舍检查记录"
+		if templateWidth == 0 {
+			document.WriteString(attachmentTitle(title, item.code))
+		} else {
+			title = ""
+		}
+		renderWordTablePages(document, title, item.code, columns, wordRecordLines(other, columns), false, width)
 		written = true
 	}
 	if !written {
 		columns := wordRecordColumns(item, teachers)
 		empty := make([]string, len(columns))
 		empty[0] = emptyWordOutputText(content, item.code)
-		renderWordTablePages(document, item.title, item.code, columns, [][]string{empty}, false)
+		renderWordTablePages(document, item.title, item.code, columns, [][]string{empty}, false, width)
 	}
+}
+
+func writeReportTable(document *strings.Builder, content reporting.ReportVersionContent, records []reporting.Record, item reportType, teachers map[string]string, wordTitle string, width int) {
+	columns := wordRecordColumns(item, teachers)
+	var lines [][]string
+	grouped := false
+	if item.code == "ATTENDANCE_RATE" {
+		columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺课同学"}, {title: "课程"}, {title: "班主任"}, {title: "缺课总课时"}, {title: "到课率"}}
+		lines = attendanceWordLines(content, records, teachers)
+		grouped = true
+	} else if item.code == "MORNING_ATTENDANCE" {
+		columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺到人员"}, {title: "班主任"}, {title: "缺勤总次数"}, {title: "出勤率"}}
+		lines = morningWordLines(content, records, teachers)
+		grouped = true
+	} else if item.code == "UNATTENDED_CLASSROOM" {
+		columns = []column{{title: "年级"}, {title: "班级"}, {title: "违纪学生"}, {title: "课程"}, {title: "班主任"}, {title: "违规次数"}}
+		lines = unattendedWordLines(content, records, teachers)
+		grouped = true
+	} else if item.code == "EVENING_SELF_STUDY" {
+		columns = []column{{title: "年级"}, {title: "班级"}, {title: "缺勤学生"}, {title: "班主任"}, {title: "缺勤次数"}}
+		lines = eveningWordLines(content, records, teachers)
+		grouped = true
+	} else {
+		lines = wordRecordLines(sortedWordRecords(content, records, item.code), columns)
+	}
+	if len(lines) == 0 {
+		empty := make([]string, len(columns))
+		empty[0] = emptyWordOutputText(content, item.code)
+		lines = append(lines, empty)
+	}
+	renderWordTablePages(document, wordTitle, item.code, columns, lines, grouped, width)
 }
 
 // RenderWord builds a standard DOCX with a portrait introduction and landscape inspection pages.
@@ -819,81 +874,67 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		}
 	}
 	var document strings.Builder
-	document.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>`)
-	if combined {
-		hasStyledTitle := false
-		for _, paragraph := range cover.Content {
-			if paragraph.Attrs.Style == "title" || paragraph.Attrs.Style == "subtitle" {
-				hasStyledTitle = true
-				break
+	document.WriteString(wordDocumentStart)
+	if combined && cover.SchemaVersion == 2 {
+		if err := renderTemplateBody(&document, cover, content, records, types); err != nil {
+			return nil, err
+		}
+	} else {
+		if combined {
+			hasStyledTitle := false
+			for _, paragraph := range cover.Content {
+				if paragraph.Attrs.Style == "title" || paragraph.Attrs.Style == "subtitle" {
+					hasStyledTitle = true
+					break
+				}
 			}
-		}
-		if !hasStyledTitle {
-			title := cover.TitleTemplate
-			if title == "" {
-				title = "{semesterName} 第{weekNo}周日常管理通报"
+			if !hasStyledTitle {
+				title := cover.TitleTemplate
+				if title == "" {
+					title = "{semesterName} 第{weekNo}周日常管理通报"
+				}
+				title = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(title)
+				document.WriteString(coverTitle(title))
 			}
-			title = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(title)
-			document.WriteString(coverTitle(title))
-		}
-		for index := range cover.Content {
-			for run := range cover.Content[index].Content {
-				value := cover.Content[index].Content[run].Text
-				cover.Content[index].Content[run].Text = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(value)
+			for index := range cover.Content {
+				for run := range cover.Content[index].Content {
+					value := cover.Content[index].Content[run].Text
+					cover.Content[index].Content[run].Text = strings.NewReplacer("{semesterName}", content.Period.SemesterName, "{weekNoChinese}", chineseNumber(content.Period.WeekNo), "{weekNo}", fmt.Sprint(content.Period.WeekNo)).Replace(value)
+				}
 			}
+			position := len(cover.Content)
+			if cover.AttachmentPosition != nil {
+				position = *cover.AttachmentPosition
+			}
+			document.WriteString(renderIntroduction(IntroductionDocument{Content: cover.Content[:position]}))
+			if !cover.ManualAttachmentList {
+				document.WriteString(coverAttachmentList(types))
+			}
+			document.WriteString(renderIntroduction(IntroductionDocument{Content: cover.Content[position:]}))
+			document.WriteString(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1080" w:right="1080"/>` + wordPageNumberFormat(cover) + `</w:sectPr></w:pPr></w:p>`)
 		}
-		position := len(cover.Content)
-		if cover.AttachmentPosition != nil {
-			position = *cover.AttachmentPosition
+		teachers := headTeacherNames(content)
+		for typeIndex, item := range types {
+			if typeIndex > 0 {
+				document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
+			}
+			wordTitle := wordAttachmentTitle(item.code, content.Period.WeekNo)
+			document.WriteString(attachmentTitle(wordTitle, item.code))
+			if item.code == "DORMITORY_HYGIENE" {
+				dormitoryWordTables(&document, content, records, item, teachers, 0)
+				continue
+			}
+			writeReportTable(&document, content, records, item, teachers, wordTitle, 15000)
 		}
-		document.WriteString(renderIntroduction(IntroductionDocument{Content: cover.Content[:position]}))
-		if !cover.ManualAttachmentList {
-			document.WriteString(coverAttachmentList(types))
-		}
-		document.WriteString(renderIntroduction(IntroductionDocument{Content: cover.Content[position:]}))
-		document.WriteString(`<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1080" w:right="1080"/>` + wordPageNumberFormat(cover) + `</w:sectPr></w:pPr></w:p>`)
+		document.WriteString(`<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="900" w:bottom="900" w:left="900" w:right="900"/>` + wordPageNumberFormat(cover) + `</w:sectPr>`)
 	}
-	teachers := headTeacherNames(content)
-	for typeIndex, item := range types {
-		if typeIndex > 0 {
-			document.WriteString(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`)
-		}
-		wordTitle := wordAttachmentTitle(item.code, content.Period.WeekNo)
-		document.WriteString(attachmentTitle(wordTitle, item.code))
-		if item.code == "DORMITORY_HYGIENE" {
-			dormitoryWordTables(&document, content, records, item, teachers)
-			continue
-		}
-		columns := wordRecordColumns(item, teachers)
-		var lines [][]string
-		grouped := false
-		if item.code == "ATTENDANCE_RATE" {
-			columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺课同学"}, {title: "课程"}, {title: "班主任"}, {title: "缺课总课时"}, {title: "到课率"}}
-			lines = attendanceWordLines(content, records, teachers)
-			grouped = true
-		} else if item.code == "MORNING_ATTENDANCE" {
-			columns = []column{{title: "年级"}, {title: "班级"}, {title: "应到/实到"}, {title: "缺到人员"}, {title: "班主任"}, {title: "缺勤总次数"}, {title: "出勤率"}}
-			lines = morningWordLines(content, records, teachers)
-			grouped = true
-		} else if item.code == "UNATTENDED_CLASSROOM" {
-			columns = []column{{title: "年级"}, {title: "班级"}, {title: "违纪学生"}, {title: "课程"}, {title: "班主任"}, {title: "违规次数"}}
-			lines = unattendedWordLines(content, records, teachers)
-			grouped = true
-		} else if item.code == "EVENING_SELF_STUDY" {
-			columns = []column{{title: "年级"}, {title: "班级"}, {title: "缺勤学生"}, {title: "班主任"}, {title: "缺勤次数"}}
-			lines = eveningWordLines(content, records, teachers)
-			grouped = true
-		} else {
-			lines = wordRecordLines(sortedWordRecords(content, records, item.code), columns)
-		}
-		if len(lines) == 0 {
-			empty := make([]string, len(columns))
-			empty[0] = emptyWordOutputText(content, item.code)
-			lines = append(lines, empty)
-		}
-		renderWordTablePages(&document, wordTitle, item.code, columns, lines, grouped)
-	}
-	document.WriteString(`<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="900" w:bottom="900" w:left="900" w:right="900"/>` + wordPageNumberFormat(cover) + `</w:sectPr></w:body></w:document>`)
+	document.WriteString(`</w:body></w:document>`)
+	return packageWordDocument(document.String(), cover, content.Period.SemesterName, content.Period.WeekNo)
+}
+
+const wordDocumentStart = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>`
+
+func packageWordDocument(xml string, cover IntroductionDocument, semester string, week int) ([]byte, error) {
 	var buffer bytes.Buffer
 	archive := zip.NewWriter(&buffer)
 	files := []struct{ name, value string }{
@@ -903,8 +944,8 @@ func RenderWordDocument(content reporting.ReportVersionContent, records []report
 		{"word/styles.xml", wordStylesXML},
 		{"word/settings.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:updateFields w:val="true"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`},
 		{"word/header1.xml", wordHeaderXML(cover.HeaderText)},
-		{"word/footer1.xml", wordFooterDocumentXML(cover, content.Period.SemesterName, content.Period.WeekNo)},
-		{"word/document.xml", document.String()},
+		{"word/footer1.xml", wordFooterDocumentXML(cover, semester, week)},
+		{"word/document.xml", xml},
 	}
 	for _, file := range files {
 		writer, err := archive.Create(file.name)

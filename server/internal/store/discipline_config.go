@@ -120,7 +120,7 @@ func scanDisciplineVersion(row rowScanner) (disciplineconfig.Version, error) {
 	return v, nil
 }
 func (p *Postgres) readDisciplineGroups(ctx context.Context, versionID string) ([]disciplineconfig.Group, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT id::text,group_key,name,result_unit FROM discipline_rule_groups WHERE version_id=$1 ORDER BY sort_order,id`, versionID)
+	rows, err := p.Pool.Query(ctx, `SELECT id::text,group_key,name,result_unit,violation_name FROM discipline_rule_groups WHERE version_id=$1 ORDER BY sort_order,id`, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (p *Postgres) readDisciplineGroups(ctx context.Context, versionID string) (
 	for rows.Next() {
 		var g disciplineconfig.Group
 		var id string
-		if err := rows.Scan(&id, &g.Key, &g.Name, &g.Unit); err != nil {
+		if err := rows.Scan(&id, &g.Key, &g.Name, &g.Unit, &g.ViolationName); err != nil {
 			return nil, err
 		}
 		g.Terms = []disciplineconfig.Term{}
@@ -159,13 +159,13 @@ func (p *Postgres) readDisciplineGroups(ctx context.Context, versionID string) (
 			return nil, err
 		}
 		tr.Close()
-		r, err := p.Pool.Query(ctx, `SELECT code,name,lower_bound,upper_bound,clause,teacher_confirmation_required FROM discipline_rule_tiers WHERE group_id=$1 ORDER BY sort_order,id`, id)
+		r, err := p.Pool.Query(ctx, `SELECT code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,authority_number,clause_reference FROM discipline_rule_tiers WHERE group_id=$1 ORDER BY sort_order,id`, id)
 		if err != nil {
 			return nil, err
 		}
 		for r.Next() {
 			var t disciplineconfig.Tier
-			if err := r.Scan(&t.Code, &t.Name, &t.Lower, &t.Upper, &t.Clause, &t.TeacherConfirmationRequired); err != nil {
+			if err := r.Scan(&t.Code, &t.Name, &t.Lower, &t.Upper, &t.Clause, &t.TeacherConfirmationRequired, &t.AuthorityNumber, &t.ClauseReference); err != nil {
 				r.Close()
 				return nil, err
 			}
@@ -217,7 +217,7 @@ func (p *Postgres) CreateDraft(ctx context.Context, actor string) (disciplinecon
 	if has {
 		for groupIndex, g := range base.Groups {
 			gid := uuid.NewString()
-			_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order) VALUES($1,$2,$3,$4,$5,$6)`, gid, id, g.Key, g.Name, g.Unit, groupIndex)
+			_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order,violation_name) VALUES($1,$2,$3,$4,$5,$6,$7)`, gid, id, g.Key, g.Name, g.Unit, groupIndex, g.ViolationName)
 			if err != nil {
 				return base, err
 			}
@@ -228,7 +228,7 @@ func (p *Postgres) CreateDraft(ctx context.Context, actor string) (disciplinecon
 				}
 			}
 			for i, t := range g.Tiers {
-				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i)
+				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference)
 				if err != nil {
 					return base, err
 				}
@@ -271,7 +271,7 @@ func (p *Postgres) SaveDraft(ctx context.Context, v disciplineconfig.Version, ex
 	}
 	for gi, g := range v.Groups {
 		gid := uuid.NewString()
-		if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order) VALUES($1,$2,$3,$4,$5,$6)`, gid, v.ID, g.Key, g.Name, g.Unit, gi); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_groups(id,version_id,group_key,name,result_unit,sort_order,violation_name) VALUES($1,$2,$3,$4,$5,$6,$7)`, gid, v.ID, g.Key, g.Name, g.Unit, gi, g.ViolationName); err != nil {
 			return v, err
 		}
 		for i, t := range g.Terms {
@@ -280,7 +280,7 @@ func (p *Postgres) SaveDraft(ctx context.Context, v disciplineconfig.Version, ex
 			}
 		}
 		for i, t := range g.Tiers {
-			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference); err != nil {
 				return v, err
 			}
 		}
@@ -332,6 +332,24 @@ func (p *Postgres) Publish(ctx context.Context, id string, expected int, actor s
 		var old string
 		err := tx.QueryRow(ctx, `SELECT version_id::text FROM discipline_rule_current WHERE singleton=true FOR UPDATE`).Scan(&old)
 		if err == nil {
+			// Compare membership and conversion settings independently of row IDs and display order.
+			if _, err = tx.Exec(ctx, `WITH groups AS (
+                SELECT g.id,g.version_id,g.group_key,g.result_unit,
+                    jsonb_agg(jsonb_build_array(t.inspection_type_id,t.source_unit,t.operator,t.conversion_factor)
+                        ORDER BY t.inspection_type_id) AS terms
+                FROM discipline_rule_groups g JOIN discipline_rule_group_terms t ON t.group_id=g.id
+                WHERE g.version_id IN ($1,$2) GROUP BY g.id
+            )
+            INSERT INTO discipline_tier_template_bindings(rule_id,group_key,tier_code,template_id)
+            SELECT successor.version_id, successor.group_key, binding.tier_code,binding.template_id
+            FROM discipline_tier_template_bindings binding
+            JOIN groups previous ON previous.version_id=binding.rule_id AND previous.group_key=binding.group_key
+            JOIN groups successor ON successor.version_id=$2 AND successor.group_key=previous.group_key
+                AND successor.result_unit=previous.result_unit AND successor.terms=previous.terms
+            JOIN discipline_rule_tiers tier ON tier.group_id=successor.id AND tier.code=binding.tier_code
+            WHERE binding.rule_id=$1`, old, id); err != nil {
+				return err
+			}
 			if _, err = tx.Exec(ctx, `UPDATE discipline_rule_versions SET status='SUPERSEDED' WHERE id=$1`, old); err != nil {
 				return err
 			}

@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>阶段四 · 处分管理 Demo</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f4f6fa;
+      color: #24324a;
+      font:
+        14px "PingFang SC",
+        "Microsoft YaHei",
+        sans-serif;
+    }
+    aside {
+      position: fixed;
+      width: 216px;
+      height: 100vh;
+      background: #fff;
+      border-right: 1px solid #e7ebf1;
+      padding: 28px 16px;
+    }
+    h2 {
+      font-size: 17px;
+      margin: 0 0 32px;
+    }
+    small {
+      color: #8490a3;
+    }
+    nav button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 6px 0;
+      border: 0;
+      padding: 13px;
+      background: white;
+    }
+    button,
+    select,
+    input {
+      font: inherit;
+      border: 1px solid #dce2eb;
+      border-radius: 6px;
+      padding: 9px 14px;
+      background: white;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:hover,
+    nav .active {
+      background: #edf3ff;
+      color: #2463dc;
+    }
+    button:focus-visible {
+      outline: 2px solid #2463dc;
+    }
+    .primary {
+      background: #2463dc;
+      color: white;
+    }
+    main {
+      margin-left: 216px;
+      padding: 25px 34px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #e1e6ef;
+      padding-bottom: 22px;
+    }
+    h1 {
+      font-size: 26px;
+      margin: 28px 0 8px;
+    }
+    .sub {
+      color: #758197;
+      line-height: 1.8;
+    }
+    .box {
+      background: white;
+      border: 1px solid #e5e9f0;
+      border-radius: 9px;
+      margin-top: 22px;
+      padding: 24px;
+    }
+    .bar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .bar .right {
+      margin-left: auto;
+    }
+    .notice {
+      background: #eff5ff;
+      border-left: 3px solid #3478eb;
+      padding: 14px;
+      margin: 20px 0;
+      color: #48638b;
+    }
+    .scroll {
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      white-space: nowrap;
+    }
+    th {
+      background: #f7f9fc;
+      color: #748198;
+      text-align: left;
+      font-weight: 500;
+    }
+    td,
+    th {
+      padding: 17px 12px;
+      border-bottom: 1px solid #edf0f5;
+    }
+    .tag {
+      background: #fff3df;
+      color: #a76b13;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .blue {
+      background: #eaf2ff;
+      color: #2868d4;
+    }
+    dialog {
+      border: 0;
+      border-radius: 12px;
+      width: min(760px, 94vw);
+      padding: 30px;
+      box-shadow: 0 24px 90px #182c4e44;
+    }
+    dialog::backdrop {
+      background: #14233b66;
+    }
+    .paper {
+      background: #fff;
+      padding: 40px;
+      border: 1px solid #ddd;
+      font-family: serif;
+      line-height: 2;
+    }
+    .paper h2 {
+      text-align: center;
+      color: #a42b2b;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+    .metric {
+      border-left: 2px solid #dfe8f8;
+      padding: 4px 20px;
+    }
+    .metric b {
+      display: block;
+      font-size: 28px;
+      margin-top: 10px;
+    }
+    footer {
+      margin-top: 22px;
+      color: #8d98a9;
+      font-size: 12px;
+    }
+    @media (max-width: 800px) {
+      aside {
+        position: static;
+        width: 100%;
+        height: auto;
+      }
+      nav {
+        display: flex;
+        overflow: auto;
+      }
+      nav button {
+        min-width: 140px;
+      }
+      aside h2 {
+        margin-bottom: 10px;
+      }
+      main {
+        margin: 0;
+        padding: 18px;
+      }
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+  <aside>
+    <h2>计算机学院<br /><small>日常管理系统</small></h2>
+    <small>阶段四 / 交互原型</small>
+    <nav id="nav"></nav>
+    <footer>虚构学生 · 本地演示<br />刷新后恢复初始数据</footer>
+  </aside>
+  <main>
+    <header>
+      <span>业务管理 / <b id="crumb"></b></span
+      ><span
+        >2026–2027 学年第一学期　
+        <select id="role" aria-label="演示角色">
+          <option>办公室主任</option>
+          <option>辅导员</option>
+          <option>超级管理员</option>
+        </select></span
+      >
+    </header>
+    <h1 id="title"></h1>
+    <div class="sub" id="desc"></div>
+    <div id="content"></div>
+    <footer>
+      设计提案：不连接真实 API，不发送通知，不分配真实文号。时间规则待业务确认。
+    </footer>
+  </main>
+  <dialog id="modal">
+    <div id="detail"></div>
+    <div style="text-align: right; margin-top: 24px">
+      <button onclick="modal.close()">关闭</button>
+    </div>
+  </dialog>
+  <script>
+    const pages = [
+      "学期违纪台账",
+      "待处分",
+      "处分归档",
+      "处分规则",
+      "文书模板",
+    ];
+    let current = 0;
+    const projects = [
+      "到课",
+      "早自习",
+      "晚自习",
+      "教室卫生",
+      "宿舍卫生",
+      "公共区域卫生",
+      "晚归",
+      "无机课堂",
+    ];
+    const students = [
+      [
+        "示例学生甲",
+        "DEMO001",
+        "2026级",
+        "计科 1 班",
+        [12, 1, 0, 0, 0, 0, 0, 0],
+      ],
+      [
+        "示例学生乙",
+        "DEMO002",
+        "2025级",
+        "软件 2 班",
+        [0, 10, 2, 0, 0, 0, 0, 1],
+      ],
+      [
+        "示例学生丙",
+        "DEMO003",
+        "2026级",
+        "信安 1 班",
+        [0, 0, 0, 0, 0, 0, 6, 0],
+      ],
+      [
+        "示例学生丁",
+        "DEMO004",
+        "2026级",
+        "计科 1 班",
+        [0, 0, 0, 0, 3, 0, 0, 0],
+      ],
+      [
+        "示例学生戊",
+        "DEMO005",
+        "2025级",
+        "软件 2 班",
+        [2, 1, 0, 0, 0, 0, 0, 0],
+      ],
+      [
+        "示例学生己",
+        "DEMO006",
+        "2026级",
+        "信安 1 班",
+        [0, 0, 0, 0, 0, 0, 0, 0],
+      ],
+    ];
+    let cases = [
+      { p: 0, j: 0, level: "警告", status: "待确认", time: "剩余 2 天" },
+      { p: 1, j: 1, level: "严重警告", status: "延缓中", time: "下周结算重判" },
+      { p: 2, j: 6, level: "警告", status: "已确定", time: "11-14 辅导员确认" },
+      { p: 3, j: 4, level: "通报批评", status: "待处理", time: "本周首次达标" },
+    ];
+    function popup(s) {
+      detail.innerHTML = s;
+      modal.showModal();
+    }
+    function table(h, r) {
+      return (
+        '<div class="scroll"><table><thead><tr>' +
+        h.map((x) => "<th>" + x + "</th>").join("") +
+        "</tr></thead><tbody>" +
+        r
+          .map(
+            (a) =>
+              "<tr>" + a.map((x) => "<td>" + x + "</td>").join("") + "</tr>",
+          )
+          .join("") +
+        "</tbody></table></div>"
+      );
+    }
+    function tag(x) {
+      return '<span class="tag">' + x + "</span>";
+    }
+    function allowed(i) {
+      return role.value !== "辅导员" || students[i][3] === "计科 1 班";
+    }
+    function can(c) {
+      return (
+        role.value === "超级管理员" ||
+        (c.level === "通报批评"
+          ? role.value === "办公室主任"
+          : role.value === "辅导员" && allowed(c.p))
+      );
+    }
+    function unit(j) {
+      return j === 0 ? " 学时" : " 次";
+    }
+    function student(i) {
+      const s = students[i];
+      popup(
+        "<h2>" +
+          s[0] +
+          " · 学期违纪情况</h2><p>" +
+          s[2] +
+          " / " +
+          s[3] +
+          " / " +
+          s[1] +
+          "</p>" +
+          table(
+            ["累计项目", "本学期累计"],
+            projects.map((p, j) => [p, s[4][j] + unit(j)]),
+          ) +
+          "<h3>处分情况</h3>" +
+          cases
+            .filter((c) => c.p === i)
+            .map(
+              (c) =>
+                "<p>" +
+                projects[c.j] +
+                " / " +
+                c.level +
+                " / " +
+                c.status +
+                "</p>",
+            )
+            .join("") +
+          '<p class="sub">正式系统可从每一累计项追溯已确认违纪明细、来源批次及通报。Demo 数值为虚构，未伪造来源明细。</p>',
+      );
+    }
+    function openCase(n) {
+      let c = cases[n],
+        s = students[c.p];
+      popup(
+        "<h2>" +
+          s[0] +
+          " · " +
+          projects[c.j] +
+          "</h2><p>" +
+          s[2] +
+          " / " +
+          s[3] +
+          '</p><div class="notice">' +
+          s[4][c.j] +
+          unit(c.j) +
+          " → " +
+          c.level +
+          "　" +
+          tag(c.status) +
+          '</div><button onclick="student(' +
+          c.p +
+          ')">查看学生学期台账</button><h3>处理记录</h3><p>' +
+          c.time +
+          "</p>" +
+          (c.status === "已确定"
+            ? "<p>文书：" +
+              (c.file ? "已生成（模拟）" : "尚未制作") +
+              "。送达未模拟。</p>"
+            : c.status === "延缓中"
+              ? "<p>延缓原因：" +
+                (c.reason || "需补充核实情况") +
+                "</p><p>等待下一次周结算重判，不进入处分归档。</p>"
+              : can(c)
+                ? '<label>处理意见<textarea id="reason" style="display:block;width:100%;padding:12px;margin:12px 0" placeholder="同意意见选填；延缓必须填写原因"></textarea></label><button class="primary" onclick="decide(' +
+                  n +
+                  ',true)">' +
+                  (c.level === "通报批评" ? "确定通报批评名单" : "同意处分") +
+                  "</button> " +
+                  (c.level === "通报批评"
+                    ? ""
+                    : '<button onclick="decide(' +
+                      n +
+                      ',false)">延缓处分</button>')
+                : '<p class="sub">当前角色仅可核对。警告及以上由对应辅导员确认，超级管理员可代确认。</p>'),
+      );
+    }
+    function decide(n, yes) {
+      let reason = document.getElementById("reason").value.trim();
+      if (!yes && !reason) {
+        alert("请填写延缓原因");
+        return;
+      }
+      let c = cases[n];
+      if (
+        !confirm(
+          students[c.p][0] +
+            " / " +
+            projects[c.j] +
+            " / " +
+            c.level +
+            "：确认" +
+            (yes ? "实施处分并进入归档？" : "延缓处分？"),
+        )
+      )
+        return;
+      c.status = yes ? "已确定" : "延缓中";
+      c.reason = reason;
+      c.time = yes ? role.value + " · 本次演示确认" : "下周结算重判";
+      modal.close();
+      render();
+    }
+    function wizard(n, step = 1) {
+      let c = cases[n],
+        s = students[c.p];
+      popup(
+        "<h2>制作文书 · " +
+          step +
+          ' / 3</h2><div class="notice">核对要素 → 选择模板 → 预览生成</div>' +
+          (step === 1
+            ? "<p>" +
+              s[0] +
+              " / " +
+              projects[c.j] +
+              " / " +
+              s[4][c.j] +
+              unit(c.j) +
+              " / " +
+              c.level +
+              "</p><p>累计值与处分结果只读，制作文书不改变已确定结论。</p>"
+            : step === 2
+              ? "<label>模板 <select><option>" +
+                c.level +
+                '模板 v1</option></select></label><p><label>落款日期 <input type="date" value="2026-11-15"></label></p>'
+              : '<div class="paper"><h2>' +
+                c.level +
+                "文书</h2><p>" +
+                s[0] +
+                "同学于2026–2027学年第一学期，" +
+                projects[c.j] +
+                "累计 " +
+                s[4][c.j] +
+                unit(c.j) +
+                "。</p><p>给予" +
+                c.level +
+                "。此处为结构示意，正式文书需引用冻结条款与规范模板。</p><p>" +
+                (c.level === "通报批评"
+                  ? "分类决定 + 合并告知书，不占文号。"
+                  : "文号待正式生成时分配，预览不占号。") +
+                "</p></div>") +
+          '<br><button class="primary" onclick="' +
+          (step < 3
+            ? "wizard(" + n + "," + (step + 1) + ")"
+            : "generate(" + n + ")") +
+          '">' +
+          (step < 3 ? "下一步" : "模拟生成") +
+          "</button>",
+      );
+    }
+    function generate(n) {
+      cases[n].file = true;
+      modal.close();
+      render();
+      popup(
+        "<h2>模拟生成完成</h2><p>已更新本条归档记录的文书状态。未生成真实文件、分配文号或发送通知。</p>",
+      );
+    }
+    function filterRows(q) {
+      document
+        .querySelectorAll("tbody tr")
+        .forEach((r) => (r.hidden = !r.textContent.includes(q)));
+    }
+    function render() {
+      nav.innerHTML = pages
+        .map(
+          (p, i) =>
+            (i === 3
+              ? '<p style="margin:24px 12px 8px;color:#8793a5">处分配置</p>'
+              : "") +
+            '<button class="' +
+            (i === current ? "active" : "") +
+            '" onclick="current=' +
+            i +
+            ';render()">' +
+            p +
+            "</button>",
+        )
+        .join("");
+      title.textContent = crumb.textContent = pages[current];
+      desc.textContent = [
+        "先汇总学期违纪事实，查看每位学生的累计与处分情况。",
+        "仅处理达到标准、尚未确定是否实施处分的事项。",
+        "所有已确定的处分记录；从这里制作文书、查看结果与追溯历史。",
+        "定义什么程度的违纪，对应什么处分。",
+        "管理文书内容与排版；实际制作从处分归档中的记录发起。",
+      ][current];
+      let h = "";
+      if (current === 0) {
+        h =
+          '<div class="notice">八类项目独立累计，不相加成总次数。未达标及零违纪学生同样展示；来源缺失不能视为零。</div><div class="box"><div class="bar"><input aria-label="搜索学生" placeholder="姓名 / 学号 / 班级 / 年级" oninput="filterRows(this.value)"><span class="right">当前学期 · 虚构学生台账</span></div><br>' +
+          table(
+            ["学生", "年级 / 班级", ...projects, "处分情况"],
+            students
+              .map((s, i) => ({ s, i }))
+              .filter((x) => allowed(x.i))
+              .map(({ s, i }) => [
+                '<button onclick="student(' +
+                  i +
+                  ')">' +
+                  s[0] +
+                  "</button><br><small>" +
+                  s[1] +
+                  "</small>",
+                s[2] + " / " + s[3],
+                ...s[4].map((v, j) => v + unit(j)),
+                cases
+                  .filter((c) => c.p === i)
+                  .map((c) => tag(c.status))
+                  .join(" ") || "未达标",
+              ]),
+          ) +
+          "</div>";
+      } else if (current < 3) {
+        let list = cases
+          .map((c, n) => ({ c, n }))
+          .filter(
+            ({ c }) =>
+              allowed(c.p) &&
+              (current === 1 ? c.status !== "已确定" : c.status === "已确定"),
+          );
+        h =
+          '<div class="notice">' +
+          (current === 1
+            ? "临近到期提醒随案件展示。时间口径待确认；演示中可切换辅导员或超级管理员执行确认。"
+            : "已确定不等于已出文。文书未制作或发送失败，不会把处分退回待处分；学期只读封存另行处理。") +
+          '</div><div class="box"><div class="bar"><input aria-label="筛选案件" placeholder="搜索学生、项目或状态" oninput="filterRows(this.value)"><span class="right">' +
+          list.length +
+          " 项</span></div><br>" +
+          table(
+            [
+              "学生",
+              "累计项目",
+              "累计 / 级别",
+              current === 1 ? "提醒 / 进度" : "确认记录",
+              "状态",
+              "操作",
+            ],
+            list.map(({ c, n }) => [
+              students[c.p][0] + "<br><small>" + students[c.p][3] + "</small>",
+              projects[c.j],
+              students[c.p][4][c.j] + unit(c.j) + " / " + c.level,
+              c.time,
+              tag(
+                current === 1 ? c.status : c.file ? "文书已生成" : "待制作文书",
+              ),
+              '<button onclick="openCase(' +
+                n +
+                ')">查看详情</button> ' +
+                (current === 2 && role.value !== "辅导员" && !c.file
+                  ? '<button class="primary" onclick="wizard(' +
+                    n +
+                    ')">制作文书</button>'
+                  : ""),
+            ]),
+          ) +
+          (!list.length ? "<p>当前范围暂无记录</p>" : "") +
+          "</div>";
+      } else if (current === 3) {
+        h =
+          '<div class="notice">本学期八项独立；区间由超级管理员维护。此处仅展示需求默认配置。</div><div class="box">' +
+          table(
+            ["累计项目", "通报批评", "警告", "严重警告", "记过执行", "单位"],
+            projects.map((p, i) => [
+              p,
+              ...(i === 0
+                ? ["5–9", "10–19", "20–29", "30 及以上", "学时"]
+                : [
+                    ...([1, 2, 7].includes(i)
+                      ? ["3–5", "6–9", "10–14", "15 及以上"]
+                      : ["3–5", "6–7", "8–10", "11 及以上"]),
+                    "次",
+                  ]),
+            ]),
+          ) +
+          '<p class="sub">到课 40 学时以上配置可保留留校察看，执行封顶记过。</p><div class="bar"><button onclick="popup(\'<h2>累计项与合并</h2><p>本期不合并。后续支持按学期拖拽组合、拆分和互斥校验。</p>\')">累计项与合并</button><button onclick="popup(\'<h2>依据条款</h2><p>按明细栏与级别配置制度名称、字号、条款路径和全文。修改保留版本。</p><p>晚自习、无机课堂初始条款待补，补齐前不得出文。</p>\')">依据条款</button><button onclick="popup(\'<h2>处理设置</h2><p>确认期限、提醒和延缓重判。工作日与日历日冲突待确认，本 Demo 不开放保存。</p>\')">处理设置</button></div></div>';
+      } else {
+        h =
+          '<div class="box">' +
+          table(
+            ["模板", "文件组织", "文号", "操作"],
+            [
+              ["通报批评决定", "按明细栏分别出文", "不占号"],
+              ["通报批评告知书", "全部合并，每页两份", "不占号"],
+              ["处分决定", "按学生与累计项目分别出文", "年份 × 文种"],
+            ].map((r, i) => [
+              ...r,
+              '<button onclick="preview(' + i + ')">模板预览与字段</button>',
+            ]),
+          ) +
+          '<p class="sub">模板管理与实际制作分开。模板不能修改已确认的累计值或处分级别。</p></div>';
+      }
+      content.innerHTML = h;
+    }
+    function preview(i) {
+      popup(
+        "<h2>" +
+          ["通报批评决定", "通报批评告知书", "处分决定"][i] +
+          ' · 模板结构</h2><div class="paper"><h2>' +
+          [
+            "通 报 批 评",
+            "通报批评告知书",
+            "关于给予〔姓名〕同学〔级别〕处分的决定",
+          ][i] +
+          '</h2><p>〔学年学期〕中，〔学生信息〕因〔违纪事实〕，根据〔依据条款〕，给予〔处分级别〕。</p><p style="text-align:right">' +
+          [
+            "计算机科学与工程学院学工办",
+            "计算机学院学生会",
+            "学院学生工作办公室",
+          ][i] +
+          '<br>〔中文日期〕</p></div><h3>字段与版本</h3><p>学生快照、累计值、处分结论、依据条款、日期。生成时固定模板版本。</p><p class="sub">排版仅示意，正式模板需按原始样例核验。</p>',
+      );
+    }
+    role.onchange = () => {
+      current = role.value === "辅导员" ? 1 : 0;
+      render();
+    };
+    render();
+  </script>
+</html>

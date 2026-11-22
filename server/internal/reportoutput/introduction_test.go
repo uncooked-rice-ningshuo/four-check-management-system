@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"four-check-management-system/server/internal/reporting"
 )
@@ -275,4 +276,164 @@ func TestManualAttachmentTextAndHeadingStyle(t *testing.T) {
 		return
 	}
 	t.Fatal("document.xml missing")
+}
+
+func TestTemplateSectionsAndEmbeddedTable(t *testing.T) {
+	raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","attrs":{"style":"title","textAlign":"center"},"content":[{"type":"text","text":"自拟表题"}]},{"type":"pageBreak"},{"type":"sectionBreak","attrs":{"orientation":"landscape"}},{"type":"reportTable","attrs":{"key":"ATTENDANCE_RATE"}},{"type":"sectionBreak","attrs":{"orientation":"portrait"}},{"type":"paragraph","attrs":{"style":"signature","textAlign":"right"},"content":[{"type":"templateField","attrs":{"key":"report.semesterName"}}]}]}`)
+	snapshot := reporting.ReportVersionContent{Period: reporting.PeriodOption{SemesterName: "测试学期", WeekNo: 3}}
+	data, err := RenderWordDocument(snapshot, nil, []string{"ATTENDANCE_RATE"}, raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateGeneratedFile("WORD", data); err != nil {
+		t.Fatal(err)
+	}
+	if path := os.Getenv("REPORT_OUTPUT_SECTION_SAMPLE_PATH"); path != "" {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := archive.Open("word/document.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer part.Close()
+	body, err := io.ReadAll(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xml := string(body)
+	for token, count := range map[string]int{"<w:sectPr>": 3, `w:orient="landscape"`: 1, `w:type="page"`: 1, "自拟表题": 1, "<w:tbl>": 1, "测试学期": 1} {
+		if strings.Count(xml, token) != count {
+			t.Errorf("unexpected count for %q", token)
+		}
+	}
+	if strings.Index(xml, "自拟表题") > strings.Index(xml, "<w:tbl>") || strings.Index(xml, "测试学期") < strings.Index(xml, "</w:tbl>") {
+		t.Error("template order lost")
+	}
+	if _, err := RenderWordDocument(snapshot, nil, []string{"LATE_RETURN"}, raw, true); err == nil {
+		t.Error("rendered a table outside the selected inspection types")
+	}
+	invalid := strings.Replace(string(raw), "report.semesterName", "discipline.decidedAt", 1)
+	if _, err := decodeIntroduction(json.RawMessage(invalid)); err == nil {
+		t.Error("accepted a discipline-only field")
+	}
+}
+
+func TestDisciplineTemplateSources(t *testing.T) {
+	raw := json.RawMessage(`{"schemaVersion":2,"orientation":"landscape","content":[{"type":"paragraph","content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)
+	for _, name := range []string{"示例甲", "示例乙"} {
+		data, err := RenderDisciplineDocument(raw, map[string]string{"discipline.studentName": name}, time.Unix(0, 0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := z.Open("word/document.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(r)
+		r.Close()
+		if err != nil || !strings.Contains(string(body), name) || !strings.Contains(string(body), `w:orient="landscape"`) {
+			t.Fatalf("missing case name or orientation: %v", err)
+		}
+	}
+	if _, err := RenderDisciplineDocument(raw, nil, time.Unix(0, 0)); err == nil {
+		t.Fatal("missing student accepted")
+	}
+	for _, illegal := range []string{`{"schemaVersion":2,"content":[{"type":"reportTable","attrs":{"key":"ATTENDANCE_RATE"}}]}`, strings.Replace(string(raw), "discipline.studentName", "report.reportDate", 1)} {
+		if err := ValidateDisciplineTemplate(json.RawMessage(illegal)); err == nil {
+			t.Fatal("foreign node accepted")
+		}
+	}
+}
+
+func TestTemplateParagraphBorders(t *testing.T) {
+	for _, tc := range []struct{ border, want string }{{"topBottom", "<w:top "}, {"bottomDouble", `w:val="double"`}} {
+		raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","attrs":{"border":"` + tc.border + `"},"content":[{"type":"text","text":"印发"}]}]}`)
+		doc, err := decodeTemplate(raw, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		xml := renderIntroduction(doc)
+		if !strings.Contains(xml, "<w:pBdr>") || !strings.Contains(xml, tc.want) || !strings.Contains(xml, "<w:bottom ") {
+			t.Fatalf("missing %s in %s", tc.border, xml)
+		}
+	}
+	sample := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","attrs":{"border":"topBottom"},"content":[{"type":"text","text":"示例办公室　　　　　　2026年11月23日印发"}]},{"type":"paragraph"},{"type":"paragraph","attrs":{"border":"bottomDouble"},"content":[{"type":"text","text":"示例落款"}]}]}`)
+	data, err := RenderDisciplineDocument(sample, nil, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateGeneratedFile("WORD", data); err != nil {
+		t.Fatal(err)
+	}
+	if path := os.Getenv("DISCIPLINE_BORDER_SAMPLE_PATH"); path != "" {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateDisciplineTemplate(json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","attrs":{"border":"invalid"}}]}`)); err == nil {
+		t.Fatal("accepted invalid border")
+	}
+}
+
+func TestImprintTableCells(t *testing.T) {
+	raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"imprintTable","attrs":{"cellSplit":1},"content":[{"type":"text","text":"印发单位"},{"type":"templateField","attrs":{"key":"discipline.issuedDate"}}]}]}`)
+	doc, err := decodeTemplate(raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderDisciplineDocument(raw, map[string]string{"discipline.issuedDate": "示例日期"}, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var xml strings.Builder
+	writeImprintTable(&xml, doc.Content[0])
+	for _, part := range []string{"<w:tbl>", `<w:insideV w:val="nil"`, `<w:jc w:val="left"/>`, `<w:jc w:val="right"/>`} {
+		if !strings.Contains(xml.String(), part) {
+			t.Fatal(part)
+		}
+	}
+	if ValidateDisciplineTemplate(json.RawMessage(strings.Replace(string(raw), `"cellSplit":1`, `"cellSplit":3`, 1))) == nil {
+		t.Fatal("invalid cell split accepted")
+	}
+}
+
+func TestGenericTableDimensionsAndFields(t *testing.T) {
+	raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"wordTable","attrs":{"border":"none","insetLeft":1000,"insetRight":1500,"rows":[[{"length":0,"align":"left","height":48},{"length":1,"align":"center","width":4500,"hiddenEdges":8}],[{"length":0,"align":"right"},{"length":0,"align":"left"}]]},"content":[{"type":"templateField","attrs":{"key":"discipline.tier"}}]}]}`)
+	data, err := RenderDisciplineDocument(raw, map[string]string{"discipline.tier": "示例档位"}, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := z.Open("word/document.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	xml, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(xml, []byte("<w:tc>")) != 4 || !bytes.Contains(xml, []byte("示例档位")) || !bytes.Contains(xml, []byte(`w:jc w:val="center"`)) {
+		t.Fatal("table layout or field lost")
+	}
+	for _, part := range []string{`<w:tblW w:type="pct" w:w="3750"/>`, `<w:tblInd w:type="dxa" w:w="1010"/>`, `<w:trHeight w:val="960" w:hRule="atLeast"/>`, `<w:tcW w:type="pct" w:w="2250"/>`, `<w:left w:val="nil"/>`} {
+		if !bytes.Contains(xml, []byte(part)) {
+			t.Fatal(part)
+		}
+	}
+	if ValidateDisciplineTemplate(json.RawMessage(strings.Replace(string(raw), `"length":1`, `"length":2`, 1))) == nil {
+		t.Fatal("out of range cell length")
+	}
 }

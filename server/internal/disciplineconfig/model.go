@@ -49,11 +49,12 @@ type Version struct {
 }
 
 type Group struct {
-	Key   string `json:"key"`
-	Name  string `json:"name"`
-	Unit  string `json:"unit"`
-	Terms []Term `json:"terms"`
-	Tiers []Tier `json:"tiers"`
+	ViolationName string `json:"violationName,omitempty"`
+	Key           string `json:"key"`
+	Name          string `json:"name"`
+	Unit          string `json:"unit"`
+	Terms         []Term `json:"terms"`
+	Tiers         []Tier `json:"tiers"`
 }
 
 type Term struct {
@@ -65,6 +66,8 @@ type Term struct {
 }
 
 type Tier struct {
+	AuthorityNumber             string   `json:"authorityNumber,omitempty"`
+	ClauseReference             string   `json:"clauseReference,omitempty"`
 	Code                        string   `json:"code"`
 	Name                        string   `json:"name"`
 	Lower                       float64  `json:"lower"`

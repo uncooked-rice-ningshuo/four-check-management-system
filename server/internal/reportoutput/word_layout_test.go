@@ -89,7 +89,7 @@ func TestWordAttachmentTitleAndTableFormattingMatchReference(t *testing.T) {
 	}
 	columns := []column{{title: "年级"}, {title: "缺课同学"}, {title: "课程"}, {title: "缺课总课时"}}
 	var document strings.Builder
-	renderWordTablePages(&document, wordAttachmentTitle("ATTENDANCE_RATE", 8), "ATTENDANCE_RATE", columns, [][]string{{"2026级", "", "", ""}}, false)
+	renderWordTablePages(&document, wordAttachmentTitle("ATTENDANCE_RATE", 8), "ATTENDANCE_RATE", columns, [][]string{{"2026级", "", "", ""}}, false, 15000)
 	xml := document.String()
 	if strings.Count(xml, `>无</w:t>`) != 2 || !strings.Contains(xml, `<w:vAlign w:val="center"/>`) || !strings.Contains(xml, `<w:trHeight w:val="600" w:hRule="atLeast"/>`) || !strings.Contains(xml, `<w:tblHeader/>`) {
 		t.Fatalf("Word table did not match reference empty values, alignment, row height or repeated header: %s", xml)
@@ -132,7 +132,7 @@ func TestWordTableWritesUniformRegularRowHeights(t *testing.T) {
 	widths := wordColumnWidths(columns)
 	expectedHeight := estimatedRowHeight(lines[2], widths)
 	var document strings.Builder
-	renderWordTablePages(&document, "测试表格", "LATE_RETURN", columns, lines, false)
+	renderWordTablePages(&document, "测试表格", "LATE_RETURN", columns, lines, false, 15000)
 	want := fmt.Sprintf(`<w:trHeight w:val="%d" w:hRule="atLeast"/>`, expectedHeight)
 	if strings.Count(document.String(), want) != len(lines) {
 		t.Fatalf("regular row heights are not uniform: %s", document.String())

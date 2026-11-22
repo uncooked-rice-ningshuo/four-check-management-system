@@ -88,6 +88,47 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password) VALUES($1,$2,'预览测试账号',$3,'ACTIVE','SYSTEM','MEMBER',false,false)`, actorID, "preview-"+actorID, string(hash)); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("published discipline template and stale save", func(t *testing.T) {
+		rule := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_versions(id,version,status,created_by,published_by,published_at) VALUES($1,1,'PUBLISHED',$2,$2,now())`, rule, actorID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_current(version_id) VALUES($1)`, rule); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_groups(version_id,group_key,name,sort_order) VALUES($1,'evening','晚自习累计',1)`, rule); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,sort_order,teacher_confirmation_required)
+ SELECT id,k,k,n,n,false FROM discipline_rule_groups CROSS JOIN (VALUES('FIRST',1),('SECOND',2)) AS tiers(k,n) WHERE version_id=$1`, rule); err != nil {
+			t.Fatal(err)
+		}
+		entry := reportoutput.DisciplineTemplate{RuleID: rule, GroupKey: "evening", TierCode: "FIRST", Document: json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)}
+		if err := store.SaveDocumentTemplate(ctx, entry, audit.Metadata{ActorID: actorID}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveDocumentTemplate(ctx, entry, audit.Metadata{ActorID: actorID}); !errors.Is(err, reportoutput.ErrConfigConflict) {
+			t.Fatalf("stale save: %v", err)
+		}
+		list, err := store.ListDocumentTemplates(ctx)
+		if err != nil || len(list) != 2 || list[0].Revision != 1 {
+			t.Fatalf("saved revision: %+v %v", list, err)
+		}
+		entry.TierCode = "SECOND"
+		entry.SourceTemplateID = list[0].TemplateID
+		if err := store.SaveDocumentTemplate(ctx, entry, audit.Metadata{ActorID: actorID}); !errors.Is(err, reportoutput.ErrTemplateUnchanged) {
+			t.Fatalf("unchanged copy: %v", err)
+		}
+		entry.Document = json.RawMessage(`{"schemaVersion":2,"orientation":"landscape","content":[{"type":"paragraph","attrs":{"border":"topBottom"},"content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)
+		if err := store.SaveDocumentTemplate(ctx, entry, audit.Metadata{ActorID: actorID}); err != nil {
+			t.Fatal(err)
+		}
+		list, err = store.ListDocumentTemplates(ctx)
+		if err != nil || list[1].Revision != 1 || list[0].TemplateID == list[1].TemplateID {
+			t.Fatalf("tier copy: %v %v", list, err)
+		}
+
+	})
 	versionID := uuid.NewString()
 	if err := store.RecordTransientOutput(ctx, reportoutput.File{ReportVersionID: versionID, Format: "WORD", TypeCodes: []string{"LATE_RETURN"}, Combined: true, SettingsVersion: 1}, 1024, audit.Metadata{ActorID: actorID}); err != nil {
 		t.Fatal(err)
@@ -113,6 +154,40 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 	if err != nil || len(weekDates) != 1 || weekDates[0].IssueDate != "" || weekDates[0].Version != 0 {
 		t.Fatalf("unconfigured week dates: %+v err=%v", weekDates, err)
 	}
+	t.Run("approved case generates Word from snapshot; pending case is refused", func(t *testing.T) {
+		report := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO weekly_reports(id,semester_id,week_id,created_by,updated_by) VALUES($1,$2,$3,$4,$4)`, report, semesterID, weekID, actorID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO weekly_report_versions(id,report_id,version_no,content_json,source_fingerprint,created_by) VALUES($1,$2,1,'{}',repeat('0',64),$3)`, versionID, report, actorID); err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range []string{"APPROVED", "PENDING"} {
+			id := uuid.NewString()
+			if _, err := pool.Exec(ctx, `INSERT INTO discipline_cases(id,semester_id,student_number,group_key,tier_code,report_version_id,rule_version_id,accumulated_amount,evidence,status,decision_source,decided_at,due_at)
+                SELECT $1,$2,$3,'evening','FIRST',$4,version_id,3,'{"student":{"name":"虚构学生"}}',$5,CASE WHEN $5='APPROVED' THEN 'RULE' END,CASE WHEN $5='APPROVED' THEN now() END,CASE WHEN $5='PENDING' THEN now()+interval '48 hours' END FROM discipline_rule_current`, id, semesterID, status, versionID, status); err != nil {
+				t.Fatal(err)
+			}
+			_, data, err := store.ProcessDisciplineDocument(ctx, id, reportoutput.DocumentRequest{}, audit.Metadata{ActorID: actorID}, true)
+			if status == "PENDING" {
+				if !errors.Is(err, reportoutput.ErrNotFound) {
+					t.Fatalf("pending case: %v", err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reportoutput.ValidateGeneratedFile("WORD", data); err != nil {
+				t.Fatal(err)
+			}
+			if path := os.Getenv("DISCIPLINE_WORD_SAMPLE_PATH"); path != "" {
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	})
 	date, err := store.SaveWeekDate(ctx, reportoutput.WeekDate{SemesterID: semesterID, WeekID: weekID, IssueDate: "2026-03-30", Version: 0}, audit.Metadata{ActorID: actorID})
 	if err != nil || date.Version != 1 {
 		t.Fatalf("save week date: %+v err=%v", date, err)

@@ -35,7 +35,7 @@ export interface ReportFooterEditorHandle {
   focus: () => void
 }
 
-export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: IntroductionDocument; onChange: (next: IntroductionDocument) => void; onFocus?: () => void }>(({ value, onChange, onFocus }, ref) => {
+export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: IntroductionDocument; onChange: (next: IntroductionDocument) => void; onFocus?: () => void; reportFields?: boolean }>(({ value, onChange, onFocus, reportFields = true }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const valueRef = useRef(value)
   const changeRef = useRef(onChange)
@@ -45,8 +45,8 @@ export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: 
     content: footerContent(footerTemplate(value)), immediatelyRender: false,
     onUpdate: ({ editor: updated }) => changeRef.current({ ...valueRef.current, footerText: footerValue(updated.getJSON()), footerLayout: 'custom', footerAlign: valueRef.current.footerAlign ?? 'left' }),
   })
-  const setTemplate = (template: string) => {
-    const next = { ...valueRef.current, footerLayout: 'custom' as const, footerAlign: 'center' as const, footerText: template }
+  const setTemplate = (template: string, footerAlign: 'center'|'left' = 'center') => {
+    const next = { ...valueRef.current, footerLayout: 'custom' as const, footerAlign, footerText: template }
     valueRef.current = next
     editor?.commands.setContent(footerContent(template), { emitUpdate: false })
     changeRef.current(next)
@@ -91,17 +91,18 @@ export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: 
     <div className="report-intro-footer-local-tools" role="toolbar" aria-label="页脚快捷工具" onMouseDown={event => event.preventDefault()}>
       <span>页脚</span>
       <Button type="text" size="small" onClick={() => editor?.chain().focus().insertContent({ type: 'reportFooterTab' }).run()}>分区</Button>
-      <Dropdown menu={{ items: [{ key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' }, { key: 'pageChinese', label: '当前页码（汉字）' }, { key: 'totalPagesChinese', label: '总页数（汉字）' }, { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }, { key: 'weekNoChinese', label: '周次汉字' }], onClick: ({ key }) => {
+      <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [{ key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' }, { key: 'pageChinese', label: '当前页码（汉字）' }, { key: 'totalPagesChinese', label: '总页数（汉字）' }, { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }, { key: 'weekNoChinese', label: '周次汉字' }].filter(item => reportFields || !['weekNo','weekNoChinese','semesterName'].includes(item.key)), onClick: ({ key }) => {
         if ((key === 'page' || key === 'totalPages' || key === 'pageChinese' || key === 'totalPagesChinese') && footerTemplate(valueRef.current).includes(`{${key}}`)) return
         editor?.chain().focus().insertContent({ type: 'reportFooterField', attrs: { key } }).run()
-      } }} trigger={['click']}><Button type="text" size="small">插入字段</Button></Dropdown>
-      <Dropdown menu={{ items: [
+      } }} trigger={['click']}><Button type="text" size="small" aria-label="插入页脚字段">插入字段</Button></Dropdown>
+      <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [
         { key: 'number', label: '1' }, { key: 'numberPage', label: '第1页' }, { key: 'numberTotal', label: '第1页，共N页' },
         { key: 'chinesePage', label: '第一页' }, { key: 'chineseTotal', label: '第一页，共N页（汉字）' },
       ], onClick: ({ key }) => {
         const templates: Record<string, string> = { number: '{page}', numberPage: '第{page}页', numberTotal: '第{page}页，共{totalPages}页', chinesePage: '第{pageChinese}页', chineseTotal: '第{pageChinese}页，共{totalPagesChinese}页' }
         setTemplate(templates[key])
       } }} trigger={['click']}><Button type="text" size="small">页码样式</Button></Dropdown>
+      {reportFields && <Button type="text" size="small" onClick={()=>setTemplate('{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t','left')}>参考页脚版式</Button>}
     </div>
     <EditorContent editor={editor} className="report-intro-footer-content" aria-label="编辑页脚" />
   </div>

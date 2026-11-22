@@ -4,10 +4,9 @@ import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Checkbox, DatePicker, Menu, message, Select, Space, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { useState } from 'react'
-import { reportOutputApi, type IntroductionDocument, type ReportOutputEditorSettings, type ReportOutputSettings, type ReportOutputWeekDate } from '../../../shared/api/reportOutputApi'
+import { reportOutputApi, type IntroductionDocument, type ReportOutputEditorSettings, type ReportOutputSettings, type ReportOutputWeekDate, type WordTemplateDocument } from '../../../shared/api/reportOutputApi'
 import { useWorkContext } from '../../work-context/useWorkContext'
-import { ReportIntroductionEditor } from './ReportIntroductionEditor'
-import { ReportDocumentPreview } from './ReportDocumentPreview'
+import { WordTemplateEditor, convertReportTemplate } from './WordTemplateEditor'
 
 function attachmentLines(settings: ReportOutputEditorSettings, codes: string[]) {
   const names = codes.map(code => settings.inspectionTypes.find(type => type.code === code)?.title || settings.inspectionTypes.find(type => type.code === code)?.name || code)
@@ -33,7 +32,7 @@ function syncGeneratedAttachments(document: IntroductionDocument, previous: stri
 }
 
 function initialDocument(settings: ReportOutputEditorSettings): IntroductionDocument {
-  let document: IntroductionDocument = settings.introductionDocument ?? { type: 'doc', content: settings.introduction.split('\n').map(line => ({
+  let document: IntroductionDocument = (settings.introductionDocument && !('schemaVersion' in settings.introductionDocument) ? settings.introductionDocument : undefined) ?? { type: 'doc', content: settings.introduction.split('\n').map(line => ({
     type: 'paragraph', attrs: { style: 'body', textAlign: 'left', indent: 2, lineSpacing: 27 },
     content: line ? [{ type: 'text', text: line }] : [],
   })) }
@@ -115,22 +114,15 @@ function WorkbookPreview({ types }: { types: ReportOutputEditorSettings['inspect
 }
 
 function SettingsForm({ settings, save, pending }: { settings: ReportOutputEditorSettings; save: (value: ReportOutputSettings) => Promise<boolean>; pending: boolean }) {
-  const dates = useQuery({ queryKey: ['report-output-week-dates'], queryFn: reportOutputApi.weekDates })
-  const workContext = useWorkContext()
-  const [previewWeekId, setPreviewWeekId] = useState<string>()
   const [format, setFormat] = useState<Format>('WORD')
+  const [template,setTemplate]=useState<WordTemplateDocument | undefined>(()=>settings.introductionDocument && 'schemaVersion' in settings.introductionDocument ? settings.introductionDocument : undefined)
   const [document, setDocument] = useState<IntroductionDocument>(() => initialDocument(settings))
   const [wordCodes, setWordCodes] = useState(() => settings.wordTypeCodes ?? [])
   const [excelCodes, setExcelCodes] = useState(() => settings.excelTypeCodes ?? [])
   const [editorOpen, setEditorOpen] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const [previewing, setPreviewing] = useState(false)
-  const [previewError, setPreviewError] = useState('')
-  const configuredWeeks = dates.data?.items.filter(item => item.issueDate) ?? []
-  const selectedWeek = configuredWeeks.find(item => item.weekId === previewWeekId)
-    ?? configuredWeeks.find(item => item.weekId === workContext.data?.week?.id)
-    ?? configuredWeeks[0]
-  const previewPeriod = selectedWeek ? { semesterName: selectedWeek.semesterName, weekNo: selectedWeek.weekNo, issueDate: selectedWeek.issueDate } : undefined
+  const [downloadError, setDownloadError] = useState<{ format: Format; message: string }>()
+  const previewPeriod = { semesterName: '示例学期', weekNo: 9, issueDate: '2025-06-01' }
   const codes = format === 'WORD' ? wordCodes : format === 'EXCEL' ? excelCodes : []
   const updateCodes = (next: string[]) => {
     if (format === 'WORD') {
@@ -149,15 +141,14 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
     ;[reordered[index], reordered[next]] = [reordered[next], reordered[index]]
     updateCodes(reordered)
   }
-  const saveSettings = () => save({ introduction: settings.introduction, introductionDocument: document, wordTypeCodes: wordCodes, excelTypeCodes: excelCodes, version: settings.version })
+  const saveSettings = () => save({ introduction: settings.introduction, introductionDocument: template ?? document, wordTypeCodes: wordCodes, excelTypeCodes: excelCodes, version: settings.version })
   const downloadPreview = async () => {
     setPreviewing(true)
-    setPreviewError('')
+    setDownloadError(undefined)
     try {
       let blob: Blob
       if (format === 'WORD') {
-        if (!selectedWeek) throw new Error('请先在“文件日期”中设置通报周次的日期')
-        blob = await reportOutputApi.previewWord(document, wordCodes, { semesterId: selectedWeek.semesterId, weekId: selectedWeek.weekId })
+        blob = await reportOutputApi.previewWord(template ?? document, wordCodes)
       } else {
         blob = await reportOutputApi.previewExcel(excelCodes)
       }
@@ -170,7 +161,7 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
       anchor.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : '预览生成失败，请重试')
+      setDownloadError({ format, message: error instanceof Error ? error.message : '下载失败，请重试' })
     } finally {
       setPreviewing(false)
     }
@@ -178,7 +169,7 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
   return <div className="report-output-settings-workspace">
     <header className="report-output-settings-header">
       <div><Typography.Title level={3}>通报文件设置</Typography.Title><Typography.Text type="secondary">维护 Word、Excel 与每周文件日期</Typography.Text></div>
-      {format !== 'DATE' && <Space><Button onClick={() => setPreviewOpen(true)}>预览</Button><Button type="primary" loading={pending} onClick={() => void saveSettings()}>保存配置</Button></Space>}
+      {format !== 'DATE' && <Button type="primary" loading={pending} onClick={() => void saveSettings()}>保存配置</Button>}
     </header>
     <div className="report-output-config-layout">
       <nav className="report-output-config-nav" aria-label="文件配置类型">
@@ -191,20 +182,31 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
       <Card className="report-output-config-detail" variant="borderless">
         <div className="report-output-config-heading"><div><Typography.Title level={4}>{format === 'WORD' ? 'Word 配置' : format === 'EXCEL' ? 'Excel 配置' : '每周文件日期'}</Typography.Title><Typography.Text type="secondary">{format === 'WORD' ? '通报前文与检查附件' : format === 'EXCEL' ? '每项检查生成一张工作表' : '按通报周次设置文件落款日期'}</Typography.Text></div>{format !== 'DATE' && <span>配置版本 {settings.version}</span>}</div>
         {format === 'DATE' && <WeekDateSettings />}
-        {format === 'WORD' && <section className="report-output-config-section" aria-label="Word 前文"><div className="report-output-config-section-title"><strong>通报首页</strong><Button onClick={() => setEditorOpen(true)}>编辑首页</Button></div><ReportDocumentPreview document={document} types={wordTypes} period={previewPeriod ?? { semesterName: '示例学期', weekNo: 9, issueDate: '未设置文件日期' }} compact /></section>}
+        {format !== 'DATE' && <section className="report-output-config-section" aria-label={format === 'WORD' ? 'Word 前文' : 'Excel 模板'}>
+          <div className="report-output-config-section-title">
+            <strong>{format === 'WORD' ? '通报模板' : '工作簿预览'}</strong>
+            <Space wrap>
+              {format === 'WORD' && <Button onClick={() => {
+                if (!template) setTemplate(convertReportTemplate(document, wordTypes))
+                setEditorOpen(true)
+              }}>编辑模板</Button>}
+              <Button loading={previewing} disabled={!codes.length} onClick={() => void downloadPreview()}>
+                下载{format === 'WORD' ? ' Word ' : ' Excel '}模板
+              </Button>
+            </Space>
+          </div>
+          {downloadError?.format === format && <Alert type="error" showIcon title={downloadError.message} />}
+          {format === 'WORD'
+            ? <TemplatePreview template={template ?? convertReportTemplate(document, wordTypes)} types={wordTypes} period={previewPeriod} />
+            : <WorkbookPreview types={selectedTypes} />}
+        </section>}
         {format !== 'DATE' && <div className="report-output-config-columns">
           <section className="report-output-config-section" aria-label="检查类型"><div className="report-output-config-section-title"><strong>检查类型</strong><span>已选 {codes.length} 项</span></div><div className="report-output-type-grid">{settings.inspectionTypes.map(type => <label className="report-output-type-option" key={type.code}><Checkbox checked={codes.includes(type.code)} onChange={event => toggle(type.code, event.target.checked)} /> <span>{type.name}</span></label>)}</div></section>
           <section className="report-output-config-section" aria-label="文件顺序"><div className="report-output-config-section-title"><strong>{format === 'WORD' ? '附件顺序' : '工作表顺序'}</strong></div><div className="report-output-default-order">{codes.length === 0 && <p className="report-output-config-empty">选择检查类型后，在此调整顺序</p>}{codes.map((code, index) => <div className="report-output-order-row" key={code}><span>{index + 1}. {names[index]}</span><Space size={0}><Button type="text" size="small" icon={<ArrowUpOutlined />} aria-label={'上移 ' + names[index]} disabled={index === 0} onClick={() => move(index, -1)} /><Button type="text" size="small" icon={<ArrowDownOutlined />} aria-label={'下移 ' + names[index]} disabled={index === codes.length - 1} onClick={() => move(index, 1)} /></Space></div>)}</div></section>
         </div>}
       </Card>
     </div>
-    <ExpandableDrawer title="编辑通报首页" className="report-intro-drawer" open={editorOpen} size={1100} extra={<Button type="primary" loading={pending} onClick={() => { void saveSettings().then(saved => { if (saved) setEditorOpen(false) }) }}>保存并完成</Button>} onClose={() => setEditorOpen(false)} destroyOnHidden><ReportIntroductionEditor value={document} onChange={setDocument} attachmentNames={wordTypes.map(type => type.title || type.name)} /></ExpandableDrawer>
-    <ExpandableDrawer title={format === 'WORD' ? 'Word 文件预览' : 'Excel 工作簿预览'} open={previewOpen} size={1100} onClose={() => setPreviewOpen(false)} extra={<Button loading={previewing} disabled={!codes.length || (format === 'WORD' && !selectedWeek)} onClick={() => void downloadPreview()}>下载预览 {format === 'WORD' ? 'Word' : 'Excel'}</Button>}>
-      <Typography.Text type="secondary">使用当前未保存的配置展示文件结构；以下载的文件为准</Typography.Text>
-      {format === 'WORD' && <div style={{ margin: '16px 0' }}><Select aria-label="预览通报周次" placeholder="选择已设置文件日期的周次" loading={dates.isLoading} value={selectedWeek?.weekId} onChange={setPreviewWeekId} style={{ width: 320 }} options={configuredWeeks.map(item => ({ value: item.weekId, label: `${item.semesterName} · 第 ${item.weekNo} 周 · ${item.issueDate}` }))} />{dates.isError && <Alert type="error" showIcon title="文件日期加载失败" action={<Button onClick={() => void dates.refetch()}>重试</Button>} />}{!dates.isLoading && !dates.isError && !configuredWeeks.length && <Alert type="warning" showIcon title="请先在“文件日期”中设置通报周次的日期" />}</div>}
-      {format === 'WORD' ? <ReportDocumentPreview document={document} types={wordTypes} period={previewPeriod ?? { semesterName: '示例学期', weekNo: 9, issueDate: '未设置文件日期' }} /> : <WorkbookPreview types={selectedTypes} />}
-      {previewError && <Alert type="error" showIcon title={previewError} />}
-    </ExpandableDrawer>
+    <ExpandableDrawer title="编辑通报模板" className="report-intro-drawer" open={editorOpen} size={1100} extra={<Button type="primary" loading={pending} onClick={() => { void saveSettings().then(saved => { if (saved) setEditorOpen(false) }) }}>保存并完成</Button>} onClose={() => setEditorOpen(false)} destroyOnHidden>{template && <WordTemplateEditor value={template} onChange={setTemplate} types={wordTypes}/>}</ExpandableDrawer>
   </div>
 }
 
@@ -226,5 +228,16 @@ export function ReportOutputSettingsPanel() {
     {settings.data && <SettingsForm key={settings.data.version} settings={settings.data} save={async value => {
       try { await save.mutateAsync(value); return true } catch { return false }
     }} pending={save.isPending} />}
+  </section>
+}
+
+function TemplatePreview({template,types,period}:{
+  template:WordTemplateDocument
+  types:ReportOutputEditorSettings['inspectionTypes']
+  period?:{semesterName:string;weekNo:number;issueDate:string}
+}) {
+  return <section aria-label="模板内容预览" className="report-template-preview">
+    <WordTemplateEditor key={JSON.stringify([template,types,period])} readOnly value={template} types={types}
+      period={period} onChange={()=>{}}/>
   </section>
 }

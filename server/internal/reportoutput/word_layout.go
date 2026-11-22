@@ -215,10 +215,10 @@ func wordPageNumberFormat(document IntroductionDocument) string {
 func renderIntroduction(document IntroductionDocument) string {
 	styles := map[string]string{"body": "CoverBody", "title": "CoverTitle", "subtitle": "CoverSubtitle", "heading": "CoverHeading", "heading1": "CoverHeading1", "heading2": "CoverHeading2", "heading3": "CoverHeading3", "signature": "CoverSignature", "date": "CoverDate"}
 	alignments := map[string]string{"left": "left", "center": "center", "right": "right", "justify": "both"}
-	sizes := map[string]string{"14pt": "28", "15pt": "30", "16pt": "32", "20pt": "40", "30pt": "60"}
+	sizes := map[string]string{"9pt": "18", "10.5pt": "21", "12pt": "24", "14pt": "28", "15pt": "30", "16pt": "32", "20pt": "40", "30pt": "60"}
 	var output strings.Builder
 	for _, paragraph := range document.Content {
-		output.WriteString(`<w:p><w:pPr><w:pStyle w:val="` + styles[paragraph.Attrs.Style] + `"/><w:jc w:val="` + alignments[paragraph.Attrs.TextAlign] + `"/>`)
+		output.WriteString(`<w:p><w:pPr><w:pStyle w:val="` + styles[paragraph.Attrs.Style] + `"/>` + paragraphBorderXML(paragraph.Attrs.Border) + `<w:jc w:val="` + alignments[paragraph.Attrs.TextAlign] + `"/>`)
 		if paragraph.Attrs.Indent > 0 {
 			output.WriteString(fmt.Sprintf(`<w:ind w:firstLineChars="%d"/>`, paragraph.Attrs.Indent*100))
 		}
@@ -380,4 +380,16 @@ func paginateWordRows(lines [][]string, widths []int) []wordTablePage {
 		start = end
 	}
 	return pages
+}
+
+func paragraphBorderXML(border string) string {
+	const single = ` w:val="single" w:sz="6" w:space="3" w:color="auto"/>`
+	switch border {
+	case "topBottom":
+		return "<w:pBdr><w:top" + single + "<w:bottom" + single + "</w:pBdr>"
+	case "bottomDouble":
+		return `<w:pBdr><w:bottom w:val="double" w:sz="6" w:space="3" w:color="auto"/></w:pBdr>`
+	default:
+		return ""
+	}
 }

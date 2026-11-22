@@ -57,7 +57,7 @@ var ErrForceGenerateRoleRequired = errors.New("force generation permission requi
 var ErrReportObligationRoleRequired = errors.New("weekly obligation permission requires report maintenance responsibility")
 var ErrReportMaintenanceRequired = errors.New("report maintenance department required")
 
-var disciplineActions = []string{"DISCIPLINE_RULE_VIEW", "DISCIPLINE_RULE_EDIT", "DISCIPLINE_RULE_PUBLISH", "DISCIPLINE_LEDGER_VIEW", "DISCIPLINE_LEDGER_EXPORT", "DISCIPLINE_CASE_VIEW", "DISCIPLINE_CASE_CONFIRM", "DISCIPLINE_ARCHIVE_VIEW", "DISCIPLINE_ARCHIVE_EXPORT"}
+var disciplineActions = []string{"DISCIPLINE_RULE_VIEW", "DISCIPLINE_RULE_EDIT", "DISCIPLINE_RULE_PUBLISH", "DISCIPLINE_DOCUMENT_TEMPLATE_EDIT", "DISCIPLINE_LEDGER_VIEW", "DISCIPLINE_LEDGER_EXPORT", "DISCIPLINE_CASE_VIEW", "DISCIPLINE_CASE_CONFIRM", "DISCIPLINE_ARCHIVE_VIEW", "DISCIPLINE_ARCHIVE_EXPORT", "DISCIPLINE_DOCUMENT_EXPORT"}
 
 // IsDisciplineAction identifies the configurable discipline capabilities.
 func IsDisciplineAction(action string) bool { return slices.Contains(disciplineActions, action) }

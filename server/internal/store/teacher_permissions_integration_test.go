@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -132,9 +134,53 @@ func TestTeacherAssignedTemplatesPostgres(t *testing.T) {
 	if err := db.AssignUserRole(ctx, change, mutation); err == nil {
 		t.Fatal("role change omitted explicit personal decisions")
 	}
+	// The failed role change adds no fifth message. Updating the template sent no
+	// historical notification to first. Reading another recipient's row fails.
+	stats := func(account string) (int, string) {
+		t.Helper()
+		result, err := db.InboxPage(ctx, account, 1, 20, false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var page struct {
+			Unread  int
+			Through string
+		}
+		if err := json.Unmarshal(result, &page); err != nil {
+			t.Fatal(err)
+		}
+		return page.Unread, page.Through
+	}
+	unreadCount, last := stats(second)
+	if unreadCount != 4 {
+		t.Fatalf("recipient unread=%d", unreadCount)
+	}
+	if n, _ := stats(first); n != 1 {
+		t.Fatalf("historical recipient unread=%d", n)
+	}
+	id, err := strconv.ParseInt(last, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := db.ReadInbox(ctx, first, id, false); err != nil || found {
+		t.Fatalf("foreign read: %v %v", found, err)
+	}
+	if _, err := db.ReadInbox(ctx, second, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := stats(second); n != 0 {
+		t.Fatalf("bulk read left %d", n)
+	}
 	change.PersonalRuleDecisions = map[string]bool{personal.ID: true}
 	if err := db.AssignUserRole(ctx, change, mutation); err != nil {
 		t.Fatal("keep personal rule on role change", err)
+	}
+	// Replaying a bulk-read request must leave messages created afterwards unread.
+	if _, err := db.ReadInbox(ctx, second, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := stats(second); n != 1 {
+		t.Fatalf("new notification lost after bulk-read retry: %d", n)
 	}
 	var count int
 	if err := db.Pool.QueryRow(ctx, "SELECT count(*) FROM user_permission_rules WHERE id=$1", personal.ID).Scan(&count); err != nil || count != 1 {

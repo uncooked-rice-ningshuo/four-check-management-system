@@ -1,0 +1,30 @@
+.document-template-count {
+  margin: 0 0 8px;
+  text-align: end;
+}
+.document-template-list .department-defaults-table {
+  background: white;
+}
+.document-template-list .department-defaults-table :is(th, td) {
+  padding: 5px 14px;
+}
+.document-template-list .department-defaults-table thead th {
+  padding-block: 8px;
+}
+.document-template-list .department-defaults-row-actions .ant-btn {
+  height: 28px;
+}
+
+.document-template-list .document-group-cell {
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.document-template-list tbody + tbody > tr:first-child > * {
+  border-top: 1px solid #dfe7ef;
+}
+.document-template-list tbody .document-group-cell {
+  border-bottom: 0;
+}
+
+.discipline-preview-caption { margin: 0; padding: 10px 16px; color: #52677c; font-size: 13px; }

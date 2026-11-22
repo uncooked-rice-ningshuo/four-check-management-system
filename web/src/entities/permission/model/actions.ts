@@ -2,12 +2,14 @@ export const disciplineActions = [
   ['DISCIPLINE_RULE_VIEW', '查看处分规则'],
   ['DISCIPLINE_RULE_EDIT', '修改处分规则'],
   ['DISCIPLINE_RULE_PUBLISH', '发布处分规则'],
+  ['DISCIPLINE_DOCUMENT_TEMPLATE_EDIT', '编辑处分文件配置'],
   ['DISCIPLINE_LEDGER_VIEW', '学期违纪台账查看'],
   ['DISCIPLINE_LEDGER_EXPORT', '学期违纪台账导出'],
   ['DISCIPLINE_CASE_VIEW', '查看待处分'],
   ['DISCIPLINE_CASE_CONFIRM', '处理待处分'],
   ['DISCIPLINE_ARCHIVE_VIEW', '查看处分归档'],
   ['DISCIPLINE_ARCHIVE_EXPORT', '导出处分归档'],
+  ['DISCIPLINE_DOCUMENT_EXPORT', '导出处分文书'],
 ] as const
 
 export const permissionActionOptions = [

@@ -99,12 +99,19 @@ func (p *Postgres) DisciplineReviewQueue(ctx context.Context, f reporting.Review
 		}
 	}
 	var result json.RawMessage
-	err := p.Pool.QueryRow(ctx, `WITH allowed AS (SELECT (`+processPredicate+`) AS can_process,d.id,d.student_number,c.name AS class_name,d.evidence->'tier'->>'name' AS tier,
+	err := p.Pool.QueryRow(ctx, `WITH allowed AS (SELECT (`+processPredicate+`) AS can_process,d.id,d.student_number,
+ coalesce(nullif(d.evidence->'student'->>'name',''),s.name) AS student_name,
+ coalesce(nullif(d.evidence->'student'->>'grade',''),g.name) AS grade_name,
+ coalesce(nullif(d.evidence->'student'->>'major',''),m.name) AS major_name,
+ coalesce(nullif(d.evidence->'student'->>'class',''),c.name) AS class_name,rg.name AS group_name,rg.result_unit,d.evidence->'tier'->>'name' AS tier,
  d.accumulated_amount,d.status,d.delay_reason,d.row_version,d.due_at FROM discipline_cases d JOIN classes c ON c.id=d.responsibility_class_id
+ LEFT JOIN students s ON s.student_no=d.student_number
+ LEFT JOIN grades g ON g.id=c.grade_id LEFT JOIN majors m ON m.id=c.major_id
+ LEFT JOIN discipline_rule_groups rg ON rg.version_id=d.rule_version_id AND rg.group_key=d.group_key
  WHERE d.status IN ('PENDING','DEFERRED') AND ($1='' OR d.status=$1) AND strpos(d.student_number,$2)>0 AND (`+visiblePredicate+`)),
  page AS (SELECT * FROM allowed ORDER BY due_at,id LIMIT $3 OFFSET $4)
  SELECT jsonb_build_object('total',(SELECT count(*) FROM allowed),'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
- 'canProcess',can_process,'id',id,'studentNumber',student_number,'className',class_name,'tier',tier,'amount',accumulated_amount,'status',status,
+ 'canProcess',can_process,'id',id,'studentNumber',student_number,'studentName',student_name,'gradeName',grade_name,'majorName',major_name,'groupName',group_name,'unit',result_unit,'className',class_name,'tier',tier,'amount',accumulated_amount,'status',status,
  'reason',delay_reason,'version',row_version,'dueAt',due_at) ORDER BY due_at,id) FROM page),'[]'))`, args...).Scan(&result)
 	return result, err
 }

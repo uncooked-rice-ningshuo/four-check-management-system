@@ -3,7 +3,7 @@ import { test } from './fixture'
 
 test.use({ video:'on', launchOptions:{channel:'chrome',slowMo:350} })
 test('老师延迟后再次确认处分',async({page})=>{
-  let item={id:'sample',canProcess:true,studentNumber:'演示001',className:'演示班',tier:'警告',amount:4,status:'PENDING',version:1,reason:'',dueAt:'2026-11-24T10:00:00Z'}
+  let item={id:'sample',canProcess:true,studentNumber:'演示001',studentName:'演示学生',gradeName:'2024级',majorName:'计算机科学与技术',groupName:'课堂缺勤',unit:'学时',className:'演示班',tier:'警告',amount:4,status:'PENDING',version:1,reason:'',dueAt:'2026-11-24T10:00:00Z'}
   const decisions:string[]=[]
   await page.route('**/api/v1/**',async route=>{
     const path=new URL(route.request().url()).pathname
@@ -26,6 +26,11 @@ test('老师延迟后再次确认处分',async({page})=>{
   await page.getByRole('link',{name:'待处分',exact:true}).click()
   await expect(page).toHaveURL(/\/discipline\/review$/)
   await expect(page.getByRole('heading',{name:'待处分',exact:true})).toBeVisible()
+  const row = page.getByRole('row').filter({hasText:'演示001'})
+  for (const text of ['演示学生','2024级','计算机科学与技术','演示班','课堂缺勤','4 学时','警告']) {
+    await expect(row).toContainText(text)
+  }
+  await page.screenshot({path:test.info().outputPath('review-queue.png')})
   await page.getByRole('button',{name:'延迟处理'}).click()
   const dialog=page.getByRole('dialog')
   const ok=dialog.getByRole('button',{name:/确\s*定/})

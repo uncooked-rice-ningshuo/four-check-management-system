@@ -31,9 +31,13 @@ export function DisciplineReviewPage() {
       onReset={() => setFilter({ page: 1, pageSize: filter.pageSize })}
       pagination={{current: filter.page, pageSize: filter.pageSize, total: queue.data?.total, onChange: (page,pageSize) => setFilter({...filter,page:pageSize===filter.pageSize?page:1,pageSize})}}
       columns={[
-        { title: '学号', dataIndex: 'student', render: (_, row) => row.studentNumber },
+        { title: '学号', dataIndex: 'student', hideInTable: true },
+        { title: '学生', key: 'identity', search: false, render: (_, r) => <><strong>{r.studentName || '姓名未记录'}</strong><br/><Typography.Text type="secondary">{r.studentNumber}</Typography.Text></> },
+        { title: '年级 / 专业', key: 'program', search: false, render: (_, r) => <>{r.gradeName || '—'}<br/>{r.majorName || '—'}</> },
         { title: '责任班级', dataIndex: 'className', search: false },
-        { title: '处分档位', dataIndex: 'tier', search: false }, { title: '触发累计值', dataIndex: 'amount', search: false },
+        { title: '触发累计项', dataIndex: 'groupName', search: false, render: (_, r) => r.groupName || '累计项未记录' },
+        { title: '累计值', dataIndex: 'amount', search: false, render: (_, r) => [r.amount, r.unit].filter(v => v != null && v !== '').join(' ') },
+        { title: '处分档位', dataIndex: 'tier', search: false },
         { title: '状态', dataIndex: 'status', valueType:'select', valueEnum: { PENDING:'待处理', DEFERRED:'已延迟' } },
         { title: '自动确认截止', search:false, render:(_,r)=>r.status==='DEFERRED'?'已延迟':new Date(r.dueAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}) },
         { title: '延迟原因', dataIndex:'reason', search:false },
@@ -41,7 +45,7 @@ export function DisciplineReviewPage() {
       ]} />
     <Modal open={!!selection} title={selection?.decision==='DEFERRED'?'延迟处理':'确认处分'} okText="确定" cancelText="取消"
       confirmLoading={review.isPending} onCancel={()=>{if(!review.isPending)select(undefined)}} onOk={()=>form.submit()}>
-      <p>{selection?.item.studentNumber} · {selection?.item.className} · {selection?.item.tier}</p>
+      {selection && <p>{selection.item.studentName} {selection.item.studentNumber} · {selection.item.className}<br/>{selection.item.groupName || '累计项未记录'} · 累计 {selection.item.amount} {selection.item.unit} · {selection.item.tier}</p>}
       <Form form={form} onFinish={values=>review.mutate(values.reason?.trim() ?? '')}>
         {selection?.decision==='DEFERRED' && <Form.Item name="reason" label="延迟原因" rules={[{required:true,whitespace:true,message:'请填写延迟原因'}]}><Input.TextArea maxLength={500} /></Form.Item>}
       </Form>

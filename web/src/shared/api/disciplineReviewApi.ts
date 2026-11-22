@@ -2,6 +2,8 @@ import { apiRequest } from './httpClient'
 
 export type ReviewItem = {
   canProcess?: boolean; id: string; studentNumber: string; className: string; tier: string; amount: number
+  studentName?: string | null; gradeName?: string | null; majorName?: string | null
+  groupName?: string | null; unit?: string | null
   status: 'PENDING' | 'DEFERRED'; version: number; reason: string | null; dueAt: string
 }
 export type ReviewFilter = { student?: string; status?: string; page: number; pageSize: number }

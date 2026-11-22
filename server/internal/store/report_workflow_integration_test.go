@@ -501,8 +501,8 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
  INSERT INTO discipline_rule_versions(version,status,created_by,published_by,published_at)
  VALUES(1,'PUBLISHED',$1,$1,now()) RETURNING id
 ), cur AS (INSERT INTO discipline_rule_current(version_id) SELECT id FROM v),
-g AS (INSERT INTO discipline_rule_groups(version_id,group_key,name,sort_order)
- SELECT id,'evening','晚自习',0 FROM v RETURNING id,version_id),
+g AS (INSERT INTO discipline_rule_groups(version_id,group_key,name,result_unit,sort_order)
+ SELECT id,'evening','晚自习','次',0 FROM v RETURNING id,version_id),
 term AS (INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,operator,conversion_factor,sort_order)
  SELECT id,version_id,$2,'晚自习','+',4,0 FROM g)
 INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,teacher_confirmation_required,sort_order)
@@ -567,6 +567,12 @@ INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,tea
 		}
 		if err = json.Unmarshal(raw, &result); err != nil || result.Total != total || len(result.Items) != min(total, 1) {
 			t.Fatalf("queue = %s, err=%v", raw, err)
+		}
+		if len(result.Items) > 0 {
+			var row struct{ StudentNumber, StudentName, GradeName, ClassName, GroupName, Unit string }
+			if err := json.Unmarshal(result.Items[0], &row); err != nil || row.StudentNumber != snapshotRecord.StudentNumber || row.StudentName == "" || row.ClassName == "" || row.GradeName == "" || row.GroupName != "晚自习" || row.Unit != "次" {
+				t.Fatalf("queue missing student or rule context: %+v, %v", row, err)
+			}
 		}
 	}
 	adminView := permission.EffectiveResult{SystemRole: permission.SystemRoleSuperAdmin}

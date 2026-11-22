@@ -226,7 +226,7 @@ test('复用模板须修改，撤销回原版后不能启用', async ({page})=>{
         Object.assign(target,payload,{revision:1})
         return route.fulfill({json:{saved:true}})
       }
-      return route.fulfill({json:{items:[source,target,{...target,tierCode:'C',tierName:'第三档'},{...target,tierCode:'D',tierName:'第四档'},{...target,groupKey:'attendance',name:'到课率累计',tierName:'到课率第一档'}]}})
+      return route.fulfill({json:{sources:[{...source,revision:7,tierName:"已停用历史档位"}],items:[source,target,{...target,tierCode:'C',tierName:'第三档'},{...target,tierCode:'D',tierName:'第四档'},{...target,groupKey:'attendance',name:'到课率累计',tierName:'到课率第一档'}]}})
     }
     return route.fulfill({json:{items:[],permissions:[]}})
   })
@@ -279,6 +279,7 @@ test('复用模板须修改，撤销回原版后不能启用', async ({page})=>{
   await page.getByRole('radio',{name:'复用已有模板'}).check()
   await expect(page.getByRole('button',{name:'进入编辑'})).toBeDisabled()
   await page.getByRole('combobox',{name:'基于已有模板编辑'}).click()
+  await expect(page.getByText(/已停用历史档位/)).toHaveCount(0)
   await page.getByText('示例累计项 · 第一档 · 第 1 版',{exact:true}).click()
   await page.screenshot({path:test.info().outputPath('template-source.png'), animations:'disabled'})
   await page.getByRole('button',{name:'进入编辑'}).click()

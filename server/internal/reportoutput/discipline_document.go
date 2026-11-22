@@ -90,7 +90,6 @@ func (p *DocumentPreview) Fill(input DocumentRequest, now time.Time) error {
 }
 
 type disciplineDocumentRepository interface {
-	ListDocumentTemplateSources(context.Context) ([]DisciplineTemplate, error)
 	ListDocumentTemplates(context.Context) ([]DisciplineTemplate, error)
 	SaveDocumentTemplate(context.Context, DisciplineTemplate, audit.Metadata) error
 	ProcessDisciplineDocument(context.Context, string, DocumentRequest, audit.Metadata, bool) (DocumentPreview, []byte, error)
@@ -109,13 +108,6 @@ func (s *Service) DocumentTemplates(ctx context.Context) ([]DisciplineTemplate, 
 		return nil, err
 	}
 	return repo.ListDocumentTemplates(ctx)
-}
-func (s *Service) DocumentTemplateSources(ctx context.Context) ([]DisciplineTemplate, error) {
-	repo, err := s.documentRepository()
-	if err != nil {
-		return nil, err
-	}
-	return repo.ListDocumentTemplateSources(ctx)
 }
 func (s *Service) SaveDocumentTemplate(ctx context.Context, t DisciplineTemplate, meta audit.Metadata) error {
 	if _, err := uuid.Parse(t.RuleID); err != nil || t.TierCode == "" || t.GroupKey == "" || t.Revision < 0 {

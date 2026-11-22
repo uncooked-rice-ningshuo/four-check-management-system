@@ -127,6 +127,16 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 		if err != nil || list[1].Revision != 1 || list[0].TemplateID == list[1].TemplateID {
 			t.Fatalf("tier copy: %v %v", list, err)
 		}
+		oldSource := list[0]
+		updated := oldSource
+		updated.Document = entry.Document
+		if err := store.SaveDocumentTemplate(ctx, updated, audit.Metadata{ActorID: actorID}); err != nil {
+			t.Fatal(err)
+		}
+		entry.Revision = 1
+		if err := store.SaveDocumentTemplate(ctx, entry, audit.Metadata{ActorID: actorID}); !errors.Is(err, reportoutput.ErrConfigConflict) {
+			t.Fatalf("superseded source: %v", err)
+		}
 
 	})
 	versionID := uuid.NewString()

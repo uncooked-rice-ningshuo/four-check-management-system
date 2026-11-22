@@ -32,21 +32,6 @@ func (p *Postgres) ListDocumentTemplates(ctx context.Context) ([]reportoutput.Di
 	return list, rows.Err()
 }
 
-// Historical group templates can seed a draft but never act as a tier binding.
-func (p *Postgres) ListDocumentTemplateSources(ctx context.Context) ([]reportoutput.DisciplineTemplate, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT t.source_rule_id::text,t.group_key,g.name,coalesce(t.tier_code,''),coalesce(k.name,'原累计项模板'),t.revision,t.id::text,t.document
- FROM discipline_document_templates t JOIN discipline_rule_groups g ON (g.version_id,g.group_key)=(t.source_rule_id,t.group_key)
- LEFT JOIN discipline_rule_tiers k ON k.group_id=g.id AND k.code=t.tier_code ORDER BY g.name,k.sort_order,t.revision DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (reportoutput.DisciplineTemplate, error) {
-		var t reportoutput.DisciplineTemplate
-		err := row.Scan(&t.RuleID, &t.GroupKey, &t.Name, &t.TierCode, &t.TierName, &t.Revision, &t.TemplateID, &t.Document)
-		return t, err
-	})
-}
 func (p *Postgres) SaveDocumentTemplate(ctx context.Context, t reportoutput.DisciplineTemplate, meta audit.Metadata) error {
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
@@ -71,7 +56,9 @@ func (p *Postgres) SaveDocumentTemplate(ctx context.Context, t reportoutput.Disc
 	}
 	if t.SourceTemplateID != "" {
 		var source json.RawMessage
-		err := tx.QueryRow(ctx, `SELECT document FROM discipline_document_templates WHERE id=$1`, t.SourceTemplateID).Scan(&source)
+		err := tx.QueryRow(ctx, `SELECT t.document FROM discipline_tier_template_bindings b
+ JOIN discipline_document_templates t ON t.id=b.template_id
+ WHERE b.template_id=$1 AND b.rule_id=$2 AND (b.group_key,b.tier_code)<>($3,$4)`, t.SourceTemplateID, t.RuleID, t.GroupKey, t.TierCode).Scan(&source)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return reportoutput.ErrConfigConflict
 		}

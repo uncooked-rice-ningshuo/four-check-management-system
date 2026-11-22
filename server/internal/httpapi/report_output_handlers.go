@@ -212,10 +212,11 @@ func (h *handler) documentTemplates(c *gin.Context) {
 		h.writeOutputError(c, err)
 		return
 	}
-	sources, err := h.reportOutput.DocumentTemplateSources(c)
-	if err != nil {
-		h.writeOutputError(c, err)
-		return
+	sources := make([]reportoutput.DisciplineTemplate, 0, len(items))
+	for _, item := range items {
+		if item.TemplateID != "" {
+			sources = append(sources, item)
+		}
 	}
 	c.JSON(200, gin.H{"items": items, "sources": sources})
 }

@@ -19,7 +19,8 @@ export function DisciplineDocumentPage(){
   const [preview, setPreview] = useState<DisciplineTemplate>()
   const [reuse, setReuse] = useState(false)
   const items = query.data?.items ?? []
-  const sources = (query.data?.sources ?? items).filter(item => item.templateId && item.document)
+  const sources = items.filter(item => item.templateId && item.document &&
+    (item.groupKey !== target?.groupKey || item.tierCode !== target?.tierCode))
   const groups = new Map<string, DisciplineTemplate[]>()
   for (const item of items) {
     const key = JSON.stringify([item.ruleId, item.groupKey])
@@ -82,7 +83,7 @@ export function DisciplineDocumentPage(){
           <Radio value={false}>使用空白模板</Radio>
           <Radio value={true} disabled={!sources.length}>复用已有模板</Radio>
         </Radio.Group>
-        {reuse && <Select aria-label="基于已有模板编辑" placeholder="选择累计项、档位及版本" style={{width:'100%'}}
+        {reuse && <Select aria-label="基于已有模板编辑" placeholder="选择已配置的累计项和档位" style={{width:'100%'}}
           showSearch optionFilterProp="label" value={source?.templateId}
           options={sources.map(item=>({value:item.templateId,label:[item.name,item.tierName,'第 '+item.revision+' 版'].filter(Boolean).join(' · ')}))}
           onChange={id=>setSource(sources.find(item=>item.templateId===id))}/>}

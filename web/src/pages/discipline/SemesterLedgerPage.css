@@ -1,4 +1,4 @@
-.semester-ledger { min-width: 0; }
+.semester-ledger.attendance-page { min-width: 0; row-gap: 8px; }
 .semester-ledger header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .semester-ledger header .ant-select { min-width: 220px; }
 .semester-ledger .ant-table-wrapper .ant-table.ant-table-small table tr > .ant-table-cell { height: 32px; padding: 3px 8px; font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -29,3 +29,16 @@
 .semester-ledger .ant-pro-table-list-toolbar .ant-btn { height: 26px; padding-inline: 10px; font-size: 13px; }
 /* QueryFilter supplies its default vertical gutter inline. */
 .semester-ledger .ant-pro-table-search .ant-pro-query-filter-row { row-gap: 6px !important; }
+
+.ledger-expanded-view {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: auto;
+  padding: clamp(10px, 2vw, 24px);
+  background: #f8fafc;
+}
+.ledger-expanded-view .semester-ledger {
+  width: 100%;
+  max-width: none;
+}

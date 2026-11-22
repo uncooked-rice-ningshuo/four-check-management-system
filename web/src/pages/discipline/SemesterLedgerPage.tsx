@@ -1,3 +1,6 @@
+import { Icon } from '@iconify/react'
+import maximize from '@iconify-icons/lucide/maximize'
+import minimize from '@iconify-icons/lucide/minimize'
 import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Alert, Button, Select, Typography, Space, Tag, Empty, type FormInstance } from 'antd'
@@ -27,10 +30,12 @@ export function SemesterLedgerPage() {
   const canExport = hasNavigableInspectionAction(permissions.data?.permissions, 'DISCIPLINE_LEDGER_EXPORT')
   const download = useLedgerExport(semester, filter)
   const data = query.data
+  const [expanded, setExpanded] = useState(false)
+  const fullscreenLabel = expanded ? '退出表格全屏' : '表格全屏'
   const ledgerRef = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const ledger = ledgerRef.current
-    const viewport = ledger?.closest<HTMLElement>('.admin-content')
+    const viewport = expanded ? ledger?.parentElement : ledger?.closest<HTMLElement>('.admin-content')
     const body = ledger?.querySelector<HTMLElement>('.ant-table-body')
     if (!ledger || !viewport || !body) return
     // Reserve the actual space occupied by the filters, headers, pagination and page padding.
@@ -46,7 +51,7 @@ export function SemesterLedgerPage() {
     observer.observe(viewport)
     observer.observe(ledger)
     return () => observer.disconnect()
-  }, [query.isError, semester])
+  }, [query.isError, semester, expanded])
   const [sourceCode, setSourceCode] = useState('')
   const sourceColumn = data?.columns.find(c => c.code === sourceCode)
   const filterOptions = (key: 'grade' | 'major' | 'class') => {
@@ -104,11 +109,16 @@ export function SemesterLedgerPage() {
       <><Button type="link" size="small" onClick={() => { setPanel('sources'); setSourceCode(''); setDetail(row) }}>检查记录</Button>
       <Button type="link" size="small" onClick={() => { setPanel('cases'); setSourceCode(''); setDetail(row) }}>处分事项</Button></> },
   ]
-  return <section ref={ledgerRef} className="semester-ledger attendance-page">
+  return <div className={expanded ? 'ledger-expanded-view' : undefined}
+    onKeyDown={event => {
+      if (expanded && !detail && event.key === 'Escape' && !event.defaultPrevented) setExpanded(false)
+    }}>
+    <section ref={ledgerRef} className="semester-ledger attendance-page">
     <header className="attendance-page-heading"><Typography.Title level={2}>学期违纪台账</Typography.Title><Select aria-label="学年与学期" placeholder="选择学年与学期" value={semester || undefined}
       options={data?.semesters} onChange={id => { setSemester(id); setDraft(emptyLedgerFilter); setFilter(emptyLedgerFilter); setPage(1) }} /></header>
+    {query.isError && expanded && <Button onClick={() => setExpanded(false)}>退出表格全屏</Button>}
     {query.isError ? <Alert type="error" showIcon title="学期违纪台账加载失败" description={query.error.message} action={<Button onClick={() => void query.refetch()}>重试</Button>} /> :
-      <><p>{semester ? '已定稿周次：' + (data?.weeks.join('、') || (query.isFetching ? '读取中' : '暂无')) : '选择学期查看定稿数据'}{semester && data && (data.ruleVersion ? ' · 处分规则 V' + data.ruleVersion : ' · 处分规则尚未发布')}</p>
+      <>
       {!!data?.unassigned && <Alert type="warning" title={data.unassigned + ' 条定稿明细未关联个人学号，未计入个人累计'} />}
       {download.isError && <Alert type="error" title={download.error.message} />}
       <ProTable<LedgerStudent> className="attendance-records-table" cardBordered rowKey="number" size="small" bordered headerTitle={<Space size={10}>学生违纪台账{data && <Tag color="blue">共 {data.total} 人</Tag>}</Space>}
@@ -117,7 +127,9 @@ export function SemesterLedgerPage() {
         onSubmit={values => { setFilter({ grade: values.grade ?? '', major: values.major ?? '', class: values.class ?? '', search: (values.search ?? '').trim() }); setPage(1) }}
         onReset={() => { setDraft(emptyLedgerFilter); setFilter(emptyLedgerFilter); setPage(1) }}
         options={{ setting: true, density: false, reload: false }}
-        toolBarRender={() => canExport ? [<Button size="small" key="export" disabled={!semester} loading={download.isPending} onClick={() => download.mutate()}>导出 Excel</Button>] : []}
+        toolBarRender={() => [canExport && <Button size="small" key="export" disabled={!semester} loading={download.isPending} onClick={() => download.mutate()}>导出 Excel</Button>,
+          <Button key="fullscreen" size="small" type="text" title={fullscreenLabel} aria-label={fullscreenLabel}
+            icon={<Icon icon={expanded ? minimize : maximize} width={16} />} onClick={() => setExpanded(value => !value)} />]}
         scroll={{ x: 'max-content', y: 'var(--ledger-body-height)' }}
         pagination={{ current: page, pageSize: size, total: data?.total, showSizeChanger: true, pageSizeOptions: [25, 50, 100], onChange: (p, n) => { setPage(size === n ? p : 1); setSize(n) } }} />
       <ExpandableDrawer title={detail?.name + ' · 检查记录'} open={!!detail && panel === 'sources'} onClose={() => setDetail(undefined)} size="large">
@@ -137,7 +149,7 @@ export function SemesterLedgerPage() {
         }
       </ExpandableDrawer>
       </>}
-  </section>
+  </section></div>
 }
 
 function LedgerDetails(props: Pick<DetailRequest, 'kind' | 'semesterId' | 'studentNumber' | 'groupKey' | 'code'> & {

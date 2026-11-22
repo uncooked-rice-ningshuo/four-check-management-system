@@ -374,6 +374,12 @@ body {
 .attendance-records-table .ant-pro-table-search {
   margin-bottom: 16px;
 }
+.discipline-review-table .ant-form-vertical.ant-pro-query-filter .ant-pro-query-filter-row {
+  row-gap: 6px;
+}
+.discipline-review-table .ant-form-vertical .ant-pro-query-filter-actions .ant-form-item-label {
+  display: none;
+}
 .attendance-records-table .ant-form-item-label > label {
   color: #344054;
   font-weight: 500;

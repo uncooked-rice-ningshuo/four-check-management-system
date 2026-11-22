@@ -1,8 +1,9 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { permissionActionName as actionName, permissionActionOptions as actionOptions } from '../../entities/permission/model/actions'
 import { PlusOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Alert, Button, DatePicker, Drawer, Empty, Form, Input, Modal, Popconfirm, Select, Space, Typography } from 'antd'
+import { App, Alert, Button, DatePicker, Empty, Form, Input, Modal, Popconfirm, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import zhCN from 'antd/es/date-picker/locale/zh_CN'
@@ -14,6 +15,7 @@ import { hasConflictingClasses } from '../../features/permissions/model/rangeGro
 import './permission-detail.css'
 
 
+const permissionPagination = { defaultPageSize: 5, pageSizeOptions: [5, 10, 20, 50], showSizeChanger: true, hideOnSinglePage: false, showTotal: (total: number) => `共 ${total} 项` }
 const displayDate = (value?: string) => value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai' }).format(new Date(value)) : '无截止日期'
 const dateInput = (value?: string) => value ? dayjs(value).format('YYYY-MM-DD') : undefined
 const status = (rule: PermissionRule) => !rule.enabled || rule.mode === 'DISABLE' || rule.effect === 'DENY' ? '已禁用' : rule.startsAt && Date.parse(rule.startsAt) > Date.now() ? '未生效' : rule.endsAt && Date.parse(rule.endsAt) <= Date.now() ? '已到期' : '有效'
@@ -74,11 +76,11 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
     { title: '操作范围', render: (_, entry) => scopeText(entry) }, { title: '有效日期', render: (_, entry) => dates(entry) }, { title: '状态', render: (_, entry) => status(entry) },
     { title: '操作', valueType: 'option', render: (_, entry) => <Space><Button type="link" onClick={() => openRule(entry)}>修改</Button><Popconfirm title={entry.mode === 'ADD' ? '删除此个人授权？其他默认来源仍可能授予同一权限。' : '恢复该账号授予时的默认设置，不更新为最新模板，也不重新计算有效期。'} onConfirm={() => remove.mutate(entry.id)}><Button type="link">{entry.mode === 'ADD' ? '删除个人授权' : '恢复默认'}</Button></Popconfirm></Space> },
   ]
-  return <Drawer className="permission-detail-drawer" title={`${userName} · 权限详情`} open onClose={onClose} size="large" destroyOnHidden>
+  return <ExpandableDrawer className="permission-detail-drawer" title={`${userName} · 权限详情`} open onClose={onClose} size="large" destroyOnHidden>
     <Typography.Paragraph type="secondary">查看角色权限，或为此账号单独调整权限。</Typography.Paragraph>
     {(effective.isError || rules.isError || catalogs.isError) && <Alert type="error" title="权限信息加载失败" action={<Button onClick={() => { void effective.refetch(); void rules.refetch(); void catalogs.refetch() }}>重试</Button>} />}
-    {!effective.isError && <ProTable<EffectivePermission> rowKey={entry => `${entry.sourceDepartmentId ?? 'system'}-${entry.action}-${entry.scope.inspectionTypeId ?? 'all'}`} headerTitle="角色权限" expandable={{ expandedRowRender: entry => <Typography.Paragraph>授予时默认：{scopeText(entry)}；{dates(entry)}。{rules.data?.some(rule => rule.enabled && rule.sourceDepartmentId === entry.sourceDepartmentId && rule.action === entry.action && rule.scope.inspectionTypeId === entry.scope.inspectionTypeId && rule.mode !== 'ADD') ? '当前已由个人设置调整，详见下方。' : ''}</Typography.Paragraph> }} size="small" cardProps={false} pagination={false} search={false} options={false} loading={effective.isLoading} dataSource={effective.data?.defaultPermissions ?? []} columns={permissionColumns} scroll={{ x: 'max-content' }} />}
-    {!rules.isError && <ProTable<PermissionRule> rowKey="id" headerTitle="个人权限设置" size="small" cardProps={false} pagination={false} search={false} options={false} loading={rules.isLoading} dataSource={rules.data ?? []} columns={ruleColumns} scroll={{ x: 'max-content' }} toolBarRender={() => [<Button key="add" type="primary" disabled={!effective.data || effective.isError || rules.isError || catalogs.isError} icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限</Button>]} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无个人设置" /> }} />}
+    {!effective.isError && <ProTable<EffectivePermission> rowKey={entry => `${entry.sourceDepartmentId ?? 'system'}-${entry.action}-${entry.scope.inspectionTypeId ?? 'all'}`} headerTitle="角色权限" expandable={{ expandedRowRender: entry => <Typography.Paragraph>授予时默认：{scopeText(entry)}；{dates(entry)}。{rules.data?.some(rule => rule.enabled && rule.sourceDepartmentId === entry.sourceDepartmentId && rule.action === entry.action && rule.scope.inspectionTypeId === entry.scope.inspectionTypeId && rule.mode !== 'ADD') ? '当前已由个人设置调整，详见下方。' : ''}</Typography.Paragraph> }} size="small" cardProps={false} pagination={permissionPagination} search={false} options={false} loading={effective.isLoading} dataSource={effective.data?.defaultPermissions ?? []} columns={permissionColumns} scroll={{ x: 'max-content' }} />}
+    {!rules.isError && <ProTable<PermissionRule> rowKey="id" headerTitle="个人权限设置" size="small" cardProps={false} pagination={permissionPagination} search={false} options={false} loading={rules.isLoading} dataSource={rules.data ?? []} columns={ruleColumns} scroll={{ x: 'max-content' }} toolBarRender={() => [<Button key="add" type="primary" disabled={!effective.data || effective.isError || rules.isError || catalogs.isError} icon={<PlusOutlined aria-hidden />} onClick={() => openRule()}>新增权限</Button>]} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无个人设置" /> }} />}
     <Modal className="permission-rule-modal" title={`${editing || initial.mode === 'OVERRIDE' ? '修改' : '新增'}权限`} open={modalOpen} onCancel={close} onOk={() => form.submit()} confirmLoading={save.isPending} width={600} destroyOnHidden>
       <Form key={`${editing?.id ?? initial.action ?? 'new'}-${initial.mode}`} form={form} layout="vertical" initialValues={{ ...initial, validity: [initial.startsAt, initial.endsAt] }} onFinish={values => save.mutate(values)} preserve={false} scrollToFirstError validateTrigger="onBlur" onValuesChange={changed => { setDirty(true); if ('action' in changed) { form.setFieldValue('ranges', []); form.setFieldValue('scope', {}); form.setFieldValue('sourceDepartmentId', isDepartmentAction(changed.action) && effective.data?.departmentIds?.length === 1 ? effective.data.departmentIds[0] : undefined) } }}>
         <Form.Item name="action" label="功能权限" rules={[{ required: true, message: '请选择功能' }]}><Select aria-label="功能权限" showSearch optionFilterProp="label" options={actionOptions.map(item => ({ ...item, disabled: item.value.startsWith('REPORT_') && item.value !== 'REPORT_VIEW' && !effective.data?.reportGrantableActions?.includes(item.value) }))} disabled={initial.mode !== 'ADD'} /></Form.Item>
@@ -93,5 +95,5 @@ export function PermissionDetailDrawer({ accountId, userName, onClose }: { accou
         {save.isError && <Alert type="error" title="保存失败，输入已保留" description={save.error.message} />}
       </Form>
     </Modal>
-  </Drawer>
+  </ExpandableDrawer>
 }

@@ -1,7 +1,8 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import type { SupportedImportType } from '../../../shared/api/inspectionImportApi'
 import { ImportRollbackPanel } from './ImportRollbackPanel'
 import { CheckCircleOutlined, CloudUploadOutlined, DownloadOutlined, FileExcelOutlined } from '@ant-design/icons'
-import { Alert, Button, Descriptions, Drawer, Modal, Progress, Select, Space, Steps, Tag, Typography, Upload } from 'antd'
+import { Alert, Button, Descriptions, Modal, Progress, Select, Space, Steps, Tag, Typography, Upload } from 'antd'
 import { useMemo, useRef, useState } from 'react'
 import type { InspectionContext } from '../../../entities/inspection/model/inspection'
 import { ApiError } from '../../../shared/api/httpClient'
@@ -212,7 +213,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
 
   return <>
     {modalHolder}
-    <Drawer title={`批量导入${label}`} aria-label={`批量导入${label}`} width="min(1040px, 100vw)" className="inspection-import-drawer" open={open} onClose={closeDrawer} closable={!confirming && !rollingBack} maskClosable={!confirming && !rollingBack} keyboard={!confirming && !rollingBack} destroyOnHidden>
+    <ExpandableDrawer title={`批量导入${label}`} aria-label={`批量导入${label}`} width="min(1040px, 100vw)" className="inspection-import-drawer" open={open} onClose={closeDrawer} closable={!confirming && !rollingBack} maskClosable={!confirming && !rollingBack} keyboard={!confirming && !rollingBack} destroyOnHidden>
       <Space orientation="vertical" size={20} className="inspection-import-flow" style={{ width: '100%' }}>
         <Steps current={currentStep} responsive items={[{ title: '准备模板' }, { title: '上传解析' }, { title: '校验预览' }, { title: '确认入库' }]} />
         <section className="import-scope-summary" aria-labelledby="import-scope-title">
@@ -305,7 +306,7 @@ export function AttendanceImportDrawer({ typeCode = 'ATTENDANCE_RATE', open, con
           <Button type="primary" block disabled={!canConfirm || confirm.isPending} onClick={requestConfirm}>确认导入 {activeBatch.validRows} 条记录</Button>
         </>}
       </Space>
-    </Drawer>
+    </ExpandableDrawer>
     <Modal
       title={`确认写入${label}草稿`}
       open={confirmOpen}

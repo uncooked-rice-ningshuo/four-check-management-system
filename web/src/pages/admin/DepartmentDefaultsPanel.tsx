@@ -1,7 +1,8 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { disciplineActions } from '../../entities/permission/model/actions'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, App, Button, Drawer, Empty, Modal, Select, Spin, Switch, Typography } from 'antd'
+import { Alert, App, Button, Empty, Modal, Select, Spin, Switch, Typography } from 'antd'
 import type { DepartmentDefaultPermissions, DepartmentInspectionScope, DepartmentReportScope, InspectionRoleDefaults, OrganizationCatalogs, ReportRoleDefaults } from '../../entities/organization/model/organization'
 import { getDepartmentDefaults, getUsers, saveDepartmentDefaults } from '../../shared/api/adminApi'
 import { ApiError } from '../../shared/api/httpClient'
@@ -237,7 +238,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
           </div>
         </section>
       </div>
-      <Drawer className="department-defaults-editor" title={editor?.kind === 'disciplineScope' ? '处分管理 · 部门功能' : editor?.kind === 'disciplineRoles' ? '处分管理 · 角色权限' : editor?.kind === 'scope' ? `${editingType?.name ?? '检查项'} · 部门功能` : editor?.kind === 'inspectionRoles' ? `${editingType?.name ?? '检查项'} · 角色权限` : editor?.kind === 'reportScope' ? '周通报 · 部门功能' : '周通报 · 角色权限'}
+      <ExpandableDrawer className="department-defaults-editor" title={editor?.kind === 'disciplineScope' ? '处分管理 · 部门功能' : editor?.kind === 'disciplineRoles' ? '处分管理 · 角色权限' : editor?.kind === 'scope' ? `${editingType?.name ?? '检查项'} · 部门功能` : editor?.kind === 'inspectionRoles' ? `${editingType?.name ?? '检查项'} · 角色权限` : editor?.kind === 'reportScope' ? '周通报 · 部门功能' : '周通报 · 角色权限'}
         open={editor !== null} onClose={() => { setRangeEditor(null); setEditor(null) }} width="min(640px, 100vw)" destroyOnHidden>
         {editor?.kind === 'disciplineScope' && <><Typography.Paragraph type="secondary">部门承担状态在列表中设置；这里选择处分管理开放的动作。</Typography.Paragraph><div className="department-defaults-option-list">{disciplineActions.map(([action,label]) => {
           const scope = draft.disciplineScope ?? []
@@ -298,7 +299,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
               disabled={save.isPending || !draft.reportScope.enabled || !draft.reportScope[key]}
               onChange={value => updateReportRole(role, key, value)} aria-label={`${selectedDepartment?.name} ${reportRoleName(role.roleCode)} ${label}`} /></td>)}</tr>)}</tbody></table></div>
           <p className="department-defaults-footnote">部门未承担或未开放同一动作时，角色开关不可操作。此前已保存的角色配置仍保留，但不会生效。发布渠道尚未交付。</p></>}
-      </Drawer>
+      </ExpandableDrawer>
       <Modal className="permission-range-modal" title={`${disciplineRange ? '处分管理' : editingType?.name ?? ''} · ${rangeEditor?.label ?? ''} · ${rangeEditor?.action === 'DISCIPLINE_CASE_VIEW' ? '查看范围' : '操作范围'}`} open={Boolean(rangeEditor && rangeEnabled)} width={600} onCancel={() => setRangeEditor(null)} okText="应用范围" cancelText="取消" destroyOnHidden onOk={() => {
         if (!rangeEditor) return
         if (rangeDraft.some(range => range.gradeStage)) { message.error('该模板仍含已停用的阶段范围，请核对迁移 070 后重新加载'); return }

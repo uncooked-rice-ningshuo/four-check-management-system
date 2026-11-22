@@ -1,6 +1,7 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import { useState } from 'react'
 import { ApartmentOutlined } from '@ant-design/icons'
-import { Alert, Button, Drawer, Empty, Form, Select, Space, Table, Tabs, Typography } from 'antd'
+import { Alert, Button, Empty, Form, Select, Space, Table, Tabs, Typography } from 'antd'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import type { ColumnType } from 'antd/es/table'
 import type { ReportIndicators, ReportVersion, ReportClassIndicators } from '../../../entities/reporting/model/reporting'
@@ -308,7 +309,7 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
     </div>}
     {tabs.length > 0 && mode === 'detail' && <div className="report-version-indicator-breakdown">{classBreakdown}</div>}
     {tabs.length === 0 && <Alert showIcon type="info" message="本版本未纳入可计算的指标类型。" />}
-    {mode === 'overview' && <Drawer
+    {mode === 'overview' && <ExpandableDrawer
       rootClassName="report-version-indicator-drawer"
       title={<div className="report-version-indicator-drawer-title"><Typography.Text strong>班级指标明细</Typography.Text><Typography.Text type="secondary">本版共 {allClassRows.length} 个班级</Typography.Text></div>}
       open={breakdownOpen}
@@ -352,6 +353,6 @@ export function ReportVersionIndicators({ version, mode = 'detail', archiveTable
         </Form>
         {classBreakdown}
       </Space>
-    </Drawer>}
+    </ExpandableDrawer>}
   </section>
 }

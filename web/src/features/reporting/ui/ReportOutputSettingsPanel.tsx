@@ -1,6 +1,7 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Checkbox, DatePicker, Drawer, Menu, message, Select, Space, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, DatePicker, Menu, message, Select, Space, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { useState } from 'react'
 import { reportOutputApi, type IntroductionDocument, type ReportOutputEditorSettings, type ReportOutputSettings, type ReportOutputWeekDate } from '../../../shared/api/reportOutputApi'
@@ -197,13 +198,13 @@ function SettingsForm({ settings, save, pending }: { settings: ReportOutputEdito
         </div>}
       </Card>
     </div>
-    <Drawer title="编辑通报首页" className="report-intro-drawer" open={editorOpen} size={1100} extra={<Button type="primary" loading={pending} onClick={() => { void saveSettings().then(saved => { if (saved) setEditorOpen(false) }) }}>保存并完成</Button>} onClose={() => setEditorOpen(false)} destroyOnHidden><ReportIntroductionEditor value={document} onChange={setDocument} attachmentNames={wordTypes.map(type => type.title || type.name)} /></Drawer>
-    <Drawer title={format === 'WORD' ? 'Word 文件预览' : 'Excel 工作簿预览'} open={previewOpen} size={1100} onClose={() => setPreviewOpen(false)} extra={<Button loading={previewing} disabled={!codes.length || (format === 'WORD' && !selectedWeek)} onClick={() => void downloadPreview()}>下载预览 {format === 'WORD' ? 'Word' : 'Excel'}</Button>}>
+    <ExpandableDrawer title="编辑通报首页" className="report-intro-drawer" open={editorOpen} size={1100} extra={<Button type="primary" loading={pending} onClick={() => { void saveSettings().then(saved => { if (saved) setEditorOpen(false) }) }}>保存并完成</Button>} onClose={() => setEditorOpen(false)} destroyOnHidden><ReportIntroductionEditor value={document} onChange={setDocument} attachmentNames={wordTypes.map(type => type.title || type.name)} /></ExpandableDrawer>
+    <ExpandableDrawer title={format === 'WORD' ? 'Word 文件预览' : 'Excel 工作簿预览'} open={previewOpen} size={1100} onClose={() => setPreviewOpen(false)} extra={<Button loading={previewing} disabled={!codes.length || (format === 'WORD' && !selectedWeek)} onClick={() => void downloadPreview()}>下载预览 {format === 'WORD' ? 'Word' : 'Excel'}</Button>}>
       <Typography.Text type="secondary">使用当前未保存的配置展示文件结构；以下载的文件为准</Typography.Text>
       {format === 'WORD' && <div style={{ margin: '16px 0' }}><Select aria-label="预览通报周次" placeholder="选择已设置文件日期的周次" loading={dates.isLoading} value={selectedWeek?.weekId} onChange={setPreviewWeekId} style={{ width: 320 }} options={configuredWeeks.map(item => ({ value: item.weekId, label: `${item.semesterName} · 第 ${item.weekNo} 周 · ${item.issueDate}` }))} />{dates.isError && <Alert type="error" showIcon title="文件日期加载失败" action={<Button onClick={() => void dates.refetch()}>重试</Button>} />}{!dates.isLoading && !dates.isError && !configuredWeeks.length && <Alert type="warning" showIcon title="请先在“文件日期”中设置通报周次的日期" />}</div>}
       {format === 'WORD' ? <ReportDocumentPreview document={document} types={wordTypes} period={previewPeriod ?? { semesterName: '示例学期', weekNo: 9, issueDate: '未设置文件日期' }} /> : <WorkbookPreview types={selectedTypes} />}
       {previewError && <Alert type="error" showIcon title={previewError} />}
-    </Drawer>
+    </ExpandableDrawer>
   </div>
 }
 

@@ -1,5 +1,6 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import { DownloadOutlined, FileExcelOutlined, UploadOutlined } from '@ant-design/icons'
-import { App, Alert, Button, Descriptions, Drawer, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd'
+import { App, Alert, Button, Descriptions, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useRef, useState } from 'react'
 import type { AcademicCalendar } from '../../../entities/academic/model/academic'
@@ -168,7 +169,7 @@ export function AcademicWeekImportDrawer({ open, calendar, onClose }: AcademicWe
 
   return <>
     {modalHolder}
-    <Drawer title="批量导入周次" aria-label="批量导入周次" size="large" open={open} onClose={close} destroyOnHidden>
+    <ExpandableDrawer title="批量导入周次" aria-label="批量导入周次" size="large" open={open} onClose={close} destroyOnHidden>
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>
         <section aria-labelledby="academic-week-import-target">
           <Typography.Title id="academic-week-import-target" level={5}>1. 选择目标学期</Typography.Title>
@@ -236,7 +237,7 @@ export function AcademicWeekImportDrawer({ open, calendar, onClose }: AcademicWe
           </Space>
         </section>}
       </Space>
-    </Drawer>
+    </ExpandableDrawer>
 
     <Modal
       title="确认新增周次"

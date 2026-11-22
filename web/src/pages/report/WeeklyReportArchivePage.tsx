@@ -1,7 +1,8 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
-import { Alert, Button, Drawer, Empty, Modal, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
+import { Alert, Button, Empty, Modal, Space, Table, Tabs, Tag, Timeline, Typography } from 'antd'
 import { BarChartOutlined, HistoryOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -100,7 +101,7 @@ function ArchiveWorkflowDetail({ workflow, onAccessDenied }: { workflow: ReportW
       </header>
       {selectedVersion.content.scopeLimited && <Alert type="warning" showIcon title="此版本只覆盖生成账号当时有权查看的范围" />}
       <ReportVersionSnapshots key={selectedVersion.id} period={period} version={selectedVersion} onAccessDenied={onAccessDenied} inlineRecordDetail showIndicators={false} showHeading={false} />
-      <Drawer title="流程与修正记录" size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={activeSection === 'history'}
+      <ExpandableDrawer title="流程与修正记录" size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={activeSection === 'history'}
         onClose={() => choose(selectedVersion.versionNo, 'snapshot')} destroyOnHidden>
           <Tabs className="report-archive-history-tabs" items={[
             { key: 'reviews', label: `审核与状态轨迹 (${workflow.reviews.length})`, children: <section aria-label="审核与状态轨迹" className="report-archive-history-panel">
@@ -111,9 +112,9 @@ function ArchiveWorkflowDetail({ workflow, onAccessDenied }: { workflow: ReportW
             { key: 'corrections', label: `追加修正记录 (${workflow.corrections.length})`, children: <section aria-label="追加修正记录" className="report-archive-history-panel">
               <Table<ReportCorrectionLog> rowKey="id" size="small" pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: [10, 20, 50] }} columns={correctionColumns} dataSource={workflow.corrections} scroll={{ x: 760 }} locale={{ emptyText: '暂无修正记录' }} /></section> },
           ]} />
-      </Drawer>
-      <Drawer title={`V${selectedVersion.versionNo} · 周指标`} size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={indicatorsOpen}
-        onClose={() => setIndicatorsOpen(false)} destroyOnHidden><ReportVersionIndicators version={selectedVersion} archiveTable /></Drawer>
+      </ExpandableDrawer>
+      <ExpandableDrawer title={`V${selectedVersion.versionNo} · 周指标`} size={Math.min(1040, typeof window === 'undefined' ? 1040 : window.innerWidth)} open={indicatorsOpen}
+        onClose={() => setIndicatorsOpen(false)} destroyOnHidden><ReportVersionIndicators version={selectedVersion} archiveTable /></ExpandableDrawer>
     </div>
   </div>
 }

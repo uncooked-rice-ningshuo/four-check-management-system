@@ -1,10 +1,11 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { absenceSummary } from './recordSummary'
 import { useContext, useCallback, useMemo, useState } from 'react'
 import { InfoCircleOutlined, TeamOutlined } from '@ant-design/icons'
 import { Icon } from '@iconify/react'
 import refreshCw from '@iconify-icons/lucide/refresh-cw'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Popconfirm, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Empty, Popconfirm, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useSearchParams } from 'react-router-dom'
 import { useCreateReportObligation, useRemoveReportObligation, useReportObligationOptions, useReportObligations, useReportWorkflow, useReportingPeriods, useReportingRecords, useReportingSummary } from '../../features/reporting/model/queries'
@@ -476,7 +477,7 @@ export function WeeklyReportSummaryPage() {
         onStageChange={selectStage}
       />}
       {selectedPeriod && canManageObligations && activeStage === 0 && <WeeklyObligationManagement period={selectedPeriod} />}
-      <Drawer
+      <ExpandableDrawer
         className="weekly-report-record-drawer"
         title={<span className="weekly-report-drawer-title">来源明细 · {selectedCellTitle}</span>}
         open={Boolean(visibleTypeId)}
@@ -581,7 +582,7 @@ export function WeeklyReportSummaryPage() {
             </section>
           </div>
         </div>
-      </Drawer>
+      </ExpandableDrawer>
     </section>
   )
 }

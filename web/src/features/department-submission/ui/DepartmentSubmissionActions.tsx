@@ -1,5 +1,6 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Drawer, Empty, Input, Modal, Segmented, Select, Space, Steps, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Segmented, Select, Space, Steps, Table, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
 import type { DepartmentSubmission, DepartmentSubmissionScope } from '../../../entities/inspection/model/departmentSubmission'
 import type { SubmissionCartRecord } from '../../../entities/inspection/model/submissionCart'
@@ -275,7 +276,7 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
     {noticeContext}
     {canSubmit && <Button disabled={!inspectionTypeId || action.isPending} onClick={openCart}>提交记录</Button>}
     <Button disabled={!inspectionTypeId} onClick={() => setOpen(true)}>检查提交批次</Button>
-    <Drawer title={`${typeLabels[typeCode ?? ''] ?? '检查'}提交批次`} open={open} onClose={() => {setOpen(false); setBatchId(undefined)}} width="min(980px, 100vw)" className="submission-batches-drawer" destroyOnHidden>
+    <ExpandableDrawer title={`${typeLabels[typeCode ?? ''] ?? '检查'}提交批次`} open={open} onClose={() => {setOpen(false); setBatchId(undefined)}} width="min(980px, 100vw)" className="submission-batches-drawer" destroyOnHidden>
       {batchId ? <section className="submission-detail">
         <Button type="link" onClick={() => setBatchId(undefined)}>返回批次列表</Button>
         {detail.isError ? <Alert type="error" title="提交明细加载失败" action={<Button onClick={() => void detail.refetch()}>重试</Button>} /> : !item ? <p role="status">正在加载提交明细…</p> : <>
@@ -325,8 +326,8 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
         <Typography.Paragraph>请说明需要更正的内容。退回会影响{reasonFor?.kind === 'ZERO_RECORD' ? '整个零记录回执' : `整个批次的 ${reasonFor?.recordIds.length ?? 0} 条记录`}。</Typography.Paragraph>
         <Input.TextArea aria-label="退回原因" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} rows={3} />
       </Modal>
-    </Drawer>
-    <Drawer title="提交检查记录" open={cartOpen} width="min(1040px, 100vw)" destroyOnHidden className="submission-drawer" onClose={() => {
+    </ExpandableDrawer>
+    <ExpandableDrawer title="提交检查记录" open={cartOpen} width="min(1040px, 100vw)" destroyOnHidden className="submission-drawer" onClose={() => {
       if (cart.size) Modal.confirm({ title: '关闭并丢弃待提交清单？', content: `当前清单有 ${cart.size} 条记录，关闭后会清空本次选择。`, okText: '丢弃并关闭', cancelText: '继续核对', onOk: () => { routeValidation.current++; setCart(new Map()); setCartOpen(false); setStaleRecords([]) } })
       else { routeValidation.current++; setCartOpen(false) }
     }}>
@@ -368,6 +369,6 @@ export function DepartmentSubmissionActions({ inspectionTypeId, typeCode, listSc
       <Table<SubmissionCartRecord> size="small" rowKey="id" dataSource={[...cart.values()]} pagination={{ pageSize: 8 }} scroll={{ x: 'max-content' }} columns={[...recordColumns, { title: '操作', key: 'remove', width: 90, fixed: 'right', render: (_, item) => <Button type="link" danger onClick={() => removeCartRecord(item.id)}>移除</Button> }]} />
       <div className="submission-footer"><span>请确认记录无遗漏</span><Space><Button onClick={() => setStep(1)}>上一步</Button><Button type="primary" disabled={!cart.size || !cartScope} loading={action.isPending} onClick={() => void verifyCart()}>提交审核</Button></Space></div></section>}
       {submissionConfirmation}
-    </Drawer>
+    </ExpandableDrawer>
   </>
 }

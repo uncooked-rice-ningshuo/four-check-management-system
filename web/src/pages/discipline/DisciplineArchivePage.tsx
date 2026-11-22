@@ -1,5 +1,6 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useState } from 'react'
-import { Alert, Button, Drawer, Descriptions, Table, Typography, Tag, Space, Empty } from 'antd'
+import { Alert, Button, Descriptions, Table, Typography, Tag, Space, Empty } from 'antd'
 import { ProTable } from '@ant-design/pro-components'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
@@ -59,7 +60,7 @@ export function DisciplineArchivePage() {
             { title:'操作',valueType:'option',render:(_,row) => <Button type="link" onClick={() => select(row.id)}>详情</Button> },
           ]}
         />}
-    <Drawer open={!!selected} title="处分归档详情" onClose={() => select(undefined)} loading={detail.isLoading}>
+    <ExpandableDrawer open={!!selected} title="处分归档详情" onClose={() => select(undefined)} loading={detail.isLoading}>
       {detail.isError ? <Alert type="error" title="读取详情失败" action={<Button onClick={() => void detail.refetch()}>重试</Button>} />
         : item ? <><Descriptions column={1} items={[
           {key:'student',label:'学号',children:item.studentNumber},{key:'tier',label:'处分档位',children:item.tier},
@@ -67,6 +68,6 @@ export function DisciplineArchivePage() {
         ]} /><Table rowKey="record" size="small" dataSource={item.sources} pagination={{pageSize:8}} columns={[
           {title:'来源周次',dataIndex:'week'},{title:'定稿版本',dataIndex:'version'},{title:'累计贡献',dataIndex:'amount'},
         ]} /></> : null}
-    </Drawer>
+    </ExpandableDrawer>
   </section>
 }

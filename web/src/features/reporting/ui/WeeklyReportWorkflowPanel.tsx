@@ -1,6 +1,7 @@
+import { ExpandableDrawer } from '../../../shared/components/ExpandableDrawer'
 import { useEffect, useState } from 'react'
 import { inspectionResultLabel, reportStatusLabel } from '../model/labels'
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiError } from '../../../shared/api/httpClient'
 import type { EffectivePermission } from '../../../entities/permission/model/permission'
@@ -346,7 +347,7 @@ export function WeeklyReportWorkflowPanel({
         /> : <Typography.Text type="secondary">本周已有审核或修正记录。</Typography.Text>}
       </section>}
     </Space>}
-    <Drawer rootClassName="weekly-report-record-drawer" classNames={{ wrapper: 'weekly-report-record-drawer-wrapper' }}
+    <ExpandableDrawer rootClassName="weekly-report-record-drawer" classNames={{ wrapper: 'weekly-report-record-drawer-wrapper' }}
       title={selectedReportCell ? `${selectedReportCell.inspectionType} · V${currentVersion?.versionNo ?? ''}` : '本版记录明细'} open={Boolean(selectedReportCell)}
       size={workflowDrawerWidth} onClose={() => { setSelectedReportCell(null); setRecordPreview(null) }} destroyOnHidden>
       {selectedReportCell && <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
@@ -365,7 +366,7 @@ export function WeeklyReportWorkflowPanel({
               if (pageSize !== recordPageSize) { setRecordPageSize(pageSize); setRecordPage(1) } else setRecordPage(page)
             } }} />
       </Space>}
-    </Drawer>
+    </ExpandableDrawer>
     <Modal className="report-record-detail-modal" title="记录明细" width={960} open={Boolean(visibleRecordPreview)} footer={null}
       onCancel={() => setRecordPreview(null)} destroyOnHidden>
       {visibleRecordPreview && <ReportRecordSnapshotCard record={visibleRecordPreview} versionNo={currentVersion?.versionNo ?? 1} title={`V${currentVersion?.versionNo ?? 1} · 记录快照`} />}

@@ -1,6 +1,7 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ProFormDateRangePicker, ProTable } from '@ant-design/pro-components'
-import { Alert, Button, Card, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
 import { CloudUploadOutlined } from '@ant-design/icons'
 import { useLayoutEffect, useState } from 'react'
 import { useAuth } from '../../app/providers/authContext'
@@ -170,12 +171,12 @@ export function AcademicCalendarPage() {
         { title: '学期', dataIndex: 'semesterId', valueType: 'select', fieldProps: { options: data.semesters.map(semester => ({ value: semester.id, label: semester.name })), allowClear: true }, render: (_, week) => data.semesters.find(semester => semester.id === week.semesterId)?.name ?? '—' },
         { title: '时间范围', dataIndex: 'dateRange', valueType: 'dateRange', fieldProps: { placeholder: ['开始日期', '结束日期'] }, hideInTable: true, tooltip: '显示与所选时间范围有交集的周次' },{ title: '周次', dataIndex: 'weekNo', search: false, renderText: value => `第 ${value} 周` }, { title: '开始日期', dataIndex: 'startDate', search: false, renderText: displayDate }, { title: '结束日期', dataIndex: 'endDate', search: false, renderText: displayDate }, { title: '到课率违纪计入', dataIndex: 'attendancePenaltyMultiplier', search: false, render: (_, week) => <Tag color={week.attendancePenaltyMultiplier === 2 ? 'orange' : 'blue'}>{week.attendancePenaltyMultiplier === 2 ? 2 : 1} 倍</Tag> }, { title: '备注', dataIndex: 'note', search: false }, { title: '早签计划', search: false, render: (_, week) => <Button type="link" onClick={() => setScheduleWeekId(week.id)}>配置日期</Button> }, { title: '操作', valueType: 'option', render: (_, record) => <Button type="link" onClick={() => openEdit('week', record)}>编辑</Button> }]} /> },
     ]} /> }
-    {modal === 'roster' && editing && 'version' in editing ? <Drawer open title={`${editing.name} · 学年名单`} size="min(840px, 100vw)" onClose={closeEditor} destroyOnHidden
+    {modal === 'roster' && editing && 'version' in editing ? <ExpandableDrawer open title={`${editing.name} · 学年名单`} size="min(840px, 100vw)" onClose={closeEditor} destroyOnHidden
       footer={<Space style={{ width: '100%', justifyContent: 'flex-end' }}><Button onClick={closeEditor}>取消</Button>{rosterStep === 0 ? <Button type="primary" onClick={() => void form.validateFields(['roster']).then(() => setRosterStep(1), () => {})}>下一步：调整展示顺序</Button> : <><Button disabled={save.isPending} onClick={() => setRosterStep(0)}>上一步</Button><Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存配置</Button></>}</Space>}>
       {calendarEditor}
-    </Drawer> : <Modal title={`${editing ? '编辑' : '新增'}${modal === 'year' ? '学年' : modal === 'semester' ? '学期' : '周次'}`} open={modal !== null} onCancel={closeEditor} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden>{calendarEditor}</Modal>}
-    {viewYear && <Drawer open title={`${viewYear.name} · 查看顺序`} size="min(840px, 100vw)" onClose={() => setViewYear(undefined)}
-      footer={<Button onClick={() => setViewYear(undefined)}>关闭</Button>}><AcademicYearOrderView roster={viewYear.roster} /></Drawer>}
+    </ExpandableDrawer> : <Modal title={`${editing ? '编辑' : '新增'}${modal === 'year' ? '学年' : modal === 'semester' ? '学期' : '周次'}`} open={modal !== null} onCancel={closeEditor} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden>{calendarEditor}</Modal>}
+    {viewYear && <ExpandableDrawer open title={`${viewYear.name} · 查看顺序`} size="min(840px, 100vw)" onClose={() => setViewYear(undefined)}
+      footer={<Button onClick={() => setViewYear(undefined)}>关闭</Button>}><AcademicYearOrderView roster={viewYear.roster} /></ExpandableDrawer>}
     <AcademicWeekImportDrawer open={importOpen} calendar={data} onClose={() => setImportOpen(false)} />
     {scheduleWeekId && <MorningScheduleDialog weekId={scheduleWeekId} onClose={() => setScheduleWeekId(undefined)} />}
   </section>

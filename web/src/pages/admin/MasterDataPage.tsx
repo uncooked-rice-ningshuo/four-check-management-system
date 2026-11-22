@@ -1,7 +1,8 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { DownloadOutlined, FileExcelOutlined, HistoryOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography } from 'antd'
+import { App, Alert, Button, Card, Descriptions, Empty, Form, Input, InputNumber, Menu, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography } from 'antd'
 import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { MasterDataChange, MasterDataImportBatch, MasterDataImportPreviewRow, MasterDataKind, MasterDataRecord } from '../../entities/masterdata/model/masterData'
@@ -258,7 +259,7 @@ export function MasterDataPage() {
           options={{ reload: () => void records.refetch(), density: true, setting: true }} pagination={{ current: page, pageSize: 20, total: records.data?.total, onChange: setPage, showSizeChanger: false }} locale={{ emptyText: <Empty description={`暂无${config.label}数据`} /> }} />
       </div>
     </Card>
-    <Drawer
+    <ExpandableDrawer
       title={`导入${config.singular}`}
       open={importOpen}
       onClose={closeImport}
@@ -327,7 +328,7 @@ export function MasterDataPage() {
         />
         {confirmImport.isError && <Alert type="error" showIcon title="确认导入失败" description={confirmImport.error.message} />}
       </Space>}
-    </Drawer>
+    </ExpandableDrawer>
     <Modal title={`${editing ? '编辑' : '新增'}${config.singular}`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()} confirmLoading={save.isPending} destroyOnHidden width={680}>
       <Form name={`master-data-${kind}-editor`} form={form} layout="vertical" onFinish={values => save.mutate(values)} preserve={false}>
         {config.identifierLabel && <Form.Item name="code" label={config.identifierLabel} rules={[{ required: true, message: `请输入${config.identifierLabel}` }]}><Input disabled={Boolean(editing)} autoComplete="off" /></Form.Item>}
@@ -346,9 +347,9 @@ export function MasterDataPage() {
         {kind === 'classrooms' && <><Form.Item name="teachingBuildingId" label="教学楼" rules={[{ required: true, message: '请选择教学楼' }]}><Select showSearch optionFilterProp="label" options={options('teaching-buildings')} /></Form.Item><Form.Item name="roomNo" label="教室号" rules={[{ required: true, message: '请输入教室号' }]}><Input autoComplete="off" /></Form.Item></>}
       </Form>
     </Modal>
-    <Drawer title={`${historyRecord?.name ?? ''} · 修改记录`} open={Boolean(historyRecord)} onClose={() => setHistoryRecord(null)} size="large">
+    <ExpandableDrawer title={`${historyRecord?.name ?? ''} · 修改记录`} open={Boolean(historyRecord)} onClose={() => setHistoryRecord(null)} size="large">
 	  {history.isLoading ? <Spin /> : history.isError ? <Alert type="error" showIcon title="修改记录加载失败" /> : history.data?.length ? history.data.map((change: MasterDataChange) => <Descriptions key={change.id} bordered size="small" column={1} className="history-entry" items={[{ key: 'action', label: '操作', children: change.action }, { key: 'actor', label: '操作人', children: change.actorId || '系统' }, { key: 'time', label: '时间', children: new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(change.createdAt)) }]} />) : <Empty description="暂无修改记录" />}
-    </Drawer>
+    </ExpandableDrawer>
   </section>
 }
 

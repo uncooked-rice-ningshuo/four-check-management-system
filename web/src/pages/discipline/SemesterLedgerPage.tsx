@@ -1,5 +1,6 @@
+import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Select, Typography, Space, Tag, Empty, type FormInstance } from 'antd'
+import { Alert, Button, Select, Typography, Space, Tag, Empty, type FormInstance } from 'antd'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { useAttendancePermissions } from '../../features/attendance/hooks/useAttendancePermissions'
@@ -119,7 +120,7 @@ export function SemesterLedgerPage() {
         toolBarRender={() => canExport ? [<Button size="small" key="export" disabled={!semester} loading={download.isPending} onClick={() => download.mutate()}>导出 Excel</Button>] : []}
         scroll={{ x: 'max-content', y: 'var(--ledger-body-height)' }}
         pagination={{ current: page, pageSize: size, total: data?.total, showSizeChanger: true, pageSizeOptions: [25, 50, 100], onChange: (p, n) => { setPage(size === n ? p : 1); setSize(n) } }} />
-      <Drawer title={detail?.name + ' · 检查记录'} open={!!detail && panel === 'sources'} onClose={() => setDetail(undefined)} size="large">
+      <ExpandableDrawer title={detail?.name + ' · 检查记录'} open={!!detail && panel === 'sources'} onClose={() => setDetail(undefined)} size="large">
         {detail && panel === 'sources' && <>
         {!!sourceColumn?.members.length && <p>{sourceColumn.members.map(m => {
           const value = detail?.values[m.code]
@@ -128,13 +129,13 @@ export function SemesterLedgerPage() {
         <LedgerDetails key={detail.number + sourceCode} kind="sources" semesterId={semester} studentNumber={detail.number}
           groupKey={sourceColumn?.groupKey} code={!sourceColumn?.section ? sourceCode : undefined} weeks={data?.weeks} columns={data?.columns} />
         </>}
-      </Drawer>
-      <Drawer title={detail?.name + ' · 处分事项'} open={!!detail && panel === 'cases'} onClose={() => setDetail(undefined)} size="large">
+      </ExpandableDrawer>
+      <ExpandableDrawer title={detail?.name + ' · 处分事项'} open={!!detail && panel === 'cases'} onClose={() => setDetail(undefined)} size="large">
         {detail && panel === 'cases' &&
           <LedgerDetails key={detail.number + sourceCode} kind="cases" semesterId={semester} studentNumber={detail.number}
             groupKey={sourceColumn?.groupKey} />
         }
-      </Drawer>
+      </ExpandableDrawer>
       </>}
   </section>
 }

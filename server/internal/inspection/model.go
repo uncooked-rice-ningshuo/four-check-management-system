@@ -203,11 +203,11 @@ func attendanceDedupKey(input AttendanceInput) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// unattendedDedupKey identifies one student and normalized course section within the week.
+// unattendedDedupKey identifies one student and normalized course section on a Shanghai business date.
 func unattendedDedupKey(input AttendanceInput) string {
 	period := normalizedCoursePeriod(input.PeriodText)
 	canonical := strings.Join([]string{
-		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, period,
+		input.SemesterID, input.WeekID, input.InspectionTypeID, input.StudentID, input.OccurredAt.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("2006-01-02"), period,
 	}, "\x1f")
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])
@@ -230,13 +230,13 @@ func AttendanceDedupKey(record AttendanceRecord) string {
 	})
 }
 
-// UnattendedDedupKey restores the 无机课堂 identity (student + course section)
+// UnattendedDedupKey restores the 无机课堂 identity (student + business date + course section)
 // after a normalized import row is decoded. It must stay identical to the key the
 // manual entry path stores, otherwise the two paths cannot detect each other.
 func UnattendedDedupKey(record AttendanceRecord) string {
 	return unattendedDedupKey(AttendanceInput{
 		SemesterID: record.SemesterID, WeekID: record.WeekID, InspectionTypeID: record.InspectionTypeID,
-		StudentID: record.StudentID, PeriodText: record.PeriodText,
+		StudentID: record.StudentID, OccurredAt: record.OccurredAt, PeriodText: record.PeriodText,
 	})
 }
 

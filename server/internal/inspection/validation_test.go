@@ -329,10 +329,8 @@ func TestDuplicateKey(t *testing.T) {
 			}
 			f["date"] = json.RawMessage(`"2026-09-03"`)
 			b, _ = validateFixture(d.Code, f)
-			if d.Code != InspectionTypeUnattended && a.DuplicateKey == b.DuplicateKey {
+			if a.DuplicateKey == b.DuplicateKey {
 				t.Fatal("date absent from identity")
-			} else if d.Code == InspectionTypeUnattended && a.DuplicateKey != b.DuplicateKey {
-				t.Fatal("date must not split the weekly student/section identity")
 			}
 			f = validDetails(d.Code)
 			for key, value := range f {
@@ -450,7 +448,7 @@ func TestValidateDetailsStoragePrecision(t *testing.T) {
 	requireIssue(t, issues, "details.absenceHours", "OUT_OF_RANGE")
 }
 
-// 无机课堂 uses the same weekly student/section identity in manual entry and Excel import.
+// 无机课堂 uses the same daily student/section identity in manual entry and Excel import.
 func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
 	manual, issues := validateFixture(InspectionTypeUnattended, validDetails(InspectionTypeUnattended))
 	if len(issues) != 0 {
@@ -471,14 +469,19 @@ func TestUnattendedIdentityIsSharedByManualAndImport(t *testing.T) {
 	if imported.DedupKey != manual.DuplicateKey || UnattendedDedupKey(imported) != manual.DuplicateKey {
 		t.Fatal("import identity differs from manual identity")
 	}
-	// Class, course and date do not split the same student's section within a week.
+	// Class and course do not split the same student's section on the same date.
 	otherSection := imported
 	otherSection.CourseID = "abcdefab-0000-4000-8000-000000000002"
 	otherSection.ClassID = "abcdefab-0000-4000-8000-000000000003"
-	otherSection.OccurredAt = day.Add(24 * time.Hour)
+	otherSection.OccurredAt = day.UTC()
 	if UnattendedDedupKey(otherSection) != manual.DuplicateKey {
-		t.Fatal("class, course or date split the weekly student/section identity")
+		t.Fatal("class, course or timezone split the daily student/section identity")
 	}
+	otherSection.OccurredAt = day.AddDate(0, 0, 1)
+	if UnattendedDedupKey(otherSection) == manual.DuplicateKey {
+		t.Fatal("different business dates collided")
+	}
+	otherSection.OccurredAt = day
 	otherSection.PeriodText = "3-4"
 	if UnattendedDedupKey(otherSection) == manual.DuplicateKey {
 		t.Fatal("course section missing from 无机课堂 identity")

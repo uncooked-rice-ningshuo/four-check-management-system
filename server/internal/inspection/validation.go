@@ -317,7 +317,7 @@ func detailDuplicateKey(code string, c DetailContext, v map[string]json.RawMessa
 	}
 	if code == InspectionTypeUnattended {
 		return unattendedDedupKey(AttendanceInput{SemesterID: c.SemesterID, WeekID: c.WeekID,
-			InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), PeriodText: detailString(v, "period")})
+			InspectionTypeID: c.InspectionTypeID, StudentID: detailString(v, "studentId"), OccurredAt: occurred, PeriodText: detailString(v, "period")})
 	}
 	if code == InspectionTypeEveningSelfStudy {
 		parts := []string{c.SemesterID, c.WeekID, c.InspectionTypeID, detailString(v, "classId"), detailString(v, "studentId"), r.Date}

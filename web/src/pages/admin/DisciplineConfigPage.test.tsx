@@ -11,7 +11,7 @@ import {
   saveDisciplineRuleDraft,
   validateDisciplineRuleDraft,
 } from '../../features/discipline-config/api'
-import { getCatalogs, getDictionaries } from '../../shared/api/adminApi'
+import { getRegistrationOptions, getDisciplineLevels } from '../../shared/api/adminApi'
 import { DisciplineConfigPage } from './DisciplineConfigPage'
 
 vi.mock('../../features/discipline-config/api', () => ({
@@ -22,7 +22,7 @@ vi.mock('../../features/discipline-config/api', () => ({
   saveDisciplineRuleDraft: vi.fn(),
   validateDisciplineRuleDraft: vi.fn(),
 }))
-vi.mock('../../shared/api/adminApi', () => ({ getCatalogs: vi.fn(), getDictionaries: vi.fn() }))
+vi.mock('../../shared/api/adminApi', () => ({ getRegistrationOptions: vi.fn(), getDisciplineLevels: vi.fn() }))
 
 const makeVersion = (id: string, version: number, status: 'DRAFT' | 'PUBLISHED' | 'SUPERSEDED' = 'DRAFT') => ({
   id,
@@ -53,8 +53,8 @@ const makeVersion = (id: string, version: number, status: 'DRAFT' | 'PUBLISHED' 
 function renderPage(path = '/discipline/config/edit', mode: 'view' | 'edit' = 'edit') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const routeElement = mode === 'edit'
-    ? <Routes><Route path="/discipline/config/edit" element={<DisciplineConfigPage mode="edit" />} /><Route path="/discipline/config" element={<DisciplineConfigPage mode="view" />} /></Routes>
-    : <DisciplineConfigPage mode="view" />
+    ? <Routes><Route path="/discipline/config/edit" element={<DisciplineConfigPage canEdit canPublish mode="edit" />} /><Route path="/discipline/config" element={<DisciplineConfigPage canEdit canPublish mode="view" />} /></Routes>
+    : <DisciplineConfigPage canEdit canPublish mode="view" />
   return render(<MemoryRouter initialEntries={[path]}><QueryClientProvider client={client}><LocationProbe />{routeElement}</QueryClientProvider></MemoryRouter>)
 }
 
@@ -65,7 +65,7 @@ function LocationProbe() {
 async function openStep(title: string) {
   if (title === '检查并发布') {
     fireEvent.click(await screen.findByText('配置处分档位', { selector: '.ant-steps-item-title' }))
-    expect(screen.getAllByRole('button', { name: '通报批评' }).length).toBeGreaterThan(0)
+    expect(screen.getByText('通报批评', { selector: 'button span' })).toBeInTheDocument()
   }
   fireEvent.click(await screen.findByText(title, { selector: '.ant-steps-item-title' }))
 }
@@ -74,8 +74,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getCurrentDisciplineRule).mockResolvedValue({ current: null })
   vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [] })
-  vi.mocked(getCatalogs).mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [{ id: 'type-a', code: 'ATTENDANCE_RATE', name: '到课', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 1 }] })
-  vi.mocked(getDictionaries).mockResolvedValue({ types: [{ id: 'levels', code: 'DISCIPLINE_LEVEL', name: '处分档位', description: '', system: true, enabled: true }], items: [
+  vi.mocked(getRegistrationOptions).mockResolvedValue({ departments: [], organizationRoles: [], inspectionTypes: [{ id: 'type-a', code: 'ATTENDANCE_RATE', name: '到课', extensionKind: '', enabled: true, participatesInReport: true, sortOrder: 1 }] })
+  vi.mocked(getDisciplineLevels).mockResolvedValue({ types: [{ id: 'levels', code: 'DISCIPLINE_LEVEL', name: '处分档位', description: '', system: true, enabled: true }], items: [
     { id: 'notice', typeId: 'levels', value: 'NOTICE', label: '通报批评', description: '', sortOrder: 10, enabled: true },
     { id: 'warning', typeId: 'levels', value: 'WARNING', label: '警告', description: '', sortOrder: 20, enabled: true },
     { id: 'serious', typeId: 'levels', value: 'SERIOUS_WARNING', label: '严重警告', description: '', sortOrder: 30, enabled: true },
@@ -155,7 +155,7 @@ describe('DisciplineConfigPage', () => {
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
     renderPage()
     await openStep('配置处分档位')
-    const tierRow = screen.getByRole('row', { name: /通报批评.*1.*3/ })
+    const tierRow = screen.getByText('通报批评', { selector: 'button span' }).closest('tr')!
 
     expect(within(tierRow).queryByRole('textbox', { name: '通报批评处分名称' })).not.toBeInTheDocument()
     fireEvent.click(within(tierRow).getByRole('button', { name: '通报批评' }))
@@ -163,14 +163,14 @@ describe('DisciplineConfigPage', () => {
     expect(nameInput).toHaveValue('通报批评')
     expect(within(tierRow).getByRole('combobox', { name: '从处分档位字典填入名称' })).toBeInTheDocument()
     fireEvent.change(nameInput, { target: { value: '通报批评处分' } })
-    fireEvent.click(screen.getAllByRole('button', { name: /保\s*存/ })[0])
-    expect(await screen.findByRole('button', { name: '通报批评处分' })).toBeInTheDocument()
+    fireEvent.click(within(tierRow).getByRole('button', { name: /保\s*存/ }))
+    expect(await within(tierRow).findByRole('button', { name: '通报批评处分' })).toBeInTheDocument()
 
     fireEvent.click(within(tierRow).getByRole('button', { name: '条款一' }))
     const clauseEditor = within(tierRow).getByRole('textbox', { name: '通报批评处分依据条款' })
     expect(clauseEditor.tagName).toBe('TEXTAREA')
     fireEvent.change(clauseEditor, { target: { value: '未保存的改动' } })
-    fireEvent.click(screen.getAllByRole('button', { name: /取\s*消/ })[0])
+    fireEvent.click(within(tierRow).getByRole('button', { name: /取\s*消/ }))
     expect(within(tierRow).getByRole('button', { name: '条款一' })).toBeInTheDocument()
   })
 
@@ -190,7 +190,7 @@ describe('DisciplineConfigPage', () => {
   it('首版累计项可按需创建、归并检查项、移出成员并删除空组', async () => {
     const emptyDraft = { ...makeVersion('draft-1', 1), groups: [] }
     vi.mocked(createDisciplineRuleDraft).mockResolvedValue(emptyDraft)
-    vi.mocked(getCatalogs).mockResolvedValue({
+    vi.mocked(getRegistrationOptions).mockResolvedValue({
       departments: [],
       organizationRoles: [],
       inspectionTypes: [
@@ -275,7 +275,7 @@ describe('DisciplineConfigPage', () => {
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
     renderPage()
     await openStep('配置处分档位')
-    await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('levels'))
+    await waitFor(() => expect(getDisciplineLevels).toHaveBeenCalled())
     expect(screen.getByText('适用检查项：到课').closest('.ant-card-head')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '留校察看' })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: '通报批评需要人工确认' })).toHaveAttribute('aria-checked', 'false')
@@ -329,7 +329,7 @@ describe('DisciplineConfigPage', () => {
       { code: 'WARNING', name: '警告', lower: 3, clause: '条款二', teacherConfirmationRequired: true },
     ]
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
-    vi.mocked(getDictionaries).mockResolvedValue({
+    vi.mocked(getDisciplineLevels).mockResolvedValue({
       types: [{ id: 'levels', code: 'DISCIPLINE_LEVEL', name: '处分档位', description: '', system: true, enabled: true }],
       items: [
         { id: 'notice', typeId: 'levels', value: 'NOTICE', label: '通报批评', description: '', sortOrder: 10, enabled: true },
@@ -352,7 +352,7 @@ describe('DisciplineConfigPage', () => {
     const draft = makeVersion('draft-1', 1)
     draft.groups[0].tiers = [{ code: 'NOTICE', name: '通报批评', lower: 1, clause: '原档条款', teacherConfirmationRequired: false }]
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
-    vi.mocked(getDictionaries).mockResolvedValue({
+    vi.mocked(getDisciplineLevels).mockResolvedValue({
       types: [{ id: 'levels', code: 'DISCIPLINE_LEVEL', name: '处分档位', description: '', system: true, enabled: true }],
       items: [
         { id: 'custom', typeId: 'levels', value: 'CUSTOM_LEVEL', label: '附加观察档', description: '', sortOrder: 5, enabled: true },
@@ -362,7 +362,7 @@ describe('DisciplineConfigPage', () => {
     })
     renderPage()
     await openStep('配置处分档位')
-    await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('levels'))
+    await waitFor(() => expect(getDisciplineLevels).toHaveBeenCalled())
     fireEvent.click(await screen.findByRole('button', { name: '添加档位' }))
     const addedTierRow = screen.getByRole('row', { name: /附加观察档/ })
     expect(within(addedTierRow).getByRole('button', { name: '附加观察档' })).toBeInTheDocument()
@@ -379,7 +379,7 @@ describe('DisciplineConfigPage', () => {
 
   it('处分档位系统字典未初始化时明确提示迁移，不伪装为空白下拉', async () => {
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [makeVersion('draft-1', 1)] })
-    vi.mocked(getDictionaries).mockResolvedValue({ types: [], items: [] })
+    vi.mocked(getDisciplineLevels).mockResolvedValue({ types: [], items: [] })
     renderPage()
     await openStep('配置处分档位')
     expect(await screen.findByText('处分档位字典未初始化')).toBeInTheDocument()
@@ -464,7 +464,7 @@ describe('DisciplineConfigPage', () => {
     renderPage()
 
     await openStep('配置处分档位')
-    expect(screen.getAllByRole('button', { name: '通报批评' }).length).toBeGreaterThan(0)
+    expect(screen.getByText('通报批评', { selector: 'button span' })).toBeInTheDocument()
     await openStep('检查并发布')
     fireEvent.click(screen.getByRole('button', { name: '校验并发布' }))
 
@@ -482,18 +482,17 @@ describe('DisciplineConfigPage', () => {
     ]))
     renderPage()
 
-    await openStep('配置处分档位')
     await openStep('检查并发布')
-    fireEvent.click(screen.getByRole('button', { name: '校验并发布' }))
+    fireEvent.click(screen.getByText('校验并发布', { selector: 'button span' }))
     expect(await screen.findByText(/规则校验未通过：第 3 步“配置处分档位”发现 2 项需要修改/)).toBeInTheDocument()
     expect(screen.getByText('检查并发布').closest('.ant-steps-item')).toHaveClass('ant-steps-item-process')
     expect(screen.getByText('配置处分档位').closest('.ant-steps-item')).toHaveClass('ant-steps-item-error')
     expect(document.querySelector('.discipline-validation-summary')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '前往修正' })).not.toBeInTheDocument()
+    expect(screen.queryByText('前往修正')).not.toBeInTheDocument()
     expect(screen.queryByText('请填写处分依据条款')).not.toBeInTheDocument()
 
     await openStep('配置处分档位')
-    const clauseButton = await screen.findByRole('button', { name: '条款一' })
+    const clauseButton = await screen.findByText('条款一', { selector: 'button span' })
     const clauseItem = clauseButton.closest('.ant-form-item') as HTMLElement
     const lowerIssue = screen.getAllByText('起始值与上一档位不连续').find((element) => element.closest('.ant-form-item'))
     const lowerItem = lowerIssue?.closest('.ant-form-item') as HTMLElement
@@ -501,9 +500,9 @@ describe('DisciplineConfigPage', () => {
     expect(lowerItem).toHaveClass('ant-form-item-has-error')
 
     fireEvent.click(clauseButton)
-    const clauseInput = screen.getByRole('textbox', { name: '通报批评依据条款' })
+    const clauseInput = within(clauseItem).getByRole('textbox', { name: '通报批评依据条款' })
     fireEvent.change(clauseInput, { target: { value: '纪律条例第一条' } })
-    fireEvent.click(screen.getAllByRole('button', { name: /保\s*存/ })[0])
+    fireEvent.click(within(clauseItem).getByRole('button', { name: /保\s*存/ }))
     await waitFor(() => expect(clauseItem).not.toHaveClass('ant-form-item-has-error'))
     expect(lowerItem).toHaveClass('ant-form-item-has-error')
     expect(within(lowerItem).getByText('起始值与上一档位不连续')).toBeInTheDocument()

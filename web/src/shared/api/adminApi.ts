@@ -62,6 +62,7 @@ export const getMasterDataImportBatch = (kind: MasterDataKind, batchId: string) 
 export const confirmMasterDataImportBatch = (kind: MasterDataKind, batchId: string, version: number, idempotencyKey: string) => apiRequest<MasterDataImportConfirmResult>(`/admin/master-data/${kind}/imports/${batchId}/confirm`, {
   method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ version }),
 })
+export const getDisciplineLevels = () => apiRequest<DictionaryCatalog>('/admin/discipline/level-options')
 export const getDictionaries = (typeId = '') => apiRequest<DictionaryCatalog>(`/admin/dictionaries${typeId ? `?typeId=${encodeURIComponent(typeId)}` : ''}`)
 export const createDictionaryType = (input: Omit<DictionaryType, 'id' | 'system' | 'enabled'>) => apiRequest<DictionaryType>('/admin/dictionaries/types', { method: 'POST', body: JSON.stringify(input) })
 export const updateDictionaryType = (input: DictionaryType) => apiRequest<DictionaryType>(`/admin/dictionaries/types/${input.id}`, { method: 'PUT', body: JSON.stringify(input) })

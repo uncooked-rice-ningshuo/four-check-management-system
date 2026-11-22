@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"four-check-management-system/server/internal/auth"
+	"four-check-management-system/server/internal/dictionary"
 	"four-check-management-system/server/internal/disciplineconfig"
 	"github.com/gin-gonic/gin"
 )
@@ -155,4 +156,24 @@ func writeDisciplineError(c *gin.Context, err error) {
 	default:
 		writeError(c, 500, "INTERNAL_ERROR", "处分规则操作失败，请稍后重试")
 	}
+}
+
+func (h *handler) disciplineLevelOptions(c *gin.Context) {
+	if h.dictionary == nil {
+		writeError(c, 503, "SERVICE_UNAVAILABLE", "字典服务尚未就绪")
+		return
+	}
+	catalog, err := h.dictionary.List(c, "")
+	if err != nil {
+		writeResult(c, nil, err)
+		return
+	}
+	for _, t := range catalog.Types {
+		if t.Code == "DISCIPLINE_LEVEL" && t.Enabled {
+			levels, err := h.dictionary.List(c, t.ID)
+			writeResult(c, dictionary.Catalog{Types: []dictionary.Type{t}, Items: levels.Items}, err)
+			return
+		}
+	}
+	c.JSON(200, dictionary.Catalog{Types: []dictionary.Type{}, Items: []dictionary.Item{}})
 }

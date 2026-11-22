@@ -1,6 +1,6 @@
 export const disciplineActions = [
   ['DISCIPLINE_RULE_VIEW', '查看处分规则'],
-  ['DISCIPLINE_RULE_EDIT', '维护处分草稿'],
+  ['DISCIPLINE_RULE_EDIT', '修改处分规则'],
   ['DISCIPLINE_RULE_PUBLISH', '发布处分规则'],
   ['DISCIPLINE_LEDGER_VIEW', '学期违纪台账查看'],
   ['DISCIPLINE_LEDGER_EXPORT', '学期违纪台账导出'],

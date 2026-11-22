@@ -288,6 +288,33 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         vite.write_text('import { createServer } from ' + json.dumps((ROOT / 'web/node_modules/vite/dist/node/index.js').as_uri()) + ';\nconst server=await createServer(' + json.dumps({'configFile': str(ROOT / 'web/vite.config.ts'), 'root': str(ROOT / 'web'), 'server': {'host': '127.0.0.1', 'port': web_port, 'strictPort': True, 'proxy': {'/api': f'http://127.0.0.1:{api_port}'}}}) + '); await server.listen();\n')
         start(['node', str(vite)], 'vite', ROOT / 'web')
         wait_url(f'http://127.0.0.1:{web_port}/login')
+        if ENV.get('BROWSER_SUITE') == 'discipline-rule-access':
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input="""
+INSERT INTO accounts(id,login_name,name,password_hash,status,system_role,account_kind,primary_department_id)
+SELECT gen_random_uuid(), 'rule-'||r.code||'-'||action,r.name,a.password_hash,'ACTIVE','MEMBER','SYSTEM',d.id
+FROM accounts a CROSS JOIN departments d CROSS JOIN organization_roles r
+CROSS JOIN unnest(ARRAY['VIEW','EDIT','PUBLISH','NONE']) action
+WHERE a.login_name='browser-admin' AND d.code='OFFICE' AND r.code IN ('MEMBER','MINISTER','VICE_MINISTER');
+INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id,start_at,default_permissions)
+SELECT gen_random_uuid(),a.id,a.primary_department_id,r.id,now(),jsonb_build_object('version',1,'rolePolicies',
+jsonb_build_array(jsonb_build_object('roleCode',r.code,'disciplineActions',CASE WHEN split_part(a.login_name,'-',3)='NONE'
+THEN ARRAY[]::text[] ELSE ARRAY['DISCIPLINE_RULE_'||split_part(a.login_name,'-',3)] END)))
+FROM accounts a JOIN organization_roles r ON r.code=split_part(a.login_name,'-',2) WHERE a.login_name LIKE 'rule-%';
+INSERT INTO discipline_rule_versions(version,status,created_by) SELECT 1,'DRAFT',id FROM accounts WHERE login_name='browser-admin';
+INSERT INTO discipline_rule_groups(version_id,group_key,name,result_unit,sort_order)
+SELECT id,'test','测试累计项','次',1 FROM discipline_rule_versions;
+INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,source_unit,operator,conversion_factor,sort_order)
+SELECT g.id,g.version_id,i.id,i.name,CASE WHEN i.code='ATTENDANCE_RATE' THEN '学时' ELSE '次' END,'+',1,i.sort_order
+FROM discipline_rule_groups g CROSS JOIN inspection_types i WHERE i.enabled;
+INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,clause,teacher_confirmation_required,sort_order)
+SELECT id,'NOTICE','通报批评',1,'测试条款',true,1 FROM discipline_rule_groups;
+""".encode())
+            browser_env = dict(ENV, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}', RULE_TEST_PASSWORD=password)
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'rule-access.spec.ts', '--workers=1', '--trace=off', '--output', '../output/rule-access'],
+                           cwd=ROOT / 'web', env=browser_env, check=True)
+            report.update(status='passed', cases=['办公室三个角色的查看、修改、发布及无授权'])
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'midscene-discipline-permissions':
             member_id = str(uuid.uuid4())
             run(sql_command('-v','ON_ERROR_STOP=1'), input=f"""

@@ -106,7 +106,7 @@ export function AppLayout() {
     ? [{ key: '/discipline/ledger', icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/ledger">学期违纪台账</Link> }] : []
   const disciplineItems = [...ledgerItems]
   if (user?.isSuperAdmin || ['DISCIPLINE_CASE_CONFIRM', 'DISCIPLINE_CASE_VIEW'].some(action => hasNavigableInspectionAction(effectivePermissions.data?.permissions, action))) disciplineItems.push({key: "/discipline/review", icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/review">待处分</Link>})
-  if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_RULE_VIEW')) {
+  if (user?.isSuperAdmin || ['DISCIPLINE_RULE_VIEW','DISCIPLINE_RULE_EDIT','DISCIPLINE_RULE_PUBLISH'].some(action => hasNavigableInspectionAction(effectivePermissions.data?.permissions, action))) {
     disciplineItems.unshift({ key: '/discipline/config', icon: <SettingOutlined />, label: <Link to="/discipline/config">处分配置</Link> })
   }
   if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_ARCHIVE_VIEW')) {

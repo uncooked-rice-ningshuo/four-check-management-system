@@ -35,6 +35,17 @@ import { ProtectedRoute } from './router/ProtectedRoute'
 import { SuperAdminOnly, SuperAdminRoute } from './router/SuperAdminRoute'
 import { EffectivePermissionRoute } from './router/EffectivePermissionRoute'
 
+import { useAuth } from './providers/authContext'
+import { useAttendancePermissions } from '../features/attendance/hooks/useAttendancePermissions'
+import { hasNavigableInspectionAction } from '../features/attendance/hooks/hasNavigableInspectionAction'
+
+function RuleConfig({mode}: {mode:'view'|'edit'}) {
+  const {user} = useAuth()
+  const grants = useAttendancePermissions()
+  const allowed = (action: string) => Boolean(user?.isSuperAdmin || hasNavigableInspectionAction(grants.data?.permissions, action))
+  return <DisciplineConfigPage mode={mode} canEdit={allowed('DISCIPLINE_RULE_EDIT')} canPublish={allowed('DISCIPLINE_RULE_PUBLISH')} />
+}
+
 const protectedPage = (page: ReactNode) => <ProtectedRoute>{page}</ProtectedRoute>
 const superAdminOnly = (page: ReactNode) => <SuperAdminOnly>{page}</SuperAdminOnly>
 const adminOrSystemAdmin = (page: ReactNode) => <SuperAdminRoute>{page}</SuperAdminRoute>
@@ -47,8 +58,8 @@ export default function App() {
 		<Route path="/change-password" element={protectedPage(<ChangePasswordPage />)} />
 		<Route element={protectedPage(<AppLayout />)}>
 			<Route index element={<HomePage />} />
-			<Route path="discipline/config" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_VIEW"><DisciplineConfigPage mode="view" /></EffectivePermissionRoute>} />
-      <Route path="discipline/config/edit" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_EDIT"><DisciplineConfigPage mode="edit" /></EffectivePermissionRoute>} />
+			<Route path="discipline/config" element={<EffectivePermissionRoute action={['DISCIPLINE_RULE_VIEW','DISCIPLINE_RULE_EDIT','DISCIPLINE_RULE_PUBLISH']}><RuleConfig mode="view" /></EffectivePermissionRoute>} />
+      <Route path="discipline/config/edit" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_EDIT"><RuleConfig mode="edit" /></EffectivePermissionRoute>} />
       <Route path="notifications" element={<InboxPage />} />
       <Route path="discipline/archive" element={<EffectivePermissionRoute action="DISCIPLINE_ARCHIVE_VIEW"><DisciplineArchivePage /></EffectivePermissionRoute>} />
       <Route path="discipline/ledger" element={<EffectivePermissionRoute action="DISCIPLINE_LEDGER_VIEW"><SemesterLedgerPage /></EffectivePermissionRoute>} />

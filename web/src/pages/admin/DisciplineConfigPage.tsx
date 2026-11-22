@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiError } from '../../shared/api/httpClient'
-import { getCatalogs, getDictionaries } from '../../shared/api/adminApi'
+import { getRegistrationOptions, getDisciplineLevels } from '../../shared/api/adminApi'
 import { calculateRuleExample, orderGroupsByInitialConfiguration, type DisciplineGroup, type DisciplineRuleVersion, type DisciplineTerm, type DisciplineTier, type DisciplineValidationIssue } from '../../features/discipline-config/model'
 import { createDisciplineRuleDraft, getCurrentDisciplineRule, getDisciplineRuleVersions, publishDisciplineRuleDraft, saveDisciplineRuleDraft, validateDisciplineRuleDraft } from '../../features/discipline-config/api'
 import './DisciplineConfigPage.css'
@@ -18,7 +18,7 @@ const dateText = (value?: string) => value
   ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   : '—'
 
-export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit' }) {
+export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { mode?: 'view' | 'edit'; canEdit: boolean; canPublish: boolean }) {
   const client = useQueryClient()
   const navigate = useNavigate()
   const [messageApi, contextHolder] = message.useMessage()
@@ -47,11 +47,10 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
 
   const current = useQuery({ queryKey: ['discipline-config', 'current'], queryFn: getCurrentDisciplineRule })
   const versions = useQuery({ queryKey: ['discipline-config', 'versions'], queryFn: getDisciplineRuleVersions })
-  const catalogs = useQuery({ queryKey: ['admin-catalogs'], queryFn: getCatalogs })
-  const dictionaryTypes = useQuery({ queryKey: ['admin-dictionaries', 'types'], queryFn: () => getDictionaries() })
-  const tierDictionary = dictionaryTypes.data?.types.find((item) => item.code === 'DISCIPLINE_LEVEL')
-  const tierDictionaryItems = useQuery({ queryKey: ['admin-dictionaries', tierDictionary?.id], queryFn: () => getDictionaries(tierDictionary!.id), enabled: Boolean(tierDictionary?.id) })
-  const tierOptions = tierDictionaryItems.data?.items.filter((item) => item.enabled) ?? []
+  const catalogs = useQuery({ queryKey: ['discipline-config', 'entry-options'], queryFn: getRegistrationOptions, enabled: mode === 'edit' })
+  const levels = useQuery({ queryKey: ['discipline-config', 'levels'], queryFn: getDisciplineLevels, enabled: mode === 'edit' })
+  const tierDictionary = levels.data?.types.find(type => type.code === 'DISCIPLINE_LEVEL')
+  const tierOptions = levels.data?.items.filter(item => item.enabled) ?? []
   const draftInHistory = versions.data?.items.find((item) => item.status === 'DRAFT')
   const draftVersion = createdDraft ?? draftInHistory
   const activeVersion = viewId
@@ -270,7 +269,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
     if (nextStep === step || nextStep < 0 || nextStep > 3) return
     if (nextStep > step) {
       for (let checkedStep = step; checkedStep < nextStep; checkedStep += 1) {
-        if (checkedStep === 2 && tierDictionaryItems.isLoading) {
+        if (checkedStep === 2 && levels.isLoading) {
           messageApi.warning('处分档位字典正在加载，请稍后再继续。')
           return
         }
@@ -549,10 +548,10 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
     { title: '操作', width: 90, render: (_: unknown, group: DisciplineGroup) => <Button danger type="text" disabled={!editable} onClick={() => deleteGroup(group.key)}>删除累计项</Button> },
   ]
 
-  if (current.isLoading || versions.isLoading || catalogs.isLoading) return <section className="discipline-config-page"><div role="status">正在加载处分规则配置…</div></section>
-  if (current.isError || versions.isError || catalogs.isError) {
-    const forbidden = [current.error, versions.error, catalogs.error].some((error) => error instanceof ApiError && error.status === 403)
-    return <section className="discipline-config-page"><Alert type="error" showIcon title={forbidden ? '没有处分规则配置权限' : '处分规则加载失败'} description={forbidden ? '当前账号无权访问处分规则配置。' : '当前没有加载空配置，请重试。'} action={!forbidden && <Button onClick={() => { void current.refetch(); void versions.refetch(); void catalogs.refetch() }}>重试</Button>} /></section>
+  if (current.isLoading || versions.isLoading || catalogs.isLoading || levels.isLoading) return <section className="discipline-config-page"><div role="status">正在加载处分规则配置…</div></section>
+  if (current.isError || versions.isError || catalogs.isError || levels.isError) {
+    const forbidden = [current.error, versions.error].some((error) => error instanceof ApiError && error.status === 403)
+    return <section className="discipline-config-page"><Alert type="error" showIcon title={forbidden ? '没有处分规则配置权限' : '处分规则加载失败'} description={forbidden ? '当前账号无权访问处分规则配置。' : '当前没有加载空配置，请重试。'} action={!forbidden && <Button onClick={() => { void current.refetch(); void versions.refetch(); if (mode === 'edit') { void catalogs.refetch(); void levels.refetch() } }}>重试</Button>} /></section>
   }
 
   const noDraft = !draftVersion
@@ -577,7 +576,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
           else { setWorkspace('editor'); setViewId(undefined) }
         }}>返回规则配置</Button>
         : mode === 'view'
-          ? <><Button type="primary" loading={createDraft.isPending} onClick={startEditing}>{draftVersion ? `继续修改草稿 v${draftVersion.version}` : current.data?.current ? '修改配置' : '开始配置'}</Button><Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>
+          ? <>{canEdit && <Button type="primary" loading={createDraft.isPending} onClick={startEditing}>{draftVersion ? `继续修改草稿 v${draftVersion.version}` : current.data?.current ? '修改配置' : '开始配置'}</Button>}{canPublish && draftVersion && <Button onClick={() => { setPublishTarget(draftVersion); setPublishConfirmOpen(true) }}>发布草稿 v{draftVersion.version}</Button>}<Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>
           : <>{!draftVersion && <Button type="primary" loading={createDraft.isPending} onClick={startEditing}>新建规则草稿</Button>}<Button onClick={() => transition({ kind: 'route', path: '/discipline/config' })}>配置查看</Button><Button onClick={() => transition({ kind: 'history' })}>版本历史</Button></>}
       </Space>
     </header>
@@ -601,7 +600,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
             { title: '累计项', dataIndex: 'name' },
             { title: '成员', render: (_: unknown, group: DisciplineGroup) => group.terms.map((term) => term.inspectionTypeName).join('、') },
             { title: '单位', dataIndex: 'unit' },
-            { title: '累计公式', render: (_: unknown, group: DisciplineGroup) => group.terms.map((term, index) => `${index ? (term.operator === '+' ? '+' : '−') + ' ' : ''}${term.inspectionTypeName} × ${term.factor} ${sourceUnitForType(term.inspectionTypeId)}`).join(' ') },
+            { title: '累计公式', render: (_: unknown, group: DisciplineGroup) => group.terms.map((term, index) => `${index ? (term.operator === '+' ? '+' : '−') + ' ' : ''}${term.inspectionTypeName} × ${term.factor} ${term.sourceUnit}`).join(' ') },
             { title: '处分档位', render: (_: unknown, group: DisciplineGroup) => group.tiers.map((tier) => `${tier.name} [${tier.lower}, ${tier.upper ?? '无上限'}) ${tier.clause} · ${tier.teacherConfirmationRequired ? '人工确认' : '免人工确认'}`).join('；') },
           ]} />
         </Card> : null
@@ -611,7 +610,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
           <div className="discipline-view-group-title"><span className="discipline-view-group-icon">{iconForGroup(group)}</span><Typography.Text strong>{group.name || '未命名累计项'}</Typography.Text><Tag color="blue">累计单位：{group.unit || '未配置'}</Tag><span className="discipline-view-tier-count">{group.tiers.length} 个处分档位</span></div>
           <div className="discipline-view-group-meta">
             <section aria-label={`${group.name}所含检查项`}><span>检查项</span><strong>{group.terms.map((term) => term.inspectionTypeName).join('、')}</strong></section>
-            <section aria-label={`${group.name}换算方式`}><span>换算方式</span><div className="discipline-view-formula">{group.terms.map((term, index) => <span key={term.inspectionTypeId}>{index > 0 && (term.operator === '+' ? '＋ ' : '－ ')}<strong>{term.inspectionTypeName}</strong> × {term.factor} {sourceUnitForType(term.inspectionTypeId)} → {group.unit || '累计单位待配置'}</span>)}</div></section>
+            <section aria-label={`${group.name}换算方式`}><span>换算方式</span><div className="discipline-view-formula">{group.terms.map((term, index) => <span key={term.inspectionTypeId}>{index > 0 && (term.operator === '+' ? '＋ ' : '－ ')}<strong>{term.inspectionTypeName}</strong> × {term.factor} {term.sourceUnit} → {group.unit || '累计单位待配置'}</span>)}</div></section>
           </div>
         </div>}>
           <section aria-label={`${group.name}处分档位`}>
@@ -700,13 +699,12 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
             {selectedGroup && <Card title={<div className="discipline-tier-card-title"><span>{selectedGroup.name}</span><Tag color="blue">累计单位：{selectedGroup.unit || '待确认'}</Tag></div>} extra={<Tag className="discipline-tier-applicability">适用检查项：{selectedGroup.terms.map((term) => term.inspectionTypeName).join('、')}</Tag>} className="discipline-tier-editor">
               {tierNeedsReview.has(selectedGroup.key) && <Alert type="warning" showIcon title="归组或换算已变化，请重新核对本累计项的处分档位。" action={<Button size="small" onClick={() => confirmTierReview(selectedGroup.key)}>已核对档位</Button>} />}
               <Typography.Paragraph type="secondary">区间按“含起始、不含结束”计算。新增或移除档位后请核对阈值；继续前会检查区间是否连续且不重叠。</Typography.Paragraph>
-              {dictionaryTypes.isLoading && <Typography.Text type="secondary">正在检查处分档位字典…</Typography.Text>}
-              {dictionaryTypes.isError && <Alert type="error" showIcon title="处分档位字典类型加载失败" description="请检查管理端连接后重试；字典未加载时不能新增档位。" />}
-              {!dictionaryTypes.isLoading && !dictionaryTypes.isError && !tierDictionary && <Alert type="error" showIcon title="处分档位字典未初始化" description="当前 API 返回中没有 DISCIPLINE_LEVEL 类型。请确认服务端已加载迁移 065，再刷新页面。" />}
-              {tierDictionaryItems.isError && <Alert type="error" showIcon title="处分档位字典加载失败，请刷新页面重试。" />}
-              {!tierDictionaryItems.isLoading && !tierDictionaryItems.isError && tierOptions.length === 0 && <Alert type="warning" showIcon title="处分档位字典暂无启用项，暂时不能添加档位。" />}
+              {levels.isLoading && <Typography.Text type="secondary">正在检查处分档位字典…</Typography.Text>}
+              {levels.isError && <Alert type="error" showIcon title="处分档位字典类型加载失败" description="请检查管理端连接后重试；字典未加载时不能新增档位。" />}
+              {!levels.isLoading && !levels.isError && !tierDictionary && <Alert type="error" showIcon title="处分档位字典未初始化" description="当前 API 返回中没有 DISCIPLINE_LEVEL 类型。请确认服务端已加载迁移 065，再刷新页面。" />}
+              {!levels.isLoading && !levels.isError && tierOptions.length === 0 && <Alert type="warning" showIcon title="处分档位字典暂无启用项，暂时不能添加档位。" />}
               {issueAt(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].tiers`) && <Typography.Text type="danger" role="alert">{issueAt(`groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].tiers`)?.message}</Typography.Text>}
-              <div className="discipline-tier-table-region" role="region" aria-label="处分档位表，可横向滚动" tabIndex={0}><Table rowKey="code" pagination={false} dataSource={selectedGroup.tiers} title={() => <div className="discipline-tier-toolbar"><div><Typography.Text strong>处分档位</Typography.Text><Typography.Text type="secondary">名称和依据默认只读，点击对应内容后编辑</Typography.Text></div><Button disabled={!editable || selectedGroup.tiers.length >= tierOptions.length || tierDictionaryItems.isLoading || tierDictionaryItems.isError || tierOptions.length === 0} onClick={() => addTier(selectedGroup)}>添加档位</Button></div>} columns={[
+              <div className="discipline-tier-table-region" role="region" aria-label="处分档位表，可横向滚动" tabIndex={0}><Table rowKey="code" pagination={false} dataSource={selectedGroup.tiers} title={() => <div className="discipline-tier-toolbar"><div><Typography.Text strong>处分档位</Typography.Text><Typography.Text type="secondary">名称和依据默认只读，点击对应内容后编辑</Typography.Text></div><Button disabled={!editable || selectedGroup.tiers.length >= tierOptions.length || levels.isLoading || levels.isError || tierOptions.length === 0} onClick={() => addTier(selectedGroup)}>添加档位</Button></div>} columns={[
                 { title: '处分名称', width: 220, render: (_: unknown, tier: DisciplineTier, index: number) => {
                   const path = `groups[${groups.findIndex((group) => group.key === selectedGroup.key)}].tiers[${index}].name`
                   const isEditing = tierTextEdit?.groupKey === selectedGroup.key && tierTextEdit.code === tier.code && tierTextEdit.field === 'name'
@@ -761,7 +759,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
             <Button disabled={step === 0 || !editable} onClick={() => changeStep(step - 1)}>上一步</Button>
             {step < 3
               ? <Button type="primary" disabled={!editable} onClick={() => changeStep(step + 1)}>继续：{stepTitles[step + 1]}</Button>
-              : <Button type="primary" disabled={!editable || publishRule.isPending || validating} loading={publishRule.isPending || validating} onClick={() => void validateAndPreparePublish()}>校验并发布</Button>}
+              : <Button type="primary" disabled={!canPublish || !editable || publishRule.isPending || validating} loading={publishRule.isPending || validating} onClick={() => void validateAndPreparePublish()}>校验并发布</Button>}
             <Button disabled={!editable || !dirty} loading={saveDraft.isPending} onClick={() => version && saveDraft.mutate(version)}>保存草稿</Button>
           </Space>
         </footer>}

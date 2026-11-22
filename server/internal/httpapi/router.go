@@ -230,9 +230,11 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	v1.POST("/discipline/archive/search", h.requireAction("DISCIPLINE_ARCHIVE_VIEW"), h.disciplineArchive)
 	v1.POST("/discipline/cases/search", h.disciplineReviewQueue)
 	v1.POST("/discipline/ledger/detail", h.requireAction(permission.ActionLedgerView), h.semesterLedgerDetail)
-	configAdmin.GET("/discipline/rule-versions/current", h.requireAction("DISCIPLINE_RULE_VIEW"), h.currentDisciplineRules)
-	configAdmin.GET("/discipline/rule-versions", h.requireAction("DISCIPLINE_RULE_VIEW"), h.listDisciplineRuleVersions)
-	configAdmin.GET("/discipline/rule-versions/:id", h.requireAction("DISCIPLINE_RULE_VIEW"), h.getDisciplineRuleVersion)
+	readRules := h.requireAction("DISCIPLINE_RULE_VIEW", "DISCIPLINE_RULE_EDIT", "DISCIPLINE_RULE_PUBLISH")
+	configAdmin.GET("/discipline/level-options", h.requireAction("DISCIPLINE_RULE_EDIT"), h.disciplineLevelOptions)
+	configAdmin.GET("/discipline/rule-versions/current", readRules, h.currentDisciplineRules)
+	configAdmin.GET("/discipline/rule-versions", readRules, h.listDisciplineRuleVersions)
+	configAdmin.GET("/discipline/rule-versions/:id", readRules, h.getDisciplineRuleVersion)
 	configAdmin.POST("/discipline/rule-versions", h.requireAction("DISCIPLINE_RULE_EDIT"), h.createDisciplineRuleDraft)
 	configAdmin.PUT("/discipline/rule-versions/:id", h.requireAction("DISCIPLINE_RULE_EDIT"), h.saveDisciplineRuleDraft)
 	configAdmin.POST("/discipline/rule-versions/:id/validate", h.requireAction("DISCIPLINE_RULE_EDIT"), h.validateDisciplineRuleDraft)
@@ -1635,7 +1637,7 @@ func (h *handler) requireSuperAdmin() gin.HandlerFunc {
 	}
 }
 
-func (h *handler) requireAction(action string) gin.HandlerFunc {
+func (h *handler) requireAction(action string, alternatives ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		a, ok := h.currentAccount(c)
 		if !ok {
@@ -1658,7 +1660,11 @@ func (h *handler) requireAction(action string) gin.HandlerFunc {
 			return
 		}
 		effective, err := h.permission.Effective(c, a.ID)
-		if err != nil || !effective.Allowed(action, permission.Scope{}) {
+		allowed := effective.Allowed(action, permission.Scope{})
+		for _, alternative := range alternatives {
+			allowed = allowed || effective.Allowed(alternative, permission.Scope{})
+		}
+		if err != nil || !allowed {
 			writeError(c, http.StatusForbidden, "FORBIDDEN", "无权访问该功能")
 			c.Abort()
 			return

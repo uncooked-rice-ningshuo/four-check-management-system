@@ -467,7 +467,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
     const index = nextTiers.findIndex((tier) => tier.code === dictionaryItem.value)
     const following = nextTiers[index + 1]
     const previous = nextTiers[index - 1]
-    if (!following && previous?.upper === undefined) {
+    if (!following && previous && previous.upper === undefined) {
       setTierBoundaryPrompt({ groupKey: group.key, code: dictionaryItem.value, name: dictionaryItem.label, minimum: previous.lower })
       setTierBoundaryValue(undefined)
       return

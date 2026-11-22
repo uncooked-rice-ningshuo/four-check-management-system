@@ -676,6 +676,12 @@ VALUES
             report['status'] = 'passed'
             raise SystemExit(0)
 
+        if os.environ.get('BROWSER_SUITE') == 'dictionary':
+            fixture['dictionaryOnly'] = True
+            browser_suite('platform-regression')
+            report['status'] = 'passed'
+            raise SystemExit(0)
+
         if os.environ.get('BROWSER_SUITE') == 'sidebar':
             fixture['sidebarOnly'] = True
             browser_suite('platform-regression')
@@ -770,12 +776,6 @@ VALUES
                             if kind != 'valid': values[5] = '10:00'
                             if template_type == 'MORNING_ATTENDANCE': values = values[:3] + [fixture['date'], 'E2E import']
                             if template_type == 'LATE_RETURN': values = values[:3] + [fixture['date'], '23:05:00', f'E2E dorm area E2E dorm building {101+index}', 'E2E import']
-        if os.environ.get('BROWSER_SUITE') == 'dictionary':
-            fixture['dictionaryOnly'] = True
-            browser_suite('platform-regression')
-            report['status'] = 'passed'
-            raise SystemExit(0)
-
                             if template_type == 'DORMITORY_HYGIENE': values = [f'E2E dorm area E2E dorm building {101+index}', fixture['date'], '', '首轮', '优秀' if index == 0 else '不合格', 'E2E class', '' if index == 0 else '000001', '' if index == 0 else '地面', '对象检查', 'E2E import']
                             if template_type == 'CLASSROOM_HYGIENE': values = [f'E2E building {101+index}', '前排', fixture['date'], '', '首轮', '优秀' if index == 0 else '不合格', 'E2E class', '' if index == 0 else '000001', '' if index == 0 else '地面', '区域检查', 'E2E import']
                             if kind == 'invalid' and index == 1: values[0] = 'UNKNOWN'

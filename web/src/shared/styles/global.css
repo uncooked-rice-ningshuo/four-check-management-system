@@ -2356,8 +2356,6 @@ body {
   overflow-x: auto !important;
   overscroll-behavior-inline: contain;
 }
-.master-data-workspace > .ant-card-body {
-  display: grid;
 .dictionary-sidebar { display: grid; gap: 4px; }
 .dictionary-sidebar-row { display: flex; align-items: center; min-height: 40px; padding: 4px 8px 4px 12px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
 .dictionary-sidebar-row:hover { background: #f1f5f9; }
@@ -2366,6 +2364,8 @@ body {
 .dictionary-sidebar-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-sidebar-menu { opacity: 0; }
 .dictionary-sidebar-row:hover .dictionary-sidebar-menu, .dictionary-sidebar-row:focus-within .dictionary-sidebar-menu { opacity: 1; }
+.master-data-workspace > .ant-card-body {
+  display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   min-height: 620px;
 }

@@ -308,6 +308,20 @@ describe('DisciplineConfigPage', () => {
     expect(document.getElementById('discipline-groups-0--tiers-2--lower')).toHaveValue('7')
   })
 
+  it('空表添加第一档从零开始且无上限', async () => {
+    const draft = makeVersion('draft-1', 1)
+    draft.groups[0].tiers = []
+    vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
+    renderPage()
+    await openStep('配置处分档位')
+    const add = await screen.findByRole('button', { name: '添加档位' })
+    await waitFor(() => expect(add).toBeEnabled())
+    fireEvent.click(add)
+    expect(document.getElementById('discipline-groups-0--tiers-0--lower')).toHaveValue('0')
+    expect(document.getElementById('discipline-groups-0--tiers-0--upper')).toHaveValue('')
+    expect(screen.queryByRole('dialog', { name: '设置新增档位起始值' })).toBeNull()
+  })
+
   it('新增末尾档位先要求用户填写阈值并以同一值闭合区间', async () => {
     const draft = makeVersion('draft-1', 1)
     draft.groups[0].tiers = [

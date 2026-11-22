@@ -1,5 +1,7 @@
+import { Icon } from '@iconify/react'
+import settingIcon from '@iconify-icons/lucide/sliders-horizontal'
+import calendarIcon from '@iconify-icons/lucide/calendar-days'
 import { ProFormDateTimePicker } from '@ant-design/pro-components'
-import { CalendarOutlined, SettingOutlined } from '@ant-design/icons'
 import { Alert, Button, Form, Input, Modal, Select, Space, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -27,7 +29,7 @@ export function WorkContextBar({ canManage = false }: { canManage?: boolean }) {
   }
   const weeks = (calendar.data?.weeks ?? []).filter(w => w.enabled && calendar.data?.semesters.some(s => s.id === w.semesterId && s.enabled && calendar.data?.academicYears.some(y => y.id === s.academicYearId && y.enabled)))
   return <div className="work-context-header" role="group" aria-label="当前工作上下文">
-    <CalendarOutlined className="work-context-icon" aria-hidden="true" />
+    <Icon icon={calendarIcon} className="work-context-icon" aria-hidden="true" />
     <div className="work-context-copy">
       <Typography.Text className="work-context-label">当前工作周</Typography.Text>
       {context.week ? <>
@@ -38,12 +40,11 @@ export function WorkContextBar({ canManage = false }: { canManage?: boolean }) {
       </> : <Typography.Text className="work-context-empty" title="当前无有效教学周，请选择工作范围">当前无有效教学周，请选择工作范围</Typography.Text>}
     </div>
     {context.source === 'OVERRIDE' && <Tag color="gold" className="work-context-override" title={`临时覆盖，至 ${context.expiresAt ? new Date(context.expiresAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未设置到期时间'}（北京时间）`}>临时覆盖</Tag>}
-    {canManage && <Button
+    {canManage && <button type="button" title="设置临时工作周"
       className="work-context-manage"
-      icon={<SettingOutlined aria-hidden="true" />}
       aria-label="设置临时工作周"
       onClick={() => { setVersion(context.version); setWeekId(context.week?.id ?? ''); form.resetFields(); setReason(''); save.reset() }}
-    ><span>设置临时工作周</span></Button>}
+    ><Icon icon={settingIcon} width={16} aria-hidden="true" /><span className="work-context-manage-label">设置临时工作周</span></button>}
     <Modal
       title="设置临时工作周"
       open={version !== null}

@@ -487,6 +487,11 @@ AND action IN ('INSPECTION_MANAGE','INSPECTION_ENTER');
         cli('run-code', '--filename', str(login))
         report['cases'].append('真实登录、首次改密、重新登录')
         print('PASS: login and password change', flush=True)
+        if ENV.get('BROWSER_SUITE') == 'header-responsive':
+            payload = json.loads(cli('--raw', 'run-code', '--filename', str(ROOT / 'web/e2e/header-responsive.js')))
+            report['cases'] += payload['cases']
+            report.update(status='passed', browserVersion=payload['browserVersion'])
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'teacher-adaptation':
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input="INSERT INTO grades(id,name) VALUES('d0000000-0000-0000-0000-000000000096','2024级');".encode())
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"INSERT INTO classes(id,name,grade_id,faculty_id,enrolled_size) VALUES('d0000000-0000-0000-0000-000000000097','验收二班','{ids['grade']}','{ids['faculty']}',2);".encode())

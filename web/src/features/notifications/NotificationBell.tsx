@@ -1,19 +1,22 @@
+import { Icon } from '@iconify/react'
+import safetyCertificateIcon from '@iconify-icons/lucide/shield-check'
+import apartmentIcon from '@iconify-icons/lucide/network'
+import { notificationBellIcon } from './notificationBellIcon'
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Spin } from 'antd'
-import { ApartmentOutlined, BellOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useInboxBell } from './useInbox'
 import './NotificationBell.css'
 
 type BellTab = 'all' | 'unread'
 
 const categoryMeta: Record<string, { label: string; icon: ReactNode }> = {
-  organization: { label: '部门与角色变更', icon: <ApartmentOutlined /> },
-  permission: { label: '个人授权变更', icon: <SafetyCertificateOutlined /> },
+  organization: { label: '部门与角色变更', icon: <Icon icon={apartmentIcon} /> },
+  permission: { label: '个人授权变更', icon: <Icon icon={safetyCertificateIcon} /> },
 }
 
-const fallbackMeta = { label: '消息变更', icon: <BellOutlined /> }
+const fallbackMeta = { label: '消息变更', icon: <Icon icon={notificationBellIcon} /> }
 
 const openDelayMs = 120
 const closeDelayMs = 180
@@ -154,8 +157,8 @@ export function NotificationBell() {
         if (open) hide(); else show()
       }}
     >
-      <Badge count={badgeCount} size="small" offset={[2, -2]}>
-        <BellOutlined style={{ fontSize: 22 }} />
+      <Badge count={badgeCount} size="small" color={allInbox.isError ? '#b45309' : '#2563eb'} offset={[4, -1]}>
+        <Icon icon={notificationBellIcon} width={16} height={16} aria-hidden="true" />
       </Badge>
     </button>
     {open && <div id="bell-panel" className="bell-panel" role="dialog" aria-label="近期消息">

@@ -790,12 +790,34 @@ body {
   flex: 0 0 auto;
   margin-inline-end: 0;
 }
+.header-fullscreen {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: #52677c;
+  background: transparent;
+  cursor: pointer;
+}
+.header-fullscreen:hover { color: #245a99; background: #edf4fb; }
+.header-fullscreen:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+@media (max-width: 480px) {
+  .admin-header .header-account-actions { gap: 0; padding-inline-start: 0; border: 0; }
+  .admin-header .work-context-label { display: none; }
+}
+.header-account-actions { display: flex; align-items: center; flex: none; gap: 8px; border-inline-start: 1px solid #dfe7ef; padding-inline-start: 12px; }
 .work-context-manage {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: #fff; border: 1px solid #c6d4e0; border-radius: 7px; font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
   flex: 0 0 auto;
   height: 34px;
   padding-inline: 10px;
   color: #315d83;
 }
+.work-context-manage:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 .work-context-manage:hover {
   color: var(--brand-primary) !important;
   background: var(--brand-mist) !important;
@@ -2543,7 +2565,7 @@ body {
   .work-context-dates, .work-context-override { display: none !important; }
   .work-context-copy { gap: 7px; }
   .work-context-manage { width: 34px; min-width: 34px; padding-inline: 0; }
-  .work-context-manage > span:not(.anticon) { display: none; }
+  .work-context-manage .work-context-manage-label { display: none; }
   .weekly-report-period-range { flex: 1 1 100%; }
   .dashboard-hero { min-height: 170px; padding: 28px 24px; }
   .hero-seal { width: 74px; height: 74px; font-size: 16px; }

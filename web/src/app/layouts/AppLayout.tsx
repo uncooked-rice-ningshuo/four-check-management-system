@@ -1,3 +1,8 @@
+import lockIcon from '@iconify-icons/lucide/lock-keyhole'
+import logoutIcon from '@iconify-icons/lucide/log-out'
+import userIcon from '@iconify-icons/lucide/user-round'
+import downIcon from '@iconify-icons/lucide/chevron-down'
+import { SystemFullscreenButton } from './SystemFullscreenButton'
 import { NotificationBell } from '../../features/notifications/NotificationBell'
 import {
   ApartmentOutlined,
@@ -10,11 +15,8 @@ import {
   ClearOutlined,
   DatabaseOutlined,
   DesktopOutlined,
-  DownOutlined,
   HomeOutlined,
   IdcardOutlined,
-  LockOutlined,
-  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MoonOutlined,
@@ -22,9 +24,8 @@ import {
   SettingOutlined,
   SunOutlined,
   TeamOutlined,
-  UserOutlined,
 } from '@ant-design/icons'
-import { Alert, Avatar, Button, Dropdown, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
+import { Alert, Avatar, Button, Dropdown, Layout, Menu, Space, type MenuProps } from 'antd'
 import { Icon } from '@iconify/react'
 import filesIcon from '@iconify-icons/lucide/files'
 import filePenIcon from '@iconify-icons/lucide/file-pen-line'
@@ -133,11 +134,11 @@ export function AppLayout() {
   const openKeys = openMenuState.signature === menuSignature ? openMenuState.keys : selectedParent ? [selectedParent] : []
   const accountItems = [
     ...(user?.isSuperAdmin || user?.systemRole === 'ADMIN' ? [
-      { key: 'profile', icon: <UserOutlined />, label: '个人信息' },
-      { key: 'security', icon: <LockOutlined />, label: '账户安全' },
+      { key: 'profile', icon: <Icon icon={userIcon} />, label: '个人信息' },
+      { key: 'security', icon: <Icon icon={lockIcon} />, label: '账户安全' },
       { type: 'divider' as const },
     ] : []),
-    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, disabled: signingOut },
+    { key: 'logout', icon: <Icon icon={logoutIcon} />, label: '退出登录', danger: true, disabled: signingOut },
   ]
 
   const onAccountAction = async ({ key }: { key: string }) => {
@@ -195,8 +196,8 @@ export function AppLayout() {
     <Layout>
       <Layout.Header className="admin-header">
         <WorkContextBar canManage={user?.isSuperAdmin === true} />
-        <NotificationBell />
-        <Dropdown menu={{ items: accountItems, onClick: onAccountAction }} placement="bottomRight"><Button type="text" className="account-trigger" aria-label={`${user?.name ?? '当前用户'}账户菜单`}><Space><Avatar className="account-mascot-avatar" size={34} src="/assets/characters/account-avatar.png" alt="" icon={<UserOutlined />} /><span className="account-copy"><strong>{user?.name}</strong><small>{accountRoleLabel}</small></span><Tag color="blue">在线</Tag><DownOutlined /></Space></Button></Dropdown>
+        <div className="header-account-actions"><SystemFullscreenButton /><NotificationBell />
+        <Dropdown menu={{ items: accountItems, onClick: onAccountAction }} placement="bottomRight"><Button type="text" className="account-trigger" aria-label={`${user?.name ?? '当前用户'}账户菜单`}><Space><Avatar className="account-mascot-avatar" size={34} src="/assets/characters/account-avatar.png" alt="" icon={<Icon icon={userIcon} />} /><span className="account-copy"><strong>{user?.name}</strong><small>{accountRoleLabel}</small></span><Icon icon={downIcon} /></Space></Button></Dropdown></div>
       </Layout.Header>
       <Layout.Content id="main-content" className="admin-content">{logoutFailed && <Alert role="alert" type="error" showIcon title="暂时无法确认退出，请重试。" action={<Button loading={signingOut} disabled={signingOut} onClick={() => void onAccountAction({key:'logout'})}>重试退出</Button>} />}<Outlet /></Layout.Content>
     </Layout>

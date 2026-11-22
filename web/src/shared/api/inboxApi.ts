@@ -15,6 +15,9 @@ export interface InboxQuery {
 export interface InboxItem {
   id: string
   category: string
+  caseId?: string | null
+  eventStatus?: string | null
+  relatedDeferredIds?: string[] | null
   action?: string
   body: string
   createdAt: string

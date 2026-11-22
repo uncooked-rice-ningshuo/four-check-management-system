@@ -33,6 +33,7 @@ func (s *Service) ReviewDisciplineCase(ctx context.Context, id, actor string, in
 }
 
 type ReviewQueueFilter struct {
+	CaseID   string `json:"caseId"`
 	Status   string `json:"status"`
 	Student  string `json:"student"`
 	Page     int    `json:"page"`

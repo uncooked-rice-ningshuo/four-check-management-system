@@ -12,6 +12,9 @@ import (
 //go:embed semester_discipline_amounts.sql
 var semesterDisciplineAmountsSQL string
 
+//go:embed discipline_group_amounts.sql
+var disciplineGroupAmountsSQL string
+
 //go:embed generate_discipline_cases.sql
 var generateDisciplineCasesSQL string
 

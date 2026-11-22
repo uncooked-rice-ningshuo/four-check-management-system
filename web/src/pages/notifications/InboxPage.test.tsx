@@ -314,7 +314,7 @@ describe('InboxPage', () => {
     vi.mocked(getInbox).mockImplementation(filters => Promise.resolve({ ...response(filters), items: [], total: 0, unread: 0 }))
     renderPage()
 
-    expect(await screen.findByText('有新的部门、角色或授权变更时会显示在这里。')).toBeVisible()
+    expect(await screen.findByText('收到的通知会显示在这里。')).toBeVisible()
   })
 
   it('shows the result count in the table heading alongside selection controls', async () => {

@@ -6,7 +6,7 @@ export type ReviewItem = {
   groupName?: string | null; unit?: string | null
   status: 'PENDING' | 'DEFERRED'; version: number; reason: string | null; dueAt: string
 }
-export type ReviewFilter = { student?: string; status?: string; page: number; pageSize: number }
+export type ReviewFilter = { caseId?: string; student?: string; status?: string; page: number; pageSize: number }
 const post = (body: unknown) => ({ method: 'POST', body: JSON.stringify(body) })
 export const searchReviews = (filter: ReviewFilter) =>
   apiRequest<{ items: ReviewItem[]; total: number }>('/discipline/cases/search', post(filter))

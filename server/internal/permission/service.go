@@ -282,6 +282,11 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 	if err != nil {
 		return EffectiveResult{}, err
 	}
+	return EvaluateProfile(profile), nil
+}
+
+// EvaluateProfile applies the same authorization rules to a profile read inside a business transaction.
+func EvaluateProfile(profile AccessProfile) EffectiveResult {
 	rules := profile.Rules
 	profile.Rules = nil
 	result := effectiveProfile(profile)
@@ -430,7 +435,7 @@ func (s *Service) Effective(ctx context.Context, accountID string) (EffectiveRes
 			}
 		}
 	}
-	return result, nil
+	return result
 }
 
 func effectiveProfile(profile AccessProfile) EffectiveResult {

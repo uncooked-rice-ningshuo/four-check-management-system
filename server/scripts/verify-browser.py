@@ -277,6 +277,14 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         password, changed_password = secrets.token_hex(20), secrets.token_hex(20)
         PRIVATE_VALUES.extend([password, changed_password])
         database_url = f"postgres://postgres:{ENV['POSTGRES_PASSWORD']}@127.0.0.1:{pg_port}/browser?sslmode=disable" if DB_MODE == 'docker' else f"postgres://{os.environ['USER']}@127.0.0.1:{pg_port}/browser?sslmode=disable"
+        phase4_roles = ENV.get('BROWSER_SUITE') == 'phase4-roles'
+        if phase4_roles:
+            # Run finalization, replacement, correction and delivery through the real store.
+            # The browser then signs in against precisely the database verified by that test.
+            run(sql_command('-v', 'ON_ERROR_STOP=1', '-c', 'CREATE DATABASE phase4_roles'))
+            database_url = database_url.replace('/browser?', '/phase4_roles?')
+            subprocess.run(['go', 'test', './internal/store', '-run', '^TestWeeklyReportVersionWorkflowPostgres$', '-count=1'],
+                           cwd=ROOT / 'server', env=dict(ENV, REPORT_WORKFLOW_TEST_DATABASE_URL=database_url), check=True)
         ENV.update(DATABASE_URL=database_url, HTTP_ADDR=f'127.0.0.1:{api_port}', JWT_SECRET=secrets.token_hex(32), BOOTSTRAP_ADMIN_LOGIN='browser-admin', BOOTSTRAP_ADMIN_NAME='浏览器回归管理员', BOOTSTRAP_ADMIN_PASSWORD=password, MINIO_ENDPOINT=f'127.0.0.1:{storage_port}', MINIO_ACCESS_KEY='browser-app', MINIO_SECRET_KEY=app_secret, MINIO_BUCKET='four-check-files', MINIO_USE_TLS='false', MINIO_CONNECT_TIMEOUT='1s', MINIO_OPERATION_TIMEOUT='3s', MINIO_MAX_FILE_SIZE_BYTES='16777216', COOKIE_SECURE='false', TRUSTED_PROXY_CIDRS='')
         # API gets application credentials only, never the MinIO bootstrap credentials.
         for key in ('MINIO_ROOT_USER', 'MINIO_ROOT_PASSWORD', 'MC_HOST_fixture'):
@@ -288,6 +296,18 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         vite.write_text('import { createServer } from ' + json.dumps((ROOT / 'web/node_modules/vite/dist/node/index.js').as_uri()) + ';\nconst server=await createServer(' + json.dumps({'configFile': str(ROOT / 'web/vite.config.ts'), 'root': str(ROOT / 'web'), 'server': {'host': '127.0.0.1', 'port': web_port, 'strictPort': True, 'proxy': {'/api': f'http://127.0.0.1:{api_port}'}}}) + '); await server.listen();\n')
         start(['node', str(vite)], 'vite', ROOT / 'web')
         wait_url(f'http://127.0.0.1:{web_port}/login')
+        if phase4_roles:
+            cmd = sql_command('-v', 'ON_ERROR_STOP=1')
+            cmd[cmd.index('browser')] = 'phase4_roles'
+            run(cmd, input=b"""UPDATE accounts SET password_hash=(SELECT password_hash FROM accounts WHERE login_name='browser-admin'),
+                must_change_password=false WHERE login_name IN ('discipline-teacher-in','discipline-teacher-out',
+                'discipline-member-in','discipline-member-out','discipline-member-revoke-in','notify-admin');""")
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'phase4-roles.spec.ts', '--workers=1', '--trace=off', '--output', '../output/midscene/phase4-roles'],
+                           cwd=ROOT / 'web', env=dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                           PHASE4_TEST_PASSWORD=password), check=True)
+            report.update(status='passed', cases=['规则替换及定稿纠偏', '班级内外模板和个人授权通知与审批'])
+            raise SystemExit(0)
         if ENV.get('BROWSER_SUITE') == 'discipline-rule-access':
             run(sql_command('-v', 'ON_ERROR_STOP=1'), input="""
 INSERT INTO accounts(id,login_name,name,password_hash,status,system_role,account_kind,primary_department_id)

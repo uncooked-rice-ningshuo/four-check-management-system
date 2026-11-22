@@ -78,7 +78,7 @@ func (s *Service) PageFiltered(ctx context.Context, account string, filter PageF
 	if filter.Page < 1 || filter.Page > 1000000 || filter.Size < 1 || filter.Size > 100 {
 		return nil, ErrInvalid
 	}
-	if filter.Category != "" && filter.Category != "organization" && filter.Category != "permission" {
+	if filter.Category != "" && filter.Category != "organization" && filter.Category != "permission" && filter.Category != "discipline" {
 		return nil, ErrInvalid
 	}
 	switch filter.Sort {

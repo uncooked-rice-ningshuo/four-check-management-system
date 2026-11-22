@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom'
 import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { useState } from 'react'
 import { Alert, Button, Descriptions, Table, Typography, Tag, Space, Empty } from 'antd'
@@ -13,8 +14,10 @@ const decisionSources: Record<string, string> = {
 }
 
 export function DisciplineArchivePage() {
+  const { state } = useLocation()
+  const linkedCase = typeof state?.caseId === 'string' ? state.caseId : undefined
   const [filter, setFilter] = useState<DisciplineArchiveFilter>({ page: 1, pageSize: 20 })
-  const [selected, select] = useState<string>()
+  const [selected, select] = useState<string | undefined>(linkedCase)
   const permissions = useAttendancePermissions()
   const canExport = hasNavigableInspectionAction(permissions.data?.permissions, 'DISCIPLINE_ARCHIVE_EXPORT')
   const download = useMutation({mutationFn: () => exportArchivedDecisions(filter), onSuccess: blob => {
@@ -64,6 +67,8 @@ export function DisciplineArchivePage() {
       {detail.isError ? <Alert type="error" title="读取详情失败" action={<Button onClick={() => void detail.refetch()}>重试</Button>} />
         : item ? <><Descriptions column={1} items={[
           {key:'student',label:'学号',children:item.studentNumber},{key:'tier',label:'处分档位',children:item.tier},
+          ...(item.status === 'VOID' ? [{ key: 'voidReason', label: '作废原因', children: item.voidReason || '未记录' },
+            { key: 'voidedAt', label: '作废时间', children: item.voidedAt ? new Date(item.voidedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未记录' }] : []),
           {key:'basis',label:'依据条款',children:item.clause || '无'},{key:'reason',label:'延迟原因',children:item.reason || '无'},
         ]} /><Table rowKey="record" size="small" dataSource={item.sources} pagination={{pageSize:8}} columns={[
           {title:'来源周次',dataIndex:'week'},{title:'定稿版本',dataIndex:'version'},{title:'累计贡献',dataIndex:'amount'},

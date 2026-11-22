@@ -785,7 +785,11 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]organization.UserAssignment
 }
 
 func (p *Postgres) ListRules(ctx context.Context, accountID string) ([]permission.Rule, error) {
-	rows, err := p.Pool.Query(ctx, permissionRuleSelect+` WHERE account_id=$1 ORDER BY created_at,id`, accountID)
+	return listPermissionRules(ctx, p.Pool, accountID)
+}
+
+func listPermissionRules(ctx context.Context, reader departmentDefaultsReader, accountID string) ([]permission.Rule, error) {
+	rows, err := reader.Query(ctx, permissionRuleSelect+` WHERE account_id=$1 ORDER BY created_at,id`, accountID)
 	if err != nil {
 		return nil, err
 	}

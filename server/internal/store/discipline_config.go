@@ -325,6 +325,10 @@ func (p *Postgres) Publish(ctx context.Context, id string, expected int, actor s
 		if rowVersion != expected {
 			return disciplineconfig.ErrConflict
 		}
+		// Finalization takes the shared side of this lock before reading current rules.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(74077)`); err != nil {
+			return err
+		}
 		var old string
 		err := tx.QueryRow(ctx, `SELECT version_id::text FROM discipline_rule_current WHERE singleton=true FOR UPDATE`).Scan(&old)
 		if err == nil {
@@ -342,6 +346,38 @@ func (p *Postgres) Publish(ctx context.Context, id string, expected int, actor s
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE discipline_rule_versions SET status='PUBLISHED',published_by=$2,published_at=now() WHERE id=$1`, id, actor)
+		if err != nil || old == "" {
+			return err
+		}
+		if _, err := tx.Exec(ctx, changedRuleCasesSQL, old, id); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT DISTINCT c.semester_id::text FROM changed_rule_cases c ORDER BY 1`)
+		if err != nil {
+			return err
+		}
+		semesters, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, semester := range semesters {
+			var report string
+			err := tx.QueryRow(ctx, `SELECT r.report_version_id::text FROM weekly_report_reviews r
+ JOIN weekly_reports w ON w.id=r.report_id WHERE w.semester_id=$1 AND r.action='FINALIZED'
+ ORDER BY r.created_at DESC,r.report_version_id LIMIT 1`, semester).Scan(&report)
+			if err != nil {
+				return err
+			}
+			if err := changeAndNotifyCases(ctx, tx, actor, `UPDATE discipline_cases d SET status='VOID',row_version=row_version+1,
+ void_reason='处分规则更新',voided_at=statement_timestamp(),reassessment_rule_version_id=$2,reassessment_report_version_id=$3
+ FROM changed_rule_cases c WHERE c.id=d.id AND c.semester_id=$1 AND d.status IN ('PENDING','DEFERRED') RETURNING d.id::text`, semester, id, report); err != nil {
+				return err
+			}
+			if err := changeAndNotifyCases(ctx, tx, actor, semesterDisciplineAmountsSQL+disciplineGroupAmountsSQL+generateDisciplineCasesSQL+
+				` WHERE EXISTS(SELECT 1 FROM changed_rule_cases c WHERE c.semester_id=$1::uuid AND c.student_number=a.number AND c.group_key=a.group_key)`+activeTierConflictSQL+" RETURNING id::text", semester, report); err != nil {
+				return err
+			}
+		}
 		return err
 	})
 	if err != nil {

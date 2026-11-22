@@ -931,17 +931,36 @@ WHERE wr.id=$1::uuid FOR UPDATE OF wr`, reportID).Scan(&current.ID, &current.Sem
 	if tag.RowsAffected() != 1 {
 		return reporting.ReportState{}, reporting.ErrReportVersionConflict
 	}
+	var revisesFinal bool
+	if finalized {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(74077)`); err != nil {
+			return reporting.ReportState{}, err
+		}
+		// Serialize different weeks so the next statement sees other committed finals for this semester.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 69))`, current.SemesterID); err != nil {
+			return reporting.ReportState{}, err
+		}
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM weekly_report_reviews WHERE report_id=$1 AND action='FINALIZED')`, reportID).Scan(&revisesFinal); err != nil {
+			return reporting.ReportState{}, err
+		}
+		if revisesFinal {
+			if _, err := tx.Exec(ctx, "CREATE TEMP TABLE previous_reached_tiers ON COMMIT DROP AS "+semesterDisciplineAmountsSQL+disciplineGroupAmountsSQL+reachedTiersSQL, current.SemesterID); err != nil {
+				return reporting.ReportState{}, err
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO weekly_report_reviews(id,report_id,report_version_id,action,comment,actor_id,created_at)
  VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,$7)`, uuid.NewString(), reportID, versionID,
 		action, strings.TrimSpace(input.Comment), actorID, updatedAt); err != nil {
 		return reporting.ReportState{}, err
 	}
 	if finalized {
-		// Serialize different weeks so the next statement sees other committed finals for this semester.
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 69))`, current.SemesterID); err != nil {
-			return reporting.ReportState{}, err
+		if revisesFinal {
+			if err := changeAndNotifyCases(ctx, tx, actorID, semesterDisciplineAmountsSQL+disciplineGroupAmountsSQL+voidLostTiersSQL+" RETURNING d.id::text", current.SemesterID, versionID); err != nil {
+				return reporting.ReportState{}, err
+			}
 		}
-		if _, err := tx.Exec(ctx, semesterDisciplineAmountsSQL+generateDisciplineCasesSQL, current.SemesterID, versionID); err != nil {
+		if err := changeAndNotifyCases(ctx, tx, actorID, semesterDisciplineAmountsSQL+disciplineGroupAmountsSQL+generateDisciplineCasesSQL+activeTierConflictSQL+" RETURNING id::text", current.SemesterID, versionID); err != nil {
 			return reporting.ReportState{}, err
 		}
 	}

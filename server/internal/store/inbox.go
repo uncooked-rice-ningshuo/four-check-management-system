@@ -40,7 +40,7 @@ func (p *Postgres) InboxPageFiltered(ctx context.Context, account string, filter
    AND ($4::timestamptz IS NULL OR created_at >= $4)
    AND ($5::timestamptz IS NULL OR created_at < $5)),
  slice AS (SELECT * FROM filtered ORDER BY `+order+` LIMIT $6 OFFSET $7)
- SELECT jsonb_build_object('items',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id::text,'category',category,'action',permission_action,'body',body,'createdAt',created_at,'read',read_at IS NOT NULL) ORDER BY `+order+`) FROM slice),'[]'),
+ SELECT jsonb_build_object('items',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id::text,'category',category,'action',permission_action,'body',body,'caseId',discipline_case_id,'eventStatus',discipline_event_status,'relatedDeferredIds',related_deferred_ids,'createdAt',created_at,'read',read_at IS NOT NULL) ORDER BY `+order+`) FROM slice),'[]'),
  'total',(SELECT count(*) FROM filtered),'unread',(SELECT count(*) FROM mine WHERE read_at IS NULL),
  'through',COALESCE((SELECT max(id)::text FROM mine),'0'),'page',$8::int,'pageSize',$9::int,'sort',$10::text)`,
 		account, filter.Unread, filter.Category, nullableTime(from), nullableTime(to),

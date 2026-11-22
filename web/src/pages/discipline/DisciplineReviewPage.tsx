@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { Alert, Button, Form, Input, Modal, Space, Tag, Typography, Empty } from 'antd'
 import { ProTable } from '@ant-design/pro-components'
@@ -6,8 +7,10 @@ import { searchReviews, submitReview, type ReviewItem, type ReviewFilter } from 
 import { TableRowLegend } from '../../shared/components/TableRowLegend'
 
 export function DisciplineReviewPage() {
+  const { state } = useLocation()
+  const linkedCase = typeof state?.caseId === 'string' ? state.caseId : undefined
 
-  const [filter, setFilter] = useState<ReviewFilter>({ page: 1, pageSize: 20 })
+  const [filter, setFilter] = useState<ReviewFilter>({ caseId: linkedCase, page: 1, pageSize: 20 })
   const [selection, select] = useState<{ item: ReviewItem; decision: 'APPROVED' | 'DEFERRED' }>()
   const [form] = Form.useForm<{ reason: string }>()
   const client = useQueryClient()

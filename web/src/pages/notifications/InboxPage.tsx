@@ -1,8 +1,9 @@
+import { Link } from 'react-router-dom'
 import { permissionActionName } from '../../entities/permission/model/actions'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { Alert, Button, Modal, Select, Space, Tag, Typography } from 'antd'
-import { ArrowLeftOutlined, CheckOutlined, ApartmentOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CheckOutlined, FileTextOutlined, ApartmentOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useInbox, useMarkInboxRead } from '../../features/notifications/useInbox'
 import type { InboxItem, InboxSort } from '../../shared/api/inboxApi'
 import './InboxPage.css'
@@ -20,7 +21,7 @@ interface InboxFilters {
 }
 
 interface InboxSearchValues {
-  category?: 'all' | 'organization' | 'permission'
+  category?: 'all' | 'organization' | 'permission' | 'discipline'
   createdAt?: [string, string]
   read?: ReadStatus
 }
@@ -37,9 +38,11 @@ const sortOptions: { value: InboxSort; label: string }[] = [
 const categoryTitle: Record<string, string> = {
   organization: '部门与角色变更',
   permission: '个人授权变更',
+  discipline: '处分事项',
 }
 
 function categoryIcon(category: string) {
+  if (category === 'discipline') return <FileTextOutlined aria-hidden="true" />
   return category === 'permission' ? <SafetyCertificateOutlined aria-hidden="true" />
     : <ApartmentOutlined aria-hidden="true" />
 }
@@ -50,6 +53,7 @@ function noticeSubject(item: InboxItem) {
 }
 
 function NoticeLetter({ item, recipientName }: { item: InboxItem; recipientName?: string }) {
+  if (item.category === 'discipline') return <p>{item.body}</p>
   const [opening, ...paragraphs] = item.body.split('。').filter(Boolean)
   const fields = paragraphs.join('。').split('；').filter(Boolean)
   return <>
@@ -211,7 +215,7 @@ export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
       dataIndex: 'category',
       width: 120,
       valueType: 'select',
-      valueEnum: { all: { text: '全部类别' }, organization: { text: '部门与角色' }, permission: { text: '个人授权' } },
+      valueEnum: { all: { text: '全部类别' }, organization: { text: '部门与角色' }, permission: { text: '个人授权' }, discipline: { text: '处分事项' } },
       fieldProps: { placeholder: '全部类别', allowClear: true },
       // 分栏时列表只保留摘要列，类别仍在查询表单与详情中完整呈现。
       hideInTable: compact,
@@ -233,7 +237,7 @@ export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
           {noticeSubject(record)}
         </button>
 
-        {record.body.split('。').filter(Boolean)[1]?.split('；')[0] ?? record.body}
+        {record.category === 'discipline' ? record.body : record.body.split('。').filter(Boolean)[1]?.split('；')[0] ?? record.body}
         <span className="inbox-cell-status-mobile" aria-hidden="true">
           <Tag color={record.read ? 'default' : 'blue'}>{record.read ? '已读' : '未读'}</Tag>
         </span>
@@ -285,7 +289,7 @@ export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
     <header className="page-heading">
       <div>
         <Typography.Title level={2}>消息中心</Typography.Title>
-        <Typography.Paragraph>查看与本人账号相关的部门、角色和授权变更；未读状态仅对本人生效。</Typography.Paragraph>
+        <Typography.Paragraph>查看发给本人的组织变更、个人授权和处分事项通知。</Typography.Paragraph>
       </div>
       <p className="inbox-heading-count" aria-live="polite">
         {inbox.isError ? '未读数读取失败' : !inbox.data ? '未读数加载中…' : <>未读 <strong>{inbox.data.unread}</strong> 条</>}
@@ -337,13 +341,18 @@ export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
             {detailItem && <div key={detailItem.id} className="inbox-detail__message">
             <h3 className="inbox-detail__title">{noticeSubject(detailItem)}</h3>
             <div className="inbox-detail__meta">
-              <span className="inbox-detail__category-icon">{categoryIcon(detailItem.category)}<span>{detailItem.category === 'permission' ? '个人授权' : '组织变更'}</span></span>
+              <span className="inbox-detail__category-icon">{categoryIcon(detailItem.category)}<span>{detailItem.category === 'discipline' ? '处分事项' : detailItem.category === 'permission' ? '个人授权' : '组织变更'}</span></span>
               {detailItem.action && <span>{permissionActionName(detailItem.action)}</span>}
               <time dateTime={detailItem.createdAt}>{messageTime(detailItem.createdAt)}</time>
               <span className={`inbox-detail__read-state${detailItem.read ? '' : ' inbox-detail__read-state--unread'}`}>{detailItem.read ? '已读' : '未读'}</span>
             </div>
             <div className="inbox-detail__body"><NoticeLetter item={detailItem} recipientName={recipientName} /></div>
             <div className="inbox-detail__foot">
+              {detailItem.caseId && detailItem.eventStatus && <Link
+                to={['PENDING', 'DEFERRED'].includes(detailItem.eventStatus) ? '/discipline/review' : '/discipline/archive'}
+                state={{ caseId: detailItem.caseId }}>查看对应事项</Link>}
+              {detailItem.relatedDeferredIds?.map((id, index, ids) => <Link key={id} to="/discipline/review"
+                state={{ caseId: id }}>查看已延迟事项{ids.length > 1 ? index + 1 : ''}</Link>)}
               {!detailItem.read && <Button type="primary" icon={<CheckOutlined aria-hidden />} loading={read.isPending} onClick={() => void markOne(detailItem.id)}>标为已读</Button>}
             </div>
             </div>}
@@ -393,7 +402,7 @@ export function InboxPage({ recipientName }: { recipientName?: string } = {}) {
           : inbox.isPending ? '正在读取消息…'
             : filters.unread ? '当前仅看未读，切换到全部消息可查看已读记录。'
               : filters.category || filters.from || filters.to ? '暂无符合条件的消息'
-                : '有新的部门、角色或授权变更时会显示在这里。',
+                : '收到的通知会显示在这里。',
       }}
     />
     <Modal

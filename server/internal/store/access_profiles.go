@@ -11,12 +11,16 @@ import (
 
 // LoadAccessProfile reads assigned snapshots; current templates never rewrite existing grants.
 func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (permission.AccessProfile, error) {
+	return loadAccessProfile(ctx, p.Pool, accountID)
+}
+
+func loadAccessProfile(ctx context.Context, reader departmentDefaultsReader, accountID string) (permission.AccessProfile, error) {
 	profile := permission.AccessProfile{PendingDepartmentIDs: []string{}}
-	err := p.Pool.QueryRow(ctx, `SELECT id,system_role,COALESCE(primary_department_id::text,'') FROM accounts WHERE id=$1`, accountID).Scan(&profile.AccountID, &profile.SystemRole, &profile.DepartmentID)
+	err := reader.QueryRow(ctx, `SELECT id,system_role,COALESCE(primary_department_id::text,'') FROM accounts WHERE id=$1`, accountID).Scan(&profile.AccountID, &profile.SystemRole, &profile.DepartmentID)
 	if err != nil {
 		return profile, err
 	}
-	rows, err := p.Pool.Query(ctx, `SELECT d.id,d.code,r.code,u.start_at,u.end_at,u.template_version,u.default_permissions FROM user_org_roles u JOIN departments d ON d.id=u.department_id AND d.enabled JOIN organization_roles r ON r.id=u.organization_role_id AND r.enabled WHERE u.account_id=$1 ORDER BY d.id`, accountID)
+	rows, err := reader.Query(ctx, `SELECT d.id,d.code,r.code,u.start_at,u.end_at,u.template_version,u.default_permissions FROM user_org_roles u JOIN departments d ON d.id=u.department_id AND d.enabled JOIN organization_roles r ON r.id=u.organization_role_id AND r.enabled WHERE u.account_id=$1 ORDER BY d.id`, accountID)
 	if err != nil {
 		return profile, err
 	}
@@ -51,7 +55,7 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 		return profile, err
 	}
 	for _, m := range members {
-		current, err := getDepartmentDefaults(ctx, p.Pool, m.id)
+		current, err := getDepartmentDefaults(ctx, reader, m.id)
 		if err != nil {
 			return profile, err
 		}
@@ -91,7 +95,7 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 		saved := m.snapshot.ReportScope
 		department.AssignedReportScope = &permission.ReportScope{Enabled: saved.Enabled, ReportRoleDefaults: reportDefaults(saved.CanView, saved.CanGenerate, saved.CanFileOutput, saved.CanCorrect, saved.CanReview, saved.CanReturn, saved.CanFinalize, saved.CanPublish, saved.CanOutputSettings, saved.CanArchive, saved.CanForceGenerate, saved.CanObligationManage)}
 		department.AssignedMorningSchedule = m.snapshot.CanManageMorningSchedule
-		if err := p.Pool.QueryRow(ctx, `SELECT id::text FROM inspection_types WHERE code='MORNING_ATTENDANCE'`).Scan(&department.MorningInspectionTypeID); err != nil {
+		if err := reader.QueryRow(ctx, `SELECT id::text FROM inspection_types WHERE code='MORNING_ATTENDANCE'`).Scan(&department.MorningInspectionTypeID); err != nil {
 			return profile, err
 		}
 		profile.Departments = append(profile.Departments, department)
@@ -100,7 +104,7 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 			profile.DepartmentCode = m.code
 		}
 	}
-	profile.Rules, err = p.ListRules(ctx, accountID)
+	profile.Rules, err = listPermissionRules(ctx, reader, accountID)
 	return profile, err
 }
 

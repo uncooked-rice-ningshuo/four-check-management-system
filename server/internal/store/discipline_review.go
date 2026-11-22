@@ -80,6 +80,9 @@ func (p *Postgres) ReviewDisciplineCase(ctx context.Context, id string, input re
 	if err != nil {
 		return err
 	}
+	if err := notifyDisciplineCases(ctx, tx, []string{id}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -88,7 +91,7 @@ func (p *Postgres) DisciplineReviewQueue(ctx context.Context, f reporting.Review
 	if effective.SystemRole != permission.SystemRoleSuperAdmin && !effective.HasAnyAllowed(permission.ActionDisciplineConfirm) && !effective.HasAnyAllowed("DISCIPLINE_CASE_VIEW") {
 		return nil, reporting.ErrForbidden
 	}
-	args := []any{f.Status, f.Student, f.PageSize, (f.Page - 1) * f.PageSize}
+	args := []any{f.Status, f.Student, f.PageSize, (f.Page - 1) * f.PageSize, f.CaseID}
 	processPredicate := disciplineScopeSQL(effective, permission.ActionDisciplineConfirm, &args)
 	// Older processing-only grants retain access to their own actionable rows.
 	visiblePredicate := processPredicate
@@ -108,7 +111,7 @@ func (p *Postgres) DisciplineReviewQueue(ctx context.Context, f reporting.Review
  LEFT JOIN students s ON s.student_no=d.student_number
  LEFT JOIN grades g ON g.id=c.grade_id LEFT JOIN majors m ON m.id=c.major_id
  LEFT JOIN discipline_rule_groups rg ON rg.version_id=d.rule_version_id AND rg.group_key=d.group_key
- WHERE d.status IN ('PENDING','DEFERRED') AND ($1='' OR d.status=$1) AND strpos(d.student_number,$2)>0 AND (`+visiblePredicate+`)),
+ WHERE ($5='' OR d.id::text=$5) AND d.status IN ('PENDING','DEFERRED') AND ($1='' OR d.status=$1) AND strpos(d.student_number,$2)>0 AND (`+visiblePredicate+`)),
  page AS (SELECT * FROM allowed ORDER BY due_at,id LIMIT $3 OFFSET $4)
  SELECT jsonb_build_object('total',(SELECT count(*) FROM allowed),'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
  'canProcess',can_process,'id',id,'studentNumber',student_number,'studentName',student_name,'gradeName',grade_name,'majorName',major_name,'groupName',group_name,'unit',result_unit,'className',class_name,'tier',tier,'amount',accumulated_amount,'status',status,

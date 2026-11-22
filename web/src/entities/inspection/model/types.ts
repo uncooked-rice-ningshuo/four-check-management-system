@@ -242,6 +242,7 @@ const catalog: InspectionDefinition[] = [
       "weekId",
       "inspectionTypeId",
       "studentId",
+      "date",
       "period"
     ],
     "plannedActions": [

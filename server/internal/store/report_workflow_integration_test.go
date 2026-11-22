@@ -141,7 +141,7 @@ SELECT $1,it.id,source.semester_id,source.week_id,source.department_id,source.st
  source.class_id,source.class_name_snapshot,source.grade_snapshot,'2026-09-02'::date,NULL,'DATE',1,'晚自习缺勤','MANUAL','CONFIRMED',$2,repeat('b',64),2,source.created_by
 FROM inspection_records source JOIN inspection_types it ON it.code='EVENING_SELF_STUDY' WHERE source.id=$3`, eveningID, eveningSubmissionID, recordID); err == nil {
 		_, err = eveningTx.Exec(ctx, `INSERT INTO evening_self_study_details(record_id,classroom_id,period_text,penalty_multiplier,penalty_count)
-VALUES($1,'a0000000-0000-0000-0000-000000000009','9-10',1,1)`, eveningID)
+VALUES($1,'a0000000-0000-0000-0000-000000000009','9-10',2,2)`, eveningID)
 	}
 	if err == nil {
 		_, err = eveningTx.Exec(ctx, `INSERT INTO department_submission_revisions(id,submission_id,revision_no,submitted_by,submission_kind,record_ids,records_snapshot)
@@ -281,7 +281,7 @@ FROM inspection_records ir JOIN evening_self_study_details esd ON esd.record_id=
 	var eveningPeriod, eveningHours, eveningCourse string
 	if err := pool.QueryRow(ctx, `SELECT included_data_json->'details'->>'period',included_data_json->'details'->>'penaltyCount',
 COALESCE(included_data_json->>'currentCourseName','') FROM weekly_report_version_records
-WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=1) AND inspection_record_id=$2`, draft.ID, eveningID).Scan(&eveningPeriod, &eveningHours, &eveningCourse); err != nil || eveningPeriod != "9-10" || eveningHours != "1" || eveningCourse != "" {
+WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$1 AND version_no=1) AND inspection_record_id=$2`, draft.ID, eveningID).Scan(&eveningPeriod, &eveningHours, &eveningCourse); err != nil || eveningPeriod != "9-10" || eveningHours != "2" || eveningCourse != "" {
 		t.Fatalf("evening report detail snapshot period=%q hours=%q course=%q err=%v", eveningPeriod, eveningHours, eveningCourse, err)
 	}
 	if _, err := pool.Exec(ctx, "UPDATE inspection_records SET row_version=row_version+1 WHERE id=$1", recordID); err != nil {
@@ -504,12 +504,29 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 g AS (INSERT INTO discipline_rule_groups(version_id,group_key,name,result_unit,sort_order)
  SELECT id,'evening','晚自习','次',0 FROM v RETURNING id,version_id),
 term AS (INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,operator,conversion_factor,sort_order)
- SELECT id,version_id,$2,'晚自习','+',4,0 FROM g)
+ SELECT id,version_id,$2,'晚自习','+',2,0 FROM g)
 INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,teacher_confirmation_required,sort_order)
  SELECT g.id,t.code,t.name,t.lo,t.hi,true,t.ord FROM g CROSS JOIN
  (VALUES ('NOTICE','通报批评',2,4,0),('WARNING','警告',4,8,1),('DEMERIT','记过',8,NULL,2)) t(code,name,lo,hi,ord)`, actorID, eveningTypeID)
 	if err != nil {
 		t.Fatal("publish fixture rule:", err)
+	}
+	// Separate synthetic accounts make delivery and non-delivery observable without
+	// depending on the permissions stub used by the report workflow itself.
+	const notificationAdmin = "91000000-0000-0000-0000-000000000041"
+	const notificationOutsider = "91000000-0000-0000-0000-000000000042"
+	_, err = pool.Exec(ctx, `INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin)
+ VALUES($1,'notify-admin','测试管理员','unused','ACTIVE','SYSTEM','SUPER_ADMIN',true),
+ ($2,'notify-outsider','测试成员','unused','ACTIVE','SYSTEM','MEMBER',false)`, notificationAdmin, notificationOutsider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roleSeed, err := os.ReadFile("testdata/discipline_notification_roles.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(roleSeed)); err != nil {
+		t.Fatal(err)
 	}
 	finalized, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionFinalized,
 		reporting.ReportTransitionInput{RowVersion: finalizing.RowVersion}, audit.Metadata{})
@@ -522,6 +539,30 @@ INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,tea
  FROM discipline_cases WHERE semester_id=$1 AND student_number=$2`, semesterID, snapshotRecord.StudentNumber).Scan(&crossed, &pendingWithDeadline)
 	if err != nil || crossed != 2 || pendingWithDeadline != 2 {
 		t.Fatalf("crossed tiers=%d pending=%d err=%v", crossed, pendingWithDeadline, err)
+	}
+	var received, unrelated int
+	err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE account_id=$1),count(*) FILTER(WHERE account_id=$2)
+ FROM account_notifications WHERE category='discipline'`, notificationAdmin, notificationOutsider).Scan(&received, &unrelated)
+	if err != nil || received != 2 || unrelated != 0 {
+		t.Fatalf("discipline recipients admin=%d outsider=%d err=%v", received, unrelated, err)
+	}
+	for login, want := range map[string]int{"discipline-teacher-in": 2, "discipline-member-in": 2, "discipline-teacher-out": 0, "discipline-member-out": 0} {
+		var got int
+		if err := pool.QueryRow(ctx, `SELECT count(n.id) FROM accounts a LEFT JOIN account_notifications n ON n.account_id=a.id AND n.category='discipline' WHERE a.login_name=$1 GROUP BY a.id`, login).Scan(&got); err != nil || got != want {
+			t.Fatalf("%s received %d want %d: %v", login, got, want, err)
+		}
+	}
+	var firstNotification int64
+	if err := pool.QueryRow(ctx, `SELECT min(id) FROM account_notifications WHERE account_id=$1 AND category='discipline'`, notificationAdmin).Scan(&firstNotification); err != nil {
+		t.Fatal(err)
+	}
+	if found, changed, err := database.ReadInboxDetailed(ctx, notificationAdmin, firstNotification, false); err != nil || !found || changed != 1 {
+		t.Fatalf("read notification: %v %d %v", found, changed, err)
+	}
+	var unaffected int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases WHERE semester_id=$1 AND status='PENDING'
+ AND row_version=1 AND due_at=created_at+interval '48 hours'`, semesterID).Scan(&unaffected); err != nil || unaffected != 2 {
+		t.Fatalf("reading changed approval: %d %v", unaffected, err)
 	}
 	for _, test := range []struct {
 		kind, status, student string
@@ -628,18 +669,61 @@ INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,tea
 	if _, err := pool.Exec(ctx, `UPDATE discipline_cases SET due_at=now()-interval '1 minute' WHERE semester_id=$1`, semesterID); err != nil {
 		t.Fatal(err)
 	}
+	var expiredWarning string
+	if err := pool.QueryRow(ctx, `SELECT id FROM discipline_cases WHERE semester_id=$1 AND tier_code='WARNING'`, semesterID).Scan(&expiredWarning); err != nil {
+		t.Fatal(err)
+	}
+	manualResult := make(chan error, 1)
+	go func() {
+		manualResult <- database.ReviewDisciplineCase(ctx, expiredWarning, reporting.DisciplineReview{Decision: "APPROVED", Version: 1}, adminView, audit.Metadata{ActorID: actorID})
+	}()
 	for _, want := range []int64{1, 0} {
 		if n, err := database.ConfirmExpiredDisciplineCases(ctx); err != nil || n != want {
 			t.Fatalf("timeout count %d want %d: %v", n, want, err)
 		}
 	}
-	if err := database.ReviewDisciplineCase(ctx, noticeID, reporting.DisciplineReview{Decision: "APPROVED", Version: 2}, adminView, audit.Metadata{ActorID: actorID}); err != nil {
+	if err := <-manualResult; !errors.Is(err, reporting.ErrReportVersionConflict) {
+		t.Fatalf("expired manual decision competed with scanner: %v", err)
+	}
+	// The notice is deferred and the warning already confirmed by timeout.
+	replacementRule, err := database.CreateDraft(ctx, actorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE discipline_rule_tiers t SET clause='测试替换条款' FROM discipline_rule_groups g
+ WHERE t.group_id=g.id AND g.version_id=$1`, replacementRule.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Publish(ctx, replacementRule.ID, replacementRule.RowVersion, actorID); err != nil {
+		t.Fatal("publish replacement", err)
+	}
+	var replacementID string
+	err = pool.QueryRow(ctx, `SELECT n.id FROM discipline_cases n JOIN discipline_cases old ON old.id=n.previous_case_id
+ WHERE old.id=$1 AND old.status='VOID' AND old.void_reason='处分规则更新' AND old.delay_reason IS NOT NULL
+ AND n.status='PENDING' AND n.rule_version_id=$2 AND n.due_at=n.created_at+interval '48 hours'
+ AND n.created_at>old.created_at`, noticeID, replacementRule.ID).Scan(&replacementID)
+	if err != nil {
+		t.Fatal("missing replacement with fresh deadline", err)
+	}
+	var protected int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases WHERE semester_id=$1 AND tier_code='WARNING'
+ AND status='APPROVED' AND rule_version_id<>$2 AND decision_source='TIMEOUT'`, semesterID, replacementRule.ID).Scan(&protected)
+	if err != nil || protected != 1 {
+		t.Fatalf("confirmed history changed: %d %v", protected, err)
+	}
+	if err := database.ReviewDisciplineCase(ctx, noticeID, reporting.DisciplineReview{Decision: "APPROVED", Version: 2}, adminView, audit.Metadata{ActorID: actorID}); !errors.Is(err, reporting.ErrReportVersionConflict) {
+		t.Fatalf("stale original review: %v", err)
+	}
+	if err := database.ReviewDisciplineCase(ctx, replacementID, reporting.DisciplineReview{Decision: "APPROVED", Version: 1}, adminView, audit.Metadata{ActorID: actorID}); err != nil {
 		t.Fatal("confirm deferred", err)
 	}
 	var audited int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases c JOIN audit_logs a ON a.resource_id=c.id::text
  WHERE a.action='DISCIPLINE_TIMEOUT_CONFIRMED' AND c.status='APPROVED' AND c.decision_source='TIMEOUT' AND c.decided_at IS NOT NULL AND c.row_version=2`).Scan(&audited); err != nil || audited != 1 {
 		t.Fatalf("timeout audit count %d: %v", audited, err)
+	}
+	if _, err := database.SemesterLedger(ctx, "", reporting.LedgerFilter{}, 1, 50); err != nil {
+		t.Fatal("load semester options before selection", err)
 	}
 	ledgerJSON, err := database.SemesterLedger(ctx, semesterID, reporting.LedgerFilter{Search: snapshotRecord.StudentNumber}, 1, 10)
 	var ledger struct {
@@ -759,6 +843,60 @@ INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,tea
 		t.Fatalf("restored version cell records = %+v, %v", restoredRecords, err)
 	}
 
+	// Finalizing a corrected week that drops the student's sole evening entry
+	// must invalidate even approved tiers, while preserving both decision sources.
+	reduced, err := service.AddReportAdjustment(ctx, actorID, draft.ID, reporting.AddReportAdjustmentInput{
+		RowVersion: included.Report.RowVersion, RecordID: eveningID, Operation: "EXCLUDE", Reason: "复核后排除晚自习记录",
+	}, audit.Metadata{})
+	if err != nil {
+		t.Fatal("exclude evening record", err)
+	}
+	finalizeRevision := func(state reporting.ReportState) reporting.ReportState {
+		t.Helper()
+		for _, action := range []string{reporting.ReportActionSubmit, reporting.ReportActionApprove, reporting.ReportActionFinalized} {
+			next, err := service.TransitionReport(ctx, actorID, draft.ID, action, reporting.ReportTransitionInput{RowVersion: state.RowVersion}, audit.Metadata{})
+			if err != nil {
+				t.Fatalf("revision %s: %v", action, err)
+			}
+			state = next
+		}
+		return state
+	}
+	reducedFinal := finalizeRevision(reduced.Report)
+	var lost int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases WHERE semester_id=$1 AND status='VOID'
+ AND void_reason='定稿更正后未达到该档位' AND reassessment_report_version_id IS NOT NULL AND decided_at IS NOT NULL`, semesterID).Scan(&lost)
+	if err != nil || lost != 2 {
+		t.Fatalf("lost approved tiers: %d %v", lost, err)
+	}
+	if _, err := service.StartFinalizedRevision(ctx, actorID, draft.ID, reducedFinal.RowVersion, audit.Metadata{}); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := service.AddReportAdjustment(ctx, actorID, draft.ID, reporting.AddReportAdjustmentInput{RowVersion: reducedFinal.RowVersion, RecordID: eveningID, Operation: "INCLUDE", Reason: "恢复晚自习记录"}, audit.Metadata{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveredFinal := finalizeRevision(recovered.Report)
+	var restored int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases n JOIN discipline_cases old ON old.id=n.previous_case_id
+ WHERE n.semester_id=$1 AND n.status='PENDING' AND old.status='VOID' AND old.void_reason='定稿更正后未达到该档位'`, semesterID).Scan(&restored)
+	if err != nil || restored != 2 {
+		t.Fatalf("re-crossed tiers: %d %v", restored, err)
+	}
+	if _, err := service.StartFinalizedRevision(ctx, actorID, draft.ID, recoveredFinal.RowVersion, audit.Metadata{}); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := service.AddReportCorrection(ctx, actorID, draft.ID, reporting.AddReportCorrectionInput{RowVersion: recoveredFinal.RowVersion, RecordID: eveningID, Changes: []reporting.ReportCorrectionChange{{Field: "details.penaltyCount", AfterValue: []byte("1")}}, Reason: "复核扣次由二次改为一次"}, audit.Metadata{})
+	if err != nil {
+		t.Fatal("prepare partial downgrade", err)
+	}
+	finalizeRevision(partial.Report)
+	var lower, higher int
+	err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE tier_code='NOTICE' AND status='PENDING' AND row_version=1),
+ count(*) FILTER(WHERE tier_code='WARNING' AND status<>'VOID') FROM discipline_cases WHERE semester_id=$1`, semesterID).Scan(&lower, &higher)
+	if err != nil || lower != 1 || higher != 0 {
+		t.Fatalf("downgrade low=%d high=%d err=%v", lower, higher, err)
+	}
 	// An explicit obligation without a confirmed record batch or zero receipt blocks generation.
 	const nextWeekID = "a0000000-0000-0000-0000-000000000024"
 	if _, err := pool.Exec(ctx, `INSERT INTO semester_weeks(id,semester_id,week_no,start_date,end_date)

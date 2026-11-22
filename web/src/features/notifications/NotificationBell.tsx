@@ -1,6 +1,7 @@
 import { Icon } from '@iconify/react'
 import safetyCertificateIcon from '@iconify-icons/lucide/shield-check'
 import apartmentIcon from '@iconify-icons/lucide/network'
+import fileTextIcon from '@iconify-icons/lucide/file-text'
 import { notificationBellIcon } from './notificationBellIcon'
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
@@ -12,6 +13,7 @@ import './NotificationBell.css'
 type BellTab = 'all' | 'unread'
 
 const categoryMeta: Record<string, { label: string; icon: ReactNode }> = {
+  discipline: { label: '处分事项', icon: <Icon icon={fileTextIcon} /> },
   organization: { label: '部门与角色变更', icon: <Icon icon={apartmentIcon} /> },
   permission: { label: '个人授权变更', icon: <Icon icon={safetyCertificateIcon} /> },
 }

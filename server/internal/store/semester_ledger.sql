@@ -51,8 +51,8 @@ SELECT jsonb_build_object(
  'amount',dc.accumulated_amount,'status',dc.status,'week',sw.week_no,'version',rv.version_no,'dueAt',dc.due_at)
  ORDER BY dc.created_at DESC, (dc.evidence->'tier'->>'lower_bound')::numeric DESC,dc.id),'[]')
  FROM (SELECT DISTINCT ON (group_key) * FROM discipline_cases
- WHERE semester_id=$1::uuid AND student_number=s.number ORDER BY group_key,created_at DESC,(evidence->'tier'->>'lower_bound')::numeric DESC,id) dc JOIN discipline_rule_groups dg ON dg.version_id=dc.rule_version_id AND dg.group_key=dc.group_key JOIN weekly_report_versions rv ON rv.id=dc.report_version_id
+ WHERE semester_id=nullif($1,'')::uuid AND student_number=s.number ORDER BY group_key,(status='VOID'),created_at DESC,(evidence->'tier'->>'lower_bound')::numeric DESC,id) dc JOIN discipline_rule_groups dg ON dg.version_id=dc.rule_version_id AND dg.group_key=dc.group_key JOIN weekly_report_versions rv ON rv.id=dc.report_version_id
  JOIN weekly_reports wr ON wr.id=rv.report_id JOIN semester_weeks sw ON sw.id=wr.week_id
- WHERE dc.semester_id=$1::uuid AND dc.student_number=s.number))
+ WHERE dc.semester_id=nullif($1,'')::uuid AND dc.student_number=s.number))
  ORDER BY grade_order,major_order,class_order,class,number) FROM students_page s JOIN student_values sv USING(number)),'[]'),
  'total',(SELECT count(*) FROM filtered),'page',$5::integer,'pageSize',$3::integer)

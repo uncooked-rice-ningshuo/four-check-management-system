@@ -13,7 +13,7 @@ func (p *Postgres) DisciplineArchive(ctx context.Context, f reporting.ArchiveFil
 	err := p.Pool.QueryRow(ctx, `
 WITH filtered AS (
  SELECT d.id,d.student_number,d.group_key,d.tier_code,d.evidence->'tier'->>'name' AS tier,
-        d.evidence,d.delay_reason,d.rule_version_id,d.report_version_id,d.status,d.accumulated_amount,d.decided_at,d.decision_source,s.name AS semester
+        d.void_reason,d.voided_at,d.previous_case_id,d.reassessment_rule_version_id,d.reassessment_report_version_id,d.evidence,d.delay_reason,d.rule_version_id,d.report_version_id,d.status,d.accumulated_amount,d.decided_at,d.decision_source,s.name AS semester
  FROM discipline_cases d JOIN semesters s ON s.id=d.semester_id
  WHERE d.status IN ('APPROVED','VOID') AND ($1='' OR d.status=$1)
  AND strpos(d.student_number,$2)>0 AND ($3='' OR d.semester_id::text=$3)
@@ -24,7 +24,7 @@ WITH filtered AS (
 SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),'page',$8::int,'pageSize',$6::int,
 'items',coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'studentNumber',student_number,
 'semester',semester,'group',group_key,'tier',coalesce(tier,tier_code),'status',status,'amount',accumulated_amount,
-'decidedAt',decided_at,'decisionSource',decision_source) || CASE WHEN $9<>'' THEN jsonb_build_object('clause',evidence->'tier'->>'clause','sources',evidence->'sources','reason',delay_reason,'ruleVersion',rule_version_id,'reportVersion',report_version_id) ELSE '{}'::jsonb END ORDER BY decided_at DESC NULLS LAST,id) FROM page),'[]'))
+'decidedAt',decided_at,'decisionSource',decision_source) || CASE WHEN $9<>'' THEN jsonb_build_object('clause',evidence->'tier'->>'clause','sources',evidence->'sources','reason',delay_reason,'voidReason',void_reason,'voidedAt',voided_at,'previousCaseId',previous_case_id,'reassessmentRuleVersionId',reassessment_rule_version_id,'reassessmentReportVersionId',reassessment_report_version_id,'ruleVersion',rule_version_id,'reportVersion',report_version_id) ELSE '{}'::jsonb END ORDER BY decided_at DESC NULLS LAST,id) FROM page),'[]'))
 `, f.Status, f.Student, f.SemesterID, f.Group, f.Tier, f.PageSize, (f.Page-1)*f.PageSize, f.Page, f.CaseID).Scan(&result)
 	return result, err
 }

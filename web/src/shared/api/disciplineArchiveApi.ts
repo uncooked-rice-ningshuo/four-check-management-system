@@ -19,6 +19,8 @@ export type ArchivedDecision = {
   decidedAt: string | null
   clause?: string
   sources?: {record:string;week:number;version:number;amount:number}[]
+  voidReason?: string | null
+  voidedAt?: string | null
   reason?: string
   decisionSource: string | null
 }

@@ -23,7 +23,7 @@ export async function setReadStatus(page: Page, status: '全部' | '仅未读') 
   await applySearch(page)
 }
 
-export async function setCategory(page: Page, category: '全部类别' | '部门与角色' | '个人授权') {
+export async function setCategory(page: Page, category: '全部类别' | '部门与角色' | '个人授权' | '处分事项') {
   await chooseOption(page, '消息类别', category)
   await applySearch(page)
 }

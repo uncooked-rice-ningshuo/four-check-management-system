@@ -372,6 +372,52 @@ FROM generate_series(1,25) n;
                            cwd=ROOT / 'web', env=browser_env, check=True)
             report.update(status='passed', cases=['808/390px 分栏详情、读写分离、键盘与批量互不干扰、筛选翻页不串旧记录、越权与失败重试'])
             raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'midscene-cross-department':
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=b"""
+INSERT INTO department_inspection_scopes(department_id,inspection_type_id,enabled,can_enter,can_view,can_review,can_manage,can_export)
+SELECT d.id,i.id,true,true,true,true,true,false FROM departments d CROSS JOIN inspection_types i
+WHERE d.code IN ('STUDY','DORMITORY','SPORTS') AND i.code='ATTENDANCE_RATE'
+ON CONFLICT(department_id,inspection_type_id) DO UPDATE SET enabled=true,can_enter=true,can_view=true,can_review=true,can_manage=true;
+INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password,primary_department_id)
+SELECT gen_random_uuid(),'gui-'||d.code,'GUI-'||d.code,a.password_hash,'ACTIVE','SYSTEM','MEMBER',false,false,d.id
+FROM departments d CROSS JOIN accounts a WHERE a.login_name='browser-admin' AND d.code IN ('STUDY','DORMITORY','SPORTS');
+INSERT INTO user_org_roles(id,account_id,department_id,organization_role_id,start_at,default_permissions)
+SELECT gen_random_uuid(),a.id,a.primary_department_id,r.id,now(),jsonb_build_object('version',1) FROM accounts a CROSS JOIN organization_roles r
+WHERE a.login_name LIKE 'gui-%' AND r.code='MEMBER';
+INSERT INTO user_permission_rules(id,account_id,source_department_id,action,effect,source_type,inspection_type_id,note,enabled,created_by)
+SELECT gen_random_uuid(),a.id,a.primary_department_id,action,'ALLOW','USER_RULE',i.id,'GUI fixture',true,admin.id
+FROM accounts a CROSS JOIN accounts admin CROSS JOIN inspection_types i CROSS JOIN
+unnest(ARRAY['INSPECTION_VIEW','INSPECTION_ENTER','INSPECTION_MANAGE','INSPECTION_REVIEW']) action
+WHERE admin.login_name='browser-admin' AND a.login_name LIKE 'gui-%' AND i.code='ATTENDANCE_RATE';
+INSERT INTO accounts(id,login_name,name,password_hash,status,account_kind,system_role,is_super_admin,must_change_password)
+SELECT gen_random_uuid(),v.login,v.login,a.password_hash,'ACTIVE','SYSTEM','ADMIN',v.super,false
+FROM accounts a CROSS JOIN (VALUES ('audit-admin-a',false),('audit-admin-b',false),('audit-super',true)) v(login,super)
+WHERE a.login_name='browser-admin';
+INSERT INTO user_permission_rules(id,account_id,action,effect,source_type,inspection_type_id,note,enabled,created_by)
+SELECT gen_random_uuid(),a.id,action,'ALLOW','USER_RULE',i.id,'admin regression',true,admin.id
+FROM accounts a CROSS JOIN accounts admin CROSS JOIN inspection_types i CROSS JOIN
+unnest(ARRAY['INSPECTION_ENTER','INSPECTION_MANAGE','INSPECTION_VIEW']) action
+WHERE a.login_name IN ('audit-admin-a','audit-admin-b') AND admin.login_name='browser-admin' AND i.code='ATTENDANCE_RATE';
+""")
+            fixture.update(class24=str(uuid.uuid4()), student24=str(uuid.uuid4()))
+            grade24 = str(uuid.uuid4())
+            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"""
+INSERT INTO grades(id,name) VALUES('{grade24}','2024级');
+INSERT INTO classes(id,name,grade_id,faculty_id,major_id,enrolled_size)
+VALUES('{fixture['class24']}','E2E 24 class','{grade24}','{ids['faculty']}','{ids['major']}',1);
+INSERT INTO students(id,student_no,name,grade_id,faculty_id,class_id)
+VALUES('{fixture['student24']}','000024','E2E 24','{grade24}','{ids['faculty']}','{fixture['class24']}');
+INSERT INTO course_classes(course_id,class_id) VALUES('{ids['course']}','{fixture['class24']}');
+UPDATE user_permission_rules SET operation_ranges=jsonb_build_array(jsonb_build_object('gradeId','{ids['grade']}'::text))
+WHERE account_id=(SELECT id FROM accounts WHERE login_name='gui-DORMITORY')
+AND action IN ('INSPECTION_MANAGE','INSPECTION_ENTER');
+""".encode())
+            run_env = dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                           CROSS_DEPT_FIXTURE=json.dumps(fixture), CROSS_DEPT_PASSWORD=password)
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'cross-department.spec.ts', '--trace=off'], cwd=ROOT / 'web', env=run_env, check=True)
+            report.update(status='passed', cases=['Midscene cross-department submission and review'])
+            raise SystemExit(0)
         config = temp / 'cli.json'
         config.write_text(json.dumps({'browser': {'browserName': 'chromium', 'launchOptions': {'channel': 'chrome', 'headless': True}, 'contextOptions': {'viewport': {'width': 1440, 'height': 1000}}}, 'outputDir': str(OUTPUT)}))
         cli('open', f'http://127.0.0.1:{web_port}/login', '--config', str(config))

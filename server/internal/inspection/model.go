@@ -107,6 +107,7 @@ type AttendanceRecord struct {
 	SubmitterName   string     `json:"submitterName"`
 	SubmittedByName string     `json:"submittedByName,omitempty"`
 	SubmittedAt     *time.Time `json:"submittedAt,omitempty"`
+	CanEdit         bool       `json:"canEdit"`
 	CanDelete       bool       `json:"canDelete"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
@@ -257,6 +258,7 @@ type AttendanceListFilter struct {
 // AttendanceScope is the already-compiled effective data scope for one list request.
 // Empty values mean the corresponding dimension is unrestricted.
 type AttendanceScope struct {
+	Maintenance      MutationAccess
 	ConfirmedOnly    bool
 	SemesterID       string
 	WeekID           string
@@ -268,6 +270,7 @@ type AttendanceScope struct {
 }
 
 type AttendanceListQuery struct {
+	Maintenance      MutationAccess
 	ConfirmedOnly    bool
 	SemesterID       string
 	WeekID           string

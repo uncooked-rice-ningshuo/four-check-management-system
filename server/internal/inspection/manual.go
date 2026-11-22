@@ -205,6 +205,7 @@ func canPrepareAttendance(actor ManualActor, effective permission.EffectiveResul
 	if actor.IsSuperAdmin {
 		return true
 	}
+	effective = effective.ForDepartment(scope.DepartmentID)
 	if ownerID == "" {
 		return effective.Allowed(permission.ActionInspectionEnter, scope)
 	}

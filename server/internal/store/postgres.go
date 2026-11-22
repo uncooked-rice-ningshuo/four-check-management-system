@@ -1496,7 +1496,7 @@ func (p *Postgres) ListAttendance(ctx context.Context, query inspection.Attendan
 			&record.ClassroomID, &record.ClassroomCode, &record.OccurredAt, &record.AbsenceHours, &record.PenaltyMultiplier, &record.PenaltyHours,
 			&record.PeriodText, &record.Remark, &record.Source, &record.Status, &record.ImportBatchID,
 			&record.DedupKey, &record.RowVersion, &record.CreatedBy, &record.CreatedByName, &record.SubmitterName, &record.CreatedAt, &record.UpdatedAt,
-			&record.SubmittedByName, &record.SubmittedAt, &record.CanDelete,
+			&record.SubmittedByName, &record.SubmittedAt, &record.CanEdit, &record.CanDelete,
 		); err != nil {
 			return inspection.AttendancePage{}, err
 		}
@@ -1511,7 +1511,8 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		return "", nil, "", nil, err
 	}
 	where := ` FROM inspection_records ir
-		JOIN attendance_details ad ON ad.record_id = ir.id
+		JOIN semesters sem ON sem.id=ir.semester_id
+ JOIN attendance_details ad ON ad.record_id = ir.id
 		JOIN courses c ON c.id = ad.course_id
 		LEFT JOIN classrooms cr ON cr.id = ad.classroom_id
 		LEFT JOIN teaching_buildings tb ON tb.id = cr.teaching_building_id
@@ -1536,14 +1537,7 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		where += " AND " + confirmedInspectionSQL
 	}
 	countSQL := `SELECT count(*)` + where
-	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
-		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
-		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
-		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
-		ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,
-		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
-			COALESCE(importer.name,creator.name,'账号不可用'),COALESCE(importer.name,creator.name,'账号不可用'),ir.created_at,ir.updated_at,
-			COALESCE(actual_submitter.name,''),ds.submitted_at,(ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL)` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
+
 	departmentIDs := query.DepartmentIDs
 	if departmentIDs == nil {
 		departmentIDs = make([]string, 0)
@@ -1553,6 +1547,18 @@ func buildAttendanceListQueries(query inspection.AttendanceListQuery) (string, [
 		query.ClassID, query.Grade, query.Keyword, query.Status, query.Source, departmentIDs,
 	}
 	listArgs := append(append([]any{}, countArgs...), query.PageSize, (query.Page-1)*query.PageSize)
+	guard := "FALSE"
+	if query.Maintenance.ActorID != "" {
+		guard = inspectionAccessSQL(query.Maintenance, "mutate", &listArgs)
+	}
+	listSQL := `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
+		COALESCE(ir.student_id::text,''),ir.student_no_snapshot,ir.student_name_snapshot,
+		COALESCE(ir.class_id::text,''),ir.class_name_snapshot,ir.grade_snapshot,
+		ad.course_id,c.name,COALESCE(ad.classroom_id::text,''),COALESCE(tb.name || ' ' || cr.room_no,''),
+		ir.occurred_at,ad.absence_hours,ad.penalty_multiplier,ad.penalty_hours,ad.period_text,ir.remark,ir.source,ir.status,
+		COALESCE(ir.import_batch_id::text,''),ir.dedup_key,ir.row_version,ir.created_by,
+			COALESCE(importer.name,creator.name,'账号不可用'),COALESCE(importer.name,creator.name,'账号不可用'),ir.created_at,ir.updated_at,
+			COALESCE(actual_submitter.name,''),ds.submitted_at,(` + inspectionEditableSQL + ` AND ` + guard + `),(` + inspectionDeletableSQL + ` AND ` + guard + `)` + where + ` ORDER BY ` + orderBy + ` LIMIT $11 OFFSET $12`
 	return countSQL, countArgs, listSQL, listArgs, nil
 }
 

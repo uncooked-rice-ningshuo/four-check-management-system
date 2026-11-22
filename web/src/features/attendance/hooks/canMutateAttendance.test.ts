@@ -11,12 +11,12 @@ it('separates own entry permission from others management permission', () => {
  expect(canMutateAttendance(record, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE'), grant('INSPECTION_MANAGE', 'DENY')])).toBe(false)
 })
 
-it('separates draft deletion from returned-record editing and allows scoped managers to edit administrator records', () => {
+it('separates draft deletion from returned-record editing and protects administrator records from other managers', () => {
  expect(canDeleteAttendance({ ...record, canDelete: true }, { id: 'owner', isSuperAdmin: false }, [grant('INSPECTION_ENTER')])).toBe(true)
  expect(canDeleteAttendance({ ...record, status: 'RETURNED', canDelete: false }, { id: 'owner', isSuperAdmin: false }, [grant('INSPECTION_ENTER')])).toBe(false)
- expect(canMutateAttendance({ ...record, attributionMode: 'ADMINISTRATOR' }, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE')])).toBe(true)
+ expect(canMutateAttendance({ ...record, attributionMode: 'ADMINISTRATOR' }, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE')])).toBe(false)
  expect(canMutateAttendance({ ...record, attributionMode: 'ADMINISTRATOR' }, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_ENTER')])).toBe(false)
- expect(canDeleteAttendance({ ...record, attributionMode: 'ADMINISTRATOR', canDelete: true }, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE')])).toBe(true)
+ expect(canDeleteAttendance({ ...record, attributionMode: 'ADMINISTRATOR', canDelete: true }, { id: 'other', isSuperAdmin: false }, [grant('INSPECTION_MANAGE')])).toBe(false)
  expect(canMutateAttendance({ ...record, attributionMode: 'ADMINISTRATOR' }, { id: 'owner', isSuperAdmin: false }, [grant('INSPECTION_ENTER')])).toBe(true)
 })
 it('allows a scoped member to correct a returned record', () => {
@@ -24,4 +24,12 @@ it('allows a scoped member to correct a returned record', () => {
 })
 it.each(['PENDING_REVIEW', 'CONFIRMED', 'LOCKED'])('hides %s actions even for super admins', status => {
  expect(canMutateAttendance({ ...record, status }, { id: 'root', isSuperAdmin: true }, [])).toBe(false)
+})
+
+it('respects server row permissions and keeps older department grants isolated', () => {
+ const actor = { id: 'other', isSuperAdmin: false }
+ const manager = grant('INSPECTION_MANAGE')
+ expect(canMutateAttendance({ ...record, canEdit: false }, actor, [manager])).toBe(false)
+ expect(canMutateAttendance(record, actor, [{ ...manager, sourceDepartmentId: 'another' }])).toBe(false)
+ expect(canMutateAttendance(record, actor, [{ ...manager, sourceDepartmentId: 'd' }])).toBe(true)
 })

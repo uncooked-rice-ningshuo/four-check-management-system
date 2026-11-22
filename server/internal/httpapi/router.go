@@ -1099,6 +1099,7 @@ func (h *handler) listAttendance(c *gin.Context) {
 		Keyword: c.Query("keyword"), Status: c.Query("status"), Source: c.Query("source"),
 		Sort: c.DefaultQuery("sort", inspection.SortOccurredAtDescending), Page: page, PageSize: pageSize,
 	}
+	maintenance := inspection.MutationAccess{ActorID: account.ID, Unrestricted: account.IsSuperAdmin}
 	confirmedOnly := false
 	if !account.IsSuperAdmin {
 		effective, err := h.permission.Effective(c, account.ID)
@@ -1106,9 +1107,10 @@ func (h *handler) listAttendance(c *gin.Context) {
 			writeInspectionError(c, err)
 			return
 		}
+		maintenance.Permissions = effective.Permissions
 		confirmedOnly = effective.ConfirmedInspectionsOnly
 	}
-	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{ConfirmedOnly: confirmedOnly,
+	result, err := h.attendance.ListAttendance(c, filter, inspection.AttendanceScope{Maintenance: maintenance, ConfirmedOnly: confirmedOnly,
 		SemesterID: scope.SemesterID, WeekID: scope.WeekID, InspectionTypeID: scope.InspectionTypeID,
 		DepartmentID: scope.DepartmentID, DepartmentIDs: allowedDepartments,
 		ClassID: scope.ClassID, Grade: scope.Grade,

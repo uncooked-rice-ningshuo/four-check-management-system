@@ -37,7 +37,7 @@ const submissionSelect = submissionColumns + submissionTables
 func submissionVisibilitySQL(access workflow.ViewAccess, args *[]any) string {
 	a := inspection.MutationAccess{SubmissionView: access.IsMember, ActorID: access.ActorID, Unrestricted: access.Unrestricted, Permissions: access.Permissions}
 	view := inspectionAccessSQL(a, "read", args)
-	mutate := inspectionAccessSQL(a, "mutate", args)
+	mutate := inspectionAccessSQL(a, "submit", args)
 	review := inspectionAccessSQL(a, "review", args)
 	cell := zeroReceiptVisibilitySQL(a, args)
 	prefix := ""

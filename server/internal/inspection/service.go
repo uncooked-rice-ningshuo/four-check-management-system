@@ -69,7 +69,7 @@ func (s *Service) ListAttendance(ctx context.Context, filter AttendanceListFilte
 		return AttendancePage{}, ErrScopeMismatch
 	}
 
-	page, err := s.repository.ListAttendance(ctx, AttendanceListQuery{ConfirmedOnly: scope.ConfirmedOnly,
+	page, err := s.repository.ListAttendance(ctx, AttendanceListQuery{Maintenance: scope.Maintenance, ConfirmedOnly: scope.ConfirmedOnly,
 		SemesterID: semesterID, WeekID: weekID, InspectionTypeID: inspectionTypeID,
 		DepartmentID: departmentID, DepartmentIDs: append([]string(nil), scope.DepartmentIDs...), ClassID: classID, Grade: grade,
 		Keyword: strings.TrimSpace(filter.Keyword), Status: filter.Status, Source: filter.Source,

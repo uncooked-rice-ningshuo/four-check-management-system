@@ -107,7 +107,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 		// revoked member could use an old key to read a batch's current state.
 		for _, requested := range command.Records {
 			args := []any{requested.ID, result.ID, command.CanRouteOwn, command.ActorID}
-			guard := inspectionAccessSQL(access, "mutate", &args)
+			guard := inspectionAccessSQL(access, "submit", &args)
 			if !command.CanRouteAdministrator && !command.Unrestricted {
 				guard += " AND ir.attribution_mode<>'ADMINISTRATOR'"
 			}
@@ -142,7 +142,7 @@ func (p *Postgres) SubmitDepartmentBatch(ctx context.Context, command workflow.S
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
 		args := []any{requested.ID, command.Scope.SemesterID, command.Scope.WeekID, command.Scope.DepartmentID, command.Scope.InspectionTypeID, command.CanRouteOwn, command.ActorID}
-		guard := inspectionAccessSQL(access, "mutate", &args)
+		guard := inspectionAccessSQL(access, "submit", &args)
 		if !command.CanRouteAdministrator && !command.Unrestricted {
 			guard += " AND ir.attribution_mode<>'ADMINISTRATOR'"
 		}
@@ -415,7 +415,7 @@ func (p *Postgres) ResubmitDepartmentBatch(ctx context.Context, command workflow
 	snapshots := make([]json.RawMessage, 0, len(command.Records))
 	for _, requested := range command.Records {
 		args := []any{requested.ID, result.ID, string(result.Status)}
-		guard := inspectionAccessSQL(access, "mutate", &args)
+		guard := inspectionAccessSQL(access, "submit", &args)
 		var version int
 		var snapshot json.RawMessage
 		err = tx.QueryRow(ctx, `SELECT ir.row_version,

@@ -94,7 +94,7 @@ func authorizeImportedClass(ctx context.Context, tx pgx.Tx, input importjob.Conf
 	if !listed {
 		return importjob.ErrPreviewStale
 	}
-	if !input.Permissions.Allowed(permission.ActionInspectionEnter, scope) {
+	if !input.Permissions.ForDepartment(scope.DepartmentID).Allowed(permission.ActionInspectionEnter, scope) {
 		return importjob.ErrBatchScopeMismatch
 	}
 	return nil

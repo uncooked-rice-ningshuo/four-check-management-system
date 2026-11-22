@@ -77,6 +77,7 @@ func (s *MutationService) access(ctx context.Context, actor ManualActor) (Mutati
 		return a, nil
 	}
 	p, err := s.permissions.Effective(ctx, actor.ID)
+	a.ConfirmedOnly = p.ConfirmedInspectionsOnly
 	a.Permissions = p.Permissions
 	return a, err
 }

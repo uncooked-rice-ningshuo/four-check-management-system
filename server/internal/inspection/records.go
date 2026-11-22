@@ -635,7 +635,7 @@ func AllowsInspectionScope(a MutationAccess, scope permission.Scope, owner strin
 	if a.Unrestricted {
 		return true
 	}
-	p := permission.EffectiveResult{Permissions: a.Permissions}
+	p := (permission.EffectiveResult{Permissions: a.Permissions}).ForDepartment(scope.DepartmentID)
 	if owner == "" {
 		return p.Allowed(permission.ActionInspectionEnter, scope)
 	}

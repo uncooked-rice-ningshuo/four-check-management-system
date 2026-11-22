@@ -69,7 +69,7 @@ func prepareInspectionImport(ctx context.Context, tx pgx.Tx, locked inspection.I
 	// The API reauthorizes the whole batch before confirmation. Every reference
 	// must remain inside that exact scope; do not manufacture a permission grant.
 	current, err := (&inspectionTx{tx: tx}).lockReferences(ctx, record, locked, func(scope permission.Scope) bool {
-		allowed := input.Permissions.Allowed(permission.ActionInspectionEnter, scope)
+		allowed := input.Permissions.ForDepartment(scope.DepartmentID).Allowed(permission.ActionInspectionEnter, scope)
 		return allowed && scope.SemesterID == input.Scope.SemesterID && scope.WeekID == input.Scope.WeekID && scope.InspectionTypeID == input.Scope.InspectionTypeID && scope.DepartmentID == input.Scope.DepartmentID && (input.Scope.ClassID == "" || scope.ClassID == input.Scope.ClassID) && (input.Scope.Grade == "" || scope.Grade == input.Scope.Grade)
 	})
 	if errors.Is(err, inspection.ErrInvalidAttendanceRecord) {

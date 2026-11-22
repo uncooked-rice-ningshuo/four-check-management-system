@@ -42,14 +42,15 @@ func inspectionPermissionSQL(a inspection.MutationAccess, mode string, args *[]a
 					if r.Action != name || r.Effect != effect || (effect == permission.EffectAllow && r.SourceDepartmentID != source) || (effect == permission.EffectDeny && r.SourceDepartmentID != "" && r.SourceDepartmentID != source) {
 						continue
 					}
-					var ands []string
-					if a.RouteOptions && r.SourceDepartmentID != "" {
-						*args = append(*args, r.SourceDepartmentID)
-						ands = append(ands, fmt.Sprintf("ir.department_id=$%d::uuid", len(*args)))
-					}
 					if a.TargetDepartmentID != "" && r.SourceDepartmentID != "" && a.TargetDepartmentID != r.SourceDepartmentID {
 						continue
 					}
+					var ands []string
+					if (a.RouteOptions || mode == "mutate" || mode == "write") && r.SourceDepartmentID != "" {
+						*args = append(*args, r.SourceDepartmentID)
+						ands = append(ands, fmt.Sprintf("ir.department_id=$%d::uuid", len(*args)))
+					}
+
 					if r.ConfirmedOnly && mode == "read" {
 						ands = append(ands, confirmedInspectionSQL)
 					}
@@ -113,6 +114,10 @@ func inspectionPermissionSQL(a inspection.MutationAccess, mode string, args *[]a
 		*args = append(*args, a.ActorID)
 		owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
 		manage := action(permission.ActionInspectionManage)
+		if mode == "mutate" || mode == "write" {
+			// Routing an administrator's draft to a department never transfers maintenance.
+			manage = "((ir.attribution_mode<>'ADMINISTRATOR' OR " + owner + ") AND " + manage + ")"
+		}
 		return "((" + owner + " AND " + action(permission.ActionInspectionEnter) + ") OR " + manage + ")"
 	}
 	personal := one("ir.class_id", "ir.grade_snapshot")
@@ -327,6 +332,24 @@ const confirmedInspectionSQL = `ir.status='CONFIRMED' AND EXISTS(
  WHERE ds.id=ir.submission_id AND ds.status='CONFIRMED' AND ir.id=ANY(rev.record_ids))`
 const inspectionDeletableSQL = `ir.status='DRAFT' AND ir.submission_id IS NULL AND ir.locked_by_report_id IS NULL`
 
+// A caller who can already see a record gets an actionable permission error.
+func inspectionMutationMiss(ctx context.Context, q mutationQueryer, id string, access inspection.MutationAccess) error {
+	args := []any{id}
+	visible := inspectionAccessSQL(access, "read", &args)
+	if access.ConfirmedOnly {
+		visible += " AND " + confirmedInspectionSQL
+	}
+	var permitted bool
+	err := q.QueryRow(ctx, "SELECT EXISTS (SELECT 1"+inspectionFrom+" WHERE ir.id=$1 AND ir.deleted_at IS NULL AND "+visible+")", args...).Scan(&permitted)
+	if err != nil {
+		return err
+	}
+	if permitted {
+		return inspection.ErrScopeMismatch
+	}
+	return inspection.ErrRecordNotFound
+}
+
 func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.MutationAccess, mode string, lock bool) (inspection.InspectionRecord, error) {
 	args := []any{id}
 	editable := inspectionAccessSQL(a, "mutate", &args)
@@ -340,6 +363,9 @@ func (t *inspectionTx) Read(ctx context.Context, id string, a inspection.Mutatio
 	var r inspection.InspectionRecord
 	err := t.tx.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.SemesterID, &r.WeekID, &r.InspectionTypeID, &r.TypeCode, &r.DepartmentID, &r.AttributionMode, &r.Status, &r.Source, &r.ImportBatchID, &r.RowVersion, &r.CreatedBy, &r.CreatedByName, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock, &r.StudentNumber, &r.StudentName, &r.ClassName, &r.ClassID, &r.Grade, &r.CanEdit, &r.CanDelete, &r.SubmittedByName, &r.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if mode == "mutate" {
+			return r, inspectionMutationMiss(ctx, t.tx, id, a)
+		}
 		return r, inspection.ErrRecordNotFound
 	}
 	if err != nil {
@@ -430,7 +456,7 @@ func (p *Postgres) ListInspections(ctx context.Context, f inspection.InspectionF
 		if !(a.CanRouteAdministrator || a.Unrestricted) {
 			where += " AND ir.attribution_mode<>'ADMINISTRATOR'"
 		}
-		where += " AND " + inspectionAccessSQL(a, "mutate", &args)
+		where += " AND " + inspectionAccessSQL(a, "submit", &args)
 	}
 	if f.ConfirmedSubmissionOnly || a.ConfirmedOnly {
 		where += " AND " + confirmedInspectionSQL

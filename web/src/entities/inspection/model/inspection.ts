@@ -19,6 +19,7 @@ export type AttendanceRecord = {
   submitterName?: string
   submittedByName?: string
   submittedAt?: string
+  canEdit?: boolean
   canDelete?: boolean
   importBatchId?: string
   id: string

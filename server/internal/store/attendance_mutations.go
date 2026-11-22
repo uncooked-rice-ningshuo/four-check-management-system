@@ -3,57 +3,18 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
+
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/inspection"
-	"four-check-management-system/server/internal/permission"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"sort"
-	"strings"
 )
 
 // mutationScopeSQL enforces ownership and action-specific ALLOW/DENY in SQL.
 func mutationScopeSQL(access inspection.MutationAccess, args *[]any) string {
-	if access.Unrestricted {
-		return "TRUE"
-	}
-	scopeSet := func(action, effect string) string {
-		var alternatives []string
-		for _, rule := range access.Permissions {
-			if rule.Action != action || rule.Effect != effect {
-				continue
-			}
-			var terms []string
-			for _, d := range []struct{ column, value string }{
-				{"sem.academic_year_id", rule.Scope.AcademicYearID}, {"ir.semester_id", rule.Scope.SemesterID}, {"ir.week_id", rule.Scope.WeekID}, {"ir.inspection_type_id", rule.Scope.InspectionTypeID}, {"ir.department_id", rule.Scope.DepartmentID}, {"ir.class_id", rule.Scope.ClassID}, {"ir.grade_snapshot", rule.Scope.Grade},
-			} {
-				if d.value != "" {
-					*args = append(*args, d.value)
-					cast := "::uuid"
-					if d.column == "ir.grade_snapshot" {
-						cast = "::text"
-					}
-					terms = append(terms, fmt.Sprintf("%s=$%d%s", d.column, len(*args), cast))
-				}
-			}
-			if len(terms) == 0 {
-				alternatives = append(alternatives, "TRUE")
-			} else {
-				alternatives = append(alternatives, "("+strings.Join(terms, " AND ")+")")
-			}
-		}
-		if len(alternatives) == 0 {
-			return "FALSE"
-		}
-		return "(" + strings.Join(alternatives, " OR ") + ")"
-	}
-	*args = append(*args, access.ActorID)
-	owner := fmt.Sprintf("ir.created_by=$%d::uuid", len(*args))
-	ownAllow, ownDeny := scopeSet(permission.ActionInspectionEnter, permission.EffectAllow), scopeSet(permission.ActionInspectionEnter, permission.EffectDeny)
-	manageAllow, manageDeny := scopeSet(permission.ActionInspectionManage, permission.EffectAllow), scopeSet(permission.ActionInspectionManage, permission.EffectDeny)
-	manage := "(" + manageAllow + " AND NOT " + manageDeny + ")"
-	return "(ir.attribution_mode<>'ADMINISTRATOR' OR " + owner + " OR " + manage + ") AND ((" + owner + " AND " + ownAllow + " AND NOT " + ownDeny + ") OR " + manage + ")"
+	return inspectionAccessSQL(access, "mutate", args)
 }
 
 const mutationRecordSelect = `SELECT ir.id,ir.inspection_type_id,ir.semester_id,ir.week_id,COALESCE(ir.department_id::text,''),ir.attribution_mode,
@@ -79,7 +40,7 @@ func readMutationRecord(ctx context.Context, q mutationQueryer, id string, acces
 	var r inspection.AttendanceRecord
 	err := q.QueryRow(ctx, sql, args...).Scan(&r.ID, &r.InspectionTypeID, &r.SemesterID, &r.WeekID, &r.DepartmentID, &r.AttributionMode, &r.StudentID, &r.StudentNoSnapshot, &r.StudentNameSnapshot, &r.ClassID, &r.ClassNameSnapshot, &r.GradeSnapshot, &r.CourseID, &r.CourseName, &r.ClassroomID, &r.ClassroomCode, &r.OccurredAt, &r.AbsenceHours, &r.PenaltyMultiplier, &r.PenaltyHours, &r.PeriodText, &r.Remark, &r.Source, &r.Status, &r.ImportBatchID, &r.DedupKey, &r.RowVersion, &r.CreatedBy, &r.SubmitterName, &r.CreatedAt, &r.UpdatedAt, &r.HasSubmission, &r.HasReportLock)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return r, inspection.ErrRecordNotFound
+		return r, inspectionMutationMiss(ctx, q, id, access)
 	}
 	return r, err
 }
@@ -129,7 +90,7 @@ func (p *Postgres) UpdateAttendance(ctx context.Context, r inspection.Attendance
  AND ((ir.status='DRAFT' AND ir.submission_id IS NULL) OR
  (ir.status='RETURNED' AND ir.submission_id IS NOT NULL AND EXISTS
  (SELECT 1 FROM department_submissions ds WHERE ds.id=ir.submission_id AND ds.status='RETURNED'
- AND ds.semester_id=$4 AND ds.week_id=$5 AND ds.department_id IS NOT DISTINCT FROM NULLIF($6,'')::uuid AND ds.inspection_type_id=$3)))
+ AND ds.semester_id=$4 AND ds.week_id=$5 AND ir.department_id IS NOT DISTINCT FROM NULLIF($6,'')::uuid AND ds.inspection_type_id=$3)))
  AND ir.locked_by_report_id IS NULL AND ` + guard + ` RETURNING ir.row_version,ir.updated_at`
 	if err = tx.QueryRow(ctx, sql, args...).Scan(&r.RowVersion, &r.UpdatedAt); err != nil {
 		var pe *pgconn.PgError

@@ -54,7 +54,7 @@ func (p *Postgres) ListContextOptions(ctx context.Context, q inspection.ContextO
 	}
 	mode := "read"
 	if q.Purpose == "submit" {
-		mode = "mutate"
+		mode = "submit"
 	}
 	if q.Purpose == "entry" {
 		mode = "mutate"

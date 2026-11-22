@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/organization"
@@ -22,7 +23,7 @@ type departmentDefaultsReader interface {
 
 func getDepartmentDefaults(ctx context.Context, reader departmentDefaultsReader, departmentID string) (organization.DepartmentDefaultPermissions, error) {
 	result := organization.DepartmentDefaultPermissions{DepartmentID: departmentID, Scopes: []organization.DepartmentInspectionScope{}, InspectionRoles: []organization.InspectionRoleDefaults{}, ReportRoles: []organization.ReportRoleDefaults{}}
-	if err := reader.QueryRow(ctx, `SELECT permission_version,role_policies,can_manage_morning_schedule FROM departments WHERE id=$1::uuid`, departmentID).Scan(&result.Version, &result.RolePolicies, &result.CanManageMorningSchedule); err != nil {
+	if err := reader.QueryRow(ctx, `SELECT permission_version,role_policies,can_manage_morning_schedule,discipline_scope,discipline_enabled FROM departments WHERE id=$1::uuid`, departmentID).Scan(&result.Version, &result.RolePolicies, &result.CanManageMorningSchedule, &result.DisciplineScope, &result.DisciplineEnabled); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return result, organization.ErrInvalidInput
 		}
@@ -174,9 +175,9 @@ func (p *Postgres) SaveDepartmentDefaults(ctx context.Context, input organizatio
 		if err != nil {
 			return err
 		}
-		liveChanged := !sameDepartmentScopes(previous.Scopes, input.Scopes) || previous.ReportScope != input.ReportScope || previous.CanManageMorningSchedule != input.CanManageMorningSchedule
-		if err := tx.QueryRow(ctx, `UPDATE departments SET permission_version=permission_version+1,updated_at=now(),role_policies=$3,can_manage_morning_schedule=$4
-			WHERE id=$1::uuid AND permission_version=$2 RETURNING permission_version`, input.DepartmentID, input.Version, policies, input.CanManageMorningSchedule).Scan(&result.Version); err != nil {
+		liveChanged := previous.DisciplineEnabled != input.DisciplineEnabled || !slices.Equal(previous.DisciplineScope, input.DisciplineScope) || !sameDepartmentScopes(previous.Scopes, input.Scopes) || previous.ReportScope != input.ReportScope || previous.CanManageMorningSchedule != input.CanManageMorningSchedule
+		if err := tx.QueryRow(ctx, `UPDATE departments SET permission_version=permission_version+1,updated_at=now(),role_policies=$3,can_manage_morning_schedule=$4,discipline_scope=coalesce($5,ARRAY[]::text[]),discipline_enabled=$6
+			WHERE id=$1::uuid AND permission_version=$2 RETURNING permission_version`, input.DepartmentID, input.Version, policies, input.CanManageMorningSchedule, input.DisciplineScope, input.DisciplineEnabled).Scan(&result.Version); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return organization.ErrPermissionVersionConflict
 			}

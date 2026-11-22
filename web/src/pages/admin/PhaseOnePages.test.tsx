@@ -889,6 +889,43 @@ describe('阶段一管理页面', () => {
 		await waitFor(() => expect(vi.mocked(updateInspectionType).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ id: 'inspection-1', enabled: false })))
 	})
 
+	it('处分管理复用周通报的部门与角色配置抽屉', async () => {
+		vi.mocked(getCatalogs).mockResolvedValue({
+			departments: [{ id: 'department-1', code: 'STUDY', name: '学习部', enabled: true }], organizationRoles: [],
+			inspectionTypes: [{ id: 'inspection-1', code: 'LATE', name: '晚归检查', extensionKind: '', enabled: true, sortOrder: 1, participatesInReport: true }],
+		})
+		const baseline: DepartmentDefaultPermissions = { departmentId: 'department-1', version: 1,
+			scopes: [{ departmentId: 'department-1', inspectionTypeId: 'inspection-1', canEnter: false, canView: false, canManage: false, canReview: false, canExport: false, enabled: true }],
+			inspectionRoles: [
+				{ inspectionTypeId: 'inspection-1', roleCode: 'MEMBER', canView: true, canEnter: true, canManage: false, canReview: false, canExport: false },
+				{ inspectionTypeId: 'inspection-1', roleCode: 'MINISTER', canView: true, canEnter: true, canManage: true, canReview: true, canExport: false },
+				{ inspectionTypeId: 'inspection-1', roleCode: 'PRESIDIUM', canView: true, canEnter: false, canManage: false, canReview: false, canExport: false },
+			], reportMaintenance: { state: 'assigned' as const, departmentId: 'office', departmentName: '学生会办公室' }, reportScope: { enabled: false, canView: false, canGenerate: false, canFileOutput: false, canForceGenerate: false, canObligationManage: false, canCorrect: false, canReview: false, canReturn: false, canFinalize: false, canPublish: false, canOutputSettings: false, canArchive: false }, reportRoles: [], rolePolicies: ['MEMBER', 'MINISTER', 'VICE_MINISTER', 'PRESIDIUM', 'TEACHER'].map(roleCode => ({ roleCode, validityYears: roleCode === 'TEACHER' ? 0 : 1, canManageMorningSchedule: false, operationRanges: [] })), canManageMorningSchedule: false }
+		vi.mocked(getDepartmentDefaults).mockResolvedValue(baseline)
+		vi.mocked(saveDepartmentDefaults).mockImplementation(async input => input)
+		renderPage(<OrganizationConfigPage />)
+
+        const table = await screen.findByRole('region', { name: '处分管理权限表' })
+        const roles = within(table).getByRole('button', {name:'角色权限'})
+        expect(roles).toBeDisabled()
+        fireEvent.click(within(table).getByRole('switch'))
+        fireEvent.click(within(table).getByRole('button', {name:'部门功能'}))
+        const scope = await screen.findByRole('dialog', {name:'处分管理 · 部门功能'})
+        fireEvent.click(within(scope).getByRole('switch', {name:'学习部 处分管理 查看处分归档'}))
+        fireEvent.click(within(scope).getByRole('button', {name:'Close'}))
+        fireEvent.click(roles)
+        const matrix = await screen.findByRole('dialog', {name:'处分管理 · 角色权限'})
+        expect(within(matrix).getByRole('switch', {name:'委员默认导出处分归档'})).toBeDisabled()
+        fireEvent.click(within(matrix).getByRole('switch', {name:'委员默认查看处分归档'}))
+        fireEvent.click(within(matrix).getByRole('button', {name:'Close'}))
+        fireEvent.click(screen.getByRole('button', {name:/保存修改/}))
+        fireEvent.click(await screen.findByRole('button', { name: '保存全部修改' }))
+        await waitFor(() => expect(vi.mocked(saveDepartmentDefaults).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+          disciplineEnabled: true, disciplineScope: ['DISCIPLINE_ARCHIVE_VIEW'],
+          rolePolicies: expect.arrayContaining([expect.objectContaining({ roleCode:'MEMBER', disciplineActions:['DISCIPLINE_ARCHIVE_VIEW'] })]),
+        })))
+    })
+
 	it('按部门编辑默认权限时只在确认保存后提交整份配置', async () => {
 		vi.mocked(getCatalogs).mockResolvedValue({
 			departments: [{ id: 'department-1', code: 'STUDY', name: '学习部', enabled: true }], organizationRoles: [],

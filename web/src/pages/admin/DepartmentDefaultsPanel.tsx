@@ -1,3 +1,4 @@
+import { disciplineActions } from '../../entities/permission/model/actions'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, App, Button, Drawer, Empty, Modal, Select, Spin, Switch, Typography } from 'antd'
@@ -50,9 +51,16 @@ function normalize(source: DepartmentDefaultPermissions, catalogs: OrganizationC
   }
 }
 
+function disciplineSummary(draft: DepartmentDefaultPermissions, actions = draft.disciplineScope ?? []) {
+  if (!draft.disciplineEnabled) return '无'
+  return disciplineActions.filter(([code]) => draft.disciplineScope?.includes(code) && actions.includes(code)).map(([, label]) => label).join('、') || '无'
+}
+
 function changes(before: DepartmentDefaultPermissions, after: DepartmentDefaultPermissions, catalogs: OrganizationCatalogs): string[] {
   const result: string[] = []
-  if (JSON.stringify(before.rolePolicies) !== JSON.stringify(after.rolePolicies)) result.push("角色有效期、早签计划或操作范围已调整")
+  if (before.disciplineEnabled !== after.disciplineEnabled) result.push(`处分管理 · 部门承担：${after.disciplineEnabled ? "开启" : "关闭"}`)
+  if (JSON.stringify(before.disciplineScope) !== JSON.stringify(after.disciplineScope)) result.push("处分管理部门职责已调整")
+  if (JSON.stringify(before.rolePolicies) !== JSON.stringify(after.rolePolicies)) result.push("角色模板的权限、有效期或操作范围已调整")
   if (before.canManageMorningSchedule !== after.canManageMorningSchedule) result.push("部门早签计划管理功能已调整")
   for (const [index, scope] of after.scopes.entries()) {
     const previous = before.scopes[index]
@@ -91,7 +99,7 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
   const [rangeDraft, setRangeDraft] = useState<OperationRange[]>([])
   const [rangeEditor, setRangeEditor] = useState<{ roleCode: string; action: string; inspectionTypeId: string; enabled: boolean; label: string } | null>(null)
   const [drafts, setDrafts] = useState<Record<string, DepartmentDefaultPermissions>>({})
-  const [editor, setEditor] = useState<{ kind: 'scope' | 'inspectionRoles'; inspectionTypeId: string } | { kind: 'reportScope' | 'reportRoles' } | null>(null)
+  const [editor, setEditor] = useState<{ kind: 'scope' | 'inspectionRoles'; inspectionTypeId: string } | { kind: 'reportScope' | 'reportRoles' | 'disciplineScope' | 'disciplineRoles' } | null>(null)
   const department = catalogs.departments.find(item => item.id === departmentId)
   const selectedId = department?.id ?? catalogs.departments[0]?.id ?? ''
   const selectedDepartment = catalogs.departments.find(item => item.id === selectedId)
@@ -136,12 +144,15 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
     if (!draft) return
     update({ ...draft, reportScope: { ...draft.reportScope, [key]: value } })
   }
+  const disciplineRoles = inspectionRoleCodes.flatMap(code => draft?.rolePolicies.filter(policy => policy.roleCode === code) ?? [])
   const reportRoleName = roleName
   const editingScope = editor && (editor.kind === 'scope' || editor.kind === 'inspectionRoles') ? draft?.scopes.find(item => item.inspectionTypeId === editor.inspectionTypeId) : undefined
   const editingType = editor && (editor.kind === 'scope' || editor.kind === 'inspectionRoles') ? catalogs.inspectionTypes.find(item => item.id === editor.inspectionTypeId) : undefined
   const editingInspectionRoles = editor?.kind === 'inspectionRoles' ? draft?.inspectionRoles.filter(role => role.inspectionTypeId === editor.inspectionTypeId) ?? [] : []
   const rangeKey = rangeEditor?.action === 'INSPECTION_ENTER' ? 'canEnter' : rangeEditor?.action === 'INSPECTION_MANAGE' ? 'canManage' : 'canReview'
-  const rangeEnabled = Boolean(editingScope?.enabled && editingScope[rangeKey] && editingInspectionRoles.find(role => role.roleCode === rangeEditor?.roleCode)?.[rangeKey])
+  const disciplineRange = rangeEditor?.action === 'DISCIPLINE_CASE_VIEW' || rangeEditor?.action === 'DISCIPLINE_CASE_CONFIRM'
+  const rangeEnabled = disciplineRange ? Boolean(draft?.disciplineEnabled && draft.disciplineScope?.includes(rangeEditor.action)
+    && draft.rolePolicies.find(role => role.roleCode === rangeEditor.roleCode)?.disciplineActions?.includes(rangeEditor.action)) : Boolean(editingScope?.enabled && editingScope[rangeKey] && editingInspectionRoles.find(role => role.roleCode === rangeEditor?.roleCode)?.[rangeKey])
   const reportEnabled = draft?.reportScope.enabled ?? false
   const actionSummary = (scope: DepartmentInspectionScope) => !scope.enabled ? '未承担' :
     inspectionActions.filter(([key]) => scope[key]).map(([key]) => inspectionShortNames[key]).join('、') || '未开放动作'
@@ -202,9 +213,68 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
                 <Button type="link" disabled={!reportEnabled} onClick={() => setEditor({ kind: 'reportRoles' })}>角色权限</Button></div></td></tr></tbody>
           </table></div>
         </section>
+        <section className="department-defaults-section" aria-labelledby="department-discipline-title">
+          <div className="department-defaults-section-heading"><div>
+            <Typography.Title id="department-discipline-title" level={3}>处分管理</Typography.Title>
+            <Typography.Text type="secondary">按部门设置处分管理职责和各角色的默认权限</Typography.Text>
+          </div></div>
+          <div className="department-defaults-table-scroll" role="region" aria-label="处分管理权限表" tabIndex={0}>
+            <table className="department-defaults-table department-defaults-list">
+              <thead><tr>{['业务项','部门承担','部门功能','角色信息','设置'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+              <tbody><tr><th scope="row">处分管理</th>
+                <td className="department-defaults-assignment"><Switch size="small" aria-label={`${selectedDepartment?.name} 承担处分管理`}
+                  checked={draft.disciplineEnabled} disabled={save.isPending || !selectedDepartment?.enabled}
+                  onChange={disciplineEnabled => update({ ...draft, disciplineEnabled })} /><span>{draft.disciplineEnabled ? '承担' : '未承担'}</span></td>
+                <td className="department-defaults-action-summary">{disciplineSummary(draft)}</td>
+                <td className="department-defaults-role-summary">{disciplineRoles.map(policy =>
+                  <div key={policy.roleCode} className="department-defaults-role-line"><span>{roleName(policy.roleCode)}</span><span>{disciplineSummary(draft, policy.disciplineActions ?? [])}</span></div>)}</td>
+                <td><div className="department-defaults-row-actions">
+                  <Button type="link" disabled={!draft.disciplineEnabled || save.isPending} onClick={() => setEditor({kind:'disciplineScope'})}>部门功能</Button>
+                  <Button type="link" disabled={!draft.disciplineEnabled || save.isPending} onClick={() => setEditor({kind:'disciplineRoles'})}>角色权限</Button>
+                </div></td>
+              </tr></tbody>
+            </table>
+          </div>
+        </section>
       </div>
-      <Drawer className="department-defaults-editor" title={editor?.kind === 'scope' ? `${editingType?.name ?? '检查项'} · 部门功能` : editor?.kind === 'inspectionRoles' ? `${editingType?.name ?? '检查项'} · 角色权限` : editor?.kind === 'reportScope' ? '周通报 · 部门功能' : '周通报 · 角色权限'}
+      <Drawer className="department-defaults-editor" title={editor?.kind === 'disciplineScope' ? '处分管理 · 部门功能' : editor?.kind === 'disciplineRoles' ? '处分管理 · 角色权限' : editor?.kind === 'scope' ? `${editingType?.name ?? '检查项'} · 部门功能` : editor?.kind === 'inspectionRoles' ? `${editingType?.name ?? '检查项'} · 角色权限` : editor?.kind === 'reportScope' ? '周通报 · 部门功能' : '周通报 · 角色权限'}
         open={editor !== null} onClose={() => { setRangeEditor(null); setEditor(null) }} width="min(640px, 100vw)" destroyOnHidden>
+        {editor?.kind === 'disciplineScope' && <><Typography.Paragraph type="secondary">部门承担状态在列表中设置；这里选择处分管理开放的动作。</Typography.Paragraph><div className="department-defaults-option-list">{disciplineActions.map(([action,label]) => {
+          const scope = draft.disciplineScope ?? []
+          return <div key={action} className="department-defaults-option"><span>{label}</span><Switch
+            aria-label={`${selectedDepartment?.name} 处分管理 ${label}`} checked={scope.includes(action)} disabled={save.isPending}
+            onChange={value => update({ ...draft, disciplineScope: value ? [...scope, action] : scope.filter(item => item !== action) })} /></div>
+        })}</div></>}
+        {editor?.kind === 'disciplineRoles' && (<>
+          <Typography.Paragraph type="secondary">先在列表开启部门承担，再开放对应部门动作。各角色均按配置的动作授权。</Typography.Paragraph>
+          <div className="department-defaults-table-scroll" role="region" aria-label="角色权限矩阵" tabIndex={0}>
+            <table className="department-defaults-table department-defaults-matrix">
+              <thead><tr><th scope="col">业务动作</th><th scope="col">部门</th>{disciplineRoles.map(policy =>
+                <th scope="col" key={policy.roleCode}>{roleName(policy.roleCode)}</th>)}</tr></thead>
+              <tbody>{disciplineActions.map(([action,label]) => {
+                const scope = draft.disciplineScope ?? []
+                const enabled = scope.includes(action)
+                return <tr key={action}><th scope="row">{label}</th><td>
+                  {enabled ? '已开放' : '未开放'}
+                </td>{disciplineRoles.map(policy => {
+                  const actions = policy.disciplineActions ?? []
+                  const checked = enabled && actions.includes(action)
+                  return <td key={policy.roleCode}><Switch size="small" aria-label={`${roleName(policy.roleCode)}默认${label}`}
+                    disabled={!enabled || save.isPending} checked={checked} onChange={on => update({ ...draft,
+                      rolePolicies: draft.rolePolicies.map(item => item.roleCode === policy.roleCode ? {
+                        ...item, disciplineActions: on ? [...actions, action] : actions.filter(value => value !== action),
+                      } : item) })} />
+                    {checked && (action === 'DISCIPLINE_CASE_CONFIRM' || action === 'DISCIPLINE_CASE_VIEW') && <Button type="link" size="small" aria-label={`${roleName(policy.roleCode)}${label}范围`} onClick={() => {
+                      setRangeDraft(policy.operationRanges.find(item => item.action === action)?.ranges ?? [])
+                      setRangeEditor({roleCode: policy.roleCode, action, inspectionTypeId: '', enabled, label: roleName(policy.roleCode) + ' · ' + label})
+                    }}>范围</Button>}
+                  </td>
+                })}</tr>
+              })}</tbody>
+            </table>
+          </div>
+          <p className="department-defaults-footnote">查看待处分和处理待处分可分别设置范围。已开放的动作未设置范围时，该动作适用于全部年级、专业和班级。</p>
+        </>)}
         {editor?.kind === 'scope' && editingScope && <><Typography.Paragraph type="secondary">部门承担状态在列表中设置；这里选择该检查项开放的动作。</Typography.Paragraph>
           {editingType?.code === 'MORNING_ATTENDANCE' && <div className="department-defaults-option"><span>早签计划管理</span><Switch aria-label="部门早签计划管理功能" checked={draft.canManageMorningSchedule} disabled={save.isPending} onChange={canManageMorningSchedule => update({ ...draft, canManageMorningSchedule })} /></div>}
  <div className="department-defaults-option-list">{inspectionActions.map(([key, label]) =>
@@ -229,14 +299,14 @@ export function DepartmentDefaultsPanel({ catalogs }: { catalogs: OrganizationCa
               onChange={value => updateReportRole(role, key, value)} aria-label={`${selectedDepartment?.name} ${reportRoleName(role.roleCode)} ${label}`} /></td>)}</tr>)}</tbody></table></div>
           <p className="department-defaults-footnote">部门未承担或未开放同一动作时，角色开关不可操作。此前已保存的角色配置仍保留，但不会生效。发布渠道尚未交付。</p></>}
       </Drawer>
-      <Modal className="permission-range-modal" title={`${editingType?.name ?? ''} · ${rangeEditor?.label ?? ''} · 操作范围`} open={Boolean(rangeEditor && rangeEnabled)} width={600} onCancel={() => setRangeEditor(null)} okText="应用范围" cancelText="取消" destroyOnHidden onOk={() => {
+      <Modal className="permission-range-modal" title={`${disciplineRange ? '处分管理' : editingType?.name ?? ''} · ${rangeEditor?.label ?? ''} · ${rangeEditor?.action === 'DISCIPLINE_CASE_VIEW' ? '查看范围' : '操作范围'}`} open={Boolean(rangeEditor && rangeEnabled)} width={600} onCancel={() => setRangeEditor(null)} okText="应用范围" cancelText="取消" destroyOnHidden onOk={() => {
         if (!rangeEditor) return
         if (rangeDraft.some(range => range.gradeStage)) { message.error('该模板仍含已停用的阶段范围，请核对迁移 070 后重新加载'); return }
         if (rangeDraft.some(range => !range.gradeId && !range.gradeStage && !range.majorId && !range.classId)) { message.error('请选择范围条件，或删除空组'); return }
         if (hasConflictingClasses(rangeDraft, rangeChoices.data?.classId ?? [])) { message.error('所选班级与年级或专业不匹配，请重新选择班级'); return }
-        update({ ...draft, rolePolicies: draft.rolePolicies.map(policy => policy.roleCode === rangeEditor.roleCode ? { ...policy, operationRanges: [...policy.operationRanges.filter(item => item.action !== rangeEditor.action || item.inspectionTypeId !== rangeEditor.inspectionTypeId), { action: rangeEditor.action, inspectionTypeId: rangeEditor.inspectionTypeId, ranges: rangeDraft }] } : policy) })
+        update({ ...draft, rolePolicies: draft.rolePolicies.map(policy => policy.roleCode === rangeEditor.roleCode ? { ...policy, operationRanges: [...policy.operationRanges.filter(item => item.action !== rangeEditor.action || (item.inspectionTypeId ?? '') !== rangeEditor.inspectionTypeId), { action: rangeEditor.action, inspectionTypeId: rangeEditor.inspectionTypeId, ranges: rangeDraft }] } : policy) })
         setRangeEditor(null)
-      }}><OperationRangeEditor value={rangeDraft} onChange={setRangeDraft} /></Modal>
+      }}><OperationRangeEditor viewing={rangeEditor?.action === 'DISCIPLINE_CASE_VIEW'} value={rangeDraft} onChange={setRangeDraft} /></Modal>
     </>}
   </div>
 }

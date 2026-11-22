@@ -12,7 +12,7 @@ func suggestedInspectionFilters(ctx context.Context, tx pgx.Tx, semesterID, insp
 	result := map[string]string{}
 	var selected *permission.OperationRange
 	for _, entry := range entries {
-		if !permission.SupportsOperationRange(entry.Action) || (entry.Scope.InspectionTypeID != "" && entry.Scope.InspectionTypeID != inspectionTypeID) {
+		if permission.IsDisciplineAction(entry.Action) || !permission.SupportsOperationRange(entry.Action) || (entry.Scope.InspectionTypeID != "" && entry.Scope.InspectionTypeID != inspectionTypeID) {
 			continue
 		}
 		if entry.Effect == permission.EffectDeny || len(entry.Ranges) == 0 {

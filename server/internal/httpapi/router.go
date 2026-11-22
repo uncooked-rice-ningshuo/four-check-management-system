@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"four-check-management-system/server/internal/inbox"
 	"io"
 	"log"
 	"mime"
@@ -33,6 +34,7 @@ import (
 )
 
 type AdminServices struct {
+	Inbox                    *inbox.Service
 	Organization             *organization.Service
 	Academic                 *academic.Service
 	ReportGrades             *academic.ReportGradeService
@@ -135,6 +137,7 @@ type readinessChecker interface {
 }
 
 type handler struct {
+	inbox                      *inbox.Service
 	auth                       *auth.Service
 	organization               *organization.Service
 	academic                   *academic.Service
@@ -184,6 +187,7 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 		h.postgresReady, h.objectStorageReady = dependencies[0].PostgresReady, dependencies[0].ObjectStorageReady
 		h.importJobs, h.attendance, h.importFiles = dependencies[0].ImportJobs, dependencies[0].Attendance, dependencies[0].ImportFiles
 		h.importRollback = dependencies[0].ImportRollback
+		h.inbox = dependencies[0].Inbox
 		h.dashboard = dependencies[0].Dashboard
 		h.workflow = dependencies[0].Workflow
 		h.reporting = dependencies[0].Reporting
@@ -204,6 +208,8 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/public/registration-options", h.registrationOptions)
+	v1.GET("/notifications", h.notifications)
+	v1.POST("/notifications/read", h.notifications)
 	authRoutes := v1.Group("/auth")
 	authRoutes.POST("/register", h.register)
 	authRoutes.POST("/login", h.login)
@@ -216,16 +222,21 @@ func NewRouter(authService *auth.Service, secureCookie bool, dependencies ...Adm
 	admin.GET("/registration-requests", h.listRegistrationRequests)
 	admin.POST("/registration-requests/:id/review", h.reviewRegistration)
 	admin.GET("/catalogs", h.listCatalogs)
-	configAdmin := v1.Group("/admin", h.requireSystemAdmin())
+	configAdmin := v1.Group("/admin")
 	v1.POST("/discipline/ledger/export", h.requireAction(permission.ActionLedgerView), h.requireAction(permission.ActionLedgerExport), h.exportSemesterLedger)
 	v1.POST("/discipline/ledger/search", h.requireAction(permission.ActionLedgerView), h.semesterLedger)
-	configAdmin.GET("/discipline/rule-versions/current", h.currentDisciplineRules)
-	configAdmin.GET("/discipline/rule-versions", h.listDisciplineRuleVersions)
-	configAdmin.GET("/discipline/rule-versions/:id", h.getDisciplineRuleVersion)
-	configAdmin.POST("/discipline/rule-versions", h.createDisciplineRuleDraft)
-	configAdmin.PUT("/discipline/rule-versions/:id", h.saveDisciplineRuleDraft)
-	configAdmin.POST("/discipline/rule-versions/:id/validate", h.validateDisciplineRuleDraft)
-	configAdmin.POST("/discipline/rule-versions/:id/publish", h.publishDisciplineRuleDraft)
+	v1.POST("/discipline/cases/:id/review", h.requireAnyAction(permission.ActionDisciplineConfirm), h.reviewDisciplineCase)
+	v1.POST("/discipline/archive/export", h.requireAction("DISCIPLINE_ARCHIVE_VIEW"), h.requireAction("DISCIPLINE_ARCHIVE_EXPORT"), h.exportDisciplineArchive)
+	v1.POST("/discipline/archive/search", h.requireAction("DISCIPLINE_ARCHIVE_VIEW"), h.disciplineArchive)
+	v1.POST("/discipline/cases/search", h.disciplineReviewQueue)
+	v1.POST("/discipline/ledger/detail", h.requireAction(permission.ActionLedgerView), h.semesterLedgerDetail)
+	configAdmin.GET("/discipline/rule-versions/current", h.requireAction("DISCIPLINE_RULE_VIEW"), h.currentDisciplineRules)
+	configAdmin.GET("/discipline/rule-versions", h.requireAction("DISCIPLINE_RULE_VIEW"), h.listDisciplineRuleVersions)
+	configAdmin.GET("/discipline/rule-versions/:id", h.requireAction("DISCIPLINE_RULE_VIEW"), h.getDisciplineRuleVersion)
+	configAdmin.POST("/discipline/rule-versions", h.requireAction("DISCIPLINE_RULE_EDIT"), h.createDisciplineRuleDraft)
+	configAdmin.PUT("/discipline/rule-versions/:id", h.requireAction("DISCIPLINE_RULE_EDIT"), h.saveDisciplineRuleDraft)
+	configAdmin.POST("/discipline/rule-versions/:id/validate", h.requireAction("DISCIPLINE_RULE_EDIT"), h.validateDisciplineRuleDraft)
+	configAdmin.POST("/discipline/rule-versions/:id/publish", h.requireAction("DISCIPLINE_RULE_PUBLISH"), h.publishDisciplineRuleDraft)
 	admin.POST("/departments", h.createDepartment)
 	admin.PUT("/departments/:id", h.updateDepartment)
 	admin.PUT("/inspection-types/:id", h.updateInspectionType)

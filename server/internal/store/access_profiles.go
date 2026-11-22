@@ -74,6 +74,10 @@ func (p *Postgres) LoadAccessProfile(ctx context.Context, accountID string) (per
 		}
 		for _, policy := range m.snapshot.RolePolicies {
 			if policy.RoleCode == m.role {
+				if current.DisciplineEnabled {
+					department.DisciplineScope = current.DisciplineScope
+				}
+				department.DefaultDisciplineActions = policy.DisciplineActions
 				department.DefaultMorningSchedule = policy.CanManageMorningSchedule
 				department.ModuleValidity = policy.ModuleValidity
 				department.OperationRanges = policy.OperationRanges

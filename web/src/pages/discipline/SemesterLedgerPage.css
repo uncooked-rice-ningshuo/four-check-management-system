@@ -1,6 +1,5 @@
 .semester-ledger { min-width: 0; }
 .semester-ledger header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.semester-ledger h1 { margin: 0; font-size: 20px; }
 .semester-ledger header .ant-select { min-width: 220px; }
 .semester-ledger .ant-table-wrapper .ant-table.ant-table-small table tr > .ant-table-cell { height: 32px; padding: 3px 8px; font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .semester-ledger .ant-table-thead th { background: #f5f6f8; }
@@ -14,7 +13,7 @@
 .semester-ledger .ant-table-body { height: var(--ledger-body-height); }
 .semester-ledger .ant-table-placeholder .ant-table-cell { height: calc(var(--ledger-body-height) - 16px); }
 
-.semester-ledger .ant-pro-table-list-toolbar-container { justify-content: flex-end; }
+
 
 .semester-ledger .ant-pro-table-search :is(.ant-form-item-label > label, .ant-select, .ant-select-selection-item, .ant-select-selection-placeholder, .ant-select-content, .ant-input, .ant-btn) {
   font-size: 13px;

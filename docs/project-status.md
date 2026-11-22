@@ -1,5 +1,44 @@
 # 项目当前状态与后续任务
 
+> **处分管理权限（本地实现）** 部门默认权限页按日常检查、周通报、处分管理排列。处分管理沿用部门承担、部门功能抽屉、角色权限抽屉与保存确认。迁移 074–076 处理旧开关、部门动作和承担状态。隔离 PostgreSQL 与真实 API 的 Midscene 用例已验证未承担时入口禁用、部门开放动作、委员配置、未开放的导出动作禁用、保存后重载和匿名导出拒绝；[本轮报告](../output/playwright/4ce58665a8/summary.json)。待处分查看和处理可分别配置范围。真实 API 验证委员继承指定年级的查看范围、个人覆盖为不限并重新登录生效；[回归摘要](../output/playwright/3efa0e5bf0/summary.json)。一次性 PostgreSQL 验证显式查看限制总数和分页，处理范围只决定行操作。待处分沿用日常检查行色与图例，另有浏览器夹具录像覆盖只读和可处理行。四个处分页面已在 1440px 和 390px 检查标题与页面宽度。目标业务环境待加载。
+
+
+> **历史验证：早期老师处分审批原型** 独立“待处分”页面和查询、写入接口使用 DISCIPLINE_CASE_CONFIRM；服务端校验老师角色、有效范围与事项的责任班级快照。支持确认、填写原因延迟、延迟后确认，版本冲突拒绝覆盖。到期扫描只处理 PENDING；系统决定和审计在同一事务写入。一次性 PostgreSQL 回归验证跨班列表为空、跨班写入拒绝、同班分页、延迟原因及到期与重复扫描。Midscene 接口夹具慢速录像验证空原因被拦截及延迟后再确认。目标环境未迁移或部署，真实登录端到端与同时竞争场景待验收。后续为事项通知、修订纠偏与归档。
+
+
+> **学期台账处分摘要与明细分页（本地）** 主表按学生、累计项展示最近档位及状态；同次跨档优先较高阈值。主表独立“最新处分事项”列按累计项列出档位与状态；行操作“检查记录”和“处分事项”分别打开各自独立抽屉，打开后按学生和学期调用有台账查看权限的分页接口。检查支持周次和类型，处分支持档位名称和状态。一次性 PostgreSQL 验证筛选总数、第二页及换人空态；Midscene 在虚构接口下验证跨档、翻页、筛选和切换学生，1/1 通过。老师后续仅能确认或填写原因延迟；仍待处理满48小时自动确认，已延迟由老师再次确认。修订失据作废为系统纠偏。未部署。
+
+
+> **阶段四逐档处分事项（本地）** 学办定稿在同一事务内按已发布规则生成处分事项。首次跨两档分别生成两条，待处理期限自记录创建起 48 小时。迁移 069、学期台账查询及学生明细已接入。一次性 PostgreSQL 定稿用例验证累计 4 分触发两档，8 分档未触发；另用 SQL 复验重复执行不增加。Midscene 浏览器用接口夹具核验两档展示及换人后空态，1/1 通过。真实 API 与浏览器串联验收、目标部署及角色验收待完成。后续为老师确认或填写原因延迟处理、超时自动通过及事项通知。
+
+> **2026-11-22 消息详情信件式排版（本地代码，未部署）**：按反馈重做 `/notifications` 的 `aside[aria-label="消息详情"]`。详情改为唯一主题标题，类别图标、实际动作、消息时间和读状态收在紧凑元信息行；正文成为视觉主体，移除重复类别 Tag、详情重复标题及头尾分割线；返回列表保持文字按钮，标已读降为默认轻按钮。个人授权正文按已有部门、角色、动作、检查类型、操作范围和起止时间字段组织成键值段落，未知正文原样保留。没有发件人字段，未添加虚构来源或置顶/删除动作。保留 ProTable 筛选、桌面 50/50 动效与窄屏单列。浏览器测试夹具加长授权字段文本，仅使用隔离 PostgreSQL 的虚构账号。
+>
+> **验证与证据**：Node `v24.22.1`、pnpm `11.7.0` 与仓库声明一致。`BROWSER_DB_MODE=native BROWSER_SUITE=midscene-inbox-detail python3 server/scripts/verify-browser.py` 真实 API/一次性 PostgreSQL/Chrome 通过 1/1，覆盖桌面 808px、390px、长授权字段、短通知、已读/未读、读写分离、Enter/Escape 焦点、失败重试、越权和筛选翻页。慢速录像：[video.webm](../output/midscene/inbox-detail/inbox-detail-消息中心分栏详情：808-390px、读写分离、键盘与批量互不干扰/video.webm)；截图：[808px 列表](../output/midscene/inbox-detail-shots/808-list.png)、[808px 详情](../output/midscene/inbox-detail-shots/808-detail.png)、[390px 列表](../output/midscene/inbox-detail-shots/390-list.png)、[390px 详情](../output/midscene/inbox-detail-shots/390-detail.png)；[浏览器报告](../output/playwright/733a19f8e0/summary.json)。通知页聚焦 Vitest 21/21，lint 0 错误（既有 1 条 Fast Refresh 警告）。全量 Vitest 命中处分配置页既有超时并中断；将该文件单独提高至 60 秒复验仍卡住，故未完成。生产 build 单独运行中。未部署、未提交，未触碰 admin 演示数据。
+>
+
+> **2026-11-22 铃铛触屏首次点击修复（本地代码，未部署、未提交）**：独立复核指出 `inbox-enhanced.spec.ts` 虽标为触屏场景，实际只在 Escape 把焦点还给铃铛后执行 `bell.click()`，不能覆盖真实触屏。根因是 `NotificationBell` 的 `onFocusCapture` 在指针取得焦点时先 `show()`，紧接着同一 tap 的 `onClick` 又把 `open` 当成 toggle 关闭，导致未聚焦时首次 tap 打开又关闭。修改 `web/src/features/notifications/NotificationBell.tsx`：按钮 `onPointerDown` 置位、`onClick` 复位指针标记，`onFocusCapture` 在指针按下期间跳过 `show()`（键盘 Tab 仍自动弹出，hover/Escape 语义不变）；`scheduleHide` 的延时关闭增加 `containerRef.contains(document.activeElement)` 判断，鼠标移开但键盘焦点仍在面板内时保持可操作。`NotificationBell.test.tsx` 新增 2 项回归（其他焦点首次 tap、鼠标离开键盘焦点驻留），聚焦 6/6 通过。
+>
+> **触屏浏览器复核**：`web/midscene/inbox-enhanced.spec.ts` 改为 `hasTouch: true`，用真实 `locator.tap()` 从账户菜单焦点出发，覆盖首次 tap 保持打开、再次 tap 关闭、第三次 tap 后外点关闭、触屏打开后 Tab 进面板且鼠标移开仍可操作、点“查看全部”跳转；保留 hover/Escape 断言。修复前首次 tap 断言失败（面板未出现），失败录像/截图留在 `output/midscene/inbox-touch-repro/`。修复后用现有隔离脚本 `BROWSER_DB_MODE=native BROWSER_SUITE=midscene-inbox-enhanced python3 server/scripts/verify-browser.py` 真实 API 1/1 通过，[运行摘要](../output/playwright/c85c01722a/summary.json)。慢速录像（200ms slowMo + 关键步骤停留，17.28 秒）见 `output/midscene/inbox-touch-slow/`（`.webm` 与转码 `.mp4`），批量确认弹窗内容清晰可读。前端 lint 0 错误（既有 `editor-preview.tsx` Fast Refresh 警告 1 条）、`pnpm build` 通过。全量 Vitest 573/576，3 项失败均为无关的 `DisciplineConfigPage.test.tsx` 默认 10 秒超时；该文件以 60 秒单项上限复验 21/21，通过，全量门禁默认时限仍未一次全绿。`$modern-web-guidance`、`$impeccable`、`$unslop` 技能在本环境不可用，按 Design.md 手工核对焦点可见（录像中“查看全部”有清晰焦点框）、ARIA 属性、reduced-motion 与触控目标尺寸。未部署、未提交、未做目标环境真实账号验收。
+>
+> **2026-11-22 消息中心增强（本地代码，未部署、未提交）**：按参考图与 Novu `headless-mode`/issue #10817 的缓存同步教训扩展本人收件箱。后端 `GET /api/v1/notifications` 新增 `from`/`to`（北京时间日历日，止日含当天）、`sort`（`newest`/`oldest`/`unread-first`/`read-first`），过滤与排序在数据库内先于分页，四种排序均以 `id` 作稳定 tie-break；响应附 `page`/`pageSize`/`sort` 并保留全局未读数与冻结边界。`POST /notifications/read` 在原有 `{id,all}` 外支持 `{ids:[...]}`，先在事务内锁定并核对全部编号，混入他人编号整批 404 回滚，重复提交幂等，响应返回本次真正翻转的 `changed` 数。前端顶栏铃铛改为 hover/focus 弹出近期消息面板，可移入、Escape 关闭、点击/触屏切换、含“查看全部”，悬停只读不写已读；完整中心加入日期范围、类型、排序、逐条与“本页全选”复选框、选中批量已读二次确认，筛选/翻页即清空选择以防误操作。`useMarkInboxRead` 逐个遍历 `['inbox']` 缓存桶，用服务端 `changed` 同步扣减所有桶的未读数，再失效重取，避免 Novu #10817 那种「列表桶更新、计数桶漂移」。修复浏览器实测发现的两处缺陷：顶栏 `backdrop-filter` 形成层叠上下文导致面板被正文遮挡（给 `.admin-header` 显式定位与 z-index）；Escape 仅在焦点位于组件内生效（改为 document 级监听并在关闭后把焦点还给铃铛）。
+>
+> **本轮验证**：一次性 PostgreSQL 迁移后 `TestInboxFilterSortAndBatchPostgres` 四个子测试全部通过（日期含止日、类别与稳定排序、先过滤后分页、越权原子失败与幂等）。后端 `gofmt` + `go vet ./...` + `go test ./...` 通过。前端聚焦 16/16，lint 0 错误（既有 `editor-preview.tsx` Fast Refresh 警告 1 条），`pnpm build` 通过。全量 Vitest 569/571，2 项失败仍为无关的 `DisciplineConfigPage.test.tsx` 默认 10 秒超时；该文件以 60 秒单项上限复验 21/21，全量门禁默认时限仍未全绿。隔离模式 `BROWSER_DB_MODE=native BROWSER_SUITE=midscene-inbox-enhanced python3 server/scripts/verify-browser.py` 真实 API 1/1 通过，慢速录像（180ms slowMo，5.3 秒）见 `output/midscene/inbox-enhanced/`，覆盖铃铛悬停/移入/Escape/触屏、服务端筛选排序分页、日期范围和批量越权原子失败与幂等；运行摘要 `output/playwright/8abf5205b9/summary.json`。本轮曾三次浏览器失败：`recordToReport` 在导航中注入样式超时（改为纯 DOM 断言）、Ant Design 登录按钮渲染为“登 录”导致选择器不匹配（改 `button[type=submit]`）、上述 z-index 与 Escape 焦点问题；均已修正后重跑通过。未部署、未提交、未做目标环境真实账号验收；全量 Vitest 默认时限仍未一次全绿。
+>
+> **2026-11-22 消息中心设计优化复审修复（本地代码，未部署，页面独立审查通过）**：按主审查四项发现修改 `web/src/pages/notifications/InboxPage.tsx`：①加载/失败时页头与工具栏显示“未读数加载中…/总数加载中…”或“未读数读取失败/总数不可用”，不再把未读数和总数兜底为 0；②读掉“仅看未读”末页最后一项后，在渲染期把越界页码校正到最后一个有效页并重新取数，避免 items 为空且分页消失；③“全部标为已读”改为先弹出 Modal 二次确认，写明“覆盖本人全部 N 条未读消息，包含其他类别，不受当前筛选影响”，并保留原服务端全局范围；④消息时间加“消息时间：”前缀，授权正文中的 `起始时间/开始日期/截止时间` 解析为“授权生效/授权截止”日期片段，两类日期可清楚区分。`InboxPage.test.tsx` 新增 5 项回归，聚焦 9/9 通过。
+>
+> **最终复核**：批量已读打开确认框时冻结消息编号上限和未读数。390px 截图已等待侧栏折叠稳定，消息及按钮可见。最新代码已在一次性 PostgreSQL、MinIO、真实 API 和 Chrome 重跑正向及越权断言（1/1），[运行摘要](../output/playwright/f29add9b9e/summary.json)。末次通知页单测 10/10，全量前端 563/565，两项处分配置测试超时。下一项为学办定稿生成处分事项；首次跨越多个档位是否补建中间事项待业务确认。
+>
+
+> **参考取舍**：实际查看 Dribbble [Juan Lizcano · Notification center](https://dribbble.com/shots/26073677-Notification-center) 与 [Antsupova Daria · Notification Center UI](https://dribbble.com/shots/27592596-Notification-Center-UI)。前者的按日分组、状态图标、正文内嵌面板与右对齐弱化时间可借鉴；本页不引入日期分组和状态图标，因为现有列表已有类别标题/未读标签，且后端消息没有结构化状态字段。后者的分类 Tab 未读计数和时间旁的类别标签有参考价值；本页沿用 Ant Design Select + Switch，API 只提供本人全局未读数、没有分类计数，因此用确认弹窗明确全局范围而不伪造分类数字。按 `$impeccable` 执行 context 与 craft-floor 检查；本运行环境未提供 `$modern-web-guidance` 与 `$unslop` 技能，按项目 Design.md 与 Web 平台实践手工核对，无模板化视觉与冗余文案。
+>
+> **本轮验证**：前端 lint 0 错误（既有 `editor-preview.tsx` Fast Refresh 警告 1 条）；`pnpm build` 通过；Playwright DOM-only 4/4 通过且不调用 AI 断言，故不消耗额度：正向、反向失败重试、末页回退、宽窄屏与键盘焦点。慢速视频 4 段见 `output/midscene/inbox-review-v2/`，截图 20 张见 `output/midscene/inbox-review-shots/`；1440/700/390px 无横向溢出，卡片内按钮聚焦时整卡有可见描边。前一轮全量 Vitest 已结束于 549/555，6 项超时分别聚焦复验 3/3 与 3/3，全量门禁仍未全绿；本轮全量 Vitest 已结束：562/564 通过，2 项失败均为无关的处分配置页 10 秒默认时限超时；该文件以 60 秒单项上限复验 21/21 通过，全量门禁仍未一次全绿。未提交、未部署、未推进阶段四，由主代理独立审查后决定。
+>
+
+> **2026-11-22 本人消息中心（本地实现）**：迁移 068 新增账号收件箱。部门归属、组织角色、系统角色及个人授权规则的实际变更在业务事务内直接生成站内消息。顶栏及 `/notifications` 支持未读数、分类、分页、单条与全部已读。消息 API 从当前会话绑定接收人。部门模板调整继续遵守授予快照规则。一次性 PostgreSQL、MinIO、真实 API 和 Chrome 已验证角色变更、个人授权新增/调整/撤销、重复保存、冲突和跨账号隔离。独立故障注入验证更新失败后保留未读及重试。目标环境尚未部署或进行真实账号验收。下一步在处分事项模型完成后接入业务通知；自动通过期限从记录进入待处理状态起算，已确认或已延迟即退出自动确认队列，通知投递和阅读独立。
+
+
+> **首批通知验收**：隔离环境执行 `BROWSER_DB_MODE=native BROWSER_SUITE=midscene-inbox INBOX_DOM_ONLY=1 python3 server/scripts/verify-browser.py`。真实 API 变更后核对五条本人消息（系统角色、部门与组织角色、授权新增、调整及撤销），覆盖旧版本 409、重复保存、匿名 401、他人消息 404 和已读持久化。故障注入视频使用模拟 API。Midscene 生成关键帧报告；远端视觉断言服务连接超时，两段视频以 Chrome 页面断言验证。消息更新及已读状态都在 PostgreSQL 中保存，本批无需后台投递服务或模板初始化。Go vet/test、前端构建通过，lint 有 1 条既有警告。全量 Vitest 549/555，管理页面与处分配置共 6 项失败，分别聚焦复验 3/3（默认时限）、3/3（60 秒单项时限），全量门禁仍未全绿。
+
 > **2026-11-19 处分管理（本地实现，待部署及真实角色验收）**：正式侧边栏「处分管理」统一承载「学期违纪台账」和「处分配置」。台账使用每周最新学办定稿及当前发布规则，按学期查询、核对个人来源和导出 Excel。查看与导出分别授权。原系统配置地址跳转到新模块。台账默认选择当前工作周所属学期，按学年名单提供年级、专业、班级选项；文本搜索限定姓名和学号。表头分基本信息、原始日常检查、组合累计项，右侧固定查看明细。待处分及处分归档尚未接入。
 >
 > **本轮验证**：临时 PostgreSQL 回归覆盖定稿、学号查询、班级排除和 Excel 回读。独立 Chrome 157 联调从真实登录、旧地址跳转到定稿学生明细和 Excel 下载；三种菜单权限另用虚构接口验证。表体实测 13px 字号、32px 行高。后端 vet/test、前端构建及 lint 已执行，lint 有 1 条既有警告。全量 Vitest 549/553，4 项处分配置用例超过默认时限；该文件以 60 秒单项上限复验 21/21。新增台账响应契约单测 2/2。下一步是目标环境加载新 API 后按实际授权账号核验，再接入待处分事项。
@@ -1116,3 +1155,6 @@ Task 17/18 的五类隔离浏览器最终重跑分别为到课率 `ca694f943b`�
 - **其他 MVP 待确认**：账号删除语义（见[决策简报](plans/2026-10-25-account-deletion-semantics.md)）、同一人可否创建后审核/定稿、发布渠道和归档时点等仍需业务决定。
 - **既有流程确认**：退回重提沿用同一提交、递增版本并保留修订；导入整批回滚仅适用于未提交且未锁定的 DRAFT，保留源文件、批次和审计。旧历史记录不替代当前环境核查。
 - **不重复扩张授权**：历史清库、删除测试账号或迁移授权仅用于当时明确范围；本次文档整理不执行这些操作。
+
+> **2026-11-22 消息中心详情过渡（本地代码，未部署）**：`InboxPage` 桌面列表/详情改为 240ms 网格轨道过渡，打开后稳定 50/50；详情栏收起时保留布局占位但以 `inert`/`aria-hidden` 退出焦点树，A→B 仅消息正文淡入，避免整表重放动画。手机断点保持单栏即时切换，`prefers-reduced-motion` 禁用所有相关动画。保留原键盘 Escape/焦点返回、复选交互及读写分离。Impeccable/unslop 页面扫描未报告确定性设计问题；按项目 Design.md 保持浅色管理面板与边框层级。
+> **验证**：聚焦 `InboxPage.test.tsx` 21/21；隔离真实 API + 一次性 PostgreSQL/MinIO + Vite + Chrome 慢速录像 `BROWSER_DB_MODE=native BROWSER_SUITE=midscene-inbox-detail python3 server/scripts/verify-browser.py` 1/1 通过，覆盖 808/390px、读写分离、键盘、批量、筛选翻页与错误路径，截图在 `output/midscene/inbox-detail-shots/`，摘要 `output/playwright/64effe11c8/summary.json`。`pnpm lint` 0 错误、1 条既有 Fast Refresh 警告；`pnpm build`（含 `tsc -b`）通过，保留大包提示。全量 Vitest 因本机有其他并行 Vitest 进程、运行约数分钟无进展而中止，不能记为通过。Node 24.22.1，实际 pnpm 10.26.0 与仓库声明 11.7.0 不符。目标环境未部署，未消耗 admin 演示数据。

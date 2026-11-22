@@ -637,3 +637,25 @@ func TestModuleTermsAndAssignedFacts(t *testing.T) {
 	}
 	t.Fatal("disabled duty removed assigned fact")
 }
+
+func TestDisciplineTemplateRespectsDepartmentScopeForAnyOrganizationRole(t *testing.T) {
+	const view = "DISCIPLINE_ARCHIVE_VIEW"
+	const export = "DISCIPLINE_ARCHIVE_EXPORT"
+	department := AccessProfile{DepartmentID: "example", OrganizationRoleCode: "MEMBER", DisciplineScope: []string{view}, DefaultDisciplineActions: []string{view, export}}
+	profile := AccessProfile{SystemRole: SystemRoleMember, Departments: []AccessProfile{department}}
+	result, err := NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed(view, Scope{}) || result.Allowed(export, Scope{}) {
+		t.Fatal("archive view and export must respect the live department responsibility")
+	}
+	profile.Departments[0].DisciplineScope = nil
+	result, err = NewService(&memoryRepository{profile: profile}).Effective(context.Background(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed(view, Scope{}) {
+		t.Fatal("disabled department must not grant archive access")
+	}
+}

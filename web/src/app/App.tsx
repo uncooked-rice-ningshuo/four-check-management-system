@@ -1,8 +1,11 @@
+import { DisciplineArchivePage } from '../pages/discipline/DisciplineArchivePage'
+import { InboxPage } from '../pages/notifications/InboxPage'
 import type { ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AcademicCalendarPage } from '../pages/admin/AcademicCalendarPage'
 import { AccountProfilePage } from '../pages/admin/AccountProfilePage'
 import { AccountSecurityPage } from '../pages/admin/AccountSecurityPage'
+import { DisciplineReviewPage } from "../pages/discipline/DisciplineReviewPage"
 import { SemesterLedgerPage } from '../pages/discipline/SemesterLedgerPage'
 import { DisciplineConfigPage } from '../pages/admin/DisciplineConfigPage'
 import { OrganizationConfigPage } from '../pages/admin/OrganizationConfigPage'
@@ -44,9 +47,12 @@ export default function App() {
 		<Route path="/change-password" element={protectedPage(<ChangePasswordPage />)} />
 		<Route element={protectedPage(<AppLayout />)}>
 			<Route index element={<HomePage />} />
-			<Route path="discipline/config" element={adminOrSystemAdmin(<DisciplineConfigPage mode="view" />)} />
-      <Route path="discipline/config/edit" element={adminOrSystemAdmin(<DisciplineConfigPage mode="edit" />)} />
+			<Route path="discipline/config" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_VIEW"><DisciplineConfigPage mode="view" /></EffectivePermissionRoute>} />
+      <Route path="discipline/config/edit" element={<EffectivePermissionRoute action="DISCIPLINE_RULE_EDIT"><DisciplineConfigPage mode="edit" /></EffectivePermissionRoute>} />
+      <Route path="notifications" element={<InboxPage />} />
+      <Route path="discipline/archive" element={<EffectivePermissionRoute action="DISCIPLINE_ARCHIVE_VIEW"><DisciplineArchivePage /></EffectivePermissionRoute>} />
       <Route path="discipline/ledger" element={<EffectivePermissionRoute action="DISCIPLINE_LEDGER_VIEW"><SemesterLedgerPage /></EffectivePermissionRoute>} />
+      <Route path="discipline/review" element={<EffectivePermissionRoute action={['DISCIPLINE_CASE_CONFIRM', 'DISCIPLINE_CASE_VIEW']}><DisciplineReviewPage /></EffectivePermissionRoute>} />
 			<Route path="admin" element={<Outlet />}>
 				<Route index element={adminOrSystemAdmin(<Navigate to="/" replace />)} />
 				<Route path="registrations" element={superAdminOnly(<RegistrationReviewPage />)} />

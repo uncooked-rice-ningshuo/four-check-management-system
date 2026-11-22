@@ -1,0 +1,2 @@
+html, body, #root { height: 100%; }
+.harness-debug [data-bell-debug] { outline: 1px dashed rgba(37, 99, 235, .4); }

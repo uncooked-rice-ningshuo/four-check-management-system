@@ -163,7 +163,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
     const groupIndex = Number(issue.path.match(/groups\[(\d+)\]/)?.[1] ?? -1)
     const tierIndex = Number(issue.path.match(/tiers\[(\d+)\]/)?.[1] ?? -1)
     const field = issue.path.split('.').at(-1)
-    const fieldNames: Record<string, string> = { name: '处分名称', lower: '起始值', upper: '结束值', clause: '依据条款', teacherConfirmationRequired: '老师确认方式', tiers: '处分档位', terms: '检查项归属', unit: '累计单位', factor: '换算系数', operator: '运算方式' }
+    const fieldNames: Record<string, string> = { name: '处分名称', lower: '起始值', upper: '结束值', clause: '依据条款', teacherConfirmationRequired: '人工确认方式', tiers: '处分档位', terms: '检查项归属', unit: '累计单位', factor: '换算系数', operator: '运算方式' }
     const groupName = groups[groupIndex]?.name || '累计项'
     const tierName = groups[groupIndex]?.tiers[tierIndex]?.name
     return `${groupName}${tierName ? ` · ${tierName}` : ''} · ${fieldNames[field ?? ''] ?? '配置项'}：${issue.message}`
@@ -563,7 +563,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
 
   return <section className={`discipline-config-page${mode === 'view' && workspace === 'editor' ? ' discipline-config-page--view' : ''}`}>
     {contextHolder}
-    <header className="page-heading discipline-heading">
+    <header className="attendance-page-heading page-heading discipline-heading">
       <div>
         <Typography.Title level={2}>处分配置</Typography.Title>
         {current.data?.current?.publishedAt && <Typography.Text className="discipline-heading-meta">当前生效配置 · {dateText(current.data.current.publishedAt)}</Typography.Text>}
@@ -602,7 +602,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
             { title: '成员', render: (_: unknown, group: DisciplineGroup) => group.terms.map((term) => term.inspectionTypeName).join('、') },
             { title: '单位', dataIndex: 'unit' },
             { title: '累计公式', render: (_: unknown, group: DisciplineGroup) => group.terms.map((term, index) => `${index ? (term.operator === '+' ? '+' : '−') + ' ' : ''}${term.inspectionTypeName} × ${term.factor} ${sourceUnitForType(term.inspectionTypeId)}`).join(' ') },
-            { title: '处分档位', render: (_: unknown, group: DisciplineGroup) => group.tiers.map((tier) => `${tier.name} [${tier.lower}, ${tier.upper ?? '无上限'}) ${tier.clause} · ${tier.teacherConfirmationRequired ? '老师确认' : '免老师确认'}`).join('；') },
+            { title: '处分档位', render: (_: unknown, group: DisciplineGroup) => group.tiers.map((tier) => `${tier.name} [${tier.lower}, ${tier.upper ?? '无上限'}) ${tier.clause} · ${tier.teacherConfirmationRequired ? '人工确认' : '免人工确认'}`).join('；') },
           ]} />
         </Card> : null
       })()}
@@ -620,7 +620,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
                 <tbody>{group.tiers.map((tier) => <tr key={tier.code}>
                   <th scope="row"><span>{tier.name || '未填写名称'}</span><small>依据：{tier.clause.trim() || '未填写依据'}</small></th>
                   <td>{`[${tier.lower}, ${tier.upper ?? '无上限'}) ${group.unit || ''}`}</td>
-                  <td className={tier.teacherConfirmationRequired ? 'discipline-view-confirm-required' : undefined}>{tier.teacherConfirmationRequired ? '需要老师确认' : '免老师确认'}</td>
+                  <td className={tier.teacherConfirmationRequired ? 'discipline-view-confirm-required' : undefined}>{tier.teacherConfirmationRequired ? '需要人工确认' : '免人工确认'}</td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -719,7 +719,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
                   const isEditing = tierTextEdit?.groupKey === selectedGroup.key && tierTextEdit.code === tier.code && tierTextEdit.field === 'clause'
                   return <Form.Item {...fieldError(path)}><div className="discipline-tier-text-cell">{isEditing ? <><Input.TextArea id={fieldControlId(path)} aria-label={`${tier.name}依据条款`} autoSize={{ minRows: 2, maxRows: 4 }} value={tierTextEdit.value} onChange={(event) => setTierTextEdit({ ...tierTextEdit, value: event.target.value })} /><Space size={4}><Button size="small" type="primary" onClick={() => saveTierText(selectedGroup, index)}>保存</Button><Button size="small" onClick={() => setTierTextEdit(undefined)}>取消</Button></Space></> : <Button className="discipline-tier-read-field discipline-tier-clause-field" type="text" disabled={!editable} onClick={() => setTierTextEdit({ groupKey: selectedGroup.key, code: tier.code, field: 'clause', value: tier.clause })}>{tier.clause || '点击填写处分依据'}</Button>}</div></Form.Item>
                 } },
-                { title: '需要老师确认', width: 145, render: (_: unknown, tier: DisciplineTier, index: number) => <div className="discipline-confirm-switch"><Switch checkedChildren="是" unCheckedChildren="否" aria-label={`${tier.name}需要老师确认`} disabled={!editable} checked={tier.teacherConfirmationRequired} onChange={(teacherConfirmationRequired) => setTierField(selectedGroup, index, { teacherConfirmationRequired }, 'teacherConfirmationRequired')} /></div> },
+                { title: '需要人工确认', width: 145, render: (_: unknown, tier: DisciplineTier, index: number) => <div className="discipline-confirm-switch"><Switch checkedChildren="是" unCheckedChildren="否" aria-label={`${tier.name}需要人工确认`} disabled={!editable} checked={tier.teacherConfirmationRequired} onChange={(teacherConfirmationRequired) => setTierField(selectedGroup, index, { teacherConfirmationRequired }, 'teacherConfirmationRequired')} /></div> },
                 { title: '操作', width: 82, render: (_: unknown, _tier: DisciplineTier, index: number) => <Button danger type="link" disabled={!editable || selectedGroup.tiers.length === 1} onClick={() => removeTier(selectedGroup, index)}>移除</Button> },
               ]} /></div>
             </Card>}
@@ -749,7 +749,7 @@ export function DisciplineConfigPage({ mode = 'edit' }: { mode?: 'view' | 'edit'
                 <div><Typography.Text className="discipline-summary-field-label">名称</Typography.Text><Typography.Text strong>{tier.name || '未填写名称'}</Typography.Text></div>
                 <div><Typography.Text className="discipline-summary-field-label">累计区间</Typography.Text><Typography.Text>[{tier.lower}, {tier.upper ?? '无上限'}) {group.unit}</Typography.Text></div>
                 <div><Typography.Text className="discipline-summary-field-label">依据</Typography.Text><Typography.Text>{tier.clause.trim() || '未填写依据'}</Typography.Text></div>
-                <div><Typography.Text className="discipline-summary-field-label">确认方式</Typography.Text><Tag color={tier.teacherConfirmationRequired ? 'gold' : 'default'}>{tier.teacherConfirmationRequired ? '需要老师确认' : '免老师确认'}</Tag></div>
+                <div><Typography.Text className="discipline-summary-field-label">确认方式</Typography.Text><Tag color={tier.teacherConfirmationRequired ? 'gold' : 'default'}>{tier.teacherConfirmationRequired ? '需要人工确认' : '免人工确认'}</Tag></div>
               </div>)}</div>
             </section>
           </Card>)}

@@ -936,6 +936,15 @@ WHERE wr.id=$1::uuid FOR UPDATE OF wr`, reportID).Scan(&current.ID, &current.Sem
 		action, strings.TrimSpace(input.Comment), actorID, updatedAt); err != nil {
 		return reporting.ReportState{}, err
 	}
+	if finalized {
+		// Serialize different weeks so the next statement sees other committed finals for this semester.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 69))`, current.SemesterID); err != nil {
+			return reporting.ReportState{}, err
+		}
+		if _, err := tx.Exec(ctx, semesterDisciplineAmountsSQL+generateDisciplineCasesSQL, current.SemesterID, versionID); err != nil {
+			return reporting.ReportState{}, err
+		}
+	}
 	if err := insertAuditTx(ctx, tx, metadata, audit.Entry{
 		Action: audit.ActionReportWorkflowChanged, ResourceType: "weeklyReport", ResourceID: reportID,
 		Before: map[string]any{"status": current.Status, "rowVersion": current.RowVersion, "versionNo": current.VersionNo},

@@ -952,3 +952,28 @@ func TestPhaseOneRepositoriesAgainstPostgres(t *testing.T) {
 		t.Fatalf("rules=%+v err=%v", rules, err)
 	}
 }
+
+func TestImportedDraftRollbackUsesOriginalDepartment(t *testing.T) {
+	ctx := context.Background()
+	db := openTestPostgres(t)
+	input := seedAttendanceConfirmation(t, db, false).input
+	confirmed, err := db.ConfirmAttendanceImport(ctx, input, confirmationMutation(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := &workflowPermissions{rules: []permission.EffectivePermission{{
+		Action: permission.ActionInspectionManage, Effect: permission.EffectAllow,
+		SourceDepartmentID: "10000000-0000-0000-0000-000000000003",
+	}}}
+	service := importjob.NewRollbackService(db, grant)
+	call := importjob.RollbackInput{BatchID: input.BatchID, Version: confirmed.Version, Reason: "隔离回归"}
+	actor := inspection.ManualActor{ID: input.Scope.ActorID}
+	if _, err := service.Rollback(ctx, actor, call, input.AuditMetadata); !errors.Is(err, importjob.ErrBatchNotFound) {
+		t.Fatalf("foreign management grant: %v", err)
+	}
+	grant.rules[0].SourceDepartmentID = input.Scope.DepartmentID
+	result, err := service.Rollback(ctx, actor, call, input.AuditMetadata)
+	if err != nil || result.RolledBackRows != 1 {
+		t.Fatalf("same-department rollback: %+v, %v", result, err)
+	}
+}

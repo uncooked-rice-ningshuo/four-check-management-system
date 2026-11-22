@@ -48,7 +48,8 @@ func (p *Postgres) Close() { p.Pool.Close() }
 func (p *Postgres) Ready(ctx context.Context) error {
 	var ready bool
 	err := p.Pool.QueryRow(ctx, `SELECT
-		to_regclass('public.teaching_buildings') IS NOT NULL
+		to_regclass('public.account_notifications') IS NOT NULL
+        AND to_regclass('public.teaching_buildings') IS NOT NULL
 		AND to_regclass('public.morning_exercise_details') IS NOT NULL
 		AND to_regclass('public.late_return_details') IS NOT NULL
 		AND to_regclass('public.dorm_hygiene_details') IS NOT NULL
@@ -344,6 +345,10 @@ func scanAccount(r row) (auth.Account, error) {
 func (p *Postgres) UpdateAccount(ctx context.Context, account auth.Account, mutation audit.Mutation) (auth.Account, error) {
 	var updated auth.Account
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
+		var previousRole string
+		if err := tx.QueryRow(ctx, `SELECT system_role FROM accounts WHERE id=$1 FOR UPDATE`, account.ID).Scan(&previousRole); err != nil {
+			return err
+		}
 		tag, execErr := tx.Exec(ctx, `UPDATE accounts SET login_name=$2,student_no=$3,name=$4,system_role=$5,
 			session_version=session_version+1,updated_at=now() WHERE id=$1 AND NOT is_super_admin AND session_version=$6`, account.ID, account.LoginName, account.StudentNo, account.Name, account.SystemRole, account.SessionVersion)
 		if execErr == nil && tag.RowsAffected() == 0 {
@@ -354,6 +359,15 @@ func (p *Postgres) UpdateAccount(ctx context.Context, account auth.Account, muta
 		}
 		if execErr = revokeAccountSessionsTx(ctx, tx, account.ID); execErr != nil {
 			return execErr
+		}
+		if previousRole != account.SystemRole {
+			role := "普通成员"
+			if account.SystemRole == "ADMIN" {
+				role = "管理员"
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body) VALUES($1,'organization',$2)`, account.ID, "系统角色已调整为"+role+"，即时生效。"); err != nil {
+				return err
+			}
 		}
 		updated, execErr = scanAccount(tx.QueryRow(ctx, accountSelect+` WHERE id=$1`, account.ID))
 		return execErr
@@ -803,13 +817,26 @@ func (p *Postgres) CreateRule(ctx context.Context, value permission.Rule, mutati
 		if err != nil {
 			return err
 		}
-		return invalidatePermissionSessions(ctx, tx, value.AccountID)
+		if err := invalidatePermissionSessions(ctx, tx, value.AccountID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission',$2,$3)`, value.AccountID, permissionMessage(value), value.Action)
+		return err
 	})
 	return value, err
 }
 func (p *Postgres) UpdateRule(ctx context.Context, value permission.Rule, mutation audit.Mutation) (permission.Rule, error) {
 	err := p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
 		if err := validateRangeClasses(ctx, tx, value.Ranges); err != nil {
+			return err
+		}
+		// Compare the stored values under the rule lock so a repeated save creates no new message.
+		const ruleState = `SELECT (to_jsonb(r)-'updated_at'-'note')::text FROM user_permission_rules r WHERE id=$1 AND account_id=$2 FOR UPDATE`
+		var before, after string
+		if err := tx.QueryRow(ctx, ruleState, value.ID, value.AccountID).Scan(&before); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return permission.ErrInvalidRule
+			}
 			return err
 		}
 		tag, err := tx.Exec(ctx, `UPDATE user_permission_rules SET action=$3,effect=$4,inspection_type_id=NULLIF($5,'')::uuid,source_department_id=NULLIF($6,'')::uuid,mode=$7,operation_ranges=$8,starts_at=$9,ends_at=$10,note=$11,enabled=$12,updated_at=now() WHERE id=$1 AND account_id=$2`, value.ID, value.AccountID, value.Action, value.Effect, value.Scope.InspectionTypeID, value.SourceDepartmentID, value.Mode, value.Ranges, value.StartsAt, value.EndsAt, value.Note, value.Enabled)
@@ -819,20 +846,54 @@ func (p *Postgres) UpdateRule(ctx context.Context, value permission.Rule, mutati
 		if tag.RowsAffected() != 1 {
 			return permission.ErrInvalidRule
 		}
-		return invalidatePermissionSessions(ctx, tx, value.AccountID)
+		if err := invalidatePermissionSessions(ctx, tx, value.AccountID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, ruleState, value.ID, value.AccountID).Scan(&after); err != nil {
+			return err
+		}
+		if before == after {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission',$2,$3)`, value.AccountID, permissionMessage(value), value.Action)
+		return err
 	})
 	return value, err
 }
 
 func (p *Postgres) DeleteRule(ctx context.Context, accountID, ruleID string, mutation audit.Mutation) error {
 	return p.withAudit(ctx, mutation.Metadata, mutation.Entry, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `DELETE FROM user_permission_rules WHERE id=$1 AND account_id=$2`, ruleID, accountID); err != nil {
+		var action string
+		err := tx.QueryRow(ctx, `DELETE FROM user_permission_rules WHERE id=$1 AND account_id=$2 RETURNING action`, ruleID, accountID).Scan(&action)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		return invalidatePermissionSessions(ctx, tx, accountID)
+		if err := invalidatePermissionSessions(ctx, tx, accountID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body,permission_action) VALUES($1,'permission','个人授权规则已撤销，即时生效。',$2)`, accountID, action)
+		return err
 	})
 }
 
+func permissionMessage(rule permission.Rule) string {
+	description := "允许"
+	if rule.Effect == "DENY" || rule.Mode == "DISABLE" {
+		description = "限制"
+	}
+	if !rule.Enabled {
+		description = "停用"
+	}
+	zone := time.FixedZone("UTC+8", 8*60*60)
+	message := fmt.Sprintf("个人授权规则已更新（%s）。起始时间 %s", description, rule.StartsAt.In(zone).Format("2006-01-02 15:04"))
+	if rule.EndsAt != nil {
+		message += "，截止时间 " + rule.EndsAt.In(zone).Format("2006-01-02 15:04")
+	}
+	return message + "（北京时间）。"
+}
 func invalidatePermissionSessions(ctx context.Context, tx pgx.Tx, accountID string) error {
 	if _, err := tx.Exec(ctx, `UPDATE accounts SET session_version=session_version+1,updated_at=now() WHERE id=$1`, accountID); err != nil {
 		return err

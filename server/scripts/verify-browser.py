@@ -288,6 +288,90 @@ INSERT INTO dictionary_items(id,type_id,value,label) SELECT '{uuid.uuid4()}',id,
         vite.write_text('import { createServer } from ' + json.dumps((ROOT / 'web/node_modules/vite/dist/node/index.js').as_uri()) + ';\nconst server=await createServer(' + json.dumps({'configFile': str(ROOT / 'web/vite.config.ts'), 'root': str(ROOT / 'web'), 'server': {'host': '127.0.0.1', 'port': web_port, 'strictPort': True, 'proxy': {'/api': f'http://127.0.0.1:{api_port}'}}}) + '); await server.listen();\n')
         start(['node', str(vite)], 'vite', ROOT / 'web')
         wait_url(f'http://127.0.0.1:{web_port}/login')
+        if ENV.get('BROWSER_SUITE') == 'midscene-discipline-permissions':
+            member_id = str(uuid.uuid4())
+            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{member_id}','matrix-member','matrix-member','范围验收委员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+""".encode())
+            browser_env = dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}', MATRIX_TEST_PASSWORD=password, MATRIX_MEMBER_ID=member_id, MATRIX_GRADE_ID=ids['grade'])
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'discipline-permissions.spec.ts', '--grep', '真实服务', '--output',
+                            '../output/midscene/discipline-matrix-live', '--trace=off'],
+                           cwd=ROOT / 'web', env=browser_env, check=True)
+            report.update(status='passed', cases=['部门处分职责、角色矩阵、重载与归档鉴权'])
+            raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'midscene-inbox':
+            recipient = 'f0000000-0000-4000-8000-000000000068'
+            run(sql_command('-v','ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{recipient}','demo-recipient','demo-recipient','演示成员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+""".encode())
+            browser_env = dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                               INBOX_ACCOUNT=recipient, INBOX_PASSWORD=password)
+            subprocess.run(['node_modules/.bin/playwright','test','-c','playwright.midscene.config.ts',
+                            'inbox-live.spec.ts','--output','../output/midscene/inbox-live','--trace=off'],
+                           cwd=ROOT / 'web',env=browser_env,check=True)
+            report.update(status='passed',cases=['真实账号角色变更、版本冲突与消息收件隔离'])
+            raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'midscene-inbox-enhanced':
+            # 一次性库内的虚构收件人与他人账号，日期取北京时间 11-21/23/24，止日含当天。
+            recipient = 'f0000000-0000-4000-8000-000000000068'
+            foreign = 'f0000000-0000-4000-8000-000000000069'
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{recipient}','demo-recipient','demo-recipient','演示成员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{foreign}','demo-foreign','demo-foreign','其他成员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+INSERT INTO account_notifications(account_id,category,body,created_at,read_at) VALUES
+('{recipient}','organization','较早的部门变更',TIMESTAMPTZ '2026-11-21 01:00:00+00',NULL),
+('{recipient}','permission','当天早间的授权变更\n部门：学习部\n角色：指导教师\n动作：授权管理\n检查类型：宿舍卫生、晚归\n操作范围：2026级计算机科学与技术专业1班\n起始时间：2026-11-23 09:00\n截止时间：2027-06-30 23:59',TIMESTAMPTZ '2026-11-23 01:00:00+00',NULL),
+('{recipient}','organization','当天夜间的部门变更',TIMESTAMPTZ '2026-11-23 15:00:00+00',NULL),
+('{recipient}','permission','已读的授权变更',TIMESTAMPTZ '2026-11-24 01:00:00+00',TIMESTAMPTZ '2026-11-24 02:00:00+00'),
+('{foreign}','organization','他人消息不应被修改',TIMESTAMPTZ '2026-11-23 01:00:00+00',NULL);
+""".encode())
+            browser_env = dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                               INBOX_ACCOUNT=recipient, INBOX_PASSWORD=password,
+                               INBOX_FOREIGN_ACCOUNT=foreign)
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'inbox-enhanced.spec.ts', '--output', '../output/midscene/inbox-enhanced', '--trace=off'],
+                           cwd=ROOT / 'web', env=browser_env, check=True)
+            report.update(status='passed', cases=['顶栏铃铛悬停/触屏/Escape、日期与类型筛选、排序分页、批量已读越权原子失败与幂等'])
+            raise SystemExit(0)
+        if ENV.get('BROWSER_SUITE') == 'midscene-inbox-detail':
+            # 同一批虚构消息外追加 25 条，覆盖 808px 分栏、390px 单栏与翻页不串旧记录。
+            recipient = 'f0000000-0000-4000-8000-000000000068'
+            foreign = 'f0000000-0000-4000-8000-000000000069'
+            run(sql_command('-v', 'ON_ERROR_STOP=1'), input=f"""
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{recipient}','demo-recipient','demo-recipient','演示成员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+INSERT INTO accounts(id,login_name,student_no,name,password_hash,status,account_kind,system_role)
+SELECT '{foreign}','demo-foreign','demo-foreign','其他成员',password_hash,'ACTIVE','PERSON','MEMBER'
+FROM accounts WHERE login_name='browser-admin';
+INSERT INTO account_notifications(account_id,category,body,created_at,read_at) VALUES
+('{recipient}','organization','较早的部门变更',TIMESTAMPTZ '2026-11-21 01:00:00+00',NULL),
+('{recipient}','permission','当天早间的授权变更',TIMESTAMPTZ '2026-11-23 01:00:00+00',NULL),
+('{recipient}','organization','当天夜间的部门变更',TIMESTAMPTZ '2026-11-23 15:00:00+00',NULL),
+('{recipient}','permission','已读的授权变更',TIMESTAMPTZ '2026-11-24 01:00:00+00',TIMESTAMPTZ '2026-11-24 02:00:00+00'),
+('{foreign}','organization','他人消息不应被修改',TIMESTAMPTZ '2026-11-23 01:00:00+00',NULL);
+INSERT INTO account_notifications(account_id,category,body,created_at,read_at)
+SELECT '{recipient}','organization','分页消息 '||n,
+       TIMESTAMPTZ '2026-11-22 01:00:00+00' + (n || ' minutes')::interval, NULL
+FROM generate_series(1,25) n;
+""".encode())
+            browser_env = dict(os.environ, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}',
+                               INBOX_ACCOUNT=recipient, INBOX_PASSWORD=password,
+                               INBOX_FOREIGN_ACCOUNT=foreign)
+            subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',
+                            'inbox-detail.spec.ts', '--output', '../output/midscene/inbox-detail', '--trace=off'],
+                           cwd=ROOT / 'web', env=browser_env, check=True)
+            report.update(status='passed', cases=['808/390px 分栏详情、读写分离、键盘与批量互不干扰、筛选翻页不串旧记录、越权与失败重试'])
+            raise SystemExit(0)
         config = temp / 'cli.json'
         config.write_text(json.dumps({'browser': {'browserName': 'chromium', 'launchOptions': {'channel': 'chrome', 'headless': True}, 'contextOptions': {'viewport': {'width': 1440, 'height': 1000}}}, 'outputDir': str(OUTPUT)}))
         cli('open', f'http://127.0.0.1:{web_port}/login', '--config', str(config))

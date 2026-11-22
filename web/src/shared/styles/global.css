@@ -392,16 +392,20 @@ body {
 .attendance-records-table .ant-table-tbody > tr > td {
   font-variant-numeric: tabular-nums;
 }
-.attendance-records-table .ant-table-tbody > tr.inspection-record-row--mine > td {
+.attendance-records-table .ant-table-tbody > tr.inspection-record-row--mine > td,
+.attendance-records-table .ant-table-tbody > tr.discipline-row-actionable > td {
   background-color: #f1f6ff;
 }
-.attendance-records-table .ant-table-tbody > tr.inspection-record-row--other > td {
+.attendance-records-table .ant-table-tbody > tr.inspection-record-row--other > td,
+.attendance-records-table .ant-table-tbody > tr.discipline-row-readonly > td {
   background-color: #f7f8fa;
 }
-.attendance-records-table .ant-table-tbody > tr.inspection-record-row--mine:hover > td {
+.attendance-records-table .ant-table-tbody > tr.inspection-record-row--mine:hover > td,
+.attendance-records-table .ant-table-tbody > tr.discipline-row-actionable:hover > td {
   background-color: #e8f0ff;
 }
-.attendance-records-table .ant-table-tbody > tr.inspection-record-row--other:hover > td {
+.attendance-records-table .ant-table-tbody > tr.inspection-record-row--other:hover > td,
+.attendance-records-table .ant-table-tbody > tr.discipline-row-readonly:hover > td {
   background-color: #f2f4f7;
 }
 .inspection-record-ownership-legend,
@@ -726,6 +730,8 @@ body {
   transform: translate(-50%, -50%);
 }
 .admin-header {
+  position: relative;
+  z-index: 20;
   height: 64px;
   flex: 0 0 64px;
   display: flex;

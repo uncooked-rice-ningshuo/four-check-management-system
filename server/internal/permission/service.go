@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ const (
 	ActionUserManage                 = "USER_MANAGE"
 	ActionPermissionManage           = "PERMISSION_MANAGE"
 	ActionLedgerExport               = "DISCIPLINE_LEDGER_EXPORT"
+	ActionDisciplineConfirm          = "DISCIPLINE_CASE_CONFIRM"
 	ActionLedgerView                 = "DISCIPLINE_LEDGER_VIEW"
 	ActionMasterDataManage           = "MASTER_DATA_MANAGE"
 	ActionDictionaryManage           = "DICTIONARY_MANAGE"
@@ -55,11 +57,16 @@ var ErrForceGenerateRoleRequired = errors.New("force generation permission requi
 var ErrReportObligationRoleRequired = errors.New("weekly obligation permission requires report maintenance responsibility")
 var ErrReportMaintenanceRequired = errors.New("report maintenance department required")
 
-var allActions = []string{
-	ActionUserManage, ActionPermissionManage, ActionLedgerView, ActionLedgerExport, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
+var disciplineActions = []string{"DISCIPLINE_RULE_VIEW", "DISCIPLINE_RULE_EDIT", "DISCIPLINE_RULE_PUBLISH", "DISCIPLINE_LEDGER_VIEW", "DISCIPLINE_LEDGER_EXPORT", "DISCIPLINE_CASE_VIEW", "DISCIPLINE_CASE_CONFIRM", "DISCIPLINE_ARCHIVE_VIEW", "DISCIPLINE_ARCHIVE_EXPORT"}
+
+// IsDisciplineAction identifies the configurable discipline capabilities.
+func IsDisciplineAction(action string) bool { return slices.Contains(disciplineActions, action) }
+
+var allActions = append([]string{
+	ActionUserManage, ActionPermissionManage, ActionMasterDataManage, ActionDictionaryManage, ActionConfigurationView,
 	ActionInspectionEnter, ActionInspectionManage, ActionInspectionView, ActionInspectionReview, ActionInspectionExport, ActionMorningScheduleManage,
 	ActionReportView, ActionReportGenerate, ActionReportFileOutput, ActionReportCorrect, ActionReportForceGenerate, ActionReportObligationManage, ActionReportOutputSettingsManage, ActionReportReview, ActionReportReturn, ActionReportFinalize, ActionReportPublish, ActionArchiveView,
-}
+}, disciplineActions...)
 
 type Scope struct {
 	GradeID          string `json:"-"`
@@ -108,6 +115,8 @@ type DepartmentScope struct {
 }
 
 type AccessProfile struct {
+	DisciplineScope          []string
+	DefaultDisciplineActions []string
 	ModuleValidity           []ModuleValidity
 	MorningInspectionTypeID  string
 	AssignedDepartmentScopes []DepartmentScope
@@ -447,6 +456,11 @@ func effectiveProfile(profile AccessProfile) EffectiveResult {
 			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceSystemRole, Label: "系统管理员"}))
 		}
 	}
+	for _, action := range profile.DefaultDisciplineActions {
+		if IsDisciplineAction(action) && slices.Contains(profile.DisciplineScope, action) {
+			result.Permissions = append(result.Permissions, allow(action, Scope{}, Source{Type: SourceOrganizationRole, Label: "角色模板处分管理"}))
+		}
+	}
 	if profile.CanManageMorningSchedule && profile.DefaultMorningSchedule {
 		result.Permissions = append(result.Permissions, allow(ActionMorningScheduleManage, Scope{}, Source{Type: SourceOrganizationRole, Label: "早签计划默认权限"}))
 	}
@@ -753,6 +767,9 @@ func matches(ruleValue, requestedValue string) bool {
 }
 
 func departmentSupports(profile AccessProfile, action, inspectionType string) bool {
+	if IsDisciplineAction(action) {
+		return slices.Contains(profile.DisciplineScope, action)
+	}
 	if action == ActionMorningScheduleManage {
 		return profile.CanManageMorningSchedule
 	}
@@ -809,7 +826,7 @@ func departmentSupports(profile AccessProfile, action, inspectionType string) bo
 }
 
 func requiresDepartmentSource(action string) bool {
-	return strings.HasPrefix(action, "INSPECTION_") || strings.HasPrefix(action, "REPORT_") || action == ActionArchiveView || action == ActionMorningScheduleManage
+	return IsDisciplineAction(action) || strings.HasPrefix(action, "INSPECTION_") || strings.HasPrefix(action, "REPORT_") || action == ActionArchiveView || action == ActionMorningScheduleManage
 }
 func (s *Service) validateRuleSource(ctx context.Context, rule Rule) error {
 	profile, err := s.repository.LoadAccessProfile(ctx, rule.AccountID)

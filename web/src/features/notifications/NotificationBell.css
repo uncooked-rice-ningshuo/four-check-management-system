@@ -1,0 +1,295 @@
+.bell-root {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.bell-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #102a43;
+  background: transparent;
+  cursor: pointer;
+}
+
+.bell-trigger:hover {
+  background: #f1f5f9;
+}
+
+.bell-trigger:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.bell-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 328px;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  border: 1px solid #dfe7ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgba(42, 70, 98, 0.14);
+  overflow: hidden;
+  /* 浮层挂在 Ant Layout.Header 内，默认继承顶栏 line-height:64px，会把标题与空态撑成 84/104px。
+     这里显式建立独立排版上下文，后续所有子元素都用 14px/20px。 */
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.bell-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.bell-panel__head strong {
+  color: #102a43;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.bell-panel__head a {
+  flex: none;
+  color: #2563eb;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.bell-panel__head a:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.bell-panel__head a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.bell-panel__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 10px;
+  border-bottom: 1px solid #eef2f6;
+  background: #fbfdff;
+}
+
+.bell-panel__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #63788d;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.bell-panel__tab:hover {
+  color: #2563eb;
+  background: #f1f6ff;
+}
+
+.bell-panel__tab[aria-selected='true'] {
+  color: #2563eb;
+  background: #eaf1ff;
+  font-weight: 600;
+}
+
+.bell-panel__tab:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.bell-panel__tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bell-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.bell-panel__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 10px 14px;
+  color: #63788d;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.bell-panel__list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bell-panel__list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bell-panel__list::-webkit-scrollbar-thumb {
+  border: 2px solid #fff;
+  border-radius: 8px;
+  background: #cbd8e6;
+}
+
+.bell-panel__list::-webkit-scrollbar-thumb:hover {
+  background: #a9bdd4;
+}
+
+.bell-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #eef2f6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bell-item--unread {
+  border-color: #dbeafe;
+  background: #f6faff;
+}
+
+.bell-item__icon {
+  flex: 0 0 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #2563eb;
+  background: #eaf1ff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.bell-item__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bell-item__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bell-item__category {
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.bell-item__time {
+  flex: none;
+  color: #8798a8;
+  font-size: 11px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bell-item__body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: #101828;
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.bell-item__dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bell-panel {
+    animation: bell-panel-in 0.16s ease-out;
+  }
+}
+
+@keyframes bell-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (max-width: 520px) {
+  .bell-panel {
+    position: fixed;
+    top: 64px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+  }
+}

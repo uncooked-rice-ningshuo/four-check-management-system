@@ -182,7 +182,7 @@ describe('DisciplineConfigPage', () => {
 
     expect(screen.queryByRole('link', { name: '维护处分档位字典' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加档位' })).toBeInTheDocument()
-    const confirmationSwitch = screen.getByRole('switch', { name: '通报批评需要老师确认' })
+    const confirmationSwitch = screen.getByRole('switch', { name: '通报批评需要人工确认' })
     expect(confirmationSwitch).not.toHaveClass('ant-switch-small')
     expect(confirmationSwitch).toHaveAttribute('aria-checked', 'false')
   })
@@ -278,7 +278,7 @@ describe('DisciplineConfigPage', () => {
     await waitFor(() => expect(getDictionaries).toHaveBeenCalledWith('levels'))
     expect(screen.getByText('适用检查项：到课').closest('.ant-card-head')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '留校察看' })).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: '通报批评需要老师确认' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('switch', { name: '通报批评需要人工确认' })).toHaveAttribute('aria-checked', 'false')
     expect(document.getElementById('discipline-groups-0--tiers-0--lower')).toHaveAttribute('step', '1')
     expect(document.getElementById('discipline-groups-0--tiers-0--lower')).toHaveValue('1')
     expect(screen.getByRole('region', { name: '处分档位表，可横向滚动' })).toBeInTheDocument()

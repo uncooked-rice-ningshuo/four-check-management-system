@@ -129,7 +129,7 @@ func (t GrantTemplate) Assign(departmentID string, startsAt time.Time) ([]Assign
 
 // SupportsOperationRange is shared by grant validation and the action catalog.
 func SupportsOperationRange(action string) bool {
-	return action == ActionInspectionEnter || action == ActionInspectionManage || action == ActionInspectionReview
+	return action == "DISCIPLINE_CASE_VIEW" || action == ActionDisciplineConfirm || action == ActionInspectionEnter || action == ActionInspectionManage || action == ActionInspectionReview
 }
 
 // ForDepartment keeps each route's action/range tuple intact, while retaining explicit global denials.

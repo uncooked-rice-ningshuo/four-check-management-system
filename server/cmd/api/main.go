@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"four-check-management-system/server/internal/inbox"
 	"log"
 	"os"
 	"strconv"
@@ -70,7 +71,31 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("api listening on %s", addr)
-	log.Fatal(r.Run(addr))
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go runDisciplineDeadlineWorker(workerCtx, db)
+	if err := r.Run(addr); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runDisciplineDeadlineWorker(ctx context.Context, db *store.Postgres) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		changed, err := db.ConfirmExpiredDisciplineCases(ctx)
+		if err != nil && ctx.Err() == nil {
+			log.Print("discipline deadline scan failed; will retry")
+		}
+		if err == nil && changed == 100 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func newApplicationServices(db *store.Postgres, storageService *storage.Service, maxUploadBytes int64) httpapi.AdminServices {
@@ -79,7 +104,7 @@ func newApplicationServices(db *store.Postgres, storageService *storage.Service,
 	permissionService := permission.NewService(db)
 	reportService := reporting.NewService(db, permissionService)
 	manualAttendance := inspection.NewManualService(db, importjob.NewAttendanceAdapter(db), academicService, organizationService, permissionService)
-	return httpapi.AdminServices{
+	return httpapi.AdminServices{Inbox: inbox.New(db),
 		Organization: organizationService, Academic: academicService, ReportGrades: academic.NewReportGradeService(db), Permission: permissionService,
 		AcademicWeekImports: academicimport.NewService(db, academicService, maxUploadBytes),
 		MasterData:          masterdata.NewService(db), MasterDataImports: masterdataimport.NewService(db, db, maxUploadBytes),

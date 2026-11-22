@@ -1,0 +1,410 @@
+.inbox-page .page-heading {
+  align-items: center;
+}
+
+.inbox-heading-count {
+  margin: 0;
+  color: #63788d;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inbox-heading-count strong {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.inbox-page .inbox-status {
+  margin: 0 0 12px;
+  color: #63788d;
+  font-size: 13px;
+}
+
+.inbox-alert {
+  margin-bottom: 12px;
+}
+
+.inbox-page .inbox-table .ant-card-body {
+  padding: 0;
+}
+
+/* 查询区与下方列表卡片保持普通管理页的间隔，表单本身始终横跨整个容器。 */
+.inbox-page .inbox-table .ant-pro-table-search {
+  margin-bottom: 16px;
+}
+
+/* 查询区下：列表与详情各占一半；未打开详情时列表回到全宽。 */
+.inbox-page .inbox-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+  gap: 16px;
+  align-items: start;
+  transition: grid-template-columns 240ms cubic-bezier(.2, .75, .25, 1), gap 240ms cubic-bezier(.2, .75, .25, 1);
+}
+
+.inbox-page .inbox-workspace--open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.inbox-page .inbox-list-pane {
+  min-width: 0;
+}
+
+.inbox-page .inbox-table .ant-pro-query-filter-row {
+  row-gap: 8px;
+}
+
+/* 非模态详情：时间 → 类别/来源 → 标题 → 完整正文 → 已读状态与显式写入动作。 */
+.inbox-detail {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+  padding: 20px 22px 22px;
+  border: 1px solid #dfe7ef;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(42, 70, 98, .06);
+  min-height: 0;
+  padding-inline: 0;
+  border-color: transparent;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 160ms ease, padding 240ms ease, border-color 240ms ease, visibility 0s linear 240ms;
+}
+
+.inbox-detail--open {
+  min-height: 160px;
+  padding-inline: 22px;
+  border-color: #dfe7ef;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms ease 70ms, padding 240ms ease, border-color 240ms ease, visibility 0s;
+}
+
+.inbox-detail__message {
+  animation: inbox-message-enter 160ms ease both;
+}
+
+@keyframes inbox-message-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.inbox-detail:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.inbox-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.inbox-detail__caption {
+  color: #63788d;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.inbox-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 20px;
+  color: #63788d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-detail__category-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #2563eb;
+}
+
+.inbox-detail__title {
+  margin: 0 0 10px;
+  color: #102a43;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.inbox-detail__body {
+  color: #101828;
+  font-size: 15px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.inbox-detail__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.inbox-detail__read-state {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #f2f4f7;
+  color: #63788d;
+}
+
+.inbox-detail__read-state--unread {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.inbox-detail__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+}
+
+.inbox-detail__field {
+  min-width: 0;
+}
+
+.inbox-detail__field dt {
+  margin-bottom: 2px;
+  color: #63788d;
+  font-size: 12px;
+}
+
+.inbox-detail__field dd {
+  margin: 0;
+  color: #101828;
+}
+
+.inbox-detail__field--wide {
+  grid-column: 1 / -1;
+}
+
+.inbox-sort-select {
+  width: 120px;
+}
+
+.inbox-page .ant-pro-table-list-toolbar-container {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* 未读行用浅蓝衬色提示，同时保留已读/未读文字标签，不依赖颜色传递状态。 */
+.inbox-page .ant-table-tbody > tr.ant-table-row:where(:not(:hover, .ant-table-row-selected, .inbox-row--unread)) > td {
+  background-color: #fff;
+}
+
+.inbox-page .ant-table-tbody > tr.inbox-row--unread > td,
+.inbox-page .ant-table-tbody > tr.inbox-row--unread:hover > td {
+  background: #f6faff;
+}
+
+/* 选中态以左侧蓝条表达，与“未读=浅蓝底、已读=白底”相互独立。 */
+.inbox-page .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: #f2f7ff;
+}
+
+.inbox-page .ant-table-tbody > tr.inbox-row--unread.ant-table-row-selected > td {
+  background: #e8f2ff;
+}
+
+.inbox-page .ant-table-tbody > tr.ant-table-row-selected > td:first-child {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+/* 行内按钮获得键盘焦点时给出整行可见提示，不改变行高和文字左边缘。 */
+.inbox-page .ant-table-tbody > tr:focus-within > td:first-child {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.inbox-page .ant-table-tbody > tr > td {
+  vertical-align: top;
+}
+
+/* 行高随正文换行增长，避免固定单行高度裁切授权生效日期等内联信息。 */
+.inbox-cell-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding-block: 3px;
+  line-height: 1.65;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 标题与阅读状态本身是打开详情的按钮，去掉浏览器/Ant 默认按钮外观。 */
+.inbox-cell-open,
+.inbox-status-open {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.inbox-cell-open:hover {
+  color: #2563eb;
+}
+
+.inbox-cell-open:focus-visible,
+.inbox-status-open:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.inbox-cell-title {
+  color: #102a43;
+  font-weight: 600;
+}
+
+/* 分栏后列表收紧为摘要列，文字仍完整可读，横向滚动留在表格容器内。 */
+.inbox-page .inbox-workspace--open .ant-table-tbody > tr > td {
+  padding: 8px;
+}
+
+.inbox-page .inbox-workspace--open .inbox-cell-body {
+  gap: 1px;
+  padding-block: 0;
+  font-size: 13px;
+}
+
+.inbox-cell-action {
+  margin-inline-end: 4px;
+  color: #102a43;
+}
+
+.inbox-cell-time {
+  color: #63788d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-cell-time-mobile,
+.inbox-cell-status-mobile {
+  display: none;
+}
+
+.inbox-cell-done {
+  color: #98a2b3;
+}
+
+.inbox-item__effective {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-inline: 2px;
+  padding: 1px 6px;
+  border: 1px solid #dbeafe;
+  border-radius: 4px;
+  background: #f6faff;
+  color: #102a43;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inbox-item__effective-label {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  .inbox-page .inbox-workspace,
+  .inbox-page .inbox-workspace--open {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    transition: none;
+  }
+
+  .inbox-cell-time-mobile {
+    display: block;
+    color: #63788d;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (max-width: 575px) {
+  .inbox-cell-status-mobile {
+    display: inline-flex;
+  }
+
+  .inbox-item__effective {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 760px) {
+  .inbox-page .page-heading {
+    align-items: flex-start;
+  }
+
+  .inbox-page .ant-pro-table-search {
+    padding-inline: 14px;
+  }
+
+  .inbox-page .ant-pro-table-list-toolbar-container {
+    padding-inline: 14px;
+  }
+}
+
+/* 390px 单栏：详情打开时列表整块收起，靠“返回列表”回到全宽。 */
+@media (max-width: 767px) {
+  .inbox-page .inbox-workspace--open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inbox-page .inbox-workspace--open .inbox-list-pane {
+    display: none;
+  }
+
+  .inbox-detail {
+    position: static;
+    padding: 16px;
+  }
+
+  .inbox-page .inbox-workspace--open .inbox-detail {
+    padding: 16px;
+  }
+
+  .inbox-detail__title { font-size: 19px; }
+  .inbox-detail__fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .inbox-detail__field--wide { grid-column: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-page .inbox-workspace,
+  .inbox-detail,
+  .inbox-detail__message {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .inbox-page .ant-table-tbody > tr.inbox-row--unread > td {
+    background: Canvas;
+  }
+
+  .inbox-page .ant-table-tbody > tr.ant-table-row-selected > td:first-child {
+    box-shadow: inset 3px 0 0 Highlight;
+  }
+}

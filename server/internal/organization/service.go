@@ -100,6 +100,7 @@ type InspectionRoleDefaults struct {
 }
 
 type RolePolicy struct {
+	DisciplineActions        []string                    `json:"disciplineActions"`
 	ModuleValidity           []permission.ModuleValidity `json:"moduleValidity,omitempty"`
 	RoleCode                 string                      `json:"roleCode"`
 	ValidityYears            int                         `json:"validityYears"`
@@ -111,6 +112,8 @@ type RolePolicy struct {
 var roleCodes = []string{"MEMBER", "MINISTER", "VICE_MINISTER", "PRESIDIUM", "TEACHER"}
 
 type DepartmentDefaultPermissions struct {
+	DisciplineEnabled        bool         `json:"disciplineEnabled"`
+	DisciplineScope          []string     `json:"disciplineScope"`
 	RolePolicies             []RolePolicy `json:"rolePolicies"`
 	CanManageMorningSchedule bool         `json:"canManageMorningSchedule"`
 
@@ -320,10 +323,20 @@ func (s *Service) SaveDepartmentDefaults(ctx context.Context, input DepartmentDe
 	if len(seenRoles) != len(roleCodes) {
 		return DepartmentDefaultPermissions{}, ErrInvalidInput
 	}
+	for _, action := range input.DisciplineScope {
+		if !permission.IsDisciplineAction(action) {
+			return DepartmentDefaultPermissions{}, ErrInvalidInput
+		}
+	}
 	seenPolicies := map[string]bool{}
 	for _, policy := range input.RolePolicies {
 		if !slices.Contains(roleCodes, policy.RoleCode) || seenPolicies[policy.RoleCode] || policy.ValidityYears < 0 || policy.ValidityYears > 100 {
 			return DepartmentDefaultPermissions{}, ErrInvalidInput
+		}
+		for _, action := range policy.DisciplineActions {
+			if !permission.IsDisciplineAction(action) {
+				return DepartmentDefaultPermissions{}, ErrInvalidInput
+			}
 		}
 		seenPolicies[policy.RoleCode] = true
 		modules := map[string]bool{}
@@ -338,7 +351,7 @@ func (s *Service) SaveDepartmentDefaults(ctx context.Context, input DepartmentDe
 		}
 
 		for _, action := range policy.OperationRanges {
-			if !permission.SupportsOperationRange(action.Action) || !permission.ValidOperationRanges(action.Ranges) || action.InspectionTypeID == "" {
+			if !permission.SupportsOperationRange(action.Action) || !permission.ValidOperationRanges(action.Ranges) || (action.InspectionTypeID == "") != (action.Action == permission.ActionDisciplineConfirm || action.Action == "DISCIPLINE_CASE_VIEW") {
 				return DepartmentDefaultPermissions{}, ErrInvalidInput
 			}
 		}

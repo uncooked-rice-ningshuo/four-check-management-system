@@ -5,7 +5,7 @@ import { useAttendancePermissions } from '../../features/attendance/hooks/useAtt
 import { hasNavigableInspectionAction } from '../../features/attendance/hooks/hasNavigableInspectionAction'
 import { useAuth } from '../providers/authContext'
 
-export function EffectivePermissionRoute({ action, children }: { action: string; children: ReactNode }) {
+export function EffectivePermissionRoute({ action, children }: { action: string | string[]; children: ReactNode }) {
   const { user } = useAuth()
   const permissions = useAttendancePermissions()
   const fromLogin = (useLocation().state as { fromLogin?: boolean } | null)?.fromLogin === true
@@ -16,7 +16,7 @@ export function EffectivePermissionRoute({ action, children }: { action: string;
     return <Result status="warning" title="暂时无法核对访问权限" subTitle="请稍后重试，或返回工作台选择其他功能。" extra={<Link to="/">返回工作台</Link>} />
   }
 
-  const granted = hasNavigableInspectionAction(permissions.data?.permissions, action)
+  const granted = (Array.isArray(action) ? action : [action]).some(value => hasNavigableInspectionAction(permissions.data?.permissions, value))
   if (!granted) {
     // 登录后回到的旧地址可能属于上一个账号，直接去工作台而不是让用户面对 403。
     if (fromLogin) return <Navigate to="/" replace />

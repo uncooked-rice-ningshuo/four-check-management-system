@@ -496,10 +496,144 @@ WHERE report_version_id=(SELECT id FROM weekly_report_versions WHERE report_id=$
 	if err != nil || finalizing.Status != reporting.ReportStatusFinalizing || finalizing.RowVersion != 6 {
 		t.Fatalf("approve report = %+v, %v", finalizing, err)
 	}
+	// One confirmed evening absence converts to four points, crossing both published tiers.
+	_, err = pool.Exec(ctx, `WITH v AS (
+ INSERT INTO discipline_rule_versions(version,status,created_by,published_by,published_at)
+ VALUES(1,'PUBLISHED',$1,$1,now()) RETURNING id
+), cur AS (INSERT INTO discipline_rule_current(version_id) SELECT id FROM v),
+g AS (INSERT INTO discipline_rule_groups(version_id,group_key,name,sort_order)
+ SELECT id,'evening','晚自习',0 FROM v RETURNING id,version_id),
+term AS (INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,operator,conversion_factor,sort_order)
+ SELECT id,version_id,$2,'晚自习','+',4,0 FROM g)
+INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,teacher_confirmation_required,sort_order)
+ SELECT g.id,t.code,t.name,t.lo,t.hi,true,t.ord FROM g CROSS JOIN
+ (VALUES ('NOTICE','通报批评',2,4,0),('WARNING','警告',4,8,1),('DEMERIT','记过',8,NULL,2)) t(code,name,lo,hi,ord)`, actorID, eveningTypeID)
+	if err != nil {
+		t.Fatal("publish fixture rule:", err)
+	}
 	finalized, err := service.TransitionReport(ctx, actorID, draft.ID, reporting.ReportActionFinalized,
 		reporting.ReportTransitionInput{RowVersion: finalizing.RowVersion}, audit.Metadata{})
 	if err != nil || finalized.Status != reporting.ReportStatusFinalized || finalized.RowVersion != 7 {
 		t.Fatalf("finalize structured data without output files = %+v, %v", finalized, err)
+	}
+	var crossed, pendingWithDeadline int
+	err = pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='PENDING' AND due_at-created_at=interval '48 hours'
+ AND tier_code IN ('NOTICE','WARNING') AND evidence->'sources' IS NOT NULL)
+ FROM discipline_cases WHERE semester_id=$1 AND student_number=$2`, semesterID, snapshotRecord.StudentNumber).Scan(&crossed, &pendingWithDeadline)
+	if err != nil || crossed != 2 || pendingWithDeadline != 2 {
+		t.Fatalf("crossed tiers=%d pending=%d err=%v", crossed, pendingWithDeadline, err)
+	}
+	for _, test := range []struct {
+		kind, status, student string
+		total                 int
+	}{
+		{"cases", "PENDING", snapshotRecord.StudentNumber, 2}, {"cases", "DEFERRED", snapshotRecord.StudentNumber, 0}, {"cases", "", "unmatched", 0},
+	} {
+		detail, err := database.SemesterLedgerDetail(ctx, reporting.LedgerDetailFilter{Semester: semesterID, Student: test.student, Kind: test.kind, Status: test.status, Page: 2, Size: 1})
+		var result struct {
+			Total int
+			Items []json.RawMessage
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(detail, &result); err != nil || result.Total != test.total || len(result.Items) != min(1, max(0, test.total-1)) {
+			t.Fatalf("unexpected detail page %s: %v", detail, err)
+		}
+	}
+	if _, err := database.SemesterLedgerDetail(ctx, reporting.LedgerDetailFilter{Semester: semesterID, Student: snapshotRecord.StudentNumber, Kind: "sources", Page: 1, Size: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := database.ConfirmExpiredDisciplineCases(ctx); err != nil || n != 0 {
+		t.Fatalf("premature timeout: %d %v", n, err)
+	}
+	var noticeID, classSnapshot string
+	if err := pool.QueryRow(ctx, `SELECT id,responsibility_class_id FROM discipline_cases WHERE semester_id=$1 AND tier_code='NOTICE'`, semesterID).Scan(&noticeID, &classSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	studentGrant := permission.EffectiveResult{OrganizationRoleCode: "MEMBER", Permissions: []permission.EffectivePermission{{Action: permission.ActionDisciplineConfirm, Effect: permission.EffectAllow, Ranges: []permission.OperationRange{{ClassID: "00000000-0000-0000-0000-000000000001"}}}}}
+	reviewInput := reporting.DisciplineReview{Decision: "DEFERRED", Reason: "核对来源", Version: 1}
+	if err := database.ReviewDisciplineCase(ctx, noticeID, reviewInput, studentGrant, audit.Metadata{ActorID: actorID}); !errors.Is(err, reporting.ErrForbidden) {
+		t.Fatalf("cross-class review = %v", err)
+	}
+	checkQueue := func(access permission.EffectiveResult, total int) {
+		raw, err := database.DisciplineReviewQueue(ctx, reporting.ReviewQueueFilter{Page: 1, PageSize: 1}, access)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Total int
+			Items []json.RawMessage
+		}
+		if err = json.Unmarshal(raw, &result); err != nil || result.Total != total || len(result.Items) != min(total, 1) {
+			t.Fatalf("queue = %s, err=%v", raw, err)
+		}
+	}
+	adminView := permission.EffectiveResult{SystemRole: permission.SystemRoleSuperAdmin}
+	checkQueue(adminView, 2)
+	checkQueue(studentGrant, 0)
+	studentGrant.Permissions[0].Ranges[0].ClassID = classSnapshot
+	checkQueue(studentGrant, 2)
+	// A broad processing grant cannot enlarge an explicit narrow view.
+	var gradeID string
+	if err := pool.QueryRow(ctx, "SELECT grade_id FROM classes WHERE id=$1", classSnapshot).Scan(&gradeID); err != nil {
+		t.Fatal(err)
+	}
+	view := permission.EffectivePermission{Action: "DISCIPLINE_CASE_VIEW", Effect: permission.EffectAllow, Ranges: []permission.OperationRange{{GradeID: "00000000-0000-0000-0000-000000000001"}}}
+	combined := permission.EffectiveResult{Permissions: []permission.EffectivePermission{view, studentGrant.Permissions[0]}}
+	checkQueue(combined, 0)
+	view.Ranges[0].GradeID = gradeID
+	checkQueue(combined, 2)
+	combined.Permissions[0].Ranges = nil
+	combined.Permissions[1].Ranges = []permission.OperationRange{{ClassID: "00000000-0000-0000-0000-000000000001"}}
+	rawQueue, err := database.DisciplineReviewQueue(ctx, reporting.ReviewQueueFilter{Page: 1, PageSize: 20}, combined)
+	var visible struct {
+		Total int
+		Items []struct{ CanProcess *bool }
+	}
+	if err != nil || json.Unmarshal(rawQueue, &visible) != nil || visible.Total != 2 || len(visible.Items) != 2 {
+		t.Fatalf("unrestricted view queue: %s %v", rawQueue, err)
+	}
+	for _, item := range visible.Items {
+		if item.CanProcess == nil || *item.CanProcess {
+			t.Fatal("outside processing scope must be explicitly read-only")
+		}
+	}
+	review := func(decision, reason string, version int) error {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if err := applyDisciplineReviewTx(ctx, tx, noticeID, classSnapshot, decision, reason, "TEACHER", version, audit.Metadata{ActorID: actorID}); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	if err := review("DEFERRED", " ", 1); !errors.Is(err, errDisciplineReviewInput) {
+		t.Fatal("blank delay reason", err)
+	}
+	if err := database.ReviewDisciplineCase(ctx, noticeID, reviewInput, studentGrant, audit.Metadata{ActorID: actorID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := review("APPROVED", "", 1); !errors.Is(err, errDisciplineReviewConflict) {
+		t.Fatal("stale review", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE discipline_cases SET due_at=now()-interval '1 minute' WHERE semester_id=$1`, semesterID); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []int64{1, 0} {
+		if n, err := database.ConfirmExpiredDisciplineCases(ctx); err != nil || n != want {
+			t.Fatalf("timeout count %d want %d: %v", n, want, err)
+		}
+	}
+	if err := database.ReviewDisciplineCase(ctx, noticeID, reporting.DisciplineReview{Decision: "APPROVED", Version: 2}, adminView, audit.Metadata{ActorID: actorID}); err != nil {
+		t.Fatal("confirm deferred", err)
+	}
+	var audited int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM discipline_cases c JOIN audit_logs a ON a.resource_id=c.id::text
+ WHERE a.action='DISCIPLINE_TIMEOUT_CONFIRMED' AND c.status='APPROVED' AND c.decision_source='TIMEOUT' AND c.decided_at IS NOT NULL AND c.row_version=2`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("timeout audit count %d: %v", audited, err)
 	}
 	ledgerJSON, err := database.SemesterLedger(ctx, semesterID, reporting.LedgerFilter{Search: snapshotRecord.StudentNumber}, 1, 10)
 	var ledger struct {

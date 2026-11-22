@@ -1,5 +1,5 @@
 export type OperationRange = { gradeId?: string; majorId?: string; classId?: string; gradeStage?: number }
-export const supportsOperationRange = (action: string) => ['INSPECTION_ENTER', 'INSPECTION_MANAGE', 'INSPECTION_REVIEW'].includes(action)
+export const supportsOperationRange = (action: string) => ['INSPECTION_ENTER', 'INSPECTION_MANAGE', 'INSPECTION_REVIEW', 'DISCIPLINE_CASE_CONFIRM', 'DISCIPLINE_CASE_VIEW'].includes(action)
 export type GrantDates = { startsAt?: string; endsAt?: string; sourceDepartmentId?: string; ranges?: OperationRange[] }
 export type PermissionScope = {
   academicYearId?: string

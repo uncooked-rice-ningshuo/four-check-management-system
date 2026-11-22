@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { downloadSemesterLedger, readSemesterLedger, type LedgerFilter } from '../../shared/api/semesterLedgerApi'
+import { readLedgerDetail, type DetailRequest, downloadSemesterLedger, readSemesterLedger, type LedgerFilter } from '../../shared/api/semesterLedgerApi'
 
 export function useSemesterLedger(semester: string, filter: LedgerFilter, page: number, size: number) {
   return useQuery({ queryKey: ['semester-ledger', semester, filter, page, size], queryFn: () => readSemesterLedger(semester, filter, page, size) })
@@ -14,4 +14,8 @@ export function useLedgerExport(semester: string, filter: LedgerFilter) {
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 60000)
   } })
+}
+
+export function useLedgerDetail(request: DetailRequest) {
+  return useQuery({ queryKey: ['semester-ledger-detail', request], queryFn: () => readLedgerDetail(request) })
 }

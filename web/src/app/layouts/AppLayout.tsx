@@ -1,3 +1,4 @@
+import { NotificationBell } from '../../features/notifications/NotificationBell'
 import {
   ApartmentOutlined,
   EnvironmentOutlined,
@@ -104,8 +105,12 @@ export function AppLayout() {
   const ledgerItems = user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_LEDGER_VIEW')
     ? [{ key: '/discipline/ledger', icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/ledger">学期违纪台账</Link> }] : []
   const disciplineItems = [...ledgerItems]
-  if (user?.isSuperAdmin || user?.systemRole === 'ADMIN') {
-    disciplineItems.push({ key: '/discipline/config', icon: <SettingOutlined />, label: <Link to="/discipline/config">处分配置</Link> })
+  if (user?.isSuperAdmin || ['DISCIPLINE_CASE_CONFIRM', 'DISCIPLINE_CASE_VIEW'].some(action => hasNavigableInspectionAction(effectivePermissions.data?.permissions, action))) disciplineItems.push({key: "/discipline/review", icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/review">待处分</Link>})
+  if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_RULE_VIEW')) {
+    disciplineItems.unshift({ key: '/discipline/config', icon: <SettingOutlined />, label: <Link to="/discipline/config">处分配置</Link> })
+  }
+  if (user?.isSuperAdmin || hasNavigableInspectionAction(effectivePermissions.data?.permissions, 'DISCIPLINE_ARCHIVE_VIEW')) {
+    disciplineItems.push({ key: '/discipline/archive', icon: <SafetyCertificateOutlined />, label: <Link to="/discipline/archive">处分归档</Link> })
   }
   const navItems = [workbenchItem, ...basicItems, ...configurationItems, ...visibleInspectionItems, ...reportItems, ...disciplineItems]
   const menuItems: NonNullable<MenuProps['items']> = [workbenchItem]
@@ -190,6 +195,7 @@ export function AppLayout() {
     <Layout>
       <Layout.Header className="admin-header">
         <WorkContextBar canManage={user?.isSuperAdmin === true} />
+        <NotificationBell />
         <Dropdown menu={{ items: accountItems, onClick: onAccountAction }} placement="bottomRight"><Button type="text" className="account-trigger" aria-label={`${user?.name ?? '当前用户'}账户菜单`}><Space><Avatar className="account-mascot-avatar" size={34} src="/assets/characters/account-avatar.png" alt="" icon={<UserOutlined />} /><span className="account-copy"><strong>{user?.name}</strong><small>{accountRoleLabel}</small></span><Tag color="blue">在线</Tag><DownOutlined /></Space></Button></Dropdown>
       </Layout.Header>
       <Layout.Content id="main-content" className="admin-content">{logoutFailed && <Alert role="alert" type="error" showIcon title="暂时无法确认退出，请重试。" action={<Button loading={signingOut} disabled={signingOut} onClick={() => void onAccountAction({key:'logout'})}>重试退出</Button>} />}<Outlet /></Layout.Content>

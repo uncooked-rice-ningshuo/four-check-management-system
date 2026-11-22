@@ -118,3 +118,28 @@ func (s *Service) ExportSemesterLedger(ctx context.Context, semester string, fil
 	}
 	return buffer.Bytes(), nil
 }
+
+// LedgerDetailFilter identifies the student and the requested subset of finalized records.
+type LedgerDetailFilter struct {
+	Semester string `json:"semesterId"`
+	Student  string `json:"studentNumber"`
+	Kind     string `json:"kind"`
+	Group    string `json:"groupKey"`
+	Code     string `json:"code"`
+	Week     int    `json:"week"`
+	Tier     string `json:"tier"`
+	Status   string `json:"status"`
+	Page     int    `json:"page"`
+	Size     int    `json:"pageSize"`
+}
+type LedgerDetailReader interface {
+	SemesterLedgerDetail(context.Context, LedgerDetailFilter) (json.RawMessage, error)
+}
+
+func (s *Service) SemesterLedgerDetail(ctx context.Context, f LedgerDetailFilter) (json.RawMessage, error) {
+	r, ok := s.repository.(LedgerDetailReader)
+	if !ok {
+		return nil, errors.New("ledger detail unavailable")
+	}
+	return r.SemesterLedgerDetail(ctx, f)
+}

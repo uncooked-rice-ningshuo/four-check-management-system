@@ -5,7 +5,7 @@ import { classMatchesRange, expandRangeGroups, groupRanges, updateRangeCondition
 import './operation-range.css'
 
 
-export function OperationRangeEditor({ value = [], onChange, disabled = false }: { value?: OperationRange[]; onChange?: (value: OperationRange[]) => void; disabled?: boolean }) {
+export function OperationRangeEditor({ value = [], onChange, disabled = false, viewing = false }: { value?: OperationRange[]; onChange?: (value: OperationRange[]) => void; disabled?: boolean; viewing?: boolean }) {
   const choices = useOperationRangeOptions()
   const groups = groupRanges(value)
   const changeGroups = (next: RangeGroup[]) => onChange?.(expandRangeGroups(next))
@@ -19,7 +19,7 @@ export function OperationRangeEditor({ value = [], onChange, disabled = false }:
       <label>班级（可多选）<Select mode="multiple" aria-label={`第${index + 1}组班级`} style={{ width: '100%' }} placeholder="全部班级" allowClear showSearch optionFilterProp="label" value={range.classIds} disabled={disabled || choices.isPending || choices.isError} options={choices.data?.classId.filter(option => classMatchesRange(option, range))} notFoundContent="没有符合年级和专业条件的班级" onChange={classIds => patch(index, { classIds })} /></label>
       </div>
     </fieldset>)}
-    <Typography.Paragraph className="operation-range-summary" type="secondary">可操作：{groups.length ? groups.map(range => [range.gradeStage ? `本学年${['大一', '大二', '大三', '大四'][range.gradeStage - 1]}` : '', ...(['gradeId', 'majorId'] as const).map(key => range[key] ? choices.data?.[key].find(item => item.value === range[key])?.label ?? '加载中' : ''), range.classIds.length ? `${range.classIds.length} 个已选班级` : ''].filter(Boolean).join('、') || '请选择条件').join('；或 ') : '不限'}</Typography.Paragraph>
+    <Typography.Paragraph className="operation-range-summary" type="secondary">{viewing ? '可查看' : '可操作'}：{groups.length ? groups.map(range => [range.gradeStage ? `本学年${['大一', '大二', '大三', '大四'][range.gradeStage - 1]}` : '', ...(['gradeId', 'majorId'] as const).map(key => range[key] ? choices.data?.[key].find(item => item.value === range[key])?.label ?? '加载中' : ''), range.classIds.length ? `${range.classIds.length} 个已选班级` : ''].filter(Boolean).join('、') || '请选择条件').join('；或 ') : '不限'}</Typography.Paragraph>
     <Button type="dashed" block disabled={disabled || choices.isPending || choices.isError} onClick={() => changeGroups([...groups, { classIds: [] }])}>添加一组范围</Button>
   </div>
 }

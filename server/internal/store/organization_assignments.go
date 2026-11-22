@@ -44,6 +44,15 @@ func (p *Postgres) AssignUserRole(ctx context.Context, value organization.UserAs
 				return organization.ErrInvalidInput
 			}
 		}
+		var before string
+		if _, err := tx.Exec(ctx, "SELECT id FROM accounts WHERE id=$1 FOR UPDATE", value.AccountID); err != nil {
+			return err
+		}
+		const membership = `SELECT concat_ws('；', (SELECT '主部门：'||d.name FROM accounts a JOIN departments d ON d.id=a.primary_department_id WHERE a.id=$1),
+        (SELECT string_agg(d.name||'（'||r.name||'）','、' ORDER BY d.id) FROM user_org_roles u JOIN departments d ON d.id=u.department_id JOIN organization_roles r ON r.id=u.organization_role_id WHERE u.account_id=$1))`
+		if err := tx.QueryRow(ctx, membership, value.AccountID).Scan(&before); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `UPDATE accounts SET primary_department_id=$2,session_version=session_version+1,updated_at=now() WHERE id=$1 AND session_version=$3`, value.AccountID, value.DepartmentID, value.SessionVersion)
 		if err != nil {
 			return err
@@ -98,6 +107,22 @@ func (p *Postgres) AssignUserRole(ctx context.Context, value organization.UserAs
 		now := time.Now().UTC()
 		for _, id := range value.DepartmentIDs {
 			if err := assignDepartmentSnapshot(ctx, tx, value.AccountID, id, value.OrganizationRoleID, roleCode, now); err != nil {
+				return err
+			}
+		}
+		var after string
+		if err := tx.QueryRow(ctx, membership, value.AccountID).Scan(&after); err != nil {
+			return err
+		}
+		if before != after {
+			summary := "部门与角色已更新，即时生效。当前" + after
+			for _, keep := range value.PersonalRuleDecisions {
+				if !keep {
+					summary += "。本次调整同时移除了个人授权规则。"
+					break
+				}
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_notifications(account_id,category,body) VALUES($1,'organization',$2)`, value.AccountID, summary); err != nil {
 				return err
 			}
 		}

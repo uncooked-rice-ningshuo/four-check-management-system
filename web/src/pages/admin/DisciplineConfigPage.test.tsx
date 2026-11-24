@@ -507,4 +507,21 @@ describe('DisciplineConfigPage', () => {
     expect(lowerItem).toHaveClass('ant-form-item-has-error')
     expect(within(lowerItem).getByText('起始值与上一档位不连续')).toBeInTheDocument()
   })
+
+  it('HTTP 非安全上下文缺少 crypto.randomUUID 时仍能新建累计项', async () => {
+    const emptyDraft = { ...makeVersion('draft-1', 1), groups: [] }
+    vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [emptyDraft] })
+    const originalRandomUUID = Object.getOwnPropertyDescriptor(window.crypto, 'randomUUID')
+    Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: undefined })
+    try {
+      renderPage()
+      expect(await screen.findByText('累计项（0）')).toBeInTheDocument()
+      fireEvent.drop(screen.getByText(/拖到这里，新建累计项/), { dataTransfer: { getData: () => 'type-a' } })
+      expect(await screen.findByRole('textbox', { name: '到课累计项名称' })).toHaveValue('到课')
+      expect(screen.getByText('累计项（1）')).toBeInTheDocument()
+    } finally {
+      if (originalRandomUUID) Object.defineProperty(window.crypto, 'randomUUID', originalRandomUUID)
+      else Reflect.deleteProperty(window.crypto, 'randomUUID')
+    }
+  })
 })

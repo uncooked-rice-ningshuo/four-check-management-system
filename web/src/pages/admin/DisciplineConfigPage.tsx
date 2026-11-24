@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiError } from '../../shared/api/httpClient'
 import { getRegistrationOptions, getDisciplineLevels } from '../../shared/api/adminApi'
+import { createUuid } from '../../shared/utils/idempotencyKey'
 import { calculateRuleExample, orderGroupsByInitialConfiguration, type DisciplineGroup, type DisciplineRuleVersion, type DisciplineTerm, type DisciplineTier, type DisciplineValidationIssue } from '../../features/discipline-config/model'
 import { createDisciplineRuleDraft, getCurrentDisciplineRule, getDisciplineRuleVersions, publishDisciplineRuleDraft, saveDisciplineRuleDraft, validateDisciplineRuleDraft } from '../../features/discipline-config/api'
 import './DisciplineConfigPage.css'
@@ -351,7 +352,7 @@ export function DisciplineConfigPage({ mode = 'edit', canEdit, canPublish }: { m
     const term = termForType(typeId)
     if (!type || !term) return
     rememberGroupChange()
-    const newGroupKey = `group-${crypto.randomUUID()}`
+    const newGroupKey = `group-${createUuid()}`
     const sourceGroup = groupForType(typeId)
     const next = groups
       .map((group) => group.key === sourceGroup?.key ? { ...group, terms: group.terms.filter((item) => item.inspectionTypeId !== typeId) } : group)

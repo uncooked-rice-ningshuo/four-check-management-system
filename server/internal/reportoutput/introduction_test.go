@@ -140,6 +140,17 @@ func TestIntroductionDateIsResolvedForGeneratedWord(t *testing.T) {
 	t.Fatal("document.xml missing")
 }
 
+func TestEmptyTitleFontSize(t *testing.T) {
+	raw := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","attrs":{"style":"title","fontSize":"15pt","textAlign":"center","lineSpacingMode":"single"}}]}`)
+	doc, err := decodeIntroduction(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if xml := renderIntroduction(doc); !strings.Contains(xml, `<w:rPr><w:sz w:val="30"/></w:rPr></w:pPr></w:p>`) {
+		t.Fatal(xml)
+	}
+}
+
 func TestIntroductionLineSpacingModes(t *testing.T) {
 	for _, test := range []struct{ mode, rule string }{
 		{"single", `w:line="240" w:lineRule="auto"`},
@@ -325,8 +336,8 @@ func TestTemplateSectionsAndEmbeddedTable(t *testing.T) {
 }
 
 func TestDisciplineTemplateSources(t *testing.T) {
-	raw := json.RawMessage(`{"schemaVersion":2,"orientation":"landscape","content":[{"type":"paragraph","content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)
-	for _, name := range []string{"示例甲", "示例乙"} {
+	raw := json.RawMessage(`{"schemaVersion":2,"orientation":"landscape","content":[{"type":"paragraph","attrs":{"style":"body","textAlign":"left","lineSpacingMode":"fixed","lineSpacing":0},"content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)
+	for name, expected := range map[string]string{"示例甲": "示例甲", "王宁": "王　宁", "王  宁": "王　宁", "王　宁": "王　宁"} {
 		data, err := RenderDisciplineDocument(raw, map[string]string{"discipline.studentName": name}, time.Unix(0, 0))
 		if err != nil {
 			t.Fatal(err)
@@ -341,7 +352,10 @@ func TestDisciplineTemplateSources(t *testing.T) {
 		}
 		body, err := io.ReadAll(r)
 		r.Close()
-		if err != nil || !strings.Contains(string(body), name) || !strings.Contains(string(body), `w:orient="landscape"`) {
+		if !strings.Contains(string(body), `w:line="240" w:lineRule="auto"`) {
+			t.Error("unset discipline body line height should follow the font")
+		}
+		if err != nil || !strings.Contains(string(body), expected) || !strings.Contains(string(body), `w:orient="landscape"`) {
 			t.Fatalf("missing case name or orientation: %v", err)
 		}
 	}
@@ -395,7 +409,7 @@ func TestImprintTableCells(t *testing.T) {
 		t.Fatal(err)
 	}
 	var xml strings.Builder
-	writeImprintTable(&xml, doc.Content[0])
+	writeImprintTable(&xml, doc.Content[0], 10106)
 	for _, part := range []string{"<w:tbl>", `<w:insideV w:val="nil"`, `<w:jc w:val="left"/>`, `<w:jc w:val="right"/>`} {
 		if !strings.Contains(xml.String(), part) {
 			t.Fatal(part)
@@ -407,7 +421,7 @@ func TestImprintTableCells(t *testing.T) {
 }
 
 func TestGenericTableDimensionsAndFields(t *testing.T) {
-	raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"wordTable","attrs":{"border":"none","insetLeft":1000,"insetRight":1500,"rows":[[{"length":0,"align":"left","height":48},{"length":1,"align":"center","width":4500,"hiddenEdges":8}],[{"length":0,"align":"right"},{"length":0,"align":"left"}]]},"content":[{"type":"templateField","attrs":{"key":"discipline.tier"}}]}]}`)
+	raw := json.RawMessage(`{"schemaVersion":2,"content":[{"type":"wordTable","attrs":{"border":"none","insetLeft":1000,"insetRight":1500,"rows":[[{"length":0,"align":"left","height":48,"fontSize":"9pt"},{"length":1,"align":"center","verticalAlign":"bottom","width":4500,"hiddenEdges":8}],[{"length":0,"align":"right"},{"length":0,"align":"left"}]]},"content":[{"type":"templateField","attrs":{"key":"discipline.tier"}}]}]}`)
 	data, err := RenderDisciplineDocument(raw, map[string]string{"discipline.tier": "示例档位"}, time.Unix(0, 0))
 	if err != nil {
 		t.Fatal(err)
@@ -428,10 +442,16 @@ func TestGenericTableDimensionsAndFields(t *testing.T) {
 	if bytes.Count(xml, []byte("<w:tc>")) != 4 || !bytes.Contains(xml, []byte("示例档位")) || !bytes.Contains(xml, []byte(`w:jc w:val="center"`)) {
 		t.Fatal("table layout or field lost")
 	}
-	for _, part := range []string{`<w:tblW w:type="pct" w:w="3750"/>`, `<w:tblInd w:type="dxa" w:w="1010"/>`, `<w:trHeight w:val="960" w:hRule="atLeast"/>`, `<w:tcW w:type="pct" w:w="2250"/>`, `<w:left w:val="nil"/>`} {
+	for _, part := range []string{`<w:vAlign w:val="bottom"/>`, `<w:rPr><w:sz w:val="18"/></w:rPr></w:pPr></w:p>`, `w:line="240" w:lineRule="auto"`, `<w:tblW w:type="pct" w:w="3750"/>`, `<w:tblInd w:type="dxa" w:w="1010"/>`, `<w:trHeight w:val="960" w:hRule="atLeast"/>`, `<w:tcW w:type="pct" w:w="2250"/>`, `<w:left w:val="nil"/>`} {
 		if !bytes.Contains(xml, []byte(part)) {
 			t.Fatal(part)
 		}
+	}
+	if ValidateDisciplineTemplate(json.RawMessage(strings.Replace(string(raw), `"verticalAlign":"bottom"`, `"verticalAlign":"baseline"`, 1))) == nil {
+		t.Fatal("invalid vertical alignment accepted")
+	}
+	if ValidateDisciplineTemplate(json.RawMessage(strings.Replace(string(raw), "9pt", "999pt", 1))) == nil {
+		t.Fatal("invalid cell font size accepted")
 	}
 	if ValidateDisciplineTemplate(json.RawMessage(strings.Replace(string(raw), `"length":1`, `"length":2`, 1))) == nil {
 		t.Fatal("out of range cell length")

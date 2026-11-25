@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { createRef } from 'react'
 import { expect, it, vi } from 'vitest'
 import type { IntroductionDocument } from '../../../shared/api/reportOutputApi'
@@ -13,4 +13,17 @@ it('edits the footer with automatic page fields and no persistent page toolbar',
   expect(screen.queryByRole('toolbar', { name: '页脚工具' })).not.toBeInTheDocument()
   act(() => ref.current?.insertField('semesterName'))
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ footerText: expect.stringContaining('{semesterName}'), footerLayout: 'custom' }))
+})
+
+it('centers a page field without replacing its contents', async () => {
+  const value: IntroductionDocument = {type:'doc',content:[],footerLayout:'numberOnly'}
+  const onChange=vi.fn()
+  const {rerender}=render(<ReportFooterEditor value={value} onChange={onChange}/>)
+  const center=await screen.findByLabelText('页尾居中')
+  fireEvent.click(center)
+  const next=onChange.mock.lastCall?.[0]
+  expect(next).toMatchObject({footerLayout:'custom',footerText:'{page}',footerAlign:'center'})
+  rerender(<ReportFooterEditor value={next} onChange={onChange}/>)
+  expect(screen.getByLabelText('编辑页脚')).toHaveStyle({textAlign:'center'})
+  expect(center).toHaveAttribute('aria-pressed','true')
 })

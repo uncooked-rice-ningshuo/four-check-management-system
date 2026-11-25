@@ -11,3 +11,10 @@ export function footerTemplate(document: Pick<IntroductionDocument, "footerLayou
     default: return text ? `${text}\n{page}` : '{page}'
   }
 }
+
+/** Matches the DOCX alignment for both legacy and custom footers. */
+export function footerAlignment(doc: Pick<IntroductionDocument,'footerLayout'|'footerAlign'>) {
+  if(doc.footerLayout==='numberOnly') return 'right'
+  if(doc.footerLayout==='textOnly' || doc.footerLayout==='inline') return 'left'
+  return doc.footerAlign ?? 'center'
+}

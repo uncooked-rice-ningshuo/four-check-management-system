@@ -12,7 +12,7 @@ import (
 )
 
 func (p *Postgres) ListDocumentTemplates(ctx context.Context) ([]reportoutput.DisciplineTemplate, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT g.version_id::text,g.group_key,g.name,k.code,k.name,coalesce(t.revision,0),coalesce(t.id::text,''),t.document,coalesce(to_jsonb(g)->>'violation_name',''),g.result_unit,trim_scale(k.lower_bound)::text
+	rows, err := p.Pool.Query(ctx, `SELECT g.version_id::text,g.group_key,g.name,k.code,k.name,coalesce(t.revision,0),coalesce(t.id::text,''),t.document,coalesce(to_jsonb(g)->>'violation_name',''),g.result_unit,trim_scale(k.lower_bound)::text,k.authority_number,k.clause_reference
  FROM discipline_rule_current c JOIN discipline_rule_groups g ON g.version_id=c.version_id
  JOIN discipline_rule_tiers k ON k.group_id=g.id
  LEFT JOIN discipline_tier_template_bindings b ON (b.rule_id,b.group_key,b.tier_code)=(g.version_id,g.group_key,k.code)
@@ -24,7 +24,7 @@ func (p *Postgres) ListDocumentTemplates(ctx context.Context) ([]reportoutput.Di
 	list := []reportoutput.DisciplineTemplate{}
 	for rows.Next() {
 		var t reportoutput.DisciplineTemplate
-		if err := rows.Scan(&t.RuleID, &t.GroupKey, &t.Name, &t.TierCode, &t.TierName, &t.Revision, &t.TemplateID, &t.Document, &t.ViolationName, &t.Unit, &t.ExampleAmount); err != nil {
+		if err := rows.Scan(&t.RuleID, &t.GroupKey, &t.Name, &t.TierCode, &t.TierName, &t.Revision, &t.TemplateID, &t.Document, &t.ViolationName, &t.Unit, &t.ExampleAmount, &t.AuthorityNumber, &t.ClauseReference); err != nil {
 			return nil, err
 		}
 		list = append(list, t)
@@ -97,13 +97,20 @@ func (p *Postgres) ProcessDisciplineDocument(ctx context.Context, id string, inp
  'discipline.sex',d.evidence->'student'->>'sex','discipline.enrollmentYear',d.evidence->'student'->>'grade','discipline.major',d.evidence->'student'->>'major','discipline.classNumber',d.evidence->'student'->>'classNumber',
  'discipline.schoolYear',y.name,'discipline.semester',CASE s.code WHEN 'FIRST' THEN '第一学期' WHEN 'SECOND' THEN '第二学期' ELSE s.name END,'discipline.violationCount',(SELECT nullif(count(DISTINCT r->>'record'),0)::text FROM jsonb_array_elements(d.evidence->'sources') r),
  'discipline.violationName',d.evidence->>'violationName','discipline.authorityNumber',d.evidence->'tier'->>'authority_number','discipline.clauseReference',d.evidence->'tier'->>'clause_reference',
- 'discipline.group',g.name,'discipline.amount',d.accumulated_amount::text,'discipline.unit',g.result_unit,'discipline.tier',coalesce(d.evidence->'tier'->>'name',k.name),'discipline.clause',d.evidence->'tier'->>'clause','discipline.decidedAt',to_char(d.decided_at AT TIME ZONE 'Asia/Shanghai','YYYY年MM月DD日')))
- FROM discipline_cases d JOIN semesters s ON s.id=d.semester_id JOIN academic_years y ON y.id=s.academic_year_id
+ 'discipline.group',g.name,'discipline.amount',d.accumulated_amount::text,'discipline.unit',g.result_unit,'discipline.tier',coalesce(d.evidence->'tier'->>'name',k.name),'discipline.decidedAt',to_char(d.decided_at AT TIME ZONE 'Asia/Shanghai','YYYY年MM月DD日')))
+ FROM discipline_cases d JOIN discipline_rule_versions v ON v.id=d.rule_version_id AND NOT v.legacy_basis_retired JOIN semesters s ON s.id=d.semester_id JOIN academic_years y ON y.id=s.academic_year_id
  JOIN discipline_rule_groups g ON (g.version_id,g.group_key)=(d.rule_version_id,d.group_key)
  JOIN discipline_rule_tiers k ON k.group_id=g.id AND k.code=d.tier_code
  JOIN discipline_tier_template_bindings b ON (b.rule_id,b.group_key,b.tier_code)=(g.version_id,g.group_key,d.tier_code)
  WHERE d.id=$1 AND d.status='APPROVED' FOR SHARE OF d,b`, id).Scan(&result.TemplateID, &ruleID, &groupKey, &tierCode, &result.Fields)
 	if errors.Is(err, pgx.ErrNoRows) {
+		var retired bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM discipline_cases d JOIN discipline_rule_versions v ON v.id=d.rule_version_id WHERE d.id=$1 AND d.status='APPROVED' AND v.legacy_basis_retired)`, id).Scan(&retired); err != nil {
+			return result, nil, err
+		}
+		if retired {
+			return result, nil, reportoutput.ErrDisciplineBasisRetired
+		}
 		return result, nil, reportoutput.ErrNotFound
 	}
 	if err != nil {
@@ -146,14 +153,12 @@ func (p *Postgres) ProcessDisciplineDocument(ctx context.Context, id string, inp
 	if len(result.Missing) > 0 {
 		return result, nil, reportoutput.ErrInvalidSelection
 	}
-	data, err := reportoutput.RenderDisciplineDocument(result.Document, result.Fields, now)
+	data, err := reportoutput.RenderDisciplineOutput(result.Document, result.Fields, now, input.Variant)
 	if err != nil {
 		return result, nil, err
 	}
-	if err = reportoutput.ValidateGeneratedFile("WORD", data); err != nil {
-		return result, nil, err
-	}
-	err = insertAuditTx(ctx, tx, meta, audit.Entry{Action: "DISCIPLINE_DOCUMENT_EXPORTED", ResourceType: "discipline_case", ResourceID: id, After: map[string]string{"templateId": result.TemplateID, "ruleId": ruleID, "generatedAt": now.UTC().Format(time.RFC3339), "decisionDate": input.DecisionDate, "issueDate": input.IssueDate, "issueNumber": input.IssueNumber}})
+
+	err = insertAuditTx(ctx, tx, meta, audit.Entry{Action: "DISCIPLINE_DOCUMENT_EXPORTED", ResourceType: "discipline_case", ResourceID: id, After: map[string]string{"templateId": result.TemplateID, "ruleId": ruleID, "variant": input.Variant, "generatedAt": now.UTC().Format(time.RFC3339), "decisionDate": input.DecisionDate, "issueDate": input.IssueDate, "issueNumber": input.IssueNumber}})
 	if err != nil {
 		return result, nil, err
 	}

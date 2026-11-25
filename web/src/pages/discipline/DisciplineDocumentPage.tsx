@@ -9,7 +9,7 @@ import { ExpandableDrawer } from '../../shared/components/ExpandableDrawer'
 import { WordTemplateEditor } from '../../features/reporting/ui/WordTemplateEditor'
 import type { WordTemplateDocument } from '../../shared/api/reportOutputApi'
 
-const blank:WordTemplateDocument={type:'doc',schemaVersion:2,orientation:'portrait',content:[{type:'paragraph',attrs:{style:'body',textAlign:'left'}}]}
+const blank:WordTemplateDocument={type:'doc',schemaVersion:2,orientation:'portrait',content:[{type:'paragraph',attrs:{style:'body',textAlign:'left',lineSpacingMode:'single'}}]}
 export function DisciplineDocumentPage(){
   const client=useQueryClient()
   const query=useQuery({queryKey:['discipline-document-templates'],queryFn:disciplineDocumentApi.list})
@@ -17,6 +17,7 @@ export function DisciplineDocumentPage(){
   const [source,setSource]=useState<DisciplineTemplate>()
   const [target, setTarget] = useState<DisciplineTemplate>()
   const [preview, setPreview] = useState<DisciplineTemplate>()
+  const [plainPreview,setPlainPreview]=useState(false)
   const [reuse, setReuse] = useState(false)
   const items = query.data?.items ?? []
   const sources = items.filter(item => item.templateId && item.document &&
@@ -68,7 +69,7 @@ export function DisciplineDocumentPage(){
                 <th scope="row">{item.tierName || item.tierCode || '默认档位'}</th>
                 <td>{item.revision ? '第 '+item.revision+' 版' : '待配置'}</td>
                 <td><div className="department-defaults-row-actions">
-                  <Button type="link" onClick={() => setPreview(item)}>预览</Button>
+                  <Button type="link" onClick={() => {setPlainPreview(false);setPreview(item)}}>预览</Button>
                   <Button type="link" onClick={() => configure(item)}>{item.revision ? '编辑模板' : '配置模板'}</Button>
                 </div></td>
               </tr>)}
@@ -92,8 +93,11 @@ export function DisciplineDocumentPage(){
     <ExpandableDrawer className="report-intro-drawer word-preview-drawer" size={1100} title={[preview?.name,preview?.tierName,'模板预览'].filter(Boolean).join(' · ')}
       open={!!preview} destroyOnHidden onClose={()=>setPreview(undefined)}>
       {preview && (preview.revision && !preview.document ? <Alert type="error" title="当前版本缺少模板正文"/> :
-        <section className="report-template-preview" aria-label="处分文件示例预览">
+        <section className={plainPreview ? "report-template-preview discipline-preview-plain" : "report-template-preview"} aria-label="处分文件示例预览">
+          <header className="discipline-preview-toolbar">
           <p className="discipline-preview-caption">{preview.revision ? '第 '+preview.revision+' 版' : '待配置 · 示例版式'} · 使用虚构学生和处分数据演示出文效果</p>
+          {preview.document?.content.some(node=>node.attrs?.letterhead) && <Radio.Group size="small" optionType="button" buttonStyle="solid" aria-label="预览版式" value={plainPreview} onChange={event=>setPlainPreview(event.target.value)} options={[{value:false,label:'带红头版'},{value:true,label:'无红头版'}]}/>}
+          </header>
           <WordTemplateEditor key={JSON.stringify([preview.ruleId,preview.groupKey,preview.tierCode])} readOnly types={[]} context="discipline" value={disciplineTemplatePreview(preview)} onChange={()=>{}}/>
         </section>)}
     </ExpandableDrawer>
@@ -108,9 +112,9 @@ export function DisciplineDocumentPage(){
 // Tiptap materializes paragraph defaults on the first transaction. They do not count as edits.
 function templateSignature(doc?:WordTemplateDocument) {
   if(!doc)return ''
-  const defaults={style:'body',textAlign:'left',indent:0,spaceBefore:0,spaceAfter:0,lineSpacing:0,lineSpacingMode:'fixed',border:null}
+  const defaults={letterhead:false,style:'body',textAlign:'left',indent:0,spaceBefore:0,spaceAfter:0,lineSpacing:0,lineSpacingMode:'fixed',border:null}
   return JSON.stringify({...doc,orientation:doc.orientation??'portrait',content:doc.content.map(n=>
-    n.type==='paragraph'?{...n,attrs:{...defaults,...n.attrs},content:n.content??[]}:n
+    n.type==='paragraph'?{...n,attrs:{...defaults,...n.attrs,lineSpacingMode:!n.attrs?.lineSpacing && (!n.attrs?.lineSpacingMode || n.attrs.lineSpacingMode==='fixed')?'single':n.attrs?.lineSpacingMode??'fixed'},content:n.content??[]}:n
   )},(_key,value)=>value && typeof value==='object' && !Array.isArray(value)
-    ?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value)
+    ?Object.fromEntries(Object.entries(value).filter(([,entry])=>entry!=null).sort(([a],[b])=>a.localeCompare(b))):value)
 }

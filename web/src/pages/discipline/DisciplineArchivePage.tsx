@@ -73,7 +73,7 @@ export function DisciplineArchivePage() {
           {key:'student',label:'学号',children:item.studentNumber},{key:'tier',label:'处分档位',children:item.tier},
           ...(item.status === 'VOID' ? [{ key: 'voidReason', label: '作废原因', children: item.voidReason || '未记录' },
             { key: 'voidedAt', label: '作废时间', children: item.voidedAt ? new Date(item.voidedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未记录' }] : []),
-          {key:'basis',label:'依据条款',children:item.clause || '无'},{key:'reason',label:'延迟原因',children:item.reason || '无'},
+          {key:'basis',label:'依据条款',children:item.clauseReference || '无'},{key:'authorityNumber',label:'文书依据',children:item.authorityNumber || '无'},{key:'reason',label:'延迟原因',children:item.reason || '无'},
         ]} /><Table rowKey="record" size="small" dataSource={item.sources} pagination={{pageSize:8}} columns={[
           {title:'来源周次',dataIndex:'week'},{title:'定稿版本',dataIndex:'version'},{title:'累计贡献',dataIndex:'amount'},
         ]} /></> : null}

@@ -41,11 +41,11 @@ const makeVersion = (id: string, version: number, status: 'DRAFT' | 'PUBLISHED' 
     unit: '次',
     terms: [{ inspectionTypeId: 'type-a', inspectionTypeName: '到课', sourceUnit: '次', operator: '+' as const, factor: 1 }],
     tiers: [
-      { code: 'NOTICE', name: '通报批评', lower: 1, upper: 3, clause: '条款一', teacherConfirmationRequired: false },
-      { code: 'WARNING', name: '警告', lower: 3, upper: 5, clause: '条款二', teacherConfirmationRequired: true },
-      { code: 'SERIOUS_WARNING', name: '严重警告', lower: 5, upper: 7, clause: '条款三', teacherConfirmationRequired: true },
-      { code: 'DEMERIT', name: '记过', lower: 7, upper: 9, clause: '条款四', teacherConfirmationRequired: true },
-      { code: 'PROBATION', name: '留校察看', lower: 9, clause: '条款五', teacherConfirmationRequired: true },
+      { code: 'NOTICE', name: '通报批评', lower: 1, upper: 3, authorityNumber: '示例1号', clauseReference: '条款一', teacherConfirmationRequired: false },
+      { code: 'WARNING', name: '警告', lower: 3, upper: 5, authorityNumber: '示例1号', clauseReference: '条款二', teacherConfirmationRequired: true },
+      { code: 'SERIOUS_WARNING', name: '严重警告', lower: 5, upper: 7, authorityNumber: '示例1号', clauseReference: '条款三', teacherConfirmationRequired: true },
+      { code: 'DEMERIT', name: '记过', lower: 7, upper: 9, authorityNumber: '示例1号', clauseReference: '条款四', teacherConfirmationRequired: true },
+      { code: 'PROBATION', name: '留校察看', lower: 9, authorityNumber: '示例1号', clauseReference: '条款五', teacherConfirmationRequired: true },
     ],
   }],
 })
@@ -325,8 +325,8 @@ describe('DisciplineConfigPage', () => {
   it('新增末尾档位先要求用户填写阈值并以同一值闭合区间', async () => {
     const draft = makeVersion('draft-1', 1)
     draft.groups[0].tiers = [
-      { code: 'NOTICE', name: '通报批评', lower: 1, upper: 3, clause: '条款一', teacherConfirmationRequired: false },
-      { code: 'WARNING', name: '警告', lower: 3, clause: '条款二', teacherConfirmationRequired: true },
+      { code: 'NOTICE', name: '通报批评', lower: 1, upper: 3, authorityNumber: '示例1号', clauseReference: '条款一', teacherConfirmationRequired: false },
+      { code: 'WARNING', name: '警告', lower: 3, authorityNumber: '示例1号', clauseReference: '条款二', teacherConfirmationRequired: true },
     ]
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
     vi.mocked(getDisciplineLevels).mockResolvedValue({
@@ -350,7 +350,7 @@ describe('DisciplineConfigPage', () => {
 
   it('新增档位遵循启用字典项的动态顺序并允许自定义名称及快捷填入', async () => {
     const draft = makeVersion('draft-1', 1)
-    draft.groups[0].tiers = [{ code: 'NOTICE', name: '通报批评', lower: 1, clause: '原档条款', teacherConfirmationRequired: false }]
+    draft.groups[0].tiers = [{ code: 'NOTICE', name: '通报批评', lower: 1, authorityNumber: '示例1号', clauseReference: '原档条款', teacherConfirmationRequired: false }]
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
     vi.mocked(getDisciplineLevels).mockResolvedValue({
       types: [{ id: 'levels', code: 'DISCIPLINE_LEVEL', name: '处分档位', description: '', system: true, enabled: true }],
@@ -477,7 +477,7 @@ describe('DisciplineConfigPage', () => {
     const draft = makeVersion('draft-1', 1)
     vi.mocked(getDisciplineRuleVersions).mockResolvedValue({ items: [draft] })
     vi.mocked(validateDisciplineRuleDraft).mockRejectedValue(new ApiError(400, 'INVALID_DISCIPLINE_RULE', '字段错误', [
-      { path: 'groups[0].tiers[0].clause', code: 'CLAUSE_REQUIRED', message: '请填写处分依据条款' },
+      { path: 'groups[0].tiers[0].clauseReference', code: 'CLAUSE_REFERENCE_REQUIRED', message: '请填写处分依据条款' },
       { path: 'groups[0].tiers[0].lower', code: 'TIER_GAP', message: '起始值与上一档位不连续' },
     ]))
     renderPage()

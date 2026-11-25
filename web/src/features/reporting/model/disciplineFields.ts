@@ -6,7 +6,7 @@ export const disciplineFields: Record<string,string> = {
   'discipline.major':'专业名称','discipline.schoolYear':'学年','discipline.semester':'学期',
   'discipline.group':'累计项名称','discipline.amount':'累计值','discipline.unit':'累计单位',
   'discipline.violationCount':'来源记录数','discipline.violationName':'违纪事实名称',
-  'discipline.tier':'处分档位','discipline.authorityNumber':'依据文件文号','discipline.clauseReference':'章条款定位',
-  'discipline.clause':'依据条款','discipline.decidedAt':'审批操作日期',
+  'discipline.tier':'处分档位','discipline.authorityNumber':'文书依据','discipline.clauseReference':'依据条款',
+  'discipline.decidedAt':'审批操作日期',
   'discipline.decisionDate':'文书确认日期（中文）','discipline.issuedDate':'印发日期',
 }

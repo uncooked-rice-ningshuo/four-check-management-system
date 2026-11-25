@@ -2,17 +2,18 @@ package disciplineconfig
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
 func baseConfig() []Group {
 	upper1, upper2, upper3, upper4 := 3.0, 5.0, 7.0, 9.0
 	return []Group{{Key: "attendance", Name: "到课", Unit: "学时", Terms: []Term{{InspectionTypeID: "a", SourceUnit: "学时", Operator: "+", Factor: 1}}, Tiers: []Tier{
-		{Code: "NOTICE", Name: "通报批评", Lower: 1, Upper: &upper1, Clause: "条款一", TeacherConfirmationRequired: false},
-		{Code: "WARNING", Name: "警告", Lower: 3, Upper: &upper2, Clause: "条款二", TeacherConfirmationRequired: true},
-		{Code: "SERIOUS_WARNING", Name: "严重警告", Lower: 5, Upper: &upper3, Clause: "条款三", TeacherConfirmationRequired: true},
-		{Code: "DEMERIT", Name: "记过", Lower: 7, Upper: &upper4, Clause: "条款四", TeacherConfirmationRequired: true},
-		{Code: "PROBATION", Name: "留校察看", Lower: 9, Clause: "条款五", TeacherConfirmationRequired: true},
+		{Code: "NOTICE", Name: "通报批评", Lower: 1, Upper: &upper1, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款一", TeacherConfirmationRequired: false},
+		{Code: "WARNING", Name: "警告", Lower: 3, Upper: &upper2, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款二", TeacherConfirmationRequired: true},
+		{Code: "SERIOUS_WARNING", Name: "严重警告", Lower: 5, Upper: &upper3, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款三", TeacherConfirmationRequired: true},
+		{Code: "DEMERIT", Name: "记过", Lower: 7, Upper: &upper4, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款四", TeacherConfirmationRequired: true},
+		{Code: "PROBATION", Name: "留校察看", Lower: 9, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款五", TeacherConfirmationRequired: true},
 	}}}
 }
 
@@ -23,6 +24,9 @@ func TestValidate(t *testing.T) {
 		valid  bool
 	}{
 		{"valid", func([]Group) {}, true},
+		{"missing authority", func(g []Group) { g[0].Tiers[1].AuthorityNumber = " " }, false},
+		{"missing clause", func(g []Group) { g[0].Tiers[4].ClauseReference = "" }, false},
+		{"long authority", func(g []Group) { g[0].Tiers[0].AuthorityNumber = strings.Repeat("号", 121) }, false},
 		{"unit required", func(g []Group) { g[0].Terms[0].SourceUnit = "" }, false},
 		{"negative conversion", func(g []Group) { g[0].Terms[0].Factor = -1 }, false},
 		{"gap", func(g []Group) { g[0].Tiers[1].Lower = 4 }, false},
@@ -50,7 +54,7 @@ func TestValidate(t *testing.T) {
 
 func TestValidateAllowsOrderedTierSubsetAndRejectsDuplicate(t *testing.T) {
 	g := baseConfig()
-	g[0].Tiers = []Tier{{Code: "WARNING", Name: "警告", Lower: 0, Upper: ptr(3), Clause: "条款", TeacherConfirmationRequired: true}, {Code: "PROBATION", Name: "留校察看", Lower: 3, Clause: "条款", TeacherConfirmationRequired: true}}
+	g[0].Tiers = []Tier{{Code: "WARNING", Name: "警告", Lower: 0, Upper: ptr(3), AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款", TeacherConfirmationRequired: true}, {Code: "PROBATION", Name: "留校察看", Lower: 3, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款", TeacherConfirmationRequired: true}}
 	if err := Validate(g, []InspectionType{{ID: "a", Code: "ATTENDANCE_RATE", Name: "到课", Enabled: true}}, true); err != nil {
 		t.Fatalf("ordered subset should be valid: %v", err)
 	}

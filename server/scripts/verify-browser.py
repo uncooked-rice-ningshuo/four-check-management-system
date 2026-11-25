@@ -354,8 +354,8 @@ SELECT id,'test','测试累计项','次',1 FROM discipline_rule_versions;
 INSERT INTO discipline_rule_group_terms(group_id,version_id,inspection_type_id,inspection_type_name,source_unit,operator,conversion_factor,sort_order)
 SELECT g.id,g.version_id,i.id,i.name,CASE WHEN i.code='ATTENDANCE_RATE' THEN '学时' ELSE '次' END,'+',1,i.sort_order
 FROM discipline_rule_groups g CROSS JOIN inspection_types i WHERE i.enabled;
-INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,clause,teacher_confirmation_required,sort_order)
-SELECT id,'NOTICE','通报批评',1,'测试条款',true,1 FROM discipline_rule_groups;
+INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,clause_reference,authority_number,teacher_confirmation_required,sort_order)
+SELECT id,'NOTICE','通报批评',1,'测试条款','测试〔2026〕1号',true,1 FROM discipline_rule_groups;
 """.encode())
             browser_env = dict(ENV, MIDSCENE_BASE_URL=f'http://127.0.0.1:{web_port}', RULE_TEST_PASSWORD=password)
             subprocess.run(['node_modules/.bin/playwright', 'test', '-c', 'playwright.midscene.config.ts',

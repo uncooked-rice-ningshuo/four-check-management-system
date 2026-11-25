@@ -1,4 +1,4 @@
-export type DisciplineTier = { authorityNumber?:string; clauseReference?:string; code: string; name: string; lower: number; upper?: number; clause: string; teacherConfirmationRequired: boolean }
+export type DisciplineTier = { authorityNumber:string; clauseReference:string; code: string; name: string; lower: number; upper?: number; teacherConfirmationRequired: boolean }
 export type DisciplineTerm = { inspectionTypeId: string; inspectionTypeName: string; sourceUnit: string; operator: '+' | '-'; factor: number }
 export type DisciplineGroup = { violationName?:string; key: string; name: string; unit: string; terms: DisciplineTerm[]; tiers: DisciplineTier[] }
 export type DisciplineRuleVersion = { id: string; version: number; status: 'DRAFT' | 'PUBLISHED' | 'SUPERSEDED'; rowVersion: number; createdBy: string; createdByName?: string; createdAt: string; publishedBy?: string; publishedByName?: string; publishedAt?: string; groups: DisciplineGroup[] }

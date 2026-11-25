@@ -37,7 +37,7 @@ func (r *repositoryStub) Publish(context.Context, string, int, string) (Version,
 func TestSaveDraftNormalizesUnitsAndPreservesCustomTierName(t *testing.T) {
 	repository := &repositoryStub{types: []InspectionType{{ID: "a", Code: "ATTENDANCE_RATE", Name: "目录权威名称", Enabled: true}, {ID: "b", Code: "LATE_RETURN", Name: "晚归", Enabled: true}}, definitions: []TierDefinition{{Code: "WARNING", Name: "管理员维护警告名称", SortOrder: 20}}}
 	service := NewService(repository)
-	version := Version{ID: "version", Status: StatusDraft, RowVersion: 1, Groups: []Group{{Key: "group", Name: "累计组", Terms: []Term{{InspectionTypeID: "a", InspectionTypeName: "客户端提供的名称", SourceUnit: "伪造", Operator: "+", Factor: 1}, {InspectionTypeID: "b", SourceUnit: "学时", Operator: "+", Factor: 1}}, Tiers: []Tier{{Code: "WARNING", Name: "伪造处分名", Lower: 0, Clause: "条款", TeacherConfirmationRequired: true}}}}}
+	version := Version{ID: "version", Status: StatusDraft, RowVersion: 1, Groups: []Group{{Key: "group", Name: "累计组", Terms: []Term{{InspectionTypeID: "a", InspectionTypeName: "客户端提供的名称", SourceUnit: "伪造", Operator: "+", Factor: 1}, {InspectionTypeID: "b", SourceUnit: "学时", Operator: "+", Factor: 1}}, Tiers: []Tier{{Code: "WARNING", Name: "伪造处分名", Lower: 0, AuthorityNumber: "示例〔2026〕1号", ClauseReference: "条款", TeacherConfirmationRequired: true}}}}}
 	if _, err := service.SaveDraft(context.Background(), version, 1, "actor"); err != nil {
 		t.Fatal(err)
 	}

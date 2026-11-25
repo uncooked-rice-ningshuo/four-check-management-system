@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +14,8 @@ import (
 // IntroductionDocument is the small Tiptap subset accepted for a report cover.
 // Unknown nodes and formatting are rejected before the document reaches OOXML.
 type IntroductionDocument struct {
+	Margins              *PageMargins            `json:"margins,omitempty"`
+	MarginTwips          int                     `json:"marginTwips,omitempty"`
 	SchemaVersion        int                     `json:"schemaVersion,omitempty"`
 	Orientation          string                  `json:"orientation,omitempty"`
 	Type                 string                  `json:"type"`
@@ -33,14 +36,34 @@ type IntroductionParagraph struct {
 }
 
 type layoutCell struct {
-	Width       int `json:"width,omitempty"`       // hundredths of the table width percentage
-	Height      int `json:"height,omitempty"`      // minimum row height in points
-	HiddenEdges int `json:"hiddenEdges,omitempty"` // top, right, bottom, left
+	VerticalAlign string `json:"verticalAlign,omitempty"`
+	FontSize      string `json:"fontSize,omitempty"`
+	Width         int    `json:"width,omitempty"`       // hundredths of the table width percentage
+	Height        int    `json:"height,omitempty"`      // minimum row height in points
+	HiddenEdges   int    `json:"hiddenEdges,omitempty"` // top, right, bottom, left
 
 	Length int    `json:"length"`
 	Align  string `json:"align"`
 }
 type IntroductionAttrs struct {
+	FontSize        string `json:"fontSize,omitempty"`
+	blankLetterhead bool   // render-only: preserve the border dimensions on white paper
+	TabStop         int    `json:"tabStop,omitempty"`
+	LeftChars       int    `json:"leftChars,omitempty"`
+	RightChars      int    `json:"rightChars,omitempty"`
+	Hanging         int    `json:"hanging,omitempty"`
+	Outline         int    `json:"outline,omitempty"`
+	BeforeLines     int    `json:"beforeLines,omitempty"`
+	AfterLines      int    `json:"afterLines,omitempty"`
+	RTL             *bool  `json:"rtl,omitempty"`
+	GridIndent      *bool  `json:"gridIndent,omitempty"`
+	ParagraphGrid   *bool  `json:"paragraphGrid,omitempty"`
+	KeepNext        *bool  `json:"keepNext,omitempty"`
+	KeepLines       *bool  `json:"keepLines,omitempty"`
+	PageBefore      *bool  `json:"pageBefore,omitempty"`
+	Widow           *bool  `json:"widow,omitempty"`
+
+	Letterhead bool            `json:"letterhead,omitempty"`
 	InsetLeft  int             `json:"insetLeft,omitempty"`
 	InsetRight int             `json:"insetRight,omitempty"`
 	Rows       *[][]layoutCell `json:"rows,omitempty"`
@@ -69,6 +92,25 @@ type TemplateFieldAttrs struct {
 	Key string `json:"key"`
 }
 
+// PageMargins holds each page edge in twentieths of a point.
+type PageMargins struct {
+	Top    int `json:"top"`
+	Bottom int `json:"bottom"`
+	Left   int `json:"left"`
+	Right  int `json:"right"`
+}
+
+func (doc IntroductionDocument) pageMargins() PageMargins {
+	if doc.Margins != nil {
+		return *doc.Margins
+	}
+	edge := doc.MarginTwips
+	if edge == 0 {
+		edge = 900
+	}
+	return PageMargins{edge, edge, edge, edge}
+}
+
 type IntroductionMark struct {
 	Type  string            `json:"type"`
 	Attrs *IntroductionFont `json:"attrs,omitempty"`
@@ -76,13 +118,48 @@ type IntroductionMark struct {
 
 type IntroductionFont struct {
 	FontFamily string `json:"fontFamily,omitempty"`
+	Color      string `json:"color,omitempty"`
+	Scale      int    `json:"scale,omitempty"`
+	Position   int    `json:"position,omitempty"`
+	Kern       int    `json:"kern,omitempty"`
+	Snap       *bool  `json:"snap,omitempty"`
+	Spacing    int    `json:"spacing,omitempty"`
 	FontSize   string `json:"fontSize,omitempty"`
 }
 
+var wordColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
 var allowedIntroductionFonts = map[string]bool{"仿宋": true, "宋体": true, "黑体": true, "楷体": true, "微软雅黑": true, "华文新魏": true}
-var allowedIntroductionSizes = map[string]bool{"9pt": true, "10.5pt": true, "12pt": true, "14pt": true, "15pt": true, "16pt": true, "20pt": true, "30pt": true}
+
+// Word stores font sizes in half-points; this map also defines the accepted presets.
+var wordFontHalfPoints = map[string]int{
+	"5pt": 10, "5.5pt": 11, "6.5pt": 13, "7.5pt": 15,
+	"8pt": 16, "9pt": 18, "10pt": 20, "10.5pt": 21, "11pt": 22, "12pt": 24,
+	"14pt": 28, "15pt": 30, "16pt": 32, "18pt": 36, "20pt": 40, "22pt": 44,
+	"24pt": 48, "26pt": 52, "28pt": 56, "30pt": 60, "32pt": 64, "36pt": 72,
+	"40pt": 80, "42pt": 84, "44pt": 88, "48pt": 96, "54pt": 108, "56pt": 112,
+	"60pt": 120, "64pt": 128, "72pt": 144, "80pt": 160, "88pt": 176, "96pt": 192,
+	"108pt": 216,
+}
 var allowedIntroductionStyles = map[string]bool{"body": true, "title": true, "subtitle": true, "heading": true, "heading1": true, "heading2": true, "heading3": true, "signature": true, "date": true}
 var allowedIntroductionAlignment = map[string]bool{"left": true, "center": true, "right": true, "justify": true}
+
+// Spacing is stored in twentieths of a point, the unit used by Word runs.
+func (font *IntroductionFont) valid() bool {
+	return font != nil && *font != (IntroductionFont{}) &&
+		(font.FontFamily == "" || allowedIntroductionFonts[font.FontFamily]) &&
+		(font.FontSize == "" || wordFontHalfPoints[font.FontSize] != 0) &&
+		(font.Color == "" || wordColor.MatchString(font.Color)) &&
+		(font.Scale == 0 || font.Scale >= 1 && font.Scale <= 600) && font.Position >= -200 && font.Position <= 200 && font.Kern >= 0 && font.Kern <= 326 && font.Spacing >= -100 && font.Spacing <= 200
+}
+
+// Line-based paragraph spacing is stored in hundredths of a line (OOXML units).
+func (a IntroductionAttrs) validParagraphLayout() bool {
+	return (a.FontSize == "" || wordFontHalfPoints[a.FontSize] != 0) && a.TabStop >= 0 && a.TabStop <= 8400 && a.LeftChars >= 0 && a.LeftChars <= 16 && a.RightChars >= 0 && a.RightChars <= 16 &&
+		a.Hanging >= 0 && a.Hanging <= 16 && (a.Hanging == 0 || a.Indent == 0) &&
+		a.Outline >= 0 && a.Outline <= 9 && a.BeforeLines >= 0 && a.BeforeLines <= 1000 && a.AfterLines >= 0 && a.AfterLines <= 1000 &&
+		(a.BeforeLines == 0 || a.SpaceBefore == 0) && (a.AfterLines == 0 || a.SpaceAfter == 0)
+}
 
 func allowedLineSpacingMode(mode string) bool {
 	switch mode {
@@ -108,6 +185,19 @@ func decodeTemplate(raw json.RawMessage, discipline bool) (IntroductionDocument,
 		return IntroductionDocument{}, fmt.Errorf("invalid introduction document: %w", ErrInvalidSelection)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
+		return IntroductionDocument{}, ErrInvalidSelection
+	}
+	if m := document.Margins; m != nil {
+		if document.SchemaVersion != 2 || document.MarginTwips != 0 {
+			return IntroductionDocument{}, ErrInvalidSelection
+		}
+		for _, edge := range []int{m.Top, m.Bottom, m.Left, m.Right} {
+			if edge < 0 || edge > 4500 {
+				return IntroductionDocument{}, ErrInvalidSelection
+			}
+		}
+	}
+	if document.MarginTwips != 0 && (document.SchemaVersion != 2 || document.MarginTwips < 720 || document.MarginTwips > 2160) {
 		return IntroductionDocument{}, ErrInvalidSelection
 	}
 	if discipline && document.SchemaVersion != 2 {
@@ -208,21 +298,27 @@ func decodeTemplate(raw json.RawMessage, discipline bool) (IntroductionDocument,
 			}
 			continue
 		}
+		if (paragraph.Attrs.Letterhead || paragraph.Attrs.Border == "redRule") && (!discipline || paragraph.Type != "paragraph") {
+			return IntroductionDocument{}, ErrInvalidSelection
+		}
 		if paragraph.Attrs.Key != "" || paragraph.Attrs.Orientation != "" {
 			return IntroductionDocument{}, ErrInvalidSelection
 		}
 		if !isTable {
 			switch paragraph.Attrs.Border {
-			case "", "topBottom", "bottomDouble":
+			case "", "topBottom", "bottomDouble", "redRule":
 			default:
 				return IntroductionDocument{}, ErrInvalidSelection
 			}
 		}
-		if !isTable && !isImprint && (paragraph.Type != "paragraph" || !allowedIntroductionStyles[paragraph.Attrs.Style] || !allowedIntroductionAlignment[paragraph.Attrs.TextAlign] || paragraph.Attrs.Indent < 0 || paragraph.Attrs.Indent > 4 || paragraph.Attrs.SpaceBefore < 0 || paragraph.Attrs.SpaceBefore > 72 || paragraph.Attrs.SpaceAfter < 0 || paragraph.Attrs.SpaceAfter > 72 || paragraph.Attrs.LineSpacing < 0 || paragraph.Attrs.LineSpacing > 48 || (paragraph.Attrs.LineSpacing > 0 && paragraph.Attrs.LineSpacing < 18) || !allowedLineSpacingMode(paragraph.Attrs.LineSpacingMode)) {
+		if !isTable && !isImprint && (paragraph.Type != "paragraph" || !paragraph.Attrs.validParagraphLayout() || !allowedIntroductionStyles[paragraph.Attrs.Style] || !allowedIntroductionAlignment[paragraph.Attrs.TextAlign] || paragraph.Attrs.Indent < 0 || paragraph.Attrs.Indent > 4 || paragraph.Attrs.SpaceBefore < 0 || paragraph.Attrs.SpaceBefore > 72 || paragraph.Attrs.SpaceAfter < 0 || paragraph.Attrs.SpaceAfter > 72 || paragraph.Attrs.LineSpacing < 0 || paragraph.Attrs.LineSpacing > 48 || (paragraph.Attrs.LineSpacing > 0 && paragraph.Attrs.LineSpacing < 18) || !allowedLineSpacingMode(paragraph.Attrs.LineSpacingMode)) {
 			return IntroductionDocument{}, ErrInvalidSelection
 		}
 		for _, run := range paragraph.Content {
 			if run.Type == "templateField" && document.SchemaVersion == 2 {
+				if discipline && run.Attrs != nil && run.Attrs.Key == "discipline.clause" {
+					return IntroductionDocument{}, ErrRetiredClauseField
+				}
 				if run.Attrs == nil || run.Text != "" || !allowedTemplateField(run.Attrs.Key, discipline) {
 					return IntroductionDocument{}, ErrInvalidSelection
 				}
@@ -245,9 +341,7 @@ func decodeTemplate(raw json.RawMessage, discipline bool) (IntroductionDocument,
 						return IntroductionDocument{}, ErrInvalidSelection
 					}
 				case "textStyle":
-					if mark.Attrs == nil || (mark.Attrs.FontFamily == "" && mark.Attrs.FontSize == "") ||
-						(mark.Attrs.FontFamily != "" && !allowedIntroductionFonts[mark.Attrs.FontFamily]) ||
-						(mark.Attrs.FontSize != "" && !allowedIntroductionSizes[mark.Attrs.FontSize]) {
+					if !mark.Attrs.valid() {
 						return IntroductionDocument{}, ErrInvalidSelection
 					}
 				default:
@@ -366,7 +460,10 @@ func validWordTable(node IntroductionParagraph) bool {
 			return false
 		}
 		for _, c := range row {
-			if c.Width < 0 || c.Width > 10000 || c.Height < 0 || c.Height > 720 || c.HiddenEdges < 0 || c.HiddenEdges > 15 {
+			if (c.FontSize != "" && wordFontHalfPoints[c.FontSize] == 0) || c.Width < 0 || c.Width > 10000 || c.Height < 0 || c.Height > 720 || c.HiddenEdges < 0 || c.HiddenEdges > 15 {
+				return false
+			}
+			if c.VerticalAlign != "" && c.VerticalAlign != "top" && c.VerticalAlign != "center" && c.VerticalAlign != "bottom" {
 				return false
 			}
 			if (c.Align != "left" && c.Align != "right" && c.Align != "center") || c.Length < 0 || c.Length > len(node.Content)-count {

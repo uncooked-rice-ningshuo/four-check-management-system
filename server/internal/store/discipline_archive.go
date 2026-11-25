@@ -24,7 +24,7 @@ WITH filtered AS (
 SELECT jsonb_build_object('total',(SELECT count(*) FROM filtered),'page',$8::int,'pageSize',$6::int,
 'items',coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'studentNumber',student_number,
 'semester',semester,'group',group_key,'tier',coalesce(tier,tier_code),'status',status,'amount',accumulated_amount,
-'decidedAt',decided_at,'decisionSource',decision_source) || CASE WHEN $9<>'' THEN jsonb_build_object('clause',evidence->'tier'->>'clause','sources',evidence->'sources','reason',delay_reason,'voidReason',void_reason,'voidedAt',voided_at,'previousCaseId',previous_case_id,'reassessmentRuleVersionId',reassessment_rule_version_id,'reassessmentReportVersionId',reassessment_report_version_id,'ruleVersion',rule_version_id,'reportVersion',report_version_id) ELSE '{}'::jsonb END ORDER BY decided_at DESC NULLS LAST,id) FROM page),'[]'))
+'decidedAt',decided_at,'decisionSource',decision_source) || CASE WHEN $9<>'' THEN jsonb_build_object('clauseReference',evidence->'tier'->>'clause_reference','authorityNumber',evidence->'tier'->>'authority_number','sources',evidence->'sources','reason',delay_reason,'voidReason',void_reason,'voidedAt',voided_at,'previousCaseId',previous_case_id,'reassessmentRuleVersionId',reassessment_rule_version_id,'reassessmentReportVersionId',reassessment_report_version_id,'ruleVersion',rule_version_id,'reportVersion',report_version_id) ELSE '{}'::jsonb END ORDER BY decided_at DESC NULLS LAST,id) FROM page),'[]'))
 `, f.Status, f.Student, f.SemesterID, f.Group, f.Tier, f.PageSize, (f.Page-1)*f.PageSize, f.Page, f.CaseID).Scan(&result)
 	return result, err
 }

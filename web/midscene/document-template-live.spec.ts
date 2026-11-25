@@ -8,6 +8,8 @@ test('逐档模板在真实服务中预览、修改并保存',async({page})=>{
   expect(login.status()).toBe(200)
   await page.goto('/discipline/documents')
   const row = page.getByRole('row').filter({has:page.getByRole('rowheader',{name:'FIRST',exact:true})})
+  const revision=Number((await row.innerText()).match(/第 (\d+) 版/)?.[1])
+  expect(revision).toBeGreaterThan(0)
   await row.getByRole('button',{name:'预览',exact:true}).click()
   const sample = page.getByLabel('处分文件示例预览')
   await expect(sample.getByLabel('模板正文预览')).toContainText('陈小禾')
@@ -19,13 +21,17 @@ test('逐档模板在真实服务中预览、修改并保存',async({page})=>{
   const body = page.getByLabel('文件模板正文')
   await body.locator('p').click()
   await page.keyboard.press('End')
+  await page.keyboard.press('Enter')
   await page.keyboard.insertText('归档核对')
+  await page.getByRole('button',{name:'红头行',exact:true}).click()
   await page.getByRole('button',{name:'保存并启用'}).click()
   await page.getByRole('button',{name:/^启\s*用$/}).click()
-  await expect(row).toContainText('第 2 版')
+  await expect(row).toContainText(`第 ${revision+1} 版`)
   await page.reload()
   await row.getByRole('button',{name:'预览',exact:true}).click()
-  await expect(sample).toContainText('归档核对')
+  await expect(sample.getByText('归档核对',{exact:true})).toBeVisible()
+  await sample.getByText('无红头版',{exact:true}).click()
+  await expect(sample.getByText('归档核对',{exact:true})).toBeHidden()
   await expect(sample).toContainText('陈小禾')
 })
 
@@ -58,6 +64,11 @@ test('模板编辑、归档清单导出、处分文书出文分别鉴权',async(
   for(const kind of ['edit','export','excel']){
     const headers=await login('doc-'+kind)
     expect((await request.get('/api/v1/discipline/document-templates',{headers})).status()).toBe(kind==='edit'?200:403)
+    for(const variant of ['letterhead','plain','both']){
+      const output=await request.post('/api/v1/discipline/archive/'+id+'/document',{headers,data:{variant}})
+      expect(output.status()).toBe(kind==='export'?200:403)
+      if(kind==='export') expect(output.headers()['content-type']).toContain(variant==='both'?'application/zip':'wordprocessingml.document')
+    }
     for(const suffix of ['/preview','']){
       const result=await request.post('/api/v1/discipline/archive/'+id+'/document'+suffix,{headers,data:{}})
       expect(result.status()).toBe(kind==='export'?200:403)

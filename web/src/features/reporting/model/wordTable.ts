@@ -1,8 +1,12 @@
 import { tableResize } from "./tableResize"
 import { Node, type Editor, type JSONContent } from '@tiptap/core'
-import { goToNextCell, tableEditing } from '@tiptap/pm/tables'
+import { Plugin } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { CellSelection, goToNextCell, tableEditing } from '@tiptap/pm/tables'
 
-type LayoutCell = {length:number; align:string; width?:number; height?:number; hiddenEdges?:number}
+export const wordFontSizes = [5, 5.5, 6.5, 7.5, 8, 9, 10, 10.5, 11, 12, 14, 15, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 42, 44, 48, 54, 56, 60, 64, 72, 80, 88, 96, 108].map(points => points + 'pt')
+
+type LayoutCell = {verticalAlign?:'top'|'center'|'bottom'; fontSize?:string; length:number; align:string; width?:number; height?:number; hiddenEdges?:number}
 export function newTable(rows:number, columns:number):JSONContent {
   return {type:'wordTable',attrs:{border:'all'},content:Array.from({length:rows},()=>({
     type:'wordRow',content:Array.from({length:columns},()=>({type:'wordCell'})),
@@ -25,7 +29,7 @@ export function tableForEditor(node:JSONContent):JSONContent {
   return {type:'wordTable',attrs:{border:node.attrs?.border,insetLeft:node.attrs?.insetLeft,insetRight:node.attrs?.insetRight},content:rows.map(row=>({type:'wordRow',attrs:{height:row[0]?.height ?? 0},content:row.map(cell=>{
     const content=runs.slice(offset,offset+cell.length)
     offset+=cell.length
-    return {type:'wordCell',attrs:{align:cell.align,width:cell.width ?? 0,hiddenEdges:cell.hiddenEdges ?? 0},content}
+    return {type:'wordCell',attrs:{align:cell.align,verticalAlign:cell.verticalAlign ?? 'top',fontSize:cell.fontSize ?? null,width:cell.width ?? 0,hiddenEdges:cell.hiddenEdges ?? 0},content}
   })}))}
 }
 
@@ -35,7 +39,7 @@ export function tableForStorage(node:JSONContent):JSONContent {
   const rows=node.content?.map(row=>row.content?.map(cell=>{
     const content=cell.content ?? []
     runs.push(...content)
-    return {length:content.length,align:cell.attrs?.align ?? 'left',width:cell.attrs?.width || undefined,height:row.attrs?.height || undefined,hiddenEdges:cell.attrs?.hiddenEdges || undefined}
+    return {length:content.length,align:cell.attrs?.align ?? 'left',verticalAlign:cell.attrs?.verticalAlign==='top'?undefined:cell.attrs?.verticalAlign,fontSize:cell.attrs?.fontSize || undefined,width:cell.attrs?.width || undefined,height:row.attrs?.height || undefined,hiddenEdges:cell.attrs?.hiddenEdges || undefined}
   }))
   return {type:'wordTable',attrs:{border:node.attrs?.border,insetLeft:node.attrs?.insetLeft||undefined,insetRight:node.attrs?.insetRight||undefined,rows},content:runs}
 }
@@ -52,8 +56,26 @@ export const wordTable = Node.create({
 export const wordRow=Node.create({name:'wordRow',content:'wordCell+',parseHTML:()=>[{tag:'tr'}],addAttributes:()=>({height:{default:0}}),renderHTML:({node})=>['tr',{style:node.attrs.height ? 'height:'+node.attrs.height+'pt' : undefined},0]})
 export const wordCell=Node.create({
   name:'wordCell',content:'inline*',isolating:true,
-  addAttributes:()=>({align:{default:'left',parseHTML:el=>el.style.textAlign||'left'},width:{default:0},hiddenEdges:{default:0},colspan:{default:1},rowspan:{default:1},colwidth:{default:null}}),
-  parseHTML:()=>[{tag:'td'}],renderHTML:({node})=>['td',{style:['text-align:'+node.attrs.align,node.attrs.width && 'width:'+node.attrs.width/100+'%', ...edges.map((edge,i)=>node.attrs.hiddenEdges & (1<<i) ? 'border-'+edge+':1px hidden transparent;--guide-'+edge+':1px' : '')].filter(Boolean).join(';')},0],
+  addProseMirrorPlugins:()=>[new Plugin({props:{decorations(state){
+    const decorations:Decoration[]=[]
+    state.doc.descendants((cell,pos)=>{
+      if(cell.type.name!=='wordCell')return
+      const base=cell.attrs.fontSize || '15pt'
+      // Remove the inherited 15 pt line box only when the text actually uses a smaller size.
+      let smallest=Infinity
+      let allExplicit=true
+      cell.forEach(run=>{
+        const mark=run.marks.find(mark=>mark.type.name==='textStyle')
+        if(!mark?.attrs.fontSize)allExplicit=false
+        smallest=Math.min(smallest,parseFloat(mark?.attrs.fontSize || base))
+      })
+      if(allExplicit && smallest<parseFloat(base))decorations.push(Decoration.node(pos,pos+cell.nodeSize,{style:'font-size:'+smallest+'pt'}))
+      return false
+    })
+    return DecorationSet.create(state.doc,decorations)
+  }}})],
+  addAttributes:()=>({verticalAlign:{default:'top',parseHTML:el=>el.style.verticalAlign==='middle'?'center':el.style.verticalAlign==='bottom'?'bottom':'top'},fontSize:{default:null,parseHTML:el=>wordFontSizes.includes(el.dataset.cellFontSize ?? '')?el.dataset.cellFontSize:null},align:{default:'left',parseHTML:el=>el.style.textAlign||'left'},width:{default:0},hiddenEdges:{default:0},colspan:{default:1},rowspan:{default:1},colwidth:{default:null}}),
+  parseHTML:()=>[{tag:'td'}],renderHTML:({node})=>['td',{'data-cell-font-size':node.attrs.fontSize,style:[node.attrs.fontSize && 'font-size:'+node.attrs.fontSize,'text-align:'+node.attrs.align,'vertical-align:'+(node.attrs.verticalAlign==='center'?'middle':node.attrs.verticalAlign),node.attrs.width && 'width:'+node.attrs.width/100+'%', ...edges.map((edge,i)=>node.attrs.hiddenEdges & (1<<i) ? 'border-'+edge+':1px hidden transparent;--guide-'+edge+':1px' : '')].filter(Boolean).join(';')},0],
 })
 
 export const edges = ['top','right','bottom','left'] as const
@@ -107,4 +129,42 @@ export function applyCellLayout(editor:Editor, layout:CellLayout){
   })
   editor.view.dispatch(tr)
   editor.commands.focus()
+}
+
+
+export function applyWordFontSize(editor:Editor,size:string){
+  const {selection}=editor.state
+  const chain=editor.chain().focus()
+  const paragraph=selection.$from.parent
+  const titleAtCaret=selection.empty && paragraph.content.size>0 &&
+    (paragraph.attrs.letterhead || paragraph.attrs.style==='title')
+  if(paragraph.type.name==='paragraph' && (titleAtCaret ||
+    (selection.from===selection.$from.start() && selection.to===selection.$from.end()))) {
+    // Keep the paragraph mark in sync when the whole line changes size.
+    chain.updateAttributes('paragraph',{fontSize:size})
+    if(titleAtCaret) chain.setTextSelection({from:selection.$from.start(),to:selection.$from.end()})
+    chain.setFontSize(size)
+    if(titleAtCaret) chain.setTextSelection(selection.from)
+    chain.run()
+    return
+  }
+  if(selection instanceof CellSelection){
+    chain.command(({tr})=>{
+      selection.forEachCell((cell,pos)=>tr.setNodeMarkup(pos,undefined,{...cell.attrs,fontSize:size}))
+      return true
+    })
+  }else if(selection.empty && selection.$from.parent.content.size===0){
+    const type=selection.$from.parent.type.name
+    if(type==='wordCell' || type==='paragraph') chain.updateAttributes(type,{fontSize:size})
+  }else if(!selection.empty){
+    chain.command(({tr})=>{
+      tr.doc.nodesBetween(selection.from,selection.to,(node,pos)=>{
+        if(node.type.name==='paragraph' && node.content.size===0 && pos+node.nodeSize-1 < selection.to){
+          tr.setNodeMarkup(pos,undefined,{...node.attrs,fontSize:size})
+        }
+      })
+      return true
+    })
+  }
+  chain.setFontSize(size).run()
 }

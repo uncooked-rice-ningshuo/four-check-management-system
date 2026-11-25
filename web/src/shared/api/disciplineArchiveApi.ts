@@ -17,7 +17,8 @@ export type ArchivedDecision = {
   status: 'APPROVED' | 'VOID'
   amount: number
   decidedAt: string | null
-  clause?: string
+  clauseReference?: string
+  authorityNumber?: string
   sources?: {record:string;week:number;version:number;amount:number}[]
   voidReason?: string | null
   voidedAt?: string | null

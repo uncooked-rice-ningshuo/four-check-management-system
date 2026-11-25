@@ -1,8 +1,9 @@
 import { apiRequest } from './httpClient'
 import type { WordTemplateDocument } from './reportOutputApi'
 
-export type DisciplineTemplate = {ruleId:string;groupKey:string;violationName?:string;unit?:string;exampleAmount?:string;tierCode?:string;tierName?:string;templateId?:string;sourceTemplateId?:string;name:string;revision:number;document?:WordTemplateDocument}
-export type DocumentRequest = {templateId?:string;decisionDate:string;issueDate:string;issueNumber:string}
+export type DisciplineTemplate = {ruleId:string;groupKey:string;authorityNumber?:string;clauseReference?:string;violationName?:string;unit?:string;exampleAmount?:string;tierCode?:string;tierName?:string;templateId?:string;sourceTemplateId?:string;name:string;revision:number;document?:WordTemplateDocument}
+export type DocumentVariant = 'letterhead' | 'plain' | 'both'
+export type DocumentRequest = {variant?:DocumentVariant;templateId?:string;decisionDate:string;issueDate:string;issueNumber:string}
 export type ArchiveDocumentPreview = {document:WordTemplateDocument; templateId:string; editions:{id:string;revision:number}[];fields:Record<string,string>;missing:string[]}
 const url='/discipline/document-templates'
 export const disciplineDocumentApi={

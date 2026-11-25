@@ -213,17 +213,44 @@ func wordPageNumberFormat(document IntroductionDocument) string {
 }
 
 func renderIntroduction(document IntroductionDocument) string {
+	return renderIntroductionWithCellSize(document, "")
+}
+
+func renderIntroductionWithCellSize(document IntroductionDocument, cellSize string) string {
 	styles := map[string]string{"body": "CoverBody", "title": "CoverTitle", "subtitle": "CoverSubtitle", "heading": "CoverHeading", "heading1": "CoverHeading1", "heading2": "CoverHeading2", "heading3": "CoverHeading3", "signature": "CoverSignature", "date": "CoverDate"}
 	alignments := map[string]string{"left": "left", "center": "center", "right": "right", "justify": "both"}
-	sizes := map[string]string{"9pt": "18", "10.5pt": "21", "12pt": "24", "14pt": "28", "15pt": "30", "16pt": "32", "20pt": "40", "30pt": "60"}
 	var output strings.Builder
 	for _, paragraph := range document.Content {
-		output.WriteString(`<w:p><w:pPr><w:pStyle w:val="` + styles[paragraph.Attrs.Style] + `"/>` + paragraphBorderXML(paragraph.Attrs.Border) + `<w:jc w:val="` + alignments[paragraph.Attrs.TextAlign] + `"/>`)
-		if paragraph.Attrs.Indent > 0 {
-			output.WriteString(fmt.Sprintf(`<w:ind w:firstLineChars="%d"/>`, paragraph.Attrs.Indent*100))
+		attrs := paragraph.Attrs
+		output.WriteString(`<w:p><w:pPr><w:pStyle w:val="` + styles[attrs.Style] + `"/>`)
+		writeFlag := func(name string, value *bool) {
+			if value != nil {
+				fmt.Fprintf(&output, `<w:%s w:val="%t"/>`, name, *value)
+			}
 		}
-		if paragraph.Attrs.SpaceBefore > 0 || paragraph.Attrs.SpaceAfter > 0 || paragraph.Attrs.LineSpacing > 0 || paragraph.Attrs.LineSpacingMode != "" {
+		writeFlag("keepNext", attrs.KeepNext)
+		writeFlag("keepLines", attrs.KeepLines)
+		writeFlag("pageBreakBefore", attrs.PageBefore)
+		writeFlag("widowControl", attrs.Widow)
+		border := paragraphBorderXML(attrs.Border)
+		if attrs.blankLetterhead {
+			border = strings.NewReplacer(`w:color="FF0000"`, `w:color="FFFFFF"`, `w:color="auto"`, `w:color="FFFFFF"`).Replace(border)
+		}
+		output.WriteString(border)
+		if attrs.TabStop > 0 {
+			fmt.Fprintf(&output, `<w:tabs><w:tab w:val="left" w:pos="%d"/></w:tabs>`, attrs.TabStop)
+		}
+		writeFlag("bidi", attrs.RTL)
+		writeFlag("adjustRightInd", attrs.GridIndent)
+		writeFlag("snapToGrid", attrs.ParagraphGrid)
+		if attrs.BeforeLines > 0 || attrs.AfterLines > 0 || attrs.SpaceBefore > 0 || attrs.SpaceAfter > 0 || attrs.LineSpacing > 0 || attrs.LineSpacingMode != "" {
 			spacing := fmt.Sprintf(`<w:spacing w:before="%d" w:after="%d"`, paragraph.Attrs.SpaceBefore*20, paragraph.Attrs.SpaceAfter*20)
+			if attrs.BeforeLines > 0 {
+				spacing += fmt.Sprintf(` w:beforeLines="%d"`, attrs.BeforeLines)
+			}
+			if attrs.AfterLines > 0 {
+				spacing += fmt.Sprintf(` w:afterLines="%d"`, attrs.AfterLines)
+			}
 			switch paragraph.Attrs.LineSpacingMode {
 			case "single":
 				spacing += ` w:line="240" w:lineRule="auto"`
@@ -238,9 +265,37 @@ func renderIntroduction(document IntroductionDocument) string {
 			}
 			output.WriteString(spacing + `/>`)
 		}
+		if attrs.Indent > 0 || attrs.Hanging > 0 || attrs.LeftChars > 0 || attrs.RightChars > 0 {
+			output.WriteString("<w:ind")
+			if attrs.Indent > 0 {
+				fmt.Fprintf(&output, ` w:firstLineChars="%d"`, attrs.Indent*100)
+			}
+			if attrs.Hanging > 0 {
+				fmt.Fprintf(&output, ` w:hangingChars="%d"`, attrs.Hanging*100)
+			}
+			if attrs.LeftChars > 0 {
+				fmt.Fprintf(&output, ` w:leftChars="%d"`, attrs.LeftChars*100)
+			}
+			if attrs.RightChars > 0 {
+				fmt.Fprintf(&output, ` w:rightChars="%d"`, attrs.RightChars*100)
+			}
+			output.WriteString("/>")
+		}
+		output.WriteString(`<w:jc w:val="` + alignments[attrs.TextAlign] + `"/>`)
+		if attrs.Outline > 0 {
+			fmt.Fprintf(&output, `<w:outlineLvl w:val="%d"/>`, attrs.Outline-1)
+		}
+		paragraphSize := attrs.FontSize
+		if paragraphSize == "" {
+			paragraphSize = cellSize
+		}
+		if paragraphSize != "" {
+			fmt.Fprintf(&output, `<w:rPr><w:sz w:val="%d"/></w:rPr>`, wordFontHalfPoints[paragraphSize])
+		}
 		output.WriteString(`</w:pPr>`)
 		for _, run := range paragraph.Content {
 			output.WriteString(`<w:r><w:rPr>`)
+			size := paragraphSize
 			for _, mark := range run.Marks {
 				if mark.Type == "bold" {
 					output.WriteString(`<w:b/>`)
@@ -258,12 +313,40 @@ func renderIntroduction(document IntroductionDocument) string {
 					if mark.Attrs.FontFamily != "" {
 						output.WriteString(`<w:rFonts w:ascii="` + xmlText(mark.Attrs.FontFamily) + `" w:eastAsia="` + xmlText(mark.Attrs.FontFamily) + `"/>`)
 					}
+					if mark.Attrs.Color != "" {
+						fmt.Fprintf(&output, `<w:color w:val="%s"/>`, xmlText(strings.TrimPrefix(mark.Attrs.Color, "#")))
+					}
+					if mark.Attrs.Snap != nil {
+						fmt.Fprintf(&output, `<w:snapToGrid w:val="%t"/>`, *mark.Attrs.Snap)
+					}
+					if mark.Attrs.Spacing != 0 {
+						fmt.Fprintf(&output, `<w:spacing w:val="%d"/>`, mark.Attrs.Spacing)
+					}
+					if mark.Attrs.Scale != 0 {
+						fmt.Fprintf(&output, `<w:w w:val="%d"/>`, mark.Attrs.Scale)
+					}
+					if mark.Attrs.Kern != 0 {
+						fmt.Fprintf(&output, `<w:kern w:val="%d"/>`, mark.Attrs.Kern)
+					}
+					if mark.Attrs.Position != 0 {
+						fmt.Fprintf(&output, `<w:position w:val="%d"/>`, mark.Attrs.Position)
+					}
 					if mark.Attrs.FontSize != "" {
-						output.WriteString(`<w:sz w:val="` + sizes[mark.Attrs.FontSize] + `"/>`)
+						size = mark.Attrs.FontSize
 					}
 				}
 			}
-			output.WriteString(`</w:rPr><w:t xml:space="preserve">` + xmlText(run.Text) + `</w:t></w:r>`)
+			if size != "" {
+				fmt.Fprintf(&output, `<w:sz w:val="%d"/>`, wordFontHalfPoints[size])
+			}
+			output.WriteString("</w:rPr>")
+			for i, text := range strings.Split(run.Text, "\t") {
+				if i > 0 {
+					output.WriteString("<w:tab/>")
+				}
+				output.WriteString(`<w:t xml:space="preserve">` + xmlText(text) + `</w:t>`)
+			}
+			output.WriteString("</w:r>")
 		}
 		output.WriteString(`</w:p>`)
 	}
@@ -387,6 +470,8 @@ func paragraphBorderXML(border string) string {
 	switch border {
 	case "topBottom":
 		return "<w:pBdr><w:top" + single + "<w:bottom" + single + "</w:pBdr>"
+	case "redRule":
+		return `<w:pBdr><w:bottom w:val="single" w:sz="18" w:space="0" w:color="FF0000"/></w:pBdr>`
 	case "bottomDouble":
 		return `<w:pBdr><w:bottom w:val="double" w:sz="6" w:space="3" w:color="auto"/></w:pBdr>`
 	default:

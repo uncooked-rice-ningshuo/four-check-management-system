@@ -66,14 +66,14 @@ type Term struct {
 }
 
 type Tier struct {
-	AuthorityNumber             string   `json:"authorityNumber,omitempty"`
-	ClauseReference             string   `json:"clauseReference,omitempty"`
-	Code                        string   `json:"code"`
-	Name                        string   `json:"name"`
-	Lower                       float64  `json:"lower"`
-	Upper                       *float64 `json:"upper,omitempty"`
-	Clause                      string   `json:"clause"`
-	TeacherConfirmationRequired bool     `json:"teacherConfirmationRequired"`
+	AuthorityNumber string   `json:"authorityNumber"`
+	ClauseReference string   `json:"clauseReference"`
+	Code            string   `json:"code"`
+	Name            string   `json:"name"`
+	Lower           float64  `json:"lower"`
+	Upper           *float64 `json:"upper,omitempty"`
+
+	TeacherConfirmationRequired bool `json:"teacherConfirmationRequired"`
 }
 
 type InspectionType struct {
@@ -149,6 +149,13 @@ func ValidateWithTierDefinitions(groups []Group, types []InspectionType, definit
 				add(path(gi, "terms["+strconv.Itoa(i)+"].operator"), "INVALID_OPERATOR", "首项使用加法，其他项请选择加或减")
 			}
 		}
+		for i, t := range g.Tiers {
+			for _, field := range []struct{ key, value string }{{"authorityNumber", t.AuthorityNumber}, {"clauseReference", t.ClauseReference}} {
+				if len([]rune(strings.TrimSpace(field.value))) > 120 {
+					add(path(gi, "tiers["+strconv.Itoa(i)+"]."+field.key), "BASIS_TOO_LONG", "依据不能超过120字")
+				}
+			}
+		}
 		if !complete {
 			continue
 		}
@@ -172,8 +179,11 @@ func ValidateWithTierDefinitions(groups []Group, types []InspectionType, definit
 			if order < 0 || order <= lastOrder {
 				add(tierPath+".code", "TIER_ORDER_INVALID", "处分档位须来自字典且按档位顺序排列，不能重复")
 			}
-			if strings.TrimSpace(t.Clause) == "" {
-				add(tierPath+".clause", "CLAUSE_REQUIRED", "请填写对应处分依据条款")
+			if strings.TrimSpace(t.ClauseReference) == "" {
+				add(tierPath+".clauseReference", "CLAUSE_REFERENCE_REQUIRED", "请填写依据条款")
+			}
+			if strings.TrimSpace(t.AuthorityNumber) == "" {
+				add(tierPath+".authorityNumber", "AUTHORITY_NUMBER_REQUIRED", "请填写文书依据")
 			}
 			if !validInteger(t.Lower, maxRuleBound) {
 				add(tierPath+".lower", "INVALID_TIER_BOUND", "起始值必须为 0 至 99999999 之间的整数")
@@ -251,6 +261,11 @@ func NormalizeWithTierDefinitions(groups []Group, types []InspectionType, defini
 			}
 		}
 		normalized[i].Tiers = append([]Tier(nil), groups[i].Tiers...)
+		for j := range normalized[i].Tiers {
+			t := &normalized[i].Tiers[j]
+			t.AuthorityNumber = strings.TrimSpace(t.AuthorityNumber)
+			t.ClauseReference = strings.TrimSpace(t.ClauseReference)
+		}
 	}
 	return normalized
 }

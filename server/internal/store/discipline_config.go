@@ -159,13 +159,13 @@ func (p *Postgres) readDisciplineGroups(ctx context.Context, versionID string) (
 			return nil, err
 		}
 		tr.Close()
-		r, err := p.Pool.Query(ctx, `SELECT code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,authority_number,clause_reference FROM discipline_rule_tiers WHERE group_id=$1 ORDER BY sort_order,id`, id)
+		r, err := p.Pool.Query(ctx, `SELECT code,name,lower_bound,upper_bound,teacher_confirmation_required,authority_number,clause_reference FROM discipline_rule_tiers WHERE group_id=$1 ORDER BY sort_order,id`, id)
 		if err != nil {
 			return nil, err
 		}
 		for r.Next() {
 			var t disciplineconfig.Tier
-			if err := r.Scan(&t.Code, &t.Name, &t.Lower, &t.Upper, &t.Clause, &t.TeacherConfirmationRequired, &t.AuthorityNumber, &t.ClauseReference); err != nil {
+			if err := r.Scan(&t.Code, &t.Name, &t.Lower, &t.Upper, &t.TeacherConfirmationRequired, &t.AuthorityNumber, &t.ClauseReference); err != nil {
 				r.Close()
 				return nil, err
 			}
@@ -228,7 +228,7 @@ func (p *Postgres) CreateDraft(ctx context.Context, actor string) (disciplinecon
 				}
 			}
 			for i, t := range g.Tiers {
-				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference)
+				_, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference)
 				if err != nil {
 					return base, err
 				}
@@ -280,7 +280,7 @@ func (p *Postgres) SaveDraft(ctx context.Context, v disciplineconfig.Version, ex
 			}
 		}
 		for i, t := range g.Tiers {
-			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,clause,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.Clause, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,teacher_confirmation_required,sort_order,authority_number,clause_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, gid, t.Code, t.Name, t.Lower, t.Upper, t.TeacherConfirmationRequired, i, t.AuthorityNumber, t.ClauseReference); err != nil {
 				return v, err
 			}
 		}

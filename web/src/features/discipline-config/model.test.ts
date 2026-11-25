@@ -9,7 +9,7 @@ describe('calculateRuleExample', () => {
         { inspectionTypeId: 'hours', inspectionTypeName: '旷课', sourceUnit: '学时', operator: '+', factor: 1 },
         { inspectionTypeId: 'absence', inspectionTypeName: '晚自习缺勤', sourceUnit: '次', operator: '+', factor: 2 },
       ],
-      tiers: [{ code: 'NOTICE', name: '通报批评', lower: 3, upper: 5, clause: '条款', teacherConfirmationRequired: false }],
+      tiers: [{ code: 'NOTICE', name: '通报批评', lower: 3, upper: 5, authorityNumber: '示例1号', clauseReference: '条款', teacherConfirmationRequired: false }],
     }
 
     expect(calculateRuleExample(group, { hours: 1, absence: 1 })).toEqual({ total: 3, tier: group.tiers[0] })

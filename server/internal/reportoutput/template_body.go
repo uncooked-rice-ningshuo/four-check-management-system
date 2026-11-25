@@ -15,7 +15,12 @@ func templateSection(orientation string, doc IntroductionDocument) string {
 	if orientation == "landscape" {
 		size = `<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>`
 	}
-	return `<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:type w:val="nextPage"/>` + size + `<w:pgMar w:top="900" w:bottom="900" w:left="900" w:right="900"/>` + wordPageNumberFormat(doc) + `</w:sectPr>`
+	margin := doc.pageMargins()
+	offsets := ""
+	if doc.Margins != nil || doc.MarginTwips != 0 {
+		offsets = fmt.Sprintf(` w:header="%d" w:footer="%d"`, margin.Top/2, margin.Bottom/2)
+	}
+	return `<w:sectPr><w:headerReference w:type="default" r:id="rId4"/><w:footerReference w:type="default" r:id="rId3"/><w:type w:val="nextPage"/>` + size + fmt.Sprintf(`<w:pgMar w:top="%d" w:bottom="%d" w:left="%d" w:right="%d"%s/>`, margin.Top, margin.Bottom, margin.Left, margin.Right, offsets) + wordPageNumberFormat(doc) + `</w:sectPr>`
 }
 
 func renderTemplateBody(out *strings.Builder, doc IntroductionDocument, content reporting.ReportVersionContent, records []reporting.Record, types []reportType) error {
@@ -39,10 +44,7 @@ func renderTemplateBody(out *strings.Builder, doc IntroductionDocument, content 
 			if !ok {
 				return ErrInvalidSelection
 			}
-			width := 10106
-			if orientation == "landscape" {
-				width = 15038
-			}
+			width := doc.textWidth(orientation)
 			if item.code == "DORMITORY_HYGIENE" {
 				dormitoryWordTables(out, content, records, item, teachers, width)
 			} else {
@@ -59,9 +61,9 @@ func renderTemplateBody(out *strings.Builder, doc IntroductionDocument, content 
 				}
 			}
 			if node.Type == "imprintTable" {
-				writeImprintTable(out, node)
+				writeImprintTable(out, node, doc.textWidth(orientation))
 			} else if node.Type == "wordTable" {
-				writeWordTable(out, node, *node.Attrs.Rows, node.Attrs.Border, orientation)
+				writeWordTable(out, node, *node.Attrs.Rows, node.Attrs.Border, doc.textWidth(orientation))
 			} else {
 				out.WriteString(renderIntroduction(IntroductionDocument{Content: []IntroductionParagraph{node}}))
 			}
@@ -72,15 +74,11 @@ func renderTemplateBody(out *strings.Builder, doc IntroductionDocument, content 
 }
 
 // writeImprintTable keeps the issuing office and date aligned even when either cell wraps.
-func writeImprintTable(out *strings.Builder, node IntroductionParagraph) {
-	writeWordTable(out, node, [][]layoutCell{{{Length: node.Attrs.CellSplit, Align: "left"}, {Length: len(node.Content) - node.Attrs.CellSplit, Align: "right"}}}, "horizontalEdges", "portrait")
+func writeImprintTable(out *strings.Builder, node IntroductionParagraph, pageWidth int) {
+	writeWordTable(out, node, [][]layoutCell{{{Length: node.Attrs.CellSplit, Align: "left"}, {Length: len(node.Content) - node.Attrs.CellSplit, Align: "right"}}}, "horizontalEdges", pageWidth)
 }
 
-func writeWordTable(out *strings.Builder, node IntroductionParagraph, rows [][]layoutCell, border, orientation string) {
-	pageWidth := 10106
-	if orientation == "landscape" {
-		pageWidth = 15038
-	}
+func writeWordTable(out *strings.Builder, node IntroductionParagraph, rows [][]layoutCell, border string, pageWidth int) {
 	tableWidth := 10000 - node.Attrs.InsetLeft - node.Attrs.InsetRight
 	fmt.Fprintf(out, `<w:tbl><w:tblPr><w:tblW w:type="pct" w:w="%d"/><w:tblInd w:type="dxa" w:w="%d"/><w:tblBorders>`, tableWidth/2, pageWidth*node.Attrs.InsetLeft/10000)
 	pageWidth = pageWidth * tableWidth / 10000
@@ -122,13 +120,25 @@ func writeWordTable(out *strings.Builder, node IntroductionParagraph, rows [][]l
 				}
 				out.WriteString("</w:tcBorders>")
 			}
+			if cell.VerticalAlign != "" {
+				fmt.Fprintf(out, `<w:vAlign w:val="%s"/>`, cell.VerticalAlign)
+			}
 			out.WriteString("</w:tcPr>")
 			runs := node.Content[offset : offset+cell.Length]
 			offset += cell.Length
-			out.WriteString(renderIntroduction(IntroductionDocument{Content: []IntroductionParagraph{{Type: "paragraph", Attrs: IntroductionAttrs{Style: "body", TextAlign: cell.Align}, Content: runs}}}))
+			out.WriteString(renderIntroductionWithCellSize(IntroductionDocument{Content: []IntroductionParagraph{{Type: "paragraph", Attrs: IntroductionAttrs{Style: "body", TextAlign: cell.Align, LineSpacingMode: "single"}, Content: runs}}}, cell.FontSize))
 			out.WriteString("</w:tc>")
 		}
 		out.WriteString("</w:tr>")
 	}
 	out.WriteString("</w:tbl>")
+}
+
+func (doc IntroductionDocument) textWidth(orientation string) int {
+	width := 11906
+	if orientation == "landscape" {
+		width = 16838
+	}
+	m := doc.pageMargins()
+	return width - m.Left - m.Right
 }

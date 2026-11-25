@@ -690,7 +690,7 @@ INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,upper_bound,tea
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE discipline_rule_tiers t SET clause='测试替换条款' FROM discipline_rule_groups g
+	if _, err = pool.Exec(ctx, `UPDATE discipline_rule_tiers t SET clause_reference='测试替换条款' FROM discipline_rule_groups g
  WHERE t.group_id=g.id AND g.version_id=$1`, replacementRule.ID); err != nil {
 		t.Fatal(err)
 	}

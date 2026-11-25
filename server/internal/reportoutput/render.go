@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"four-check-management-system/server/internal/inspection"
 	"four-check-management-system/server/internal/reporting"
@@ -50,13 +51,13 @@ func wordRecordColumns(item reportType, teachers map[string]string) []column {
 	teacher := field("班主任", func(r reporting.Record) string { return teachers[classOutputKey(r.ClassID, r.Grade, r.ClassName)] })
 	switch item.code {
 	case "CLASSROOM_HYGIENE":
-		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责人员", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), teacher, field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("检查情况", func(r reporting.Record) string { return hygieneSituation(r.Details) })}
+		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("负责人员", func(r reporting.Record) string { return wordStudentReferences(r.ResponsibleStudents) }), teacher, field("教室", func(r reporting.Record) string { return r.CurrentClassroomName }), field("检查情况", func(r reporting.Record) string { return hygieneSituation(r.Details) })}
 	case "DORMITORY_HYGIENE":
-		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }), field("所在班级", responsibleClassNames), teacher}
+		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任人", func(r reporting.Record) string { return wordStudentReferences(r.ResponsibleStudents) }), field("所在班级", responsibleClassNames), teacher}
 	case "PUBLIC_DORMITORY_HYGIENE":
 		return []column{field("日期", func(r reporting.Record) string { return r.Details.Date }), field("责任寝室", func(r reporting.Record) string { return references(r.ResponsibleDormitories) }), field("情况", func(r reporting.Record) string { return hygieneSituation(r.Details) }), field("责任班级", func(r reporting.Record) string { return wordResponsibleClassNames(r.ResponsibleClasses) }), field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	case "LATE_RETURN":
-		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("晚归人员", func(r reporting.Record) string { return r.StudentName }), teacher, field("备注", func(r reporting.Record) string { return r.Details.Remark })}
+		return []column{field("年级", func(r reporting.Record) string { return r.Grade }), field("日期", func(r reporting.Record) string { return r.Details.Date }), field("班级", func(r reporting.Record) string { return r.ClassName }), field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }), field("晚归人员", func(r reporting.Record) string { return wordPersonName(r.StudentName) }), teacher, field("备注", func(r reporting.Record) string { return r.Details.Remark })}
 	default:
 		return item.columns
 	}
@@ -76,7 +77,7 @@ func headTeacherNames(content reporting.ReportVersionContent) map[string]string 
 		return result
 	}
 	for _, class := range content.Indicators.Inputs.Classes {
-		result[classOutputKey(class.ClassID, class.Grade, class.ClassName)] = class.HeadTeacherName
+		result[classOutputKey(class.ClassID, class.Grade, class.ClassName)] = wordPersonName(class.HeadTeacherName)
 	}
 	return result
 }
@@ -107,6 +108,26 @@ func integer(value *int) string {
 	}
 	return fmt.Sprint(*value)
 }
+
+// wordPersonName aligns two Han characters to the width of a three-character name.
+func wordPersonName(name string) string {
+	letters := []rune(strings.Join(strings.Fields(name), ""))
+	if len(letters) == 2 && unicode.Is(unicode.Han, letters[0]) && unicode.Is(unicode.Han, letters[1]) {
+		return string(letters[0]) + "\u3000" + string(letters[1])
+	}
+	return name
+}
+
+func wordStudentReferences(values []reporting.RecordReference) string {
+	names := make([]string, 0, len(values))
+	for _, student := range values {
+		if student.Label != "" {
+			names = append(names, wordPersonName(student.Label))
+		}
+	}
+	return strings.Join(names, "、")
+}
+
 func references(values []reporting.RecordReference) string {
 	names := make([]string, 0, len(values))
 	for _, v := range values {
@@ -186,7 +207,7 @@ func classRecordNames(records []reporting.Record, code string, class reporting.R
 			students[position].count++
 		} else {
 			positions[identity] = len(students)
-			students = append(students, studentAbsences{name: name, count: 1})
+			students = append(students, studentAbsences{name: wordPersonName(name), count: 1})
 		}
 	}
 	names := make([]string, 0, len(students))
@@ -753,7 +774,7 @@ func dormitoryWordTables(document *strings.Builder, content reporting.ReportVers
 	excellentColumns := []column{
 		field("寝室号", func(r reporting.Record) string { return r.CurrentDormitoryName }),
 		field("所在班级", responsibleClassNames),
-		field("责任人", func(r reporting.Record) string { return references(r.ResponsibleStudents) }),
+		field("责任人", func(r reporting.Record) string { return wordStudentReferences(r.ResponsibleStudents) }),
 		field("班主任", func(r reporting.Record) string { return teachers[classOutputKey(r.ClassID, r.Grade, r.ClassName)] }),
 	}
 	pairedExcellentColumns := append(append([]column{}, excellentColumns...), excellentColumns...)

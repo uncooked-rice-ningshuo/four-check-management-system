@@ -3,6 +3,8 @@ import alignLeft from '@iconify-icons/lucide/align-left'
 import alignCenter from '@iconify-icons/lucide/align-center'
 import alignRight from '@iconify-icons/lucide/align-right'
 import alignJustify from '@iconify-icons/lucide/align-justify'
+import growFont from '@iconify-icons/lucide/a-arrow-up'
+import shrinkFont from '@iconify-icons/lucide/a-arrow-down'
 import bold from '@iconify-icons/lucide/bold'
 import italic from '@iconify-icons/lucide/italic'
 import underline from '@iconify-icons/lucide/underline'
@@ -26,13 +28,20 @@ import StarterKit from '@tiptap/starter-kit'
 import { Button, Dropdown, InputNumber, Popover, Select, Tooltip } from 'antd'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { IntroductionDocument, IntroductionLineSpacingMode } from '../../../shared/api/reportOutputApi'
+import { applyWordFontSize, wordFontSizes as sizes } from '../model/wordTable'
+import { ParagraphSettings } from './ParagraphSettings'
 import { ReportFooterEditor, type ReportFooterEditorHandle } from './ReportFooterEditor'
 
+const chineseFontSizes:Record<string,number> = {初号:42,小初:36,一号:26,小一:24,二号:22,小二:18,三号:16,小三:15,四号:14,小四:12,五号:10.5,小五:9,六号:7.5,小六:6.5,七号:5.5,八号:5}
+const fontSizeOptions = [
+  {label:'中文字号',options:Object.entries(chineseFontSizes).map(([name,points])=>({value:name,label:name+' · '+points+' 磅'}))},
+  {label:'数字字号（磅）',options:sizes.map(size=>({value:size,label:size.replace('pt','')}))},
+]
 const fonts = ['仿宋', '宋体', '黑体', '楷体', '微软雅黑', '华文新魏']
 const fontStacks: Record<string, string> = { 仿宋: "FangSong, '仿宋', serif", 宋体: "SimSun, '宋体', serif", 黑体: "SimHei, '黑体', sans-serif", 楷体: "KaiTi, '楷体', serif", 微软雅黑: "'Microsoft YaHei', '微软雅黑', sans-serif", 华文新魏: "STXinwei, '华文新魏', serif" }
 const defaultFont = (style?: string) => style === 'title' ? '华文新魏' : ['subtitle', 'heading', 'heading1', 'heading2', 'heading3'].includes(style ?? '') ? '黑体' : '仿宋'
 const defaultSize = (style?: string) => style === 'title' ? '30pt' : style === 'subtitle' ? '20pt' : '15pt'
-const sizes = ['9pt', '10.5pt', '12pt', '14pt', '15pt', '16pt', '20pt', '30pt']
+
 const paragraphStyles = [
   { value: 'body', label: '正文' },
   { value: 'title', label: '通报主标题' },
@@ -63,22 +72,40 @@ const IntroductionParagraph = Paragraph.extend({
         },
         renderHTML: attributes => ({ 'data-style': attributes.style }),
       },
+      fontSize: { default:null, parseHTML:el=>sizes.includes(el.style.fontSize)?el.style.fontSize:null,
+        renderHTML:attrs=>sizes.includes(attrs.fontSize)?{style:`font-size:${attrs.fontSize}`}:{} },
       border: { default: null, parseHTML: element => element.dataset.paragraphBorder, renderHTML: attrs => attrs.border ? { 'data-paragraph-border': attrs.border } : {} },
       indent: {
         default: 0,
         parseHTML: element => Number(element.getAttribute('data-indent') || 0),
         renderHTML: attributes => ({ 'data-indent': Math.max(0, Math.min(4, Number(attributes.indent) || 0)) }),
       },
+      ...Object.fromEntries(['tabStop','leftChars','rightChars','hanging','outline','beforeLines','afterLines','rtl','gridIndent','paragraphGrid','keepNext','keepLines','pageBefore','widow'].map(key=>{
+        const attribute='data-'+key.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())
+        return [key,{default:null,parseHTML:(el:HTMLElement)=>{
+          const value=el.getAttribute(attribute)
+          return value===null?null:value==='true'?true:value==='false'?false:Number(value)
+        },renderHTML:(attrs:Record<string,unknown>)=>attrs[key]==null?{}:{[attribute]:attrs[key]}}]
+      })),
       spaceBefore: { default: 0, parseHTML: element => Number(element.getAttribute('data-space-before') || 0), renderHTML: attributes => ({ 'data-space-before': attributes.spaceBefore }) },
       spaceAfter: { default: 0, parseHTML: element => Number(element.getAttribute('data-space-after') || 0), renderHTML: attributes => ({ 'data-space-after': attributes.spaceAfter }) },
       lineSpacing: { default: 0, parseHTML: element => Number(element.getAttribute('data-line-spacing') || 0), renderHTML: attributes => ({ 'data-line-spacing': attributes.lineSpacing }) },
       lineSpacingMode: { default: 'fixed', parseHTML: element => element.getAttribute('data-line-spacing-mode') || 'fixed', renderHTML: attributes => ({ 'data-line-spacing-mode': attributes.lineSpacingMode }) },
     }
   },
+  addKeyboardShortcuts(){
+    return {Enter:()=>{
+      const {selection}=this.editor.state
+      const paragraph=selection.$from.parent
+      const size=this.editor.getAttributes('textStyle').fontSize
+      if(!selection.empty || paragraph.type.name!=='paragraph' || selection.$from.parentOffset!==paragraph.content.size || !sizes.includes(size))return false
+      return this.editor.chain().splitBlock().updateAttributes('paragraph',{fontSize:size}).setFontSize(size).run()
+    },Tab:()=>this.editor.state.selection.$from.parent.type.name==='paragraph' && !!this.editor.state.selection.$from.parent.attrs.tabStop && this.editor.commands.insertContent('\t')}
+  },
   renderHTML({ HTMLAttributes, node }) {
     const defaultLine = node.attrs.style === 'title' ? 40 : node.attrs.style === 'subtitle' ? 28 : 27
-    const lineHeight = node.attrs.lineSpacingMode === 'single' ? '1' : node.attrs.lineSpacingMode === 'oneHalf' ? '1.5' : node.attrs.lineSpacingMode === 'double' ? '2' : `${node.attrs.lineSpacing || defaultLine}pt`
-    const styles = [HTMLAttributes.style, `margin-top:${node.attrs.spaceBefore || 0}pt`, `margin-bottom:${node.attrs.spaceAfter || 0}pt`, `line-height:${lineHeight}`].filter(Boolean).join(';')
+    const lineHeight = node.attrs.lineSpacingMode === 'single' ? 'normal' : node.attrs.lineSpacingMode === 'oneHalf' ? '1.5' : node.attrs.lineSpacingMode === 'double' ? '2' : `${node.attrs.lineSpacing || defaultLine}pt`
+    const styles = [HTMLAttributes.style, node.attrs.tabStop && `tab-size:${node.attrs.tabStop/20}pt`, node.attrs.rtl && 'direction:rtl', node.attrs.leftChars && `padding-inline-start:${node.attrs.leftChars}em`, node.attrs.rightChars && `padding-inline-end:${node.attrs.rightChars}em`, node.attrs.hanging && `text-indent:-${node.attrs.hanging}em`, `margin-top:${node.attrs.spaceBefore || 0}pt`, `margin-bottom:${node.attrs.spaceAfter || 0}pt`, `line-height:${lineHeight}`].filter(Boolean).join(';')
     return ['p', { ...HTMLAttributes, style: styles }, 0]
   },
 })
@@ -153,6 +180,7 @@ function introductionFromEditor(document: JSONContent): IntroductionDocument {
         attrs: {
           style: paragraphStyles.some(option => option.value === style) ? style as string : 'body',
           textAlign: alignments.some(option => option.value === textAlign) ? textAlign as string : 'left',
+          ...(sizes.includes(paragraph.attrs?.fontSize) ? {fontSize:paragraph.attrs?.fontSize} : {}),
           ...(paragraph.attrs?.border ? {border:paragraph.attrs.border} : {}),
           indent,
           spaceBefore: Number(paragraph.attrs?.spaceBefore) || 0,
@@ -199,7 +227,7 @@ function selectionFormatting(editor: Editor) {
     lineSpacingMode: (editor.getAttributes('paragraph').lineSpacingMode || 'fixed') as IntroductionLineSpacingMode,
     textAlign: editor.getAttributes('paragraph').textAlign as string | undefined,
     fontFamily: editor.getAttributes('textStyle').fontFamily as string | undefined,
-    fontSize: editor.getAttributes('textStyle').fontSize as string | undefined,
+    fontSize: (editor.getAttributes('textStyle').fontSize ?? editor.state.selection.$from.parent.attrs.fontSize) as string | undefined,
     bold: editor.isActive('bold'),
     italic: editor.isActive('italic'),
     underline: editor.isActive('underline'),
@@ -354,17 +382,28 @@ export function ReportIntroductionEditor({ value, onChange, attachmentNames = []
   </div>
 }
 
-export function WordFormattingControls({editor}:{editor:Editor | null}) {
+export function WordFormattingControls({editor,characterTools,discipline=false}:{discipline?:boolean;editor:Editor | null;characterTools?:React.ReactNode}) {
   const state = useEditorState({
     editor,
     selector: ({ editor: currentEditor }) => currentEditor ? selectionFormatting(currentEditor) : null,
   })
   const active = state ?? (editor ? selectionFormatting(editor) : null)
+  const [namedSize,setNamedSize]=useState('')
+  const currentSize=active?.fontSize || defaultSize(active?.paragraphStyle)
+  const index=sizes.indexOf(currentSize)
+  const chooseSize=(value:string)=>{
+    const points=chineseFontSizes[value]
+    setNamedSize(points ? value : '')
+    if(editor)applyWordFontSize(editor,points ? points+'pt' : value)
+  }
+  const stepSize=(offset:number)=>{const next=sizes[index+offset];if(next)chooseSize(next)}
   return <>
       <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="段落样式" variant="borderless" className="report-intro-select report-intro-style-select" value={active?.paragraphStyle || 'body'} options={paragraphStyles} disabled={!editor} onChange={style => editor?.chain().focus().updateAttributes('paragraph', { style }).setTextAlign(style === 'signature' || style === 'date' ? 'right' : style === 'title' || style === 'subtitle' ? 'center' : 'left').run()} />
-      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="段落边框" className="report-intro-select word-border-select" variant="borderless" value={active?.border || ''} options={[{value:'',label:'无边框'},{value:'topBottom',label:'上下单线'},{value:'bottomDouble',label:'下方双线'}]} onChange={border=>editor?.chain().focus().updateAttributes('paragraph',{border:border||null}).run()}/>
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="段落边框" className="report-intro-select word-border-select" variant="borderless" value={active?.border || ''} options={[{value:'',label:'无边框'},{value:'topBottom',label:'上下单线'},{value:'bottomDouble',label:'下方双线'},...(discipline?[{value:'redRule',label:'粗红分隔线'}]:[])]} onChange={border=>editor?.chain().focus().updateAttributes('paragraph',{border:border||null}).run()}/>
       <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="字体" variant="borderless" className="report-intro-select report-intro-font-select" value={active?.fontFamily || defaultFont(active?.paragraphStyle)} options={fonts.map(font => ({ value: font, label: font }))} disabled={!editor} onChange={font => editor?.chain().focus().setFontFamily(font).run()} />
-      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} size="small" aria-label="字号" variant="borderless" className="report-intro-select report-intro-size-select" value={active?.fontSize || defaultSize(active?.paragraphStyle)} options={sizes.map(size => ({ value: size, label: size.replace('pt', '') }))} disabled={!editor} onChange={size => editor?.chain().focus().setFontSize(size).run()} />
+      <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={142} virtual={false} showSearch={{optionFilterProp:"label"}} size="small" aria-label="字号" variant="borderless" className="report-intro-select report-intro-size-select" value={chineseFontSizes[namedSize]+'pt'===currentSize?namedSize:currentSize} labelRender={({value})=>String(value).replace('pt','')} options={fontSizeOptions} disabled={!editor} onSelect={chooseSize} />
+      <ToolButton label="增大字号" icon={<Icon icon={growFont}/>} disabled={!editor || index>=sizes.length-1} onClick={()=>stepSize(1)}/>
+      <ToolButton label="减小字号" icon={<Icon icon={shrinkFont}/>} disabled={!editor || index<=0} onClick={()=>stepSize(-1)}/>
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
       <ToolButton label="加粗" icon={<Icon icon={bold} />} active={active?.bold} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()} />
       <ToolButton label="斜体" icon={<Icon icon={italic} />} active={active?.italic} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()} />
@@ -372,14 +411,15 @@ export function WordFormattingControls({editor}:{editor:Editor | null}) {
       <ToolButton label="删除线" icon={<Icon icon={strike} />} active={active?.strike} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()} />
       <ToolButton label="清除文字格式" icon={<Icon icon={clearFormat} />} disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().run()} />
       <span className="report-intro-toolbar-divider" aria-hidden="true" />
+      {characterTools && <>{characterTools}<span className="word-toolbar-newline" aria-hidden="true"/></>}
       {alignments.map(item => <ToolButton key={item.value} label={item.label} icon={item.icon} active={active?.textAlign === item.value} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign(item.value).run()} />)}
-      <ToolButton label="减少缩进" icon={<Icon icon={indentDecrease} />} disabled={!editor || !active?.indent} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.max(0, (active?.indent ?? 0) - 1) }).run()} />
-      <ToolButton label="增加缩进" icon={<Icon icon={indentIncrease} />} disabled={!editor || (active?.indent ?? 0) >= 4} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.min(4, (active?.indent ?? 0) + 1) }).run()} />
-      <Popover trigger="click" content={<div className="report-intro-spacing">
+      <ToolButton label="减少缩进" icon={<Icon icon={indentDecrease} />} disabled={!editor || !active?.indent} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.max(0, (active?.indent ?? 0) - 1), hanging:null }).run()} />
+      <ToolButton label="增加缩进" icon={<Icon icon={indentIncrease} />} disabled={!editor || (active?.indent ?? 0) >= 4} onClick={() => editor?.chain().focus().updateAttributes('paragraph', { indent: Math.min(4, (active?.indent ?? 0) + 1), hanging:null }).run()} />
+      {characterTools ? <ParagraphSettings editor={editor}/> : <Popover trigger="click" content={<div className="report-intro-spacing">
         <label>段前（磅） <InputNumber aria-label="段前间距" min={0} max={72} value={active?.spaceBefore ?? 0} onChange={spaceBefore => { if (spaceBefore !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceBefore }).run() }} /></label>
         <label>段后（磅） <InputNumber aria-label="段后间距" min={0} max={72} value={active?.spaceAfter ?? 0} onChange={spaceAfter => { if (spaceAfter !== null) editor?.chain().focus().updateAttributes('paragraph', { spaceAfter }).run() }} /></label>
-        <label>行距 <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} aria-label="行距方式" value={active?.lineSpacingMode || 'fixed'} options={[{ value: 'single', label: '单倍行距' }, { value: 'oneHalf', label: '1.5 倍行距' }, { value: 'double', label: '双倍行距' }, { value: 'fixed', label: '固定值' }]} onChange={lineSpacingMode => editor?.chain().focus().updateAttributes('paragraph', { lineSpacingMode }).run()} /></label>
+        <label>行距 <Select classNames={{popup:{root:"word-control-popup"}}} popupMatchSelectWidth={false} aria-label="行距方式" value={active?.lineSpacingMode || 'fixed'} options={[{ value: 'single', label: '单倍行距' }, { value: 'oneHalf', label: '1.5 倍行距' }, { value: 'double', label: '双倍行距' }, { value: 'fixed', label: '固定值' }]} onChange={lineSpacingMode => editor?.chain().focus().updateAttributes('paragraph', lineSpacingMode === 'fixed' ? { lineSpacingMode, lineSpacing:active?.lineSpacing || 27 } : { lineSpacingMode }).run()} /></label>
         {(active?.lineSpacingMode || 'fixed') === 'fixed' && <label>固定值（磅） <InputNumber aria-label="固定行距" min={18} max={48} value={active?.lineSpacing || 27} onChange={lineSpacing => { if (lineSpacing !== null) editor?.chain().focus().updateAttributes('paragraph', { lineSpacing }).run() }} /></label>}
-      </div>}><Button type="text" className="report-intro-tool" icon={<Icon icon={spacingIcon} />} aria-label="段落间距" title="段落间距" /></Popover>
+      </div>}><Button type="text" className="report-intro-tool" icon={<Icon icon={spacingIcon} />} aria-label="段落间距" title="段落间距" /></Popover>}
   </>
 }

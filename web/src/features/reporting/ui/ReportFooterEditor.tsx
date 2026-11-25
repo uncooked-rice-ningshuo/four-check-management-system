@@ -1,10 +1,17 @@
+import { Icon } from '@iconify/react'
+import alignLeft from '@iconify-icons/lucide/align-left'
+import alignCenter from '@iconify-icons/lucide/align-center'
+import alignRight from '@iconify-icons/lucide/align-right'
+import columns from '@iconify-icons/lucide/columns-2'
+import braces from '@iconify-icons/lucide/braces'
+import page from '@iconify-icons/lucide/file-text'
 import { Node, type JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Button, Dropdown } from 'antd'
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { IntroductionDocument } from '../../../shared/api/reportOutputApi'
-import { footerTemplate } from '../model/reportFooter'
+import { footerAlignment, footerTemplate } from '../model/reportFooter'
 
 type FooterFieldKey = 'page' | 'totalPages' | 'pageChinese' | 'totalPagesChinese' | 'semesterName' | 'weekNo' | 'weekNoChinese'
 const fieldLabels: Record<FooterFieldKey, string> = { page: '1', totalPages: '总页数', pageChinese: '一', totalPagesChinese: '总页数（汉字）', semesterName: '学期名称', weekNo: '周次', weekNoChinese: '周次（汉字）' }
@@ -43,7 +50,7 @@ export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: 
   const editor = useEditor({
     extensions: [StarterKit.configure({ heading: false, blockquote: false, bulletList: false, orderedList: false, code: false, codeBlock: false, horizontalRule: false, hardBreak: false }), FooterField, FooterTab],
     content: footerContent(footerTemplate(value)), immediatelyRender: false,
-    onUpdate: ({ editor: updated }) => changeRef.current({ ...valueRef.current, footerText: footerValue(updated.getJSON()), footerLayout: 'custom', footerAlign: valueRef.current.footerAlign ?? 'left' }),
+    onUpdate: ({ editor: updated }) => changeRef.current({ ...valueRef.current, footerText: footerValue(updated.getJSON()), footerLayout: 'custom', footerAlign: footerAlignment(valueRef.current) }),
   })
   const setTemplate = (template: string, footerAlign: 'center'|'left' = 'center') => {
     const next = { ...valueRef.current, footerLayout: 'custom' as const, footerAlign, footerText: template }
@@ -89,22 +96,29 @@ export const ReportFooterEditor = forwardRef<ReportFooterEditorHandle, { value: 
   }), [editor])
   return <div ref={containerRef} className="report-intro-page-footer" aria-label="页尾与页码" onFocusCapture={onFocus}>
     <div className="report-intro-footer-local-tools" role="toolbar" aria-label="页脚快捷工具" onMouseDown={event => event.preventDefault()}>
-      <span>页脚</span>
-      <Button type="text" size="small" onClick={() => editor?.chain().focus().insertContent({ type: 'reportFooterTab' }).run()}>分区</Button>
+      {([['left','左对齐',alignLeft],['center','居中',alignCenter],['right','右对齐',alignRight]] as const).map(([align,label,icon])=>
+        <Button key={align} type="text" size="small" aria-label={'页尾'+label} title={label} aria-pressed={footerAlignment(value)===align}
+          icon={<Icon icon={icon}/>} onClick={()=>{
+            const next={...valueRef.current,footerLayout:'custom' as const,footerAlign:align,footerText:footerTemplate(valueRef.current)}
+            valueRef.current=next
+            changeRef.current(next)
+            editor?.commands.focus()
+          }}/>)}
+      <Button type="text" size="small" icon={<Icon icon={columns}/>} onClick={() => editor?.chain().focus().insertContent({ type: 'reportFooterTab' }).run()}>分区</Button>
       <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [{ key: 'page', label: '当前页码' }, { key: 'totalPages', label: '总页数' }, { key: 'pageChinese', label: '当前页码（汉字）' }, { key: 'totalPagesChinese', label: '总页数（汉字）' }, { key: 'semesterName', label: '学期名称' }, { key: 'weekNo', label: '周次数字' }, { key: 'weekNoChinese', label: '周次汉字' }].filter(item => reportFields || !['weekNo','weekNoChinese','semesterName'].includes(item.key)), onClick: ({ key }) => {
         if ((key === 'page' || key === 'totalPages' || key === 'pageChinese' || key === 'totalPagesChinese') && footerTemplate(valueRef.current).includes(`{${key}}`)) return
         editor?.chain().focus().insertContent({ type: 'reportFooterField', attrs: { key } }).run()
-      } }} trigger={['click']}><Button type="text" size="small" aria-label="插入页脚字段">插入字段</Button></Dropdown>
+      } }} trigger={['click']}><Button type="text" size="small" icon={<Icon icon={braces}/>} aria-label="插入页脚字段">插入字段</Button></Dropdown>
       <Dropdown classNames={{root:"word-control-popup"}} menu={{ items: [
         { key: 'number', label: '1' }, { key: 'numberPage', label: '第1页' }, { key: 'numberTotal', label: '第1页，共N页' },
         { key: 'chinesePage', label: '第一页' }, { key: 'chineseTotal', label: '第一页，共N页（汉字）' },
       ], onClick: ({ key }) => {
         const templates: Record<string, string> = { number: '{page}', numberPage: '第{page}页', numberTotal: '第{page}页，共{totalPages}页', chinesePage: '第{pageChinese}页', chineseTotal: '第{pageChinese}页，共{totalPagesChinese}页' }
         setTemplate(templates[key])
-      } }} trigger={['click']}><Button type="text" size="small">页码样式</Button></Dropdown>
+      } }} trigger={['click']}><Button type="text" size="small" icon={<Icon icon={page}/>}>页码样式</Button></Dropdown>
       {reportFields && <Button type="text" size="small" onClick={()=>setTemplate('{semesterName} 第{weekNo}周\t第 {page} 页 共 {totalPages} 页\t','left')}>参考页脚版式</Button>}
     </div>
-    <EditorContent editor={editor} className="report-intro-footer-content" aria-label="编辑页脚" />
+    <EditorContent editor={editor} className="report-intro-footer-content" style={{textAlign:footerAlignment(value)}} aria-label="编辑页脚" />
   </div>
 })
 ReportFooterEditor.displayName = 'ReportFooterEditor'

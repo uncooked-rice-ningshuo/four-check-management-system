@@ -27,4 +27,6 @@
   border-bottom: 0;
 }
 
-.discipline-preview-caption { margin: 0; padding: 10px 16px; color: #52677c; font-size: 13px; }
+.discipline-preview-toolbar { display: flex; align-items: center; justify-content: space-between; flex: none; flex-wrap: wrap; gap: 6px 16px; padding: 8px 16px; border-bottom: 1px solid var(--panel-border); background: white; }
+.discipline-preview-toolbar .ant-radio-group { flex: none; white-space: nowrap; }
+.discipline-preview-caption { margin: 0; color: #52677c; font-size: 13px; }

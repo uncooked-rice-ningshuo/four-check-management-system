@@ -23,7 +23,7 @@ const activeTierConflictSQL = ` ON CONFLICT (semester_id,student_number,group_ke
 const changedRuleCasesSQL = `CREATE TEMP TABLE changed_rule_cases ON COMMIT DROP AS
 WITH shapes AS (
  SELECT g.version_id,g.group_key,t.code,
- jsonb_build_array(g.result_unit,t.name,t.lower_bound,t.upper_bound,t.clause,t.teacher_confirmation_required,
+ jsonb_build_array(g.result_unit,t.name,t.lower_bound,t.upper_bound,t.authority_number,t.clause_reference,t.teacher_confirmation_required,
  (SELECT jsonb_agg(jsonb_build_array(x.inspection_type_id,x.operator,x.conversion_factor,x.source_unit)
  ORDER BY x.inspection_type_id) FROM discipline_rule_group_terms x WHERE x.group_id=g.id)) AS shape
  FROM discipline_rule_groups g JOIN discipline_rule_tiers t ON t.group_id=g.id

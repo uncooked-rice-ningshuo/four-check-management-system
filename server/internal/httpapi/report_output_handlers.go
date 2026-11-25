@@ -179,6 +179,10 @@ func (h *handler) writeOutputError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "INVALID_REPORT_OUTPUT_DATE", "文件日期无效，请填写有效日期")
 	case errors.Is(err, reportoutput.ErrWeekNotFound):
 		writeError(c, http.StatusNotFound, "REPORT_OUTPUT_WEEK_NOT_FOUND", "所选通报周次不存在")
+	case errors.Is(err, reportoutput.ErrRetiredClauseField):
+		writeError(c, http.StatusUnprocessableEntity, "DISCIPLINE_TEMPLATE_FIELD_RETIRED", "旧依据字段已停用，请改用文书依据和依据条款")
+	case errors.Is(err, reportoutput.ErrDisciplineBasisRetired):
+		writeError(c, http.StatusConflict, "DISCIPLINE_BASIS_RETIRED", "此处分所用规则已失效，无法再次生成文书")
 	case errors.Is(err, reportoutput.ErrTemplateUnchanged):
 		writeError(c, http.StatusUnprocessableEntity, "TEMPLATE_EDIT_REQUIRED", "请先修改来源模板的正文、字段或版式，再启用")
 	case errors.Is(err, reportoutput.ErrConfigConflict):
@@ -255,6 +259,11 @@ func (h *handler) processDisciplineDocument(c *gin.Context, export bool) {
 	}
 	if !export {
 		c.JSON(200, preview)
+		return
+	}
+	if input.Variant == "both" {
+		c.Header("Content-Disposition", "attachment; filename=discipline.zip")
+		c.Data(200, "application/zip", data)
 		return
 	}
 	c.Header("Content-Disposition", "attachment; filename=discipline.docx")

@@ -196,15 +196,15 @@ func TestWordAbsenceNamesShowRepeatedCountInFourTypes(t *testing.T) {
 	for _, code := range []string{"ATTENDANCE_RATE", "MORNING_ATTENDANCE", "EVENING_SELF_STUDY", "UNATTENDED_CLASSROOM"} {
 		t.Run(code, func(t *testing.T) {
 			records := []reporting.Record{
-				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生甲", StudentNumber: "001"},
-				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生甲", StudentNumber: "001"},
+				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "王宁", StudentNumber: "001"},
+				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "王宁", StudentNumber: "001"},
 				{TypeCode: code, Grade: "2026级", ClassName: "一班", StudentName: "学生乙", StudentNumber: "002"},
 			}
 			data, err := RenderWord(reporting.ReportVersionContent{}, records, []string{code}, "", false)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if document := wordDocumentForTest(t, data); !strings.Contains(document, "学生甲（2）、学生乙") {
+			if document := wordDocumentForTest(t, data); !strings.Contains(document, "王　宁（2）、学生乙") {
 				t.Fatalf("%s missing repeated absence count", code)
 			}
 		})

@@ -1,12 +1,15 @@
 package reportoutput
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"four-check-management-system/server/internal/audit"
 	"four-check-management-system/server/internal/reporting"
@@ -17,6 +20,8 @@ import (
 type DisciplineTemplate struct {
 	ViolationName    string          `json:"violationName,omitempty"`
 	Unit             string          `json:"unit,omitempty"`
+	AuthorityNumber  string          `json:"authorityNumber"`
+	ClauseReference  string          `json:"clauseReference"`
 	ExampleAmount    string          `json:"exampleAmount,omitempty"`
 	RuleID           string          `json:"ruleId"`
 	GroupKey         string          `json:"groupKey"`
@@ -31,6 +36,7 @@ type DisciplineTemplate struct {
 
 // DocumentRequest fixes the edition and issuance inputs for preview and download.
 type DocumentRequest struct {
+	Variant      string `json:"variant,omitempty"`
 	TemplateID   string `json:"templateId"`
 	DecisionDate string `json:"decisionDate"`
 	IssueDate    string `json:"issueDate"`
@@ -48,7 +54,7 @@ type DocumentPreview struct {
 	Missing    []string          `json:"missing"`
 }
 
-var DisciplineFields = []string{"studentName", "studentNumber", "class", "group", "amount", "unit", "tier", "clause", "decidedAt", "decisionDate", "issuedDate", "issueNumber", "sex", "enrollmentYear", "major", "classNumber", "schoolYear", "semester", "violationCount", "violationName", "authorityNumber", "clauseReference"}
+var DisciplineFields = []string{"studentName", "studentNumber", "class", "group", "amount", "unit", "tier", "decidedAt", "decisionDate", "issuedDate", "issueNumber", "sex", "enrollmentYear", "major", "classNumber", "schoolYear", "semester", "violationCount", "violationName", "authorityNumber", "clauseReference"}
 
 func (p *DocumentPreview) Fill(input DocumentRequest, now time.Time) error {
 	p.Fields["common.generatedDate"] = now.In(time.FixedZone("UTC+8", 28800)).Format("2006年1月2日")
@@ -78,6 +84,12 @@ func (p *DocumentPreview) Fill(input DocumentRequest, now time.Time) error {
 	}
 	p.Missing = []string{}
 	seen := map[string]bool{}
+	for _, key := range []string{"discipline.authorityNumber", "discipline.clauseReference"} {
+		if strings.TrimSpace(p.Fields[key]) == "" {
+			p.Missing = append(p.Missing, key)
+			seen[key] = true
+		}
+	}
 	for _, node := range doc.Content {
 		for _, r := range node.Content {
 			if r.Type == "templateField" && strings.TrimSpace(p.Fields[r.Attrs.Key]) == "" && !seen[r.Attrs.Key] {
@@ -136,7 +148,7 @@ func (s *Service) DisciplineDocument(ctx context.Context, id string, input Docum
 			return DocumentPreview{}, nil, ErrInvalidSelection
 		}
 	}
-	if len([]rune(input.IssueNumber)) > 120 {
+	if !slices.Contains([]string{"", "letterhead", "plain", "both"}, input.Variant) || len([]rune(input.IssueNumber)) > 120 {
 		return DocumentPreview{}, nil, ErrInvalidSelection
 	}
 	repo, err := s.documentRepository()
@@ -148,16 +160,66 @@ func (s *Service) DisciplineDocument(ctx context.Context, id string, input Docum
 
 // RenderDisciplineDocument resolves fields exclusively against the selected case.
 func RenderDisciplineDocument(raw json.RawMessage, fields map[string]string, now time.Time) ([]byte, error) {
+	return renderDisciplineVariant(raw, fields, now, false)
+}
+
+// RenderDisciplineOutput packages validated editions from one case snapshot.
+func RenderDisciplineOutput(raw json.RawMessage, fields map[string]string, now time.Time, variant string) ([]byte, error) {
+	render := func(plain bool) ([]byte, error) {
+		data, err := renderDisciplineVariant(raw, fields, now, plain)
+		if err == nil {
+			err = ValidateGeneratedFile("WORD", data)
+		}
+		return data, err
+	}
+	switch variant {
+	case "", "letterhead":
+		return render(false)
+	case "plain":
+		return render(true)
+	case "both":
+	default:
+		return nil, ErrInvalidSelection
+	}
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	for index, name := range []string{"处分决定书（带红头版）.docx", "处分决定书（无红头版）.docx"} {
+		data, err := render(index == 1)
+		if err != nil {
+			return nil, err
+		}
+		part, err := archive.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = part.Write(data); err != nil {
+			return nil, err
+		}
+	}
+	if err := archive.Close(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func renderDisciplineVariant(raw json.RawMessage, fields map[string]string, now time.Time, plain bool) ([]byte, error) {
 	doc, err := decodeTemplate(raw, true)
 	if err != nil {
 		return nil, err
 	}
 	for i, p := range doc.Content {
+		// A zero fixed value is an unset line height in the template editor.
+		if p.Type == "paragraph" && p.Attrs.LineSpacing == 0 && (p.Attrs.LineSpacingMode == "" || p.Attrs.LineSpacingMode == "fixed") {
+			doc.Content[i].Attrs.LineSpacingMode = "single"
+		}
 		for j, r := range p.Content {
 			if r.Type != "templateField" {
 				continue
 			}
 			value := fields[r.Attrs.Key]
+			if r.Attrs.Key == "discipline.studentName" {
+				value = wordPersonName(value)
+			}
 			if r.Attrs.Key == "common.generatedDate" {
 				value = now.In(time.FixedZone("UTC+8", 28800)).Format("2006年1月2日")
 			}
@@ -165,6 +227,23 @@ func RenderDisciplineDocument(raw json.RawMessage, fields map[string]string, now
 				return nil, ErrInvalidSelection
 			}
 			doc.Content[i].Content[j] = IntroductionText{Type: "text", Text: value, Marks: r.Marks}
+		}
+		if plain && p.Attrs.Letterhead {
+			line := &doc.Content[i]
+			line.Attrs.blankLetterhead = true
+			for j := range line.Content {
+				run := &line.Content[j]
+				run.Text = strings.Map(func(r rune) rune {
+					if unicode.IsSpace(r) {
+						return r
+					}
+					if r > 127 {
+						return '　'
+					}
+					return ' '
+				}, run.Text)
+				run.Marks = slices.DeleteFunc(run.Marks, func(m IntroductionMark) bool { return m.Type == "underline" || m.Type == "strike" })
+			}
 		}
 	}
 	var document strings.Builder
@@ -175,6 +254,10 @@ func RenderDisciplineDocument(raw json.RawMessage, fields map[string]string, now
 	document.WriteString("</w:body></w:document>")
 	return packageWordDocument(document.String(), doc, "", 0)
 }
+
+var ErrRetiredClauseField = errors.New("retired discipline clause template field")
+
+var ErrDisciplineBasisRetired = errors.New("discipline rule predates the authority field cutover")
 
 var ErrTemplateUnchanged = errors.New("source document requires a substantive edit")
 
@@ -195,6 +278,17 @@ func CheckTemplateAdaptation(source, target json.RawMessage) error {
 		return err
 	}
 	if bytes.Equal(a, b) {
+		a, err = renderDisciplineVariant(source, fields, epoch, true)
+		if err != nil {
+			return err
+		}
+		b, err = renderDisciplineVariant(target, fields, epoch, true)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(a, b) {
+			return nil
+		}
 		return ErrTemplateUnchanged
 	}
 	return nil

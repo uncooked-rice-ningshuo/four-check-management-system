@@ -99,8 +99,8 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_groups(version_id,group_key,name,sort_order) VALUES($1,'evening','晚自习累计',1)`, rule); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,sort_order,teacher_confirmation_required)
- SELECT id,k,k,n,n,false FROM discipline_rule_groups CROSS JOIN (VALUES('FIRST',1),('SECOND',2)) AS tiers(k,n) WHERE version_id=$1`, rule); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO discipline_rule_tiers(group_id,code,name,lower_bound,sort_order,teacher_confirmation_required,authority_number,clause_reference)
+ SELECT id,k,k,n,n,false,'文号'||k,'条款'||k FROM discipline_rule_groups CROSS JOIN (VALUES('FIRST',1),('SECOND',2)) AS tiers(k,n) WHERE version_id=$1`, rule); err != nil {
 			t.Fatal(err)
 		}
 		entry := reportoutput.DisciplineTemplate{RuleID: rule, GroupKey: "evening", TierCode: "FIRST", Document: json.RawMessage(`{"schemaVersion":2,"content":[{"type":"paragraph","content":[{"type":"templateField","attrs":{"key":"discipline.studentName"}}]}]}`)}
@@ -111,7 +111,7 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 			t.Fatalf("stale save: %v", err)
 		}
 		list, err := store.ListDocumentTemplates(ctx)
-		if err != nil || len(list) != 2 || list[0].Revision != 1 {
+		if err != nil || len(list) != 2 || list[0].Revision != 1 || list[0].AuthorityNumber != "文号FIRST" || list[1].ClauseReference != "条款SECOND" {
 			t.Fatalf("saved revision: %+v %v", list, err)
 		}
 		entry.TierCode = "SECOND"
@@ -175,10 +175,10 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 		for _, status := range []string{"APPROVED", "PENDING"} {
 			id := uuid.NewString()
 			if _, err := pool.Exec(ctx, `INSERT INTO discipline_cases(id,semester_id,student_number,group_key,tier_code,report_version_id,rule_version_id,accumulated_amount,evidence,status,decision_source,decided_at,due_at)
-                SELECT $1,$2,$3,'evening','FIRST',$4,version_id,3,'{"student":{"name":"虚构学生"}}',$5,CASE WHEN $5='APPROVED' THEN 'RULE' END,CASE WHEN $5='APPROVED' THEN now() END,CASE WHEN $5='PENDING' THEN now()+interval '48 hours' END FROM discipline_rule_current`, id, semesterID, status, versionID, status); err != nil {
+                SELECT $1,$2,$3,'evening','FIRST',$4,version_id,3,'{"student":{"name":"虚构学生"},"tier":{"authority_number":"快照文号","clause_reference":"快照条款"}}',$5,CASE WHEN $5='APPROVED' THEN 'RULE' END,CASE WHEN $5='APPROVED' THEN now() END,CASE WHEN $5='PENDING' THEN now()+interval '48 hours' END FROM discipline_rule_current`, id, semesterID, status, versionID, status); err != nil {
 				t.Fatal(err)
 			}
-			_, data, err := store.ProcessDisciplineDocument(ctx, id, reportoutput.DocumentRequest{}, audit.Metadata{ActorID: actorID}, true)
+			preview, data, err := store.ProcessDisciplineDocument(ctx, id, reportoutput.DocumentRequest{}, audit.Metadata{ActorID: actorID}, true)
 			if status == "PENDING" {
 				if !errors.Is(err, reportoutput.ErrNotFound) {
 					t.Fatalf("pending case: %v", err)
@@ -187,6 +187,9 @@ func TestReportOutputSettingsPostgresMigrationAndVersion(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if preview.Fields["discipline.authorityNumber"] != "快照文号" || preview.Fields["discipline.clauseReference"] != "快照条款" {
+				t.Fatal("wrong evidence source", preview.Fields)
 			}
 			if err := reportoutput.ValidateGeneratedFile("WORD", data); err != nil {
 				t.Fatal(err)

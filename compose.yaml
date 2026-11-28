@@ -108,6 +108,8 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
+      args:
+        WEB_BUILD_MODE: ${WEB_BUILD_MODE:-production}
     ports:
       - "8088:80"
     depends_on:

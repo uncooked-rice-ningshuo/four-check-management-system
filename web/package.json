@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
+    "build:webvpn": "tsc -b && vite build --mode webvpn",
     "test": "vitest run",
     "lint": "eslint .",
     "test:browser": "python3 ../server/scripts/verify-browser.py",

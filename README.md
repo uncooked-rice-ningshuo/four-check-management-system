@@ -130,3 +130,15 @@ compose.yaml          本地 Docker Compose 配置
 ## 数据与安全
 
 本系统处理学院业务记录和个人信息。开发、演示和回归使用虚构数据；生产或试运行数据仅在获批环境中按最小权限访问。不要在日志、问题报告或提交内容中包含密码、令牌、Cookie、完整身份证号、数据库连接凭据或上传文件原文。
+
+### WebVPN 构建
+
+学校网关会把模块入口包装为经典脚本。为该环境构建前端镜像时，在仓库根目录执行以下命令，再在学校部署配置中选择该镜像标签。
+
+```bash
+docker build --build-arg WEB_BUILD_MODE=webvpn -f web/Dockerfile -t four-check-web:webvpn .
+```
+
+离线试运行环境使用 `deploy/ip-trial/Dockerfile.web` 时可传入相同参数，并使用独立的发布标签。默认构建模式为 `production`。本地可在 `web/` 执行 `pnpm build:webvpn`，生成目录与 `pnpm build` 相同，均为 `dist/`。兼容模式将脚本合并为单个入口，构建时检查其经典脚本语法。部署后使用有效的学校 WebVPN 会话验证登录、登录后导航及深层页面刷新。
+
+使用根目录 Compose 时，执行 `WEB_BUILD_MODE=webvpn docker compose build web`。本地构建后可在 `web/` 运行 `node scripts/verify-build.mjs webvpn` 或 `node scripts/verify-build.mjs production` 检查对应产物。
